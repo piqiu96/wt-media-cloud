@@ -5,6 +5,10 @@ import { createDiscoveryClient } from '../../../shared/api/discovery.js'
 import { formatDateTime } from '../../../shared/utils/datetime.js'
 import { scheduleLabel } from '../labels.js'
 import FeedbackAlert from '../../../shared/ui/feedback/FeedbackAlert.vue'
+import ResourceOverlay from '../../../shared/ui/resource/ResourceOverlay.vue'
+import ResourceDescriptions from '../../../shared/ui/resource/ResourceDescriptions.vue'
+import ResourceSection from '../../../shared/ui/resource/ResourceSection.vue'
+import ResourceNotice from '../../../shared/ui/resource/ResourceNotice.vue'
 import ResourceStatusBadge from '../../../shared/ui/resource/ResourceStatusBadge.vue'
 
 // 内容池「来源」列的关联详情：只读、无路由（前端交互规范 §9.4），关闭后回到原列表，
@@ -117,58 +121,41 @@ function goTask() {
 </script>
 
 <template>
-  <t-drawer
-    :visible="visible"
-    header="来源详情"
-    size="min(92vw, 560px)"
-    :close-btn="true"
-    @update:visible="$emit('update:visible', $event)"
-  >
+  <ResourceOverlay :visible="visible" title="来源详情" kind="drawer" :width="800" @update:visible="$emit('update:visible', $event)">
     <div v-if="source" class="source-drawer">
-      <section class="source-drawer__card">
-        <h4 class="source-drawer__title">策略</h4>
-        <dl class="source-drawer__fields">
-          <div><dt>策略名称</dt><dd>{{ strategyName() }}</dd></div>
-          <div><dt>类型</dt><dd>{{ strategyTypeLabel() }}</dd></div>
-          <div><dt>关键词 / 作者</dt><dd>{{ strategyFocus() }}</dd></div>
-          <div><dt>执行周期</dt><dd>{{ scheduleLabel(snapshot().schedule) }}</dd></div>
-        </dl>
-      </section>
-      <section class="source-drawer__card">
-        <h4 class="source-drawer__title">任务</h4>
-        <FeedbackAlert v-if="error" theme="error" :message="error" />
-        <div v-if="error" class="source-drawer__retry">
-          <t-button size="small" class="wt-secondary-button" variant="outline" @click="loadTask">重试</t-button>
-        </div>
-        <p v-else-if="loading" class="source-drawer__placeholder">任务详情加载中…</p>
-        <dl v-else-if="task" class="source-drawer__fields">
-          <div><dt>任务 ID</dt><dd>{{ task.id || source.crawl_task_id }}</dd></div>
-          <div><dt>触发方式</dt><dd>{{ taskTriggerLabel() }}</dd></div>
-          <div><dt>状态</dt><dd><ResourceStatusBadge :tone="statusTone(task.status)" :label="statusLabel(task.status)" /></dd></div>
-          <div><dt>创建时间</dt><dd>{{ formatDateTime(task.created_at) }}</dd></div>
-          <div><dt>完成时间</dt><dd>{{ formatDateTime(task.finished_at) }}</dd></div>
-          <div><dt>结果概况</dt><dd>{{ resultSummary() }}</dd></div>
-        </dl>
-      </section>
+      <ResourceSection title="来源策略">
+        <ResourceDescriptions>
+          <t-descriptions-item label="策略名称" full>{{ strategyName() }}</t-descriptions-item>
+          <t-descriptions-item label="策略 ID">{{ source.strategy_id || '—' }}</t-descriptions-item>
+        </ResourceDescriptions>
+      </ResourceSection>
+      <FeedbackAlert v-if="error" theme="error" :message="error" />
+      <t-button v-if="error" size="small" variant="outline" @click="loadTask">重试</t-button>
+      <p v-else-if="loading">任务详情加载中…</p>
+      <template v-else-if="task">
+        <ResourceSection title="执行时配置">
+          <ResourceNotice>以下为本次任务使用的配置。</ResourceNotice>
+          <ResourceDescriptions>
+            <t-descriptions-item label="类型">{{ strategyTypeLabel() }}</t-descriptions-item>
+            <t-descriptions-item label="执行周期">{{ scheduleLabel(snapshot().schedule) }}</t-descriptions-item>
+            <t-descriptions-item label="关键词 / 作者" full>{{ strategyFocus() }}</t-descriptions-item>
+          </ResourceDescriptions>
+        </ResourceSection>
+        <ResourceSection title="来源任务">
+          <ResourceDescriptions>
+            <t-descriptions-item label="任务 ID">{{ task.id || source.crawl_task_id }}</t-descriptions-item>
+            <t-descriptions-item label="状态"><ResourceStatusBadge :tone="statusTone(task.status)" :label="statusLabel(task.status)" /></t-descriptions-item>
+            <t-descriptions-item label="触发方式">{{ taskTriggerLabel() }}</t-descriptions-item>
+            <t-descriptions-item label="结果概况">{{ resultSummary() }}</t-descriptions-item>
+            <t-descriptions-item label="创建时间">{{ formatDateTime(task.created_at) }}</t-descriptions-item>
+            <t-descriptions-item label="完成时间">{{ formatDateTime(task.finished_at) }}</t-descriptions-item>
+          </ResourceDescriptions>
+        </ResourceSection>
+      </template>
     </div>
     <template #footer>
-      <div v-if="source" class="source-drawer__footer">
-        <t-button v-if="source.strategy_id" theme="primary" @click="goStrategy">前往策略页面</t-button>
-        <t-button v-if="source.crawl_task_id" class="wt-secondary-button" variant="outline" @click="goTask">前往任务页面</t-button>
-      </div>
+      <t-button v-if="source?.crawl_task_id" variant="outline" @click="goTask">前往任务页面</t-button>
+      <t-button v-if="source?.strategy_id" theme="primary" @click="goStrategy">前往策略页面</t-button>
     </template>
-  </t-drawer>
+  </ResourceOverlay>
 </template>
-
-<style scoped>
-.source-drawer { display: flex; flex-direction: column; gap: 14px; }
-.source-drawer__card { padding: 14px 16px; border: 1px solid var(--wt-border); border-radius: 8px; }
-.source-drawer__title { margin: 0 0 10px; color: var(--wt-text-primary); font-size: 14px; font-weight: 600; }
-.source-drawer__fields { margin: 0; }
-.source-drawer__fields > div { display: flex; gap: 12px; padding: 6px 0; }
-.source-drawer__fields dt { flex: none; width: 88px; color: var(--wt-text-tertiary); font-size: 12px; }
-.source-drawer__fields dd { min-width: 0; margin: 0; color: var(--wt-text-primary); font-size: 13px; word-break: break-word; }
-.source-drawer__placeholder { margin: 0; color: var(--wt-text-tertiary); font-size: 13px; }
-.source-drawer__retry { margin-top: 8px; }
-.source-drawer__footer { display: flex; justify-content: flex-end; gap: 8px; }
-</style>

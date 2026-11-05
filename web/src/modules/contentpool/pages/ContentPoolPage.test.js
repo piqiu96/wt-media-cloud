@@ -24,7 +24,7 @@ describe('content pool page', () => {
     expect(source).toContain('KeywordTags')
     expect(source).toContain('开始发现')
     expect(source).toContain('idList')
-    expect(source).toContain('discover-mode')
+    expect(source).toContain('ResourceChoiceCards')
     expect(source).not.toContain('筛选条件')
     expect(source).toContain('interaction')
     expect(source).toContain("colKey: 'source'")
@@ -36,7 +36,7 @@ describe('content pool page', () => {
     expect(source).toContain('discovery.importResults')
     expect(source).toContain('loadManualContext')
     expect(source).toContain('team_id: selectedTeamID()')
-    expect(source).toContain('业务分类')
+    expect(source).toContain('label="类目"')
     expect(source).toContain('category_id')
     expect(source).toContain('categoryName')
     expect(source).not.toContain('导入链接')
@@ -131,34 +131,12 @@ describe('content pool page', () => {
     expect(source).toContain('class="table-scroll-wrap"')
   })
 
-  // 横向滚动宽度必须由列宽推导，不能写死。
-  // 断言「推导」而不是某个字面量——字面量断言正是它漂移了还没人发现的原因。
-  //
-  // 注意别把这条测试的理由写成「写死值把内容列挤没了」：实测证伪。
-  // 写死的 2060 从未生效，TDesign 取列宽合计（滚动容器 scrollWidth 实测 2378），
-  // Chrome 里内容列恒 340、.title-copy 恒 224px，窗口 900→2560 都不变。
-  // 内容列被压是另一回事——是 WebKit 不认 minWidth（见下方列宽那条测试）。
-  it('derives the horizontal scroll width from the column widths', () => {
-    expect(source).not.toContain(':scroll="{ x:')
+  it('derives horizontal scrolling from the compact list columns', () => {
     expect(source).toContain(':scroll="tableScroll"')
-    expect(source).toContain('const tableScroll = computed')
     expect(source).toContain('col.width ?? col.minWidth ?? 0')
-
-    // 把 columns 里声明的宽度抄出来自己算一遍。
-    const start = source.indexOf('const columns = [')
-    const end = source.indexOf('const tableScroll = computed')
-    expect(start).toBeGreaterThan(-1)
-    expect(end).toBeGreaterThan(start)
-    const block = source.slice(start, end)
-
-    const widths = [...block.matchAll(/\bwidth:\s*(\d+)/g)].map((m) => Number(m[1]))
-    const total = widths.reduce((a, b) => a + b, 0)
-
-    // 分母不为 0：一个都没抽到就说明这段断言是空转的。
-    expect(widths.length).toBeGreaterThan(10)
-    // 推导值必须**大于**原先写死的 2060，否则等于没修。
-    expect(total).toBeGreaterThan(2060)
-    // 现在每列都有 width，minWidth 不该再出现在声明里（写了也不生效，见下条测试）。
+    const block = source.slice(source.indexOf('const columns = ['), source.indexOf('const tableScroll = computed'))
+    expect([...block.matchAll(/\bwidth:\s*(\d+)/g)]).toHaveLength(10)
+    expect(block).toContain('opColumnWidth(')
     expect(block).not.toContain('minWidth:')
   })
 
@@ -167,9 +145,9 @@ describe('content pool page', () => {
   it('clips the content title in both render branches without changing the link colour', () => {
     const clipRule = source.match(/\.title-copy > a,\s*\n?\.title-copy > span \{[^}]*\}/)
     expect(clipRule, 'title 省略号规则必须同时覆盖 <a> 与 <span>').not.toBeNull()
-    expect(clipRule[0]).toContain('text-overflow: ellipsis')
-    expect(clipRule[0]).toContain('white-space: nowrap')
-    expect(clipRule[0]).toContain('overflow: hidden')
+    expect(clipRule[0]).toContain('text-overflow:ellipsis')
+    expect(clipRule[0]).toContain('white-space:nowrap')
+    expect(clipRule[0]).toContain('overflow:hidden')
     // 颜色只在 span 分支上声明，避免覆盖 .wt-primary-link 的主题色
     expect(clipRule[0]).not.toContain('color:')
   })
@@ -196,9 +174,9 @@ describe('content pool page', () => {
 
   it('converges row actions by processing status with 详情 as the single label', () => {
     expect(source).toContain('@click="openDetail(row)">详情</t-button>')
-    expect(source).toContain(`v-if="!isLibrary && row.status === 'pending'" size="small" theme="primary" @click="materialize(row)">转素材</t-button>`)
-    expect(source).toContain(`v-if="!isLibrary && row.status === 'pending'" size="small" class="wt-secondary-button" variant="outline" @click="updateStatus(row, 'ignored')">忽略</t-button>`)
-    expect(source).toContain(`v-if="!isLibrary && row.status === 'ignored'" size="small" class="wt-secondary-button" variant="outline" @click="updateStatus(row, 'pending')">恢复</t-button>`)
+    expect(source).toContain(`v-if="!isLibrary && row.status === 'pending'" size="small" variant="text" class="is-primary" @click="materialize(row)">转素材</t-button>`)
+    expect(source).toContain(`v-if="!isLibrary && row.status === 'pending'" size="small" variant="text" @click="updateStatus(row, 'ignored')">忽略</t-button>`)
+    expect(source).toContain(`v-if="!isLibrary && row.status === 'ignored'" size="small" variant="text" @click="updateStatus(row, 'pending')">恢复</t-button>`)
     // 用户 2026-10-27 裁定：操作列只留统一「详情」；转入素材的入口在详情抽屉的
     // 「关联素材」里，不在行上再放第二个详情按钮。
     expect(source).not.toContain('>素材详情</t-button>')
@@ -223,12 +201,14 @@ describe('content pool page', () => {
     expect(source).toContain("feedback.toast.error(e.message || '转素材失败')")
   })
 
-  it('keeps batch actions in a separate selection toolbar below the filters', () => {
-    expect(source).toContain('已选 {{ selectedRowKeys.length }} 项')
-    expect(source).toContain('v-if="!isLibrary && selectedRowKeys.length" class="wt-selection-toolbar"')
-    const filters = source.slice(source.indexOf('<div class="filter-bar">'), source.indexOf('<div class="table-scroll-wrap">'))
-    expect(filters.indexOf('class="wt-selection-toolbar"')).toBeGreaterThan(filters.indexOf('</div>\n        <div v-if="!isLibrary'))
-    expect(filters).not.toContain('<t-space wrap>')
+  it('uses the shared selection toolbar between filters and the table', () => {
+    const filtersEnd = source.indexOf('</ResourceFilterBar>')
+    const toolbar = source.indexOf('<ResourceSelectionToolbar')
+    const table = source.indexOf('<div class="table-scroll-wrap">')
+    expect(toolbar).toBeGreaterThan(filtersEnd)
+    expect(table).toBeGreaterThan(toolbar)
+    expect(source).toContain(':count="selectedRowKeys.length"')
+    expect(source).toContain('@clear="selectedRowKeys = []"')
   })
 
   // 用户 2026-10-27 裁定：来源策略与来源任务合成一列。策略来源显示可点的策略名，
@@ -245,21 +225,20 @@ describe('content pool page', () => {
     expect(source).not.toContain('?strategy_id=${row.strategy_id}')
   })
 
-  it('renders a large content decision workspace instead of a CRUD field table', () => {
-    expect(source).toContain('size="min(92vw, 960px)"')
-    expect(source).toContain('class="detail-workspace"')
-    expect(source).toContain('class="detail-cover"')
-    expect(source).toContain('row.strategy_name')
-    expect(source).toContain('row.crawl_task_name')
-    // 行上唯一的「详情」之外，素材跳转只在详情抽屉的「关联素材」里。
+  it('groups content facts in the shared drawer and keeps review actions in its footer', () => {
+    expect(source).toContain('title="发现内容" :width="960"')
+    expect(source).toContain('kind="drawer" :width="960" :busy="reviewProcessing" :footer="reviewMode"')
+    expect(source).toContain('ResourceDescriptions')
+    expect(source).toContain('ResourceSection title="基本信息"')
+    expect(source).toContain('ResourceSection title="来源追溯"')
     expect(source).toContain('@click="viewMaterial(detail)">素材详情</t-link>')
-    expect(source).toContain("router.push(`/crawl-tasks?strategy_id=${detail.strategy_id}`)")
-    expect(source).toContain("router.push(`/crawl-tasks?task_id=${detail.crawl_task_id}`)")
+    expect(source).toContain('router.push(`/crawl-tasks?task_id=${detail.crawl_task_id}`)')
+    expect(source).toContain('<template v-if="reviewMode" #footer>')
   })
 
   it('labels the ingest time as 入库时间 and never as 发现时间', () => {
     expect(source).toContain("{ colKey: 'created_at', title: '入库时间', width: 150, sorter: true }")
-    expect(source).toContain('<span>入库时间</span>')
+    expect(source).toContain('label="入库时间"')
     expect(source).not.toContain('发现时间')
   })
 
@@ -280,7 +259,7 @@ describe('content pool page', () => {
     expect(source).toContain('function openImageViewer(url)')
     expect(source).toContain('imageViewerVisible')
     expect(source).toContain('imageViewerImages')
-    expect(source).toContain('cursor: zoom-in')
+    expect(source).toContain('cursor:zoom-in')
     expect(source).toContain('@click.stop="openImageViewer(row.cover_url)"')
     expect(source).toContain('@click.stop="openImageViewer(detail.cover_url)"')
   })

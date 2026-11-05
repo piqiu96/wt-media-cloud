@@ -1,6 +1,6 @@
 <script setup>
 const REORDER_MIME = 'application/x-wt-resource-reorder'
-const props = defineProps({ itemKey: { type: String, required: true }, scope: { type: String, required: true }, index: { type: Number, required: true }, count: { type: Number, required: true }, removeDisabled: Boolean })
+const props = defineProps({ itemKey: { type: String, required: true }, scope: { type: String, required: true }, index: { type: Number, required: true }, count: { type: Number, required: true }, removeDisabled: Boolean, draggable: { type: Boolean, default: true } })
 const emit = defineEmits(['move', 'remove', 'dragend'])
 function startDrag(event) {
   event.dataTransfer.effectAllowed = 'move'
@@ -11,7 +11,7 @@ function startDrag(event) {
   <div class="resource-reorder">
     <div class="resource-reorder__heading"><strong><slot /></strong></div>
     <div class="resource-reorder__actions">
-      <t-tooltip content="拖动排序，也可使用上移、下移"><span class="resource-reorder__handle" draggable="true" role="img" aria-label="拖动排序" @dragstart="startDrag" @dragend="emit('dragend')">⠿<span>拖动排序</span></span></t-tooltip>
+      <t-tooltip v-if="draggable" content="拖动排序，也可使用上移、下移"><span class="resource-reorder__handle" draggable="true" role="img" aria-label="拖动排序" @dragstart="startDrag" @dragend="emit('dragend')">⠿<span>拖动排序</span></span></t-tooltip>
       <t-button size="small" variant="text" :disabled="index === 0" @click="emit('move', -1)">上移</t-button>
       <t-button size="small" variant="text" :disabled="index === count - 1" @click="emit('move', 1)">下移</t-button>
       <slot name="extra" />

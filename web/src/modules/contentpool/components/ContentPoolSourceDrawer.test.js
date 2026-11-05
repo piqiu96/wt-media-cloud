@@ -40,9 +40,8 @@ describe('content pool source drawer', () => {
     expect(source).toContain('visible: { type: Boolean, default: false }')
     expect(source).toContain('source: { type: Object, default: null }')
     expect(source).toContain("emit('update:visible'")
-    expect(source).toContain('header="来源详情"')
-    expect(source).toContain('size="min(92vw, 560px)"')
-    expect(source).toContain(':close-btn="true"')
+    expect(source).toContain('title="来源详情"')
+    expect(source).toContain('kind="drawer" :width="800"')
     expect(source).toContain('<template #footer>')
     expect(source).not.toContain('>关闭</t-button>')
     expect(source).not.toContain('取消')
@@ -63,7 +62,7 @@ describe('content pool source drawer', () => {
     // 快照里存的是 `manual` 这类原始值，与列表、详情用同一个映射。
     expect(source).toContain('scheduleLabel(snapshot().schedule)')
     for (const label of ['策略名称', '类型', '关键词 / 作者', '执行周期']) {
-      expect(source, label).toContain(`<dt>${label}</dt>`)
+      expect(source, label).toContain(`label="${label}"`)
     }
   })
 
@@ -71,7 +70,7 @@ describe('content pool source drawer', () => {
     expect(source).toContain("if (task.value.task_type === 'retry_failed_task') return '重试'")
     expect(source).toContain("return task.value.schedule_key ? '定时' : '手动'")
     for (const label of ['任务 ID', '触发方式', '状态', '创建时间', '完成时间', '结果概况']) {
-      expect(source, label).toContain(`<dt>${label}</dt>`)
+      expect(source, label).toContain(`label="${label}"`)
     }
     expect(source).toContain('发现 ${stats.found || 0} · 新增 ${stats.added || 0} · 待审核 ${stats.pending || 0}')
   })
@@ -89,8 +88,8 @@ describe('content pool source drawer', () => {
   it('links to the strategy and the task page only when the ids exist', () => {
     expect(source).toContain("router.push({ path: '/discovery-strategies', query: { strategy_id: props.source.strategy_id } })")
     expect(source).toContain("router.push({ path: '/crawl-tasks', query: { task_id: props.source.crawl_task_id } })")
-    expect(source).toContain('v-if="source.strategy_id" theme="primary"')
-    expect(source).toContain('v-if="source.crawl_task_id" class="wt-secondary-button" variant="outline"')
+    expect(source).toContain('v-if="source?.strategy_id" theme="primary"')
+    expect(source).toContain('v-if="source?.crawl_task_id" variant="outline"')
     // 关弹窗走 v-model，宿主列表不换路由，筛选与分页都留着。
     expect(source).toContain("emit('update:visible', false)")
   })

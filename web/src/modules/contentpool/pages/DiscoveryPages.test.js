@@ -12,7 +12,7 @@ describe('discovery strategy and task pages', () => {
     expect(source).toContain('value="author" disabled')
     expect(source).toContain("row.strategy_type === 'author'")
     expect(source).not.toContain('策略总数')
-    expect(source).not.toContain('启用策略')
+    expect(source).not.toContain("label: '启用策略'")
     expect(source).toContain('今日执行')
     expect(source).toContain('自动素材')
     expect(source).toContain('<span class="wt-filter-field__label">综合搜索</span>')
@@ -21,7 +21,7 @@ describe('discovery strategy and task pages', () => {
     expect(source).toContain('required-mark')
     expect(source).toContain('执行方式')
     expect(source).toContain('执行周期')
-    expect(source).toContain('配置说明')
+    expect(source).toContain('ResourceFieldHelp')
     expect(source).toContain('规则类型')
     expect(source).toContain('判断方式')
     expect(source).not.toContain('判断条件')
@@ -95,7 +95,7 @@ describe('discovery strategy and task pages', () => {
     expect(source).toContain('foundStats')
     expect(source).toContain('详情')
     expect(source).toContain('重试')
-    expect(source).toContain('结果概览')
+    expect(source).not.toContain('结果概览')
     expect(source).toContain('发现内容')
     expect(source).toContain('执行过程')
     expect(source).toContain('异常记录')
@@ -119,15 +119,15 @@ describe('discovery strategy and task pages', () => {
     const strategies = read('DiscoveryStrategiesPage.vue')
     expect(strategies).toContain("const canManage = computed(() => ['admin', 'senior_operator'].includes(currentUser.value?.role))")
     expect(strategies).toContain('v-if="canManage" theme="primary" @click="openCreate"')
-    expect(strategies).toContain('v-if="canManage" size="small" theme="primary"')
-    expect(strategies).toContain('v-if="canManage" size="small" class="wt-secondary-button" variant="outline" :disabled="isRunning(row)"')
+    expect(strategies).toContain('v-if="canManage" :content="runDisabledReason(row)"')
+    expect(strategies).toContain('v-if="canManage" content="已有任务执行中"')
     expect(strategies).toContain('v-if="canManage" trigger="click"')
     expect(strategies).toContain('if (!editingID.value && isAdmin.value && !form.value.team_id)')
 
     const tasks = read('CrawlTasksPage.vue')
     expect(tasks).toContain("const canManage = computed(() => ['admin', 'senior_operator'].includes(currentUser.value?.role))")
     expect(tasks).toContain('v-if="canManage && hasFailed(row)"')
-    expect(tasks).toContain('v-if="canManage && detail && hasFailed(detail)"')
+    expect(tasks).not.toContain('@click="retry(detail)"')
   })
 
   it('lets admins pick a team and shows the team column, using the full category catalog', () => {
@@ -172,7 +172,7 @@ describe('discovery strategy and task pages', () => {
     expect(tasks).not.toContain('filteredRows')
   })
 
-  it('paginates both discovery lists and keeps detail actions in drawer footers', () => {
+  it('paginates both discovery lists and keeps primary retry on the list', () => {
     for (const page of ['DiscoveryStrategiesPage.vue', 'CrawlTasksPage.vue']) {
       const source = read(page)
       expect(source).toContain(':data="pagedRows"')
@@ -180,8 +180,8 @@ describe('discovery strategy and task pages', () => {
       expect(source).toContain('<t-pagination')
     }
     const tasks = read('CrawlTasksPage.vue')
-    expect(tasks).toContain(':footer="Boolean(canManage && detail && hasFailed(detail))"')
+    expect(tasks).toContain('title="挖掘任务详情" kind="drawer" :width="960" :footer="false"')
     expect(tasks).toContain('<template #footer>')
-    expect(tasks).toContain('@click="retry(detail)">重试</t-button>')
+    expect(tasks).toContain('@click="retry(row)">重试</t-button>')
   })
 })

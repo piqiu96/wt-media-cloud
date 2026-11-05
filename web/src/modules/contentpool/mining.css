@@ -1,0 +1,33 @@
+/* 内容挖掘仅保留业务专属布局；控件、表单、详情与操作密度由 shared/ui 负责。 */
+.mining-detail { min-width:0; }
+.mining-detail > .resource-section + .resource-section { margin-top:24px; }
+.mining-secondary { display:block; margin-top:4px; color:var(--wt-text-tertiary); font-size:12px; line-height:20px; }
+.mining-ellipsis { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.mining-content-heading { display:flex; gap:12px; align-items:flex-start; }
+.mining-cover-button { flex:none; width:48px; height:56px; padding:0; border:0; overflow:hidden; border-radius:4px; background:var(--wt-bg-page); cursor:zoom-in; }
+.mining-cover-button img { width:100%; height:100%; object-fit:cover; }
+.mining-metrics { display:grid; grid-template-columns:repeat(auto-fit,minmax(88px,1fr)); gap:16px; padding:16px; border-radius:6px; background:var(--wt-bg-page); }
+.mining-metrics span { display:block; color:var(--wt-text-tertiary); font-size:12px; }
+.mining-metrics strong { display:block; margin-top:6px; font-size:18px; color:var(--wt-text-primary); font-weight:600; font-variant-numeric:tabular-nums; }
+.mining-rule { padding:16px; border:1px solid var(--wt-border); border-radius:6px; margin-bottom:16px; }
+.mining-rule-conditions { display:grid; gap:12px; margin-top:16px; }
+.mining-rule-condition { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr) minmax(0,1.4fr) auto; gap:12px; align-items:end; }
+.mining-rule-condition label { display:flex; flex-direction:column; gap:8px; min-width:0; }
+.mining-rule-condition label > span { font-size:13px; color:var(--wt-text-tertiary); }
+.mining-rule-condition .t-input-number, .mining-rule-condition .t-date-picker { width:100%; }
+.mining-rule-condition > .t-button { margin-bottom:2px; }
+.mining-tags { display:flex; flex-wrap:wrap; gap:8px; }
+.mining-task-tabs { margin-top:24px; }
+.mining-task-tabs .t-tabs__content { padding-top:20px; }
+.mining-timeline { display:grid; gap:0; margin:0; padding:0; list-style:none; }
+.mining-timeline li { display:grid; grid-template-columns:56px 1fr; gap:16px; padding:0 0 24px; }
+.mining-timeline time { font-size:12px; color:var(--wt-text-tertiary); }
+.mining-timeline p { position:relative; margin:0; padding:0 0 0 20px; line-height:22px; border-left:1px solid var(--wt-border); color:var(--wt-text-primary); }
+.mining-timeline p::before { content:''; position:absolute; top:6px; left:-4px; width:7px; height:7px; background:var(--wt-primary); border-radius:50%; }
+.mining-exception { padding:16px; border:1px solid var(--wt-color-danger-border, var(--wt-border)); border-radius:6px; margin-bottom:16px; }
+.mining-exception header { display:flex; justify-content:space-between; gap:12px; align-items:center; margin-bottom:8px; }
+.mining-exception header strong { color:var(--wt-danger); }
+.mining-exception time { font-size:12px; color:var(--wt-text-tertiary); }
+@media(max-width:680px) { .mining-rule-condition { grid-template-columns:minmax(0,1fr) minmax(0,1fr); } .mining-rule-condition > .t-button { justify-self:end; } }
+
+.mining-discovery-modes { margin-bottom:24px; }
