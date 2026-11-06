@@ -28,7 +28,7 @@ var resources struct {
 // process that will not start without a secret, which would make the release
 // tree and this repository's own tests unable to run at all. What must not happen
 // is a call that silently does nothing, and this store cannot do that.
-func Initialize(cfg config.ObjectStorageConfig, credential config.ObjectStorageCredentialConfig) error {
+func Initialize(cfg config.ObjectStorageConfig, credential config.ObjectStorageCredentialConfig, claims ...ContentClaims) error {
 	resources.Lock()
 	defer resources.Unlock()
 	if resources.store != nil {
@@ -42,6 +42,9 @@ func Initialize(cfg config.ObjectStorageConfig, credential config.ObjectStorageC
 	store, err := newMinioStore(cfg, credential)
 	if err != nil {
 		return err
+	}
+	if len(claims) > 0 {
+		store.claims = claims[0]
 	}
 	resources.store = store
 	resources.grantTTL = cfg.PresignTTL.Duration

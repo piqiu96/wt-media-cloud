@@ -307,7 +307,7 @@ func TestAttemptRunsAndCommitsVerifiedOutput(t *testing.T) {
 	if out.Name == "" {
 		t.Fatal("new output name missing")
 	}
-	if out.ObjectKey != "compose-outputs/77/1/output.mp4" || out.PublishStatus != "pending_publish" {
+	if out.ObjectKey != "media-ku/finalVideo/55.mp4" || out.PublishStatus != "pending_publish" {
 		t.Fatalf("committed=%+v key=%s", out, lifecycle.committedKey)
 	}
 	sum := sha256.Sum256([]byte("composed-output-bytes"))
@@ -317,7 +317,7 @@ func TestAttemptRunsAndCommitsVerifiedOutput(t *testing.T) {
 	if string(out.Media) != `{"duration_ms":900,"height":1920,"width":1080}` {
 		t.Fatalf("media=%s", out.Media)
 	}
-	if _, ok := store.objects["compose-outputs/77/1/output.mp4"]; !ok {
+	if _, ok := store.objects["media-ku/finalVideo/55.mp4"]; !ok {
 		t.Fatal("formal object missing")
 	}
 	if _, ok := store.objects["compose-staging/77/1/output.mp4"]; ok {
@@ -407,7 +407,7 @@ func TestGuideAttemptProducesVerifiedOutputFromFrozenAddress(t *testing.T) {
 	if outcome := RunComposeAttempt(context.Background(), deps, task, 9, runDir, nil); outcome != ComposeAttemptSuccess {
 		t.Fatalf("outcome=%s failed=%v released=%v", outcome, lifecycle.failed, lifecycle.released)
 	}
-	formal := store.objects["compose-outputs/77/1/output.mp4"]
+	formal := store.objects["media-ku/finalVideo/55.mp4"]
 	if len(formal) == 0 || lifecycle.committed == nil || lifecycle.committed.TemplateCode != "guide_insert" {
 		t.Fatal("verified formal output missing")
 	}
@@ -773,16 +773,16 @@ func TestAttemptCancelsWhenRequestedBeforeCommit(t *testing.T) {
 func TestAttemptCleansOrphansWhenCommitLosesTheRow(t *testing.T) {
 	deps, lifecycle, store, _, task, runDir := attemptFixture(t)
 	lifecycle.commitErr = repository.ErrComposeCommitLost
-	store.objects["compose-outputs/77/2/output.mp4"] = []byte("later-attempt")
+	store.objects["media-ku/finalVideo/56.mp4"] = []byte("later-attempt")
 	if outcome := RunComposeAttempt(context.Background(), deps, task, 9, runDir, nil); outcome != ComposeAttemptLeaseLost {
 		t.Fatalf("outcome=%s", outcome)
 	}
-	for _, key := range []string{"compose-outputs/77/1/output.mp4", "compose-staging/77/1/output.mp4"} {
+	for _, key := range []string{"media-ku/finalVideo/55.mp4", "compose-staging/77/1/output.mp4"} {
 		if _, ok := store.objects[key]; ok {
 			t.Fatalf("orphan %s survived", key)
 		}
 	}
-	if string(store.objects["compose-outputs/77/2/output.mp4"]) != "later-attempt" {
+	if string(store.objects["media-ku/finalVideo/56.mp4"]) != "later-attempt" {
 		t.Fatal("old attempt cleanup damaged a newer output")
 	}
 	if lifecycle.committed != nil {
@@ -796,7 +796,7 @@ func TestAttemptKeepsFormalObjectWhenCommitOutcomeIsUnknown(t *testing.T) {
 	if got := RunComposeAttempt(context.Background(), deps, task, 9, runDir, nil); got != ComposeAttemptLeaseLost {
 		t.Fatalf("outcome=%s", got)
 	}
-	if _, ok := store.objects["compose-outputs/77/1/output.mp4"]; !ok {
+	if _, ok := store.objects["media-ku/finalVideo/55.mp4"]; !ok {
 		t.Fatal("unknown commit outcome must preserve the possibly committed object")
 	}
 }
@@ -875,4 +875,12 @@ func TestAttemptClassifiesTerminatedRunAsTransientTimeout(t *testing.T) {
 	if lifecycle.committed != nil || len(lifecycle.failed) != 0 {
 		t.Fatalf("no commit and no business failure on a timeout: committed=%v failed=%v", lifecycle.committed, lifecycle.failed)
 	}
+}
+
+func (f *lifecycleFake) ReserveComposeOutputID(int64, int64, int) (int64, error) { return 55, nil }
+func (s *storeFake) PutImmutable(ctx context.Context, key string, body io.Reader, size int64, kind, digest string) error {
+	return s.Put(ctx, key, body, size, kind)
+}
+func (s putFailingStore) PutImmutable(ctx context.Context, key string, body io.Reader, size int64, kind, digest string) error {
+	return s.Put(ctx, key, body, size, kind)
 }

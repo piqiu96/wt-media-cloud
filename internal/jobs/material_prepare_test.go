@@ -618,7 +618,7 @@ func TestPrepareWritesTheFactsOfTheBytesItHashed(t *testing.T) {
 	h := harnessFor(t)
 	h.run(t)
 
-	wantFormal := fmt.Sprintf("materials/%d/%s.mp4", testMaterial, digestOf(h.body))
+	wantFormal := fmt.Sprintf("media-ku/material/%d.mp4", testMaterial)
 	wantStaging := fmt.Sprintf("materials/%d/.staging/%s.mp4", testMaterial, testTaskID)
 
 	if len(h.materials.readyFacts) != 1 {
@@ -714,18 +714,14 @@ func TestPrepareVerifiesTheFormalKeyBeforeItWritesAnythingAboutIt(t *testing.T) 
 	h := harnessFor(t)
 	h.run(t)
 
-	staging := "materials/42/.staging/task-1.mp4"
-	formal := "materials/42/" + digestOf(h.body) + ".mp4"
+	formal := "media-ku/material/42.mp4"
 	want := []string{
 		"claim",
 		"resolve",
 		"address",
 		"open",
-		"put " + staging,
-		"stat " + staging,
-		"copy " + staging + " " + formal,
+		"put " + formal,
 		"stat " + formal,
-		"remove " + staging,
 		"ready",
 		"handover",
 		"complete",
@@ -860,40 +856,21 @@ func TestPrepareFailureMatrix(t *testing.T) {
 			code: codeFetchFailed, fragment: "connection reset by peer",
 		},
 		{
-			name: "the staged object could not be written",
+			name: "the formal object could not be written",
 			spoil: func(h *harness) {
 				h.store.putErr = errors.New("the object store refused the request")
 			},
 			code: codeStagingFailed, fragment: "object store refused",
 		},
 		{
-			name: "the staged object did not read back as uploaded",
+			name: "the formal object could not be read back",
 			spoil: func(h *harness) {
-				h.store.statSize = func(key string, stored int64) int64 {
-					if strings.Contains(key, "/.staging/") {
-						return stored + 1
-					}
-					return stored
-				}
+				h.store.statErr["media-ku/material/42.mp4"] = errors.New("the object store is unreachable")
 			},
-			code: codeStagingVerify, fragment: "bytes, but",
+			code: codeCommitVerify, fragment: "unreachable", committed: true,
 		},
 		{
-			name: "the staged object could not be read back at all",
-			spoil: func(h *harness) {
-				h.store.statErr["materials/42/.staging/task-1.mp4"] = errors.New("the object store is unreachable")
-			},
-			code: codeStagingVerify, fragment: "unreachable",
-		},
-		{
-			name: "the copy to the formal key failed",
-			spoil: func(h *harness) {
-				h.store.copyErr = errors.New("the object store refused the copy")
-			},
-			code: codeCopyFailed, fragment: "refused the copy",
-		},
-		{
-			// The formal key is a digest of bytes, so this row names no key: the store
+			// The formal key is an immutable material ID: the store
 			// is told to over-report whatever it is asked about at a formal key.
 			name: "the formal object did not read back as uploaded",
 			spoil: func(h *harness) {
@@ -1480,4 +1457,8 @@ func steppingClock(step time.Duration) func() time.Time {
 		now = now.Add(step)
 		return now
 	}
+}
+
+func (s *fakeStore) PutImmutable(ctx context.Context, key string, body io.Reader, size int64, kind, digest string) error {
+	return s.Put(ctx, key, body, size, kind)
 }

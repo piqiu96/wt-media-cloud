@@ -23,7 +23,10 @@ type minioStore struct {
 	// prefix is already normalised to either "" or a value with a trailing
 	// slash, so that joining it to a key is concatenation and cannot produce an
 	// empty segment.
-	prefix string
+	prefix       string
+	legacyBucket string
+	legacyPrefix string
+	claims       ContentClaims
 	// now is injectable so that a grant's expiry is asserted against a fixed
 	// clock rather than against whatever the test's own sleep produced.
 	now func() time.Time
@@ -48,10 +51,12 @@ func newMinioStore(cfg config.ObjectStorageConfig, credential config.ObjectStora
 		return nil, fmt.Errorf("object storage client: %w", err)
 	}
 	return &minioStore{
-		client: client,
-		bucket: strings.TrimSpace(cfg.Bucket),
-		prefix: normalisePrefix(cfg.Prefix),
-		now:    time.Now,
+		client:       client,
+		bucket:       strings.TrimSpace(cfg.Bucket),
+		prefix:       normalisePrefix(cfg.Prefix),
+		legacyBucket: strings.TrimSpace(cfg.LegacyBucket),
+		legacyPrefix: normalisePrefix(cfg.LegacyPrefix),
+		now:          time.Now,
 	}, nil
 }
 
@@ -82,23 +87,51 @@ func normalisePrefix(prefix string) string {
 	return prefix + "/"
 }
 
-// object maps a logical key onto the bucket's namespace.
-func (s *minioStore) object(key string) (string, error) {
+// Reference persists a full location; later prefix changes cannot reinterpret it.
+func (s *minioStore) Reference(key string) (string, error) {
 	if err := validateKey(key); err != nil {
 		return "", err
 	}
-	return s.prefix + key, nil
+	return (&url.URL{Scheme: "s3", Host: s.bucket, Path: "/" + s.prefix + key}).String(), nil
+}
+
+// Unqualified references are the old logical keys. They retain the explicit
+// legacy home until the migration switches each reference after verification.
+func (s *minioStore) resolve(key string) (string, string, error) {
+	if strings.Contains(key, "://") {
+		u, err := url.Parse(key)
+		if err != nil || u.Scheme != "s3" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Host != s.bucket && (s.legacyBucket == "" || u.Host != s.legacyBucket)) {
+			return "", "", errors.New("unsupported stored object location")
+		}
+		object := strings.TrimPrefix(u.Path, "/")
+		if err := validateKey(object); err != nil {
+			return "", "", err
+		}
+		return u.Host, object, nil
+	}
+	if err := validateKey(key); err != nil {
+		return "", "", err
+	}
+	if s.legacyBucket != "" {
+		return s.legacyBucket, s.legacyPrefix + key, nil
+	}
+	return s.bucket, s.prefix + key, nil
+}
+
+func (s *minioStore) object(key string) (string, error) {
+	_, object, err := s.resolve(key)
+	return object, err
 }
 
 func (s *minioStore) PresignGet(ctx context.Context, key string, ttl time.Duration) (Grant, error) {
-	object, err := s.object(key)
+	bucket, object, err := s.resolve(key)
 	if err != nil {
 		return Grant{}, err
 	}
 	if ttl <= 0 {
 		return Grant{}, fmt.Errorf("grant lifetime must be positive, got %s", ttl)
 	}
-	signed, err := s.client.PresignedGetObject(ctx, s.bucket, object, ttl, url.Values{})
+	signed, err := s.client.PresignedGetObject(ctx, bucket, object, ttl, url.Values{})
 	if err != nil {
 		return Grant{}, fmt.Errorf("presign %s: %w", key, err)
 	}
@@ -106,11 +139,11 @@ func (s *minioStore) PresignGet(ctx context.Context, key string, ttl time.Durati
 }
 
 func (s *minioStore) Stat(ctx context.Context, key string) (ObjectInfo, error) {
-	object, err := s.object(key)
+	bucket, object, err := s.resolve(key)
 	if err != nil {
 		return ObjectInfo{}, err
 	}
-	info, err := s.client.StatObject(ctx, s.bucket, object, minio.StatObjectOptions{})
+	info, err := s.client.StatObject(ctx, bucket, object, minio.StatObjectOptions{})
 	if err != nil {
 		if isMissingStorageObject(err) {
 			return ObjectInfo{}, fmt.Errorf("stat %s: %w: %w", key, ErrObjectNotFound, err)
@@ -140,7 +173,7 @@ func isMissingStorageObject(err error) bool {
 // bytes are the hashed bytes. The checksum costs one pass over the reader the
 // upload already makes and no extra network traffic.
 func (s *minioStore) Put(ctx context.Context, key string, body io.Reader, size int64, contentType string) error {
-	object, err := s.object(key)
+	bucket, object, err := s.resolve(key)
 	if err != nil {
 		return err
 	}
@@ -148,7 +181,7 @@ func (s *minioStore) Put(ctx context.Context, key string, body io.Reader, size i
 		return fmt.Errorf("put %s: size must be known and non-negative, got %d", key, size)
 	}
 	options := minio.PutObjectOptions{ContentType: contentType, SendContentMd5: true}
-	if _, err := s.client.PutObject(ctx, s.bucket, object, body, size, options); err != nil {
+	if _, err := s.client.PutObject(ctx, bucket, object, body, size, options); err != nil {
 		return fmt.Errorf("put %s: %w", key, err)
 	}
 	return nil
@@ -158,17 +191,17 @@ func (s *minioStore) Put(ctx context.Context, key string, body io.Reader, size i
 // the bucket, so the promotion moves a reference rather than re-uploading
 // something that may be gigabytes.
 func (s *minioStore) Copy(ctx context.Context, sourceKey, destinationKey string) error {
-	source, err := s.object(sourceKey)
+	sourceBucket, source, err := s.resolve(sourceKey)
 	if err != nil {
 		return err
 	}
-	destination, err := s.object(destinationKey)
+	destinationBucket, destination, err := s.resolve(destinationKey)
 	if err != nil {
 		return err
 	}
 	if _, err := s.client.CopyObject(ctx,
-		minio.CopyDestOptions{Bucket: s.bucket, Object: destination},
-		minio.CopySrcOptions{Bucket: s.bucket, Object: source},
+		minio.CopyDestOptions{Bucket: destinationBucket, Object: destination},
+		minio.CopySrcOptions{Bucket: sourceBucket, Object: source},
 	); err != nil {
 		return fmt.Errorf("copy %s to %s: %w", sourceKey, destinationKey, err)
 	}
@@ -176,11 +209,11 @@ func (s *minioStore) Copy(ctx context.Context, sourceKey, destinationKey string)
 }
 
 func (s *minioStore) Remove(ctx context.Context, key string) error {
-	object, err := s.object(key)
+	bucket, object, err := s.resolve(key)
 	if err != nil {
 		return err
 	}
-	if err := s.client.RemoveObject(ctx, s.bucket, object, minio.RemoveObjectOptions{}); err != nil {
+	if err := s.client.RemoveObject(ctx, bucket, object, minio.RemoveObjectOptions{}); err != nil {
 		return fmt.Errorf("remove %s: %w", key, err)
 	}
 	return nil
