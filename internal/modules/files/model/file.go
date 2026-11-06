@@ -41,5 +41,6 @@ type View struct {
 	TeamID       *int64    `json:"team_id"`
 	TeamName     string    `json:"team_name"`
 	CreatedAt    time.Time `json:"created_at"`
+	PublicURL    string    `json:"public_url"`
 	ResourcePath string    `json:"resource_path"`
 }

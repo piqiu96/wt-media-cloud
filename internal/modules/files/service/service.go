@@ -42,11 +42,13 @@ type Repository interface {
 	List(model.Scope, string, string, int, int) ([]model.File, int64, error)
 }
 type Service struct {
-	Repo     Repository
-	Objects  storage.ImmutableStore
-	MaxBytes int64
-	GrantTTL time.Duration
-	Inspect  func(context.Context, string, string) (string, string, error)
+	PublicBaseURL string
+	Bucket        string
+	Repo          Repository
+	Objects       storage.ImmutableStore
+	MaxBytes      int64
+	GrantTTL      time.Duration
+	Inspect       func(context.Context, string, string) (string, string, error)
 }
 
 func Wired() (*Service, error) {
@@ -55,7 +57,7 @@ func Wired() (*Service, error) {
 	if !ok {
 		return nil, storage.ErrNotConfigured
 	}
-	return &Service{Repo: repository.Store{DB: database.DB()}, Objects: objects, MaxBytes: cfg.Storage.ObjectStorage.UploadMaxBytes, GrantTTL: cfg.Storage.ObjectStorage.PresignTTL.Duration, Inspect: func(ctx context.Context, p, ext string) (string, string, error) {
+	return &Service{Repo: repository.Store{DB: database.DB()}, Objects: objects, PublicBaseURL: cfg.Storage.ObjectStorage.FilesPublicBaseURL, Bucket: cfg.Storage.ObjectStorage.Bucket, MaxBytes: cfg.Storage.ObjectStorage.UploadMaxBytes, GrantTTL: cfg.Storage.ObjectStorage.PresignTTL.Duration, Inspect: func(ctx context.Context, p, ext string) (string, string, error) {
 		info, err := media.ProbeFile(ctx, cfg.Media.FFmpeg.FFprobePath, p)
 		if err != nil {
 			return "", "", fmt.Errorf("%w: 文件无法读取", ErrInvalid)
@@ -149,8 +151,12 @@ func scope(actor identity.PublicUser) (model.Scope, error) {
 func canRead(sc model.Scope, f model.File) bool {
 	return sc.All || (sc.OwnerID > 0 && sc.OwnerID == f.OwnerID) || (sc.TeamID > 0 && f.TeamID != nil && sc.TeamID == *f.TeamID)
 }
-func view(f model.File) model.View {
-	return model.View{ID: f.ID, Name: f.Name, Filename: f.Name + "." + f.Extension, Type: f.Type, ContentType: f.ContentType, SizeBytes: f.SizeBytes, SHA256: f.SHA256, OwnerID: f.OwnerID, OwnerName: f.OwnerName, TeamID: f.TeamID, TeamName: f.TeamName, CreatedAt: f.CreatedAt, ResourcePath: "/api/v1/file-resources/" + f.ResourceToken}
+func (s *Service) view(f model.File) (model.View, error) {
+	publicURL, err := storage.PublicObjectURL(s.PublicBaseURL, s.Bucket, f.ObjectKey)
+	if err != nil {
+		return model.View{}, err
+	}
+	return model.View{PublicURL: publicURL, ID: f.ID, Name: f.Name, Filename: f.Name + "." + f.Extension, Type: f.Type, ContentType: f.ContentType, SizeBytes: f.SizeBytes, SHA256: f.SHA256, OwnerID: f.OwnerID, OwnerName: f.OwnerName, TeamID: f.TeamID, TeamName: f.TeamName, CreatedAt: f.CreatedAt, ResourcePath: "/api/v1/file-resources/" + f.ResourceToken}, nil
 }
 func (s *Service) Read(actor identity.PublicUser, id int64) (model.File, error) {
 	sc, err := scope(actor)
@@ -177,7 +183,11 @@ func (s *Service) List(actor identity.PublicUser, kind, search string, page, siz
 	items, total, err := s.Repo.List(sc, kind, strings.TrimSpace(search), page, size)
 	out := make([]model.View, 0, len(items))
 	for _, f := range items {
-		out = append(out, view(f))
+		item, viewErr := s.view(f)
+		if viewErr != nil {
+			return nil, 0, viewErr
+		}
+		out = append(out, item)
 	}
 	return out, total, err
 }
@@ -186,12 +196,20 @@ func (s *Service) Upload(ctx context.Context, actor identity.PublicUser, name, o
 	if _, err := scope(actor); err != nil {
 		return model.View{}, err
 	}
+	// Validate the public origin and adapter binding before any upload allocation.
+	probe, err := storage.Reference(s.Objects, "file-ku/files/_configuration-check")
+	if err != nil {
+		return model.View{}, err
+	}
+	if _, err = storage.PublicObjectURL(s.PublicBaseURL, s.Bucket, probe); err != nil {
+		return model.View{}, err
+	}
 	ext := strings.TrimPrefix(strings.ToLower(filepath.Ext(original)), ".")
 	kind, contentType := mediaType(ext)
 	if kind == "" {
 		return model.View{}, ErrInvalid
 	}
-	name, err := filename(name, ext)
+	name, err = filename(name, ext)
 	if err != nil {
 		return model.View{}, err
 	}
@@ -246,10 +264,14 @@ func (s *Service) Upload(ctx context.Context, actor identity.PublicUser, name, o
 		return model.View{}, err
 	}
 	f.SizeBytes, f.SHA256 = size, hex.EncodeToString(hash.Sum(nil))
+	result, err := s.view(f)
+	if err != nil {
+		return model.View{}, err
+	}
 	if _, err := local.Seek(0, io.SeekStart); err != nil {
 		return model.View{}, err
 	}
-	// An interrupted upload stays private. Never delete on an uncertain write or
+	// An interrupted upload is never listed as ready. Never delete on an uncertain write or
 	// Ready response: the server may have committed even when the reply was lost.
 	if err := s.Objects.PutImmutable(ctx, f.ObjectKey, local, size, contentType, f.SHA256); err != nil {
 		return model.View{}, fmt.Errorf("upload file %d: %w", f.ID, err)
@@ -265,7 +287,7 @@ func (s *Service) Upload(ctx context.Context, actor identity.PublicUser, name, o
 	if err := s.Repo.Ready(f); err != nil {
 		return model.View{}, err
 	}
-	return view(f), nil
+	return result, nil
 }
 
 func (s *Service) Rename(actor identity.PublicUser, id int64, name string) (model.View, error) {
@@ -277,13 +299,18 @@ func (s *Service) Rename(actor identity.PublicUser, id int64, name string) (mode
 	if err != nil {
 		return model.View{}, err
 	}
+	updated := f
+	updated.Name = name
+	result, err := s.view(updated)
+	if err != nil {
+		return model.View{}, err
+	}
 	if name != f.Name {
 		if err := s.Repo.Rename(id, name); err != nil {
 			return model.View{}, err
 		}
 	}
-	f.Name = name
-	return view(f), nil
+	return result, nil
 }
 func (s *Service) Delete(ctx context.Context, actor identity.PublicUser, id int64) error {
 	f, err := s.Read(actor, id)

@@ -10,3 +10,4 @@ Cloud-owned public HTTPS JSON API contracts for Web and Desktop consumers.
 - `v1/proxies.openapi.yaml`: proxy ledger, unified capacity, acknowledged Profile assignment and read-back-based direct unbind.
 - `v1/content-production.openapi.yaml`: M4-A material library, the user's material usages, and a material download command.
 - `v1/file-transfer.openapi.yaml`: M4-A executor-neutral transfer-task list and cancellation endpoints.
+- `v1/files.openapi.yaml`: Independent operations image/video uploads, permanent public bucket URLs, and compatible Cloud preview/attachment URLs.
