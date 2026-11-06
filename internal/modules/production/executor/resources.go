@@ -30,7 +30,9 @@ type RenderInput struct {
 	OutputPath string
 }
 type RenderResult struct {
-	Arguments  []string
-	DurationMS int64
-	Timeline   json.RawMessage
+	Arguments    []string
+	DurationMS   int64
+	Timeline     json.RawMessage
+	ToleranceMS  int64
+	RequireAudio bool
 }

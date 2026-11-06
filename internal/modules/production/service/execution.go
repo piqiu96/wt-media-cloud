@@ -219,7 +219,7 @@ func RunComposeAttempt(ctx context.Context, deps ComposeExecutorDeps, task model
 		return ComposeAttemptLeaseLost
 	}
 	cutStep := beginStep(model.ComposeStepCut)
-	output, err := deps.Runner.Run(ctx, runDir, compose.Request{TemplateCode: task.TemplateCode, TemplateVersion: task.TemplateVersion, Params: task.ConfigSnapshot, InputPath: inputPath, GuidePath: guidePath})
+	output, err := deps.Runner.Run(ctx, runDir, compose.Request{TemplateCode: task.TemplateCode, TemplateVersion: task.TemplateVersion, Params: task.ConfigSnapshot, InputPath: inputPath, Resources: map[string]string{"guide": guidePath}})
 	if err != nil {
 		// A run the worker terminated speaks with its context, not with
 		// FFmpeg's last words: a cancel request is a controlled stop, a spent

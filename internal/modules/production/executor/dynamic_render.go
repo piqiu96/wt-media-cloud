@@ -115,6 +115,8 @@ func (p dynamicPlan) Compile(input RenderInput) (RenderResult, error) {
 	}
 	result.Arguments = []string{"-hide_banner", "-loglevel", "error", "-nostdin", "-protocol_whitelist", "file,pipe", "-i", input.Source.Path, "-i", intro.Path, "-i", ad.Path, "-i", ending.Path, "-filter_complex_threads", strconv.Itoa(cfg.FilterThreads), "-filter_complex", strings.Join(graph, ";"), "-map", "[" + videoLabel + "]", "-map", "[" + audioLabel + "]", "-t", seconds(timeline.Duration), "-c:v", "libx264", "-crf", strconv.Itoa(cfg.CRF), "-preset", cfg.Preset, "-pix_fmt", "yuv420p", "-c:a", "aac", "-movflags", "+faststart", "-map_metadata", "-1", "-y", input.OutputPath}
 	result.DurationMS = int64(math.Round(timeline.Duration * 1000))
+	result.ToleranceMS = 100
+	result.RequireAudio = true
 	result.Timeline, _ = json.Marshal(timeline)
 	return result, nil
 }
