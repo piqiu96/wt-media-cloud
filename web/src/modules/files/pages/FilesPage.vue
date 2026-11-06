@@ -171,6 +171,7 @@ onMounted(load)
 .file-choice{display:flex;flex-direction:column;gap:12px;min-width:0;width:100%}
 .file-help{color:var(--wt-text-tertiary);font-size:13px;line-height:1.6}
 .file-picker{width:100%}
+.file-picker :deep(.t-upload__dragger){width:100%;box-sizing:border-box}
 .file-picker__content{display:flex;flex-direction:column;align-items:center;gap:4px;padding:20px 12px}
 .file-picker__icon{font-size:28px;color:var(--wt-primary);margin-bottom:4px}
 .selected-file{display:flex;align-items:center;gap:12px;padding:12px;border:1px solid var(--wt-border);border-radius:var(--wt-radius-sm);min-width:0}
