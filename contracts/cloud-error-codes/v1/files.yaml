@@ -1,0 +1,8 @@
+schema_version: 1
+revision: "2026.11.06.1"
+errors:
+  file_invalid: {errcode: 17001, http_status: 400, retryable: false, message: Invalid filename or unreadable/unsupported image/video.}
+  file_too_large: {errcode: 17002, http_status: 413, retryable: false, message: File exceeds configured upload limit.}
+  file_not_found: {errcode: 17003, http_status: 404, retryable: false, message: File missing or outside actor scope.}
+  file_forbidden: {errcode: 17004, http_status: 403, retryable: false, message: Actor cannot manage files.}
+  file_unavailable: {errcode: 17005, http_status: 503, retryable: true, message: File operation did not complete.}
