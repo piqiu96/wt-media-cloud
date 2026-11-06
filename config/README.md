@@ -19,7 +19,8 @@ in. It is required in both trees.
 | --- | --- |
 | `endpoint` | Host only, no scheme and no bucket label. `use_ssl` chooses the scheme. |
 | `bucket` | Bucket name. |
-| `prefix` | Key prefix inside the bucket, e.g. `dev/`. The dev tree sets one so a local run cannot overwrite a production object. |
+| `prefix` | Prefix for new object locations; empty for the unified media directories. Stored s3 locations already contain the complete key and ignore later prefix changes. |
+| `legacy_bucket` / `legacy_prefix` | Explicit home of old unqualified references during migration. Keep these until all available old references have been verified and switched. |
 | `presign_ttl` | How long a pre-signed GET stays valid. |
 | `region` | May be empty where the provider does not need it. |
 | `use_ssl` | `true` for HTTPS. |

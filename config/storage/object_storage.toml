@@ -1,6 +1,8 @@
-bucket = 'data'
+bucket = 'wt-media'
 endpoint = 's3.oss.longyanyue.cn'
-prefix = 'wt_media/dev/'
+prefix = ''
 presign_ttl = '15m'
 region = 'garage'
 use_ssl = true
+legacy_bucket = 'data'
+legacy_prefix = 'wt_media/dev/'

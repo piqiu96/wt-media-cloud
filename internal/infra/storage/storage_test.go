@@ -10,39 +10,32 @@ import (
 
 const testDigest = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
 
-func TestSourceKeyIsContentAddressed(t *testing.T) {
+func TestSourceKeyUsesMaterialIdentity(t *testing.T) {
 	key, err := SourceKey(42, testDigest, "mp4")
 	if err != nil {
 		t.Fatalf("SourceKey() error = %v", err)
 	}
-	if want := "materials/42/" + testDigest + ".mp4"; key != want {
+	if want := "media-ku/material/42.mp4"; key != want {
 		t.Fatalf("SourceKey() = %q, want %q", key, want)
 	}
 }
 
-// Two runs that produced the same bytes have to land on the same key: that is
-// what makes re-preparing a material idempotent instead of a second object that
-// an earlier task's recorded key no longer points at. The control is the third
-// arm — a different digest must produce a different key, or the equality above
-// would be satisfied by a function that ignores its arguments.
-func TestSourceKeyDependsOnTheDigestAndNothingElse(t *testing.T) {
+// Content integrity is metadata, while the ID is the operator-visible name.
+func TestSourceKeyIsStableAcrossPreparationsAndSeparatesMaterials(t *testing.T) {
 	first, err := SourceKey(42, testDigest, "mp4")
 	if err != nil {
 		t.Fatal(err)
 	}
-	same, err := SourceKey(42, testDigest, "mp4")
+	same, err := SourceKey(42, strings.Repeat("a", 64), "mp4")
 	if err != nil {
 		t.Fatal(err)
 	}
-	other, err := SourceKey(42, strings.Repeat("a", 64), "mp4")
+	other, err := SourceKey(43, testDigest, "mp4")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if first != same {
-		t.Fatalf("the same digest produced %q and %q", first, same)
-	}
-	if first == other {
-		t.Fatalf("a different digest produced the same key %q", first)
+	if first != same || first == other {
+		t.Fatalf("keys %q %q %q", first, same, other)
 	}
 }
 
@@ -95,7 +88,7 @@ func TestKeyBuildersRefuseAnExtensionThatCouldMoveTheObject(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SourceKey(.MP4) error = %v", err)
 	}
-	if want := "materials/42/" + testDigest + ".mp4"; key != want {
+	if want := "media-ku/material/42.mp4"; key != want {
 		t.Fatalf("SourceKey(.MP4) = %q, want %q", key, want)
 	}
 }

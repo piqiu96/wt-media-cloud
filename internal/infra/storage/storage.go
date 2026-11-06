@@ -68,12 +68,8 @@ type Store interface {
 	Remove(ctx context.Context, key string) error
 }
 
-// SourceKey is the key a verified prepared source lives at, addressed by the
-// sha256 of its own bytes.
-//
-// Content addressing is what makes a re-preparation of the same source
-// idempotent: the second run writes the same key with the same bytes, so it
-// neither duplicates an object nor invalidates a key an earlier task recorded.
+// SourceKey gives each material one stable filename. The digest is validated
+// here and enforced as immutable content metadata by PutImmutable.
 func SourceKey(materialID int64, digest, extension string) (string, error) {
 	if materialID <= 0 {
 		return "", fmt.Errorf("source key needs a positive material id, got %d", materialID)
@@ -85,7 +81,7 @@ func SourceKey(materialID int64, digest, extension string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return "materials/" + strconv.FormatInt(materialID, 10) + "/" + strings.ToLower(digest) + "." + extension, nil
+	return "media-ku/material/" + strconv.FormatInt(materialID, 10) + "." + extension, nil
 }
 
 // StagingKey is where an in-flight download writes, one per attempt.
@@ -205,3 +201,15 @@ func (notConfiguredStore) Put(context.Context, string, io.Reader, int64, string)
 func (notConfiguredStore) Copy(context.Context, string, string) error { return ErrNotConfigured }
 
 func (notConfiguredStore) Remove(context.Context, string) error { return ErrNotConfigured }
+
+// Reference converts a newly allocated key into a durable location. Adapters
+// without namespaces (for example in-memory stores) already use absolute keys.
+func Reference(store Store, key string) (string, error) {
+	if namespaced, ok := store.(interface{ Reference(string) (string, error) }); ok {
+		return namespaced.Reference(key)
+	}
+	if err := validateKey(key); err != nil {
+		return "", err
+	}
+	return key, nil
+}
