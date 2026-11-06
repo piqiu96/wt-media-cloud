@@ -2,7 +2,7 @@
 import '../mining.css'
 import { scheduleLabel } from '../labels.js'
 import { materialRulesSummary } from '../miningRules.js'
-import ContentCoverPlaceholder from '../components/ContentCoverPlaceholder.vue'
+import { taskContents, taskExecutionEvents, taskExceptions, taskResultSummary } from '../crawlTaskDetail.js'
 import { opColumnWidth } from '../../../shared/ui/resource/opColumnWidth.js'
 import ResourceFilterBar from '../../../shared/ui/resource/ResourceFilterBar.vue'
 import ResourceRowActions from '../../../shared/ui/resource/ResourceRowActions.vue'
@@ -10,7 +10,6 @@ import ResourceOverlay from '../../../shared/ui/resource/ResourceOverlay.vue'
 import ResourceSection from '../../../shared/ui/resource/ResourceSection.vue'
 import ResourceDescriptions from '../../../shared/ui/resource/ResourceDescriptions.vue'
 import ResourceNotice from '../../../shared/ui/resource/ResourceNotice.vue'
-import ResourceEmptyState from '../../../shared/ui/resource/ResourceEmptyState.vue'
 import BusinessSelect from "../../../shared/ui/fields/BusinessSelect.vue"
 import { feedback } from '../../../shared/ui/feedback/index.js'
 import FeedbackAlert from '../../../shared/ui/feedback/FeedbackAlert.vue'
@@ -41,8 +40,13 @@ const error = ref('')
 const detail = ref(null)
 const visible = ref(false)
 const retrying = ref(false)
-const activeTab = ref('items')
+const activeTab = ref('info')
 const failedCovers = ref(new Set())
+const contentPagination = ref({ current: 1, pageSize: 10 })
+const detailContents = computed(() => detail.value ? taskContents(detail.value) : [])
+const pagedContents = computed(() => detailContents.value.slice((contentPagination.value.current - 1) * contentPagination.value.pageSize, contentPagination.value.current * contentPagination.value.pageSize))
+const detailExceptions = computed(() => detail.value ? taskExceptions(detail.value) : [])
+const contentTabLabel = computed(() => `${detail.value?.task_type === 'retry_failed_task' ? '处理内容' : '发现内容'}（${detailContents.value.length}）`)
 const categories = ref([])
 const strategyDrawerVisible = ref(false)
 const strategyDrawer = ref(null)
@@ -83,14 +87,12 @@ const tableScroll = computed(() => ({
 }))
 
 const resultColumns = [
-  { colKey: 'cover', title: '封面', width: 72 },
-  { colKey: 'title', title: '标题', width: 220 },
-  { colKey: 'author_name', title: '作者', width: 120 },
-  { colKey: 'like_count', title: '点赞', width: 90 },
-  { colKey: 'favorite_count', title: '收藏', width: 90 },
-  { colKey: 'processing_status', title: '处理状态', width: 110 },
-  { colKey: 'op', title: '操作', width: 100 },
+  { colKey: 'content', title: '内容信息', width: 360 },
+  { colKey: 'metrics', title: '互动数据', width: 150 },
+  { colKey: 'processing_status', title: '处理结果', width: 220 },
+  { colKey: 'op', title: '操作', width: opColumnWidth(['查看素材']), fixed: 'right' },
 ]
+const resultScroll = computed(() => ({ x: `${resultColumns.reduce((sum, col) => sum + col.width, 0)}px` }))
 
 const pagedRows = computed(() => {
   const start = (pagination.value.current - 1) * pagination.value.pageSize
@@ -154,7 +156,8 @@ function resetFilters() {
 async function open(row) {
   try {
     detail.value = await client.getTask(row.id)
-    activeTab.value = 'items'
+    activeTab.value = 'info'
+    contentPagination.value.current = 1
     visible.value = true
   } catch (e) {
     error.value = e.message || '任务详情加载失败'
@@ -258,56 +261,11 @@ function statusTone(status) {
 }
 
 function processingLabel(value) {
-  return ({ unprocessed: '未入池', pending: '待审核', auto_materialized: '自动转素材', material_failed: '转素材失败', duplicate: '重复', failed: '失败' })[value] || value || '未知'
+  return ({ unprocessed: '未入池', pending: '待审核', auto_materialized: '已转素材', material_failed: '转素材失败', duplicate: '已在内容池', failed: '失败' })[value] || value || '未知'
 }
 
 function processingTone(value) {
   return ({ pending: 'warning', auto_materialized: 'success', material_failed: 'danger', duplicate: 'neutral', failed: 'danger' })[value] || 'info'
-}
-
-function timeHM(value) {
-  if (!value) return ''
-  const d = new Date(value)
-  const pad = (n) => String(n).padStart(2, '0')
-  return `${pad(d.getHours())}:${pad(d.getMinutes())}`
-}
-
-function duration(task) {
-  if (!task.started_at || !task.finished_at) return '-'
-  const ms = new Date(task.finished_at) - new Date(task.started_at)
-  if (ms < 0) return '-'
-  const total = Math.round(ms / 1000)
-  const min = Math.floor(total / 60)
-  const sec = total % 60
-  return min > 0 ? `${min}分${sec}秒` : `${sec}秒`
-}
-
-function timeline(task) {
-  const steps = []
-  const s = task.stats || {}
-  steps.push({ time: timeHM(task.created_at), label: '创建任务' })
-  if (task.started_at) steps.push({ time: timeHM(task.started_at), label: '开始执行策略' })
-  steps.push({ time: '', label: `加载关键词并发现内容 ${s.found || 0} 条` })
-  steps.push({ time: '', label: `完成去重，新增 ${s.added || 0} 条` })
-  if (s.auto_materialized > 0) steps.push({ time: '', label: `执行自动转素材 ${s.auto_materialized} 条` })
-  const finished = task.finished_at || (task.status !== 'pending' && task.status !== 'running' ? task.updated_at : null)
-  steps.push({ time: finished ? timeHM(finished) : '', label: task.status === 'success' || task.status === 'partial_success' ? '任务完成' : `任务${statusLabel(task.status)}` })
-  return steps
-}
-
-function exceptions(task) {
-  const list = (task.results || [])
-    .filter((item) => ['failed', 'material_failed'].includes(item.processing_status))
-    .map((item) => ({
-      stage: item.processing_status === 'material_failed' ? '转素材失败' : '内容抓取失败',
-      reason: item.failure_reason || '平台接口异常',
-      scope: item.failure_key || item.title || item.platform_content_id || '-',
-      time: task.finished_at || task.updated_at,
-    }))
-  if (!list.length && task.error) {
-    list.push({ stage: '任务失败', reason: task.error, scope: '-', time: task.finished_at || task.updated_at })
-  }
-  return list
 }
 
 function rowAction(item) {
@@ -316,10 +274,10 @@ function rowAction(item) {
     return { label: '查看素材', to: item.material_id ? `/material-library?material_id=${item.material_id}` : '/material-library' }
   }
   if (item.processing_status === 'pending') {
-    return { label: '审核', to: `/content-pool?crawl_task_id=${detail.value?.id}${id ? `&search=${id}` : ''}` }
+    return { label: '去审核', to: `/content-pool?crawl_task_id=${detail.value?.id}${id ? `&search=${id}` : ''}` }
   }
   if (item.processing_status === 'duplicate') {
-    return { label: '查看原内容', to: id ? `/content-pool?search=${id}` : `/content-pool?crawl_task_id=${detail.value?.id}` }
+    return { label: '查看内容', to: id ? `/content-pool?search=${id}` : `/content-pool?crawl_task_id=${detail.value?.id}` }
   }
   return null
 }
@@ -338,7 +296,7 @@ function hasFailed(task) {
   <t-loading :loading="loading" :show-overlay="true">
     <div class="wt-resource-page resource-visual-approved task-page">
       <FeedbackAlert v-if="error" theme="error" :message="error" closable style="margin-bottom:16px" @close="error=''" />
-      <ResourcePageHeader title="挖掘任务" description="查看发现结果和执行过程，处理失败任务。" />
+      <ResourcePageHeader title="挖掘任务" description="查看发现结果和执行记录，处理失败任务。" />
 
       <ResourceCard class="task-card">
         <ResourceFilterBar>
@@ -376,51 +334,62 @@ function hasFailed(task) {
 
       <ResourceOverlay v-model:visible="visible" title="挖掘任务详情" kind="drawer" :width="960" :footer="false">
         <div v-if="detail" class="mining-detail">
-          <ResourceSection title="基本信息"><ResourceDescriptions>
-            <t-descriptions-item label="任务名称" full>{{ taskName(detail) }}</t-descriptions-item>
-            <t-descriptions-item label="任务 ID">{{ detail.id }}</t-descriptions-item><t-descriptions-item label="状态"><ResourceStatusBadge :tone="statusTone(detail.status)" :label="statusLabel(detail.status)" /></t-descriptions-item>
-            <t-descriptions-item label="类目">{{ categoryName(detail.snapshot?.category_id) }}</t-descriptions-item><t-descriptions-item label="运营团队">{{ teamName(detail.team_id) }}</t-descriptions-item>
-            <t-descriptions-item label="任务来源"><t-link v-if="isStrategyTask(detail)" theme="primary" @click="openStrategy(detail)">{{ sourceName(detail) }}</t-link><span v-else>{{ sourceName(detail) }}</span></t-descriptions-item><t-descriptions-item label="触发方式">{{ triggerLabel(detail) }}</t-descriptions-item>
-            <t-descriptions-item label="执行时间">{{ formatDateTime(detail.created_at) }}</t-descriptions-item><t-descriptions-item label="耗时">{{ duration(detail) }}</t-descriptions-item>
-          </ResourceDescriptions></ResourceSection>
-          <ResourceSection title="发现结果"><div class="mining-metrics"><div v-for="metric in foundStats(detail)" :key="metric.label"><span>{{ metric.label }}</span><strong>{{ Number(metric.value).toLocaleString() }}</strong></div></div></ResourceSection>
-          <t-tabs v-model="activeTab" class="mining-task-tabs">
+          <t-tabs v-model="activeTab" class="mining-task-tabs task-detail-tabs">
+            <t-tab-panel value="info" label="任务信息" :destroy-on-hide="true">
+              <ResourceSection title="基本信息"><ResourceDescriptions>
+                <t-descriptions-item label="任务名称" full>{{ taskName(detail) }}</t-descriptions-item>
+                <t-descriptions-item label="任务 ID">{{ detail.id }}</t-descriptions-item><t-descriptions-item label="状态"><ResourceStatusBadge :tone="statusTone(detail.status)" :label="statusLabel(detail.status)" /></t-descriptions-item>
+                <t-descriptions-item label="类目">{{ categoryName(detail.snapshot?.category_id) }}</t-descriptions-item><t-descriptions-item label="运营团队">{{ teamName(detail.team_id) }}</t-descriptions-item>
+                <t-descriptions-item label="任务来源"><t-link v-if="isStrategyTask(detail)" theme="primary" @click="openStrategy(detail)">{{ sourceName(detail) }}</t-link><span v-else>{{ sourceName(detail) }}</span></t-descriptions-item><t-descriptions-item label="触发方式">{{ triggerLabel(detail) }}</t-descriptions-item>
+                <t-descriptions-item label="发起人" full>{{ triggerLabel(detail) === '定时' ? '系统' : detail.created_by_name || '—' }}</t-descriptions-item>
+              </ResourceDescriptions></ResourceSection>
+              <ResourceSection title="执行结果">
+                <p class="task-result-summary">{{ taskResultSummary(detail) }}</p>
+                <ResourceNotice v-if="detailExceptions.length" tone="warning">
+                  {{ detailExceptions[0].reason }}
 
-            <t-tab-panel value="items" label="发现内容">
-              <t-table class="wt-resource-table" :data="detail.results || []" :columns="resultColumns" row-key="platform_content_id" hover size="small" :scroll="{ y: '360px' }" empty="暂无发现结果">
-                <template #cover="{ row }">
-                  <img v-if="row.cover_url && !failedCovers.has(row.cover_url)" @error="failedCovers.add(row.cover_url)" class="result-cover" :src="row.cover_url" alt="" loading="lazy" referrerpolicy="no-referrer" />
-                  <ContentCoverPlaceholder v-else />
+                </ResourceNotice>
+                <details :key="detail.id" class="task-process">
+                  <summary><span class="task-process-open">查看过程</span><span class="task-process-close">收起过程</span></summary>
+                  <div class="task-process-body">
+                    <t-timeline>
+                      <t-timeline-item v-for="(event, index) in taskExecutionEvents(detail)" :key="index"><div>{{ event.label }}</div><time class="task-event-time">{{ formatDateTime(event.time) }}</time></t-timeline-item>
+                    </t-timeline>
+                    <div v-if="detailExceptions.length" class="task-exceptions">
+                      <div v-for="(item, index) in detailExceptions" :key="index" class="task-exception">
+                        <strong>{{ item.stage }}</strong>
+                        <ResourceDescriptions><t-descriptions-item label="处理对象" full>{{ item.scope }}</t-descriptions-item><t-descriptions-item label="失败原因" full>{{ item.reason }}</t-descriptions-item></ResourceDescriptions>
+                      </div>
+                    </div>
+                  </div>
+                </details>
+              </ResourceSection>
+            </t-tab-panel>
+
+            <t-tab-panel value="items" :label="contentTabLabel" :destroy-on-hide="true">
+              <t-table class="wt-resource-table" :data="pagedContents" :columns="resultColumns" row-key="platform_content_id" hover :scroll="resultScroll" empty="暂无内容">
+                <template #content="{ row }">
+                  <div class="task-content-cell">
+                    <img v-if="row.cover_url && !failedCovers.has(row.cover_url)" @error="failedCovers.add(row.cover_url)" class="result-cover" :src="row.cover_url" alt="" loading="lazy" referrerpolicy="no-referrer" />
+                    <div class="task-content-text">
+                      <span class="result-title" :title="row.title || row.platform_content_id">{{ truncateTitle(row.title || row.platform_content_id) }}</span>
+                      <span class="task-content-author">{{ row.author_name || '—' }}</span>
+                    </div>
+                  </div>
                 </template>
-                <template #title="{ row }">
-                  <span class="result-title" :title="row.title || row.failure_key || '未命名内容'">{{ truncateTitle(row.title || row.failure_key || '未命名内容') }}</span>
+                <template #metrics="{ row }"><MetricList :items="[{ label: '点赞', value: Number(row.like_count || 0).toLocaleString() }, { label: '收藏', value: Number(row.favorite_count || 0).toLocaleString() }]" /></template>
+                <template #processing_status="{ row }">
+                  <ResourceStatusBadge :tone="processingTone(row.processing_status)" :label="processingLabel(row.processing_status)" />
+                  <span v-if="row.failure_reason" class="task-content-error">{{ row.failure_reason }}</span>
                 </template>
-                <template #author_name="{ row }">{{ row.author_name || '-' }}</template>
-                <template #like_count="{ row }">{{ Number(row.like_count || 0).toLocaleString() }}</template>
-                <template #favorite_count="{ row }">{{ Number(row.favorite_count || 0).toLocaleString() }}</template>
-                <template #processing_status="{ row }"><ResourceStatusBadge :tone="processingTone(row.processing_status)" :label="processingLabel(row.processing_status)" /></template>
                 <template #op="{ row }">
-                  <t-button v-if="rowAction(row)" size="small" variant="text" @click="router.push(rowAction(row).to)">{{ rowAction(row).label }}</t-button>
-                  <span v-else>-</span>
+                  <ResourceRowActions><t-button v-if="rowAction(row)" size="small" variant="text" @click="router.push(rowAction(row).to)">{{ rowAction(row).label }}</t-button><span v-else>—</span></ResourceRowActions>
                 </template>
               </t-table>
+              <div v-if="detailContents.length > 10" class="pagination-bar"><t-pagination v-model:current="contentPagination.current" v-model:pageSize="contentPagination.pageSize" :total="detailContents.length" :page-size-options="[10, 20, 50]" /></div>
             </t-tab-panel>
 
-            <t-tab-panel value="process" label="执行过程">
-              <ol class="mining-timeline"><li v-for="(step, index) in timeline(detail)" :key="index"><time>{{ step.time || '—' }}</time><p>{{ step.label }}</p></li></ol>
-            </t-tab-panel>
-
-            <t-tab-panel value="errors" label="异常记录">
-              <div v-if="exceptions(detail).length" class="exception-list">
-                <div v-for="(item, index) in exceptions(detail)" :key="index" class="mining-exception">
-                  <header><strong>{{ item.stage }}</strong><time>{{ formatDateTime(item.time) }}</time></header>
-                  <ResourceDescriptions><t-descriptions-item label="失败原因" full>{{ item.reason }}</t-descriptions-item><t-descriptions-item label="影响范围" full>{{ item.scope }}</t-descriptions-item></ResourceDescriptions>
-                </div>
-              </div>
-              <ResourceEmptyState v-else title="暂无异常记录" />
-            </t-tab-panel>
           </t-tabs>
-          <ResourceSection title="操作记录"><ResourceDescriptions><t-descriptions-item label="创建时间">{{ formatDateTime(detail.created_at) }}</t-descriptions-item><t-descriptions-item label="创建人">{{ detail.created_by_name || '—' }}</t-descriptions-item><t-descriptions-item label="修改时间">{{ formatDateTime(detail.updated_at) }}</t-descriptions-item><t-descriptions-item label="修改人">{{ detail.updated_by_name || '—' }}</t-descriptions-item></ResourceDescriptions></ResourceSection>
         </div>
       </ResourceOverlay>
       <ResourceOverlay v-model:visible="strategyDrawerVisible" title="执行时策略配置" kind="drawer" :width="800">
@@ -441,5 +410,21 @@ function hasFailed(task) {
 
 <style scoped>
 .task-name, .result-title { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; display:block; }
-.result-cover { width:40px; height:48px; object-fit:cover; border-radius:4px; }
+.result-cover { width:40px; height:48px; flex:0 0 40px; object-fit:cover; border-radius:4px; }
+.task-detail-tabs { margin-top:0; }
+.task-result-summary { margin:0; line-height:24px; color:var(--wt-text-primary); }
+.task-process { margin-top:12px; }
+.task-process > summary { width:fit-content; color:var(--wt-primary); cursor:pointer; line-height:24px; border-radius:4px; }
+.task-process > summary:focus-visible { outline:2px solid var(--wt-primary); outline-offset:3px; }
+.task-process-close, .task-process[open] .task-process-open { display:none; }
+.task-process[open] .task-process-close { display:inline; }
+.task-process-body { padding-top:20px; }
+.task-exceptions { padding-top:16px; border-top:1px solid var(--wt-border); }
+.task-content-cell { display:flex; align-items:center; gap:12px; }
+.task-content-text { min-width:0; }
+.task-content-author { display:block; margin-top:4px; font-size:12px; color:var(--wt-text-tertiary); }
+.task-event-time { font-size:12px; color:var(--wt-text-tertiary); }
+.task-content-error { display:block; margin-top:6px; font-size:12px; line-height:20px; color:var(--wt-danger); overflow-wrap:anywhere; }
+.task-exception + .task-exception { margin-top:16px; padding-top:16px; border-top:1px solid var(--wt-border); }
+.task-exception > strong { color:var(--wt-danger); font-size:13px; font-weight:500; }
 </style>

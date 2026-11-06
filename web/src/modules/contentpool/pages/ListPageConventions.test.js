@@ -20,7 +20,7 @@ const TABLES = [
   { file: 'ContentPoolPage.vue', name: 'resultColumns', count: 9 },
   { file: 'DiscoveryStrategiesPage.vue', name: 'columns', count: 12 },
   { file: 'CrawlTasksPage.vue', name: 'columns', count: 10 },
-  { file: 'CrawlTasksPage.vue', name: 'resultColumns', count: 7 },
+  { file: 'CrawlTasksPage.vue', name: 'resultColumns', count: 4 },
 ]
 
 describe('content pool list page conventions', () => {
