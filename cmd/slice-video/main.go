@@ -31,7 +31,7 @@ func main() {
 }
 func run(args []string) error {
 	if len(args) == 0 {
-		return errors.New("usage: slice-video prepare|publish|verify [flags]")
+		return errors.New("usage: slice-video prepare|publish|list|verify [flags]")
 	}
 	op := args[0]
 	flags := flag.NewFlagSet(op, flag.ContinueOnError)
@@ -47,7 +47,7 @@ func run(args []string) error {
 	if err := flags.Parse(args[1:]); err != nil {
 		return err
 	}
-	if op != "prepare" && op != "publish" && op != "verify" {
+	if op != "prepare" && op != "publish" && op != "verify" && op != "list" {
 		return errors.New("unknown slice-video operation")
 	}
 	if *report == "" {
@@ -185,7 +185,7 @@ func run(args []string) error {
 		}
 		fmt.Printf("processed source %s; suitable=%t; library clips=%d\n", review.SourceID, review.Suitable, len(index.Clips))
 		return nil
-	case "verify":
+	case "verify", "list":
 		ref, e := store.Reference(path.Join(cfg.Media.SliceLibrary.Prefix, "index.json"))
 		if e != nil {
 			return e
@@ -203,18 +203,28 @@ func run(args []string) error {
 		if e = json.Unmarshal(data, &index); e != nil {
 			return e
 		}
-		if index.Version != 1 || len(index.Clips) == 0 {
-			return errors.New("slice index is empty or unsupported")
+		if index.Version != 1 {
+			return errors.New("slice index is unsupported")
 		}
-		for _, clip := range index.Clips {
-			if e = service.VerifyClip(ctx, store, clip); e != nil {
-				return e
+		verified := 0
+		if op == "verify" {
+			for _, clip := range index.Clips {
+				if *source != "" && clip.SourceID != *source {
+					continue
+				}
+				if e = service.VerifyClip(ctx, store, clip); e != nil {
+					return e
+				}
+				verified++
+			}
+			if verified == 0 {
+				return errors.New("no matching clips to verify")
 			}
 		}
 		if e = write(index); e != nil {
 			return e
 		}
-		fmt.Printf("verified %d library clips\n", len(index.Clips))
+		fmt.Printf("listed %d library clips; verified %d object payloads\n", len(index.Clips), verified)
 		return nil
 	}
 	return nil

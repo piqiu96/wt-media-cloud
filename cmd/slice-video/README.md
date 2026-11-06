@@ -17,6 +17,8 @@ bin/slice-video publish --candidate /absolute/local/run/candidate-xxx/candidate.
 bin/slice-video verify --report /absolute/local/run/verified.json
 ```
 
+`list` reads the published index without downloading the library. `verify --source <video-ID>` audits one source; omit source for an explicit full-library audit. Normal additions need only audit their new sources.
+
 The Skill inspects `frames.jpg` and available `audio.wav` / media facts before
 writing a review. A review contains `source_id`, `sha256`, `suitable` (boolean),
 `reviewed_seconds` (from the candidate), `short_title` and `reason`. An unsuitable review removes that local candidate and
