@@ -23,7 +23,7 @@ describe('strategy output settings', () => {
   it('validates complete groups, platform whitelist, numeric bounds and public HTTPS address', () => {
     const group = { key: 'a', name: '组', platforms: ['bilibili', 'xiaohongshu'], copies: 2, params: { start: 0, guide_video_url: 'https://example.com/a.mp4' } }
     expect(validateSettings([group], fields)).toEqual({})
-    expect(validateSettings([{ ...group, platforms: ['douyin'], copies: 0, params: { start: 21, guide_video_url: 'http://example.com/a.mp4' } }], fields).a).toEqual({ platforms: '请选择适用平台', copies: '每条素材生成 1～20 份', start: '请填写有效的开始', guide_video_url: '请输入可公开下载的 HTTPS 视频地址' })
+    expect(validateSettings([{ ...group, platforms: ['douyin'], copies: 0, params: { start: 21, guide_video_url: 'http://example.com/a.mp4' } }], fields).a).toEqual({ platforms: '请选择适用平台', copies: '每条素材生成 1～20 份', start: '请填写有效的开始', guide_video_url: '请填写文件管理中的视频链接或 HTTPS 视频地址' })
     expect(validateSettings([{ ...group, params: { start: null, guide_video_url: '' } }], fields).a).toHaveProperty('start')
   })
   it('retains old config for explicit migration without inventing target platforms', () => {

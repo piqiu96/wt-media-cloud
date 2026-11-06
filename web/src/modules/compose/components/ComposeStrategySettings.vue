@@ -56,7 +56,7 @@ function remove(index) { if (props.modelValue.length > 1) update(props.modelValu
           <div class="strategy-setting__field">
             <t-input-number v-if="['integer', 'number'].includes(field.type)" v-model="group.params[field.key]" :min="field.minimum" :max="field.maximum" :decimal-places="field.type === 'integer' ? 0 : undefined" theme="column" :status="errors[group.key]?.[field.key] ? 'error' : undefined" />
             <t-switch v-else-if="field.type === 'boolean'" v-model="group.params[field.key]" />
-            <t-input v-else v-model="group.params[field.key]" :type="field.format === 'uri' || field.key === 'guide_video_url' ? 'url' : 'text'" :placeholder="field.key === 'guide_video_url' ? '输入 HTTPS 视频地址' : `请输入${field.label}`" :status="errors[group.key]?.[field.key] ? 'error' : undefined" />
+            <t-input v-else v-model="group.params[field.key]" :type="field.format === 'uri' || field.key === 'guide_video_url' ? 'url' : 'text'" :placeholder="field.format === 'uri' ? '粘贴文件管理中的视频链接，或填写 HTTPS 视频地址' : `请输入${field.label}`" :status="errors[group.key]?.[field.key] ? 'error' : undefined" />
             <p v-if="errors[group.key]?.[field.key]" class="strategy-setting__error">{{ errors[group.key][field.key] }}</p>
           </div>
         </t-form-item>

@@ -100,6 +100,7 @@ export function validateOverrides(fields, strategyConfig, overrides) {
     const larger = Number(effective[rule.larger])
     if (!Number.isFinite(smaller) || !Number.isFinite(larger)) continue
     // 已经有一条更具体的说明（超下限、不是数字）时不再改写：那一条才是要动手改的。
+    if (larger === 0 && fields.some((field) => field.key === rule.larger && field.auto_zero)) continue
     if (smaller >= larger && !errors[rule.larger]) errors[rule.larger] = rule.message
   }
   return errors

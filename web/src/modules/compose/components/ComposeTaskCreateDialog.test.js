@@ -49,7 +49,7 @@ describe('manual task batch creation', () => {
   })
   it('keeps inherited group structure immutable while exposing only template-opened parameters', () => {
     const settings=read('./ComposeTaskSettings.vue')
-    expect(settings).toContain("field.editable === true && field.key !== 'guide_video_url'")
+    expect(settings).toContain("field.editable === true")
     expect(settings).toContain(':disabled="!editable(field)"')
     for(const action of ['新增成片设置','拖动排序','复制','移除']) expect(settings).not.toContain(`>${action}<`)
     expect(settings).toContain('validateTaskGroup')

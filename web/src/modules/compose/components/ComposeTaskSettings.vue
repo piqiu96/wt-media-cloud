@@ -11,7 +11,7 @@ const emit = defineEmits(['update:modelValue'])
 const groups = computed(() => strategySettings(props.strategy))
 const fields = computed(() => settingFields(props.template?.schema))
 const activeGroup = ref(null), visible = ref(false), draft = ref({}), errors = ref({})
-const editable = (field) => field.editable === true && field.key !== 'guide_video_url'
+const editable = (field) => field.editable === true
 const hasEditable = computed(() => fields.value.some(editable))
 const columns = [{ colKey: 'name', title: '成片设置', width: 170 }, { colKey: 'platforms', title: '适用平台', width: 180 }, { colKey: 'copies', title: '每条份数', width: 100 }, { colKey: 'estimated', title: '预计任务', width: 100 }, { colKey: 'op', title: '操作', width: 80 }]
 const changes = (group) => changedTaskParams(group, props.modelValue[group.key], fields.value)
@@ -39,9 +39,9 @@ function save() {
           <template #label>{{ field.label }}<ResourceFieldHelp v-if="!editable(field) || field.description" :content="!editable(field) ? '固定参数，任务内不可调整。' : field.description" /></template>
           <div class="task-settings__field">
 
-              <t-input-number v-if="['integer','number'].includes(field.type)" v-model="draft[field.key]" theme="column" :min="field.minimum" :max="field.maximum" :decimal-places="field.type === 'integer' ? 0 : undefined" :disabled="!editable(field)" :status="errors[field.key] ? 'error' : undefined" />
+              <t-input-number v-if="['integer','number'].includes(field.type)" v-model="draft[field.key]" theme="column" :min="field.minimum" :max="field.maximum_from_strategy ? activeGroup?.params?.[field.key] : field.maximum" :decimal-places="field.type === 'integer' ? 0 : undefined" :disabled="!editable(field)" :status="errors[field.key] ? 'error' : undefined" />
               <t-switch v-else-if="field.type === 'boolean'" v-model="draft[field.key]" :disabled="!editable(field)" />
-              <t-input v-else-if="field.key === 'guide_video_url'" :value="activeGroup?.params?.[field.key] ? '已配置（固定）' : '未记录'" disabled />
+              <t-input v-else-if="field.format === 'uri' || field.key === 'guide_video_url'" :value="activeGroup?.params?.[field.key] ? '已配置（固定）' : '未记录'" disabled />
               <t-input v-else v-model="draft[field.key]" :disabled="!editable(field)" :status="errors[field.key] ? 'error' : undefined" />
 
 <p v-if="errors[field.key]" class="task-settings__error">{{ errors[field.key] }}</p>

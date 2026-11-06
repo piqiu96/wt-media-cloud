@@ -4,8 +4,8 @@ export const OUTPUT_PLATFORMS = [
   { value: 'bilibili', label: 'B站' }, { value: 'baidu', label: '百度' }, { value: 'xiaohongshu', label: '小红书' },
 ]
 const clone = (value) => JSON.parse(JSON.stringify(value))
-export function settingFields(schema) {
-  return schemaFields(schema).map((field) => ({ ...field, ...schema.properties[field.key], label: schema.properties[field.key].title || field.label }))
+export function settingFields(schema, defaults = {}) {
+  return schemaFields(schema).map((field) => ({ ...field, ...schema.properties[field.key], default: defaults[field.key] ?? schema.properties[field.key].default, label: schema.properties[field.key].title || field.label }))
 }
 export function initialParams(fields) {
   return Object.fromEntries(fields.map((field) => [field.key, field.default ?? (['integer', 'number'].includes(field.type) ? field.minimum ?? 0 : field.type === 'boolean' ? false : '')]))
@@ -23,6 +23,7 @@ export function strategySettings(strategy) {
 export function validGuideURL(value) {
   try {
     const url = new URL(value)
+    if (['https:', 'http:'].includes(url.protocol) && /^\/api\/v1\/file-resources\/[a-fA-F0-9]{64}$/.test(url.pathname) && !url.search && !url.hash && !url.username && !url.password) return true
     return url.protocol === 'https:' && !!url.hostname && !url.username && !url.password && !url.hash && (!url.port || url.port === '443')
   } catch { return false }
 }
@@ -43,7 +44,7 @@ export function validateSettings(settings, fields) {
       if (['integer', 'number'].includes(field.type)) {
         if (typeof value !== 'number' || !Number.isFinite(value) || (field.type === 'integer' && !Number.isInteger(value)) || (field.minimum !== undefined && value < field.minimum) || (field.maximum !== undefined && value > field.maximum)) issue[field.key] = `请填写有效的${field.label}`
       } else if (field.type === 'boolean' && typeof value !== 'boolean') issue[field.key] = '请选择有效值'
-      else if (field.key === 'guide_video_url' && !validGuideURL(value)) issue[field.key] = '请输入可公开下载的 HTTPS 视频地址'
+      else if ((field.format === 'uri' || field.key === 'guide_video_url') && !validGuideURL(value)) issue[field.key] = '请填写文件管理中的视频链接或 HTTPS 视频地址'
     }
     if (Object.keys(issue).length) errors[group.key] = issue
   }
