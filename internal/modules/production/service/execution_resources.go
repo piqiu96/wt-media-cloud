@@ -14,7 +14,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/wt-media/wt-media-cloud/internal/config"
 	"github.com/wt-media/wt-media-cloud/internal/infra/storage"
 	files "github.com/wt-media/wt-media-cloud/internal/modules/files/service"
 	"github.com/wt-media/wt-media-cloud/internal/modules/production/compose"
@@ -260,7 +259,7 @@ func inspectResource(ctx context.Context, deps ComposeExecutorDeps, path string)
 	if deps.InspectResource != nil {
 		return deps.InspectResource(ctx, path)
 	}
-	return compose.InspectMedia(ctx, config.Get().Media.FFmpeg.FFprobePath, path)
+	return executor.MediaInput{}, errors.New("resource inspector is not configured")
 }
 func choosePoolResource(ctx context.Context, store storage.Store, key string, seed int64) (frozenResource, error) {
 	// This is a current configuration key, not an old stored logical reference.

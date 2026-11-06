@@ -174,3 +174,10 @@ func TestManifestRequiresCurrentLeaseAndReusesFirstFacts(t *testing.T) {
 		t.Fatal("lost lease accepted")
 	}
 }
+
+func TestMissingResourceInspectorReturnsConfigurationError(t *testing.T) {
+	_, err := inspectResource(context.Background(), ComposeExecutorDeps{}, "unused")
+	if err == nil {
+		t.Fatal("missing inspector must return an error before processing a claimed task")
+	}
+}

@@ -22,6 +22,7 @@ import (
 	"github.com/wt-media/wt-media-cloud/internal/infra/ffmpeg"
 	"github.com/wt-media/wt-media-cloud/internal/infra/logger"
 	"github.com/wt-media/wt-media-cloud/internal/infra/storage"
+	storagerepository "github.com/wt-media/wt-media-cloud/internal/infra/storage/repository"
 	"github.com/wt-media/wt-media-cloud/internal/jobs"
 	transferservice "github.com/wt-media/wt-media-cloud/internal/modules/filetransfer/service"
 	"github.com/wt-media/wt-media-cloud/internal/modules/production/compose"
@@ -128,14 +129,14 @@ func runWorker(ctx context.Context) error {
 	if err := verifyWorkerEnvironment(ctx, cfg); err != nil {
 		return err
 	}
-	if err := storage.Initialize(cfg.Storage.ObjectStorage, cfg.Credentials.ObjectStorage); err != nil {
-		return fmt.Errorf("compose worker object storage: %w", err)
-	}
-	defer storage.Close()
 	if err := database.Initialize(cfg.Databases); err != nil {
 		return fmt.Errorf("compose worker database: %w", err)
 	}
 	defer database.Close()
+	if err := storage.Initialize(cfg.Storage.ObjectStorage, cfg.Credentials.ObjectStorage, storagerepository.ContentClaims{DB: database.DB()}); err != nil {
+		return fmt.Errorf("compose worker object storage: %w", err)
+	}
+	defer storage.Close()
 	if err := repository.CheckComposeCapacity(cfg.Compose.Worker.GlobalConcurrency); err != nil {
 		return err
 	}
@@ -152,6 +153,9 @@ func runWorker(ctx context.Context) error {
 	}
 	runner := compose.Runner{FFmpegPath: cfg.Media.FFmpeg.FFmpegPath, FFprobePath: cfg.Media.FFmpeg.FFprobePath, Registry: registry}
 	executorDeps := productionservice.ComposeExecutorDeps{
+		InspectResource: func(ctx context.Context, path string) (executor.MediaInput, error) {
+			return compose.InspectMedia(ctx, cfg.Media.FFmpeg.FFprobePath, path)
+		},
 		Tasks:     repository.ComposeTaskStore{},
 		Materials: materialSource{},
 		Registry:  registry,
