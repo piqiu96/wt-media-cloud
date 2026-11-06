@@ -60,3 +60,7 @@ do not read that local file.
 confirmed but the bucket name was not, and a sentinel keeps the tree loadable
 while making the missing value fail loudly on the first call rather than as an
 access-denied that reads like a permissions problem.
+
+### 运营文件公共域名
+
+`storage/object_storage.toml` 的 `files_public_base_url` 配置当前bucket对应的公共HTTPS origin（不含路径、查询参数或凭据）。仅运营文件API用它和持久化完整对象位置生成 `public_url`；不拼当前全局prefix，不改变素材/成片的授权规则。部署前需确认该域名能匿名读取运营文件；配置不会修改bucket ACL。旧 `resource_path` 保留兼容与附件下载。

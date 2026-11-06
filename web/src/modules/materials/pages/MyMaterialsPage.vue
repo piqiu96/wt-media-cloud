@@ -373,14 +373,14 @@ onMounted(() => {
                  （合成的入口在合成任务页，这一页不再有合成按钮）。 -->
             <template #op="{ row }">
               <ResourceRowActions>
-                <t-button size="small" class="wt-secondary-button" variant="text" @click="openDetail(row)">详情</t-button>
+                <t-button size="small" variant="text" @click="openDetail(row)">详情</t-button>
                 <template v-if="row.usage_status === 'removed'">
                   <t-button size="small" theme="primary" variant="text" class="is-primary" @click="restore(row)">恢复使用</t-button>
                 </template>
                 <template v-else>
                   <t-button v-if="needsRedownload(row.download_status, localPresence(row))" size="small" theme="primary" variant="text" class="is-primary" :disabled="Boolean(downloadReason)" :title="downloadReason" @click="download(row)">重新下载</t-button>
                   <t-button v-else-if="row.download_status !== 'downloading' && row.download_status !== 'downloaded'" size="small" theme="primary" variant="text" class="is-primary" :disabled="Boolean(downloadReason)" :title="downloadReason" @click="download(row)">{{ downloadActionLabel(row.download_status) }}</t-button>
-                  <t-button size="small" class="wt-secondary-button wt-danger-button" variant="text" @click="giveUp(row)">放弃</t-button>
+                  <t-button size="small" class="is-danger" variant="text" @click="giveUp(row)">放弃</t-button>
                 </template>
               </ResourceRowActions>
             </template>

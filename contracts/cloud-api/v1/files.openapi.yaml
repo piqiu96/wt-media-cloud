@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: WT Media Operations Files API
-  version: 2026.11.06.1
+  version: 2026.11.07.2
   description: Independent image/video uploads. JSON responses use errcode/message/data/logid. Ordinary operators manage their own uploads, senior operators their team, administrators all files. Only verified uploads are visible. Stored objects are immutable; renaming changes display/download names only.
 paths:
   /api/v1/files:
@@ -53,13 +53,13 @@ paths:
       operationId: deleteOperationsFile
       security: [{sessionCookie: []}]
       responses:
-        '200': {description: Object and file record removed. Stable URL no longer resolves.}
+        '200': {description: Object and file record removed. Origin object and capability removed; cached copies follow cache policy.}
         '404': {description: File missing or outside actor scope.}
         '503': {description: Deletion incomplete; request may be retried.}
   /api/v1/file-resources/{token}:
     get:
       operationId: openOperationsFileResource
-      description: Bearer capability URL, valid until file deletion. Resolve against the actual Cloud origin (HTTPS in production). Each request verifies the current file then redirects to a fresh short-lived private object GET. Does not require a login cookie. No durable bucket credential is exposed.
+      description: Bearer capability URL, valid until file deletion. Resolve against the actual Cloud origin (HTTPS in production). Compatibility endpoint retained for existing links and attachment downloads. Each request verifies the current file then redirects to a fresh short-lived object GET. Does not require a login cookie. No durable bucket credential is exposed.
       parameters:
         - {in: path, name: token, required: true, schema: {type: string, pattern: '^[0-9a-f]{64}$'}}
         - {in: query, name: download, schema: {type: string, enum: ['1']}, description: Request attachment disposition with the current filename.}
@@ -73,7 +73,7 @@ components:
   schemas:
     OperationsFile:
       type: object
-      required: [id, name, filename, type, content_type, size_bytes, sha256, owner_id, created_at, resource_path]
+      required: [id, name, filename, type, content_type, size_bytes, sha256, owner_id, created_at, resource_path, public_url]
       properties:
         id: {type: integer, format: int64}
         name: {type: string}
@@ -87,4 +87,5 @@ components:
         team_id: {type: [integer, 'null'], format: int64}
         team_name: {type: string}
         created_at: {type: string, format: date-time}
+        public_url: {type: string, format: uri, description: Permanent public HTTPS bucket URL from the persisted object location. Contains no signature; readable by anyone holding it. Display rename leaves it unchanged. Deleting removes the origin object; cached copies follow cache policy.}
         resource_path: {type: string, description: Stable opaque Cloud path, never an expiring S3 signature.}

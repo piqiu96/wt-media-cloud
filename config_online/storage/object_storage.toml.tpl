@@ -8,3 +8,4 @@ region = 'garage'
 use_ssl = true
 legacy_bucket = 'data'
 legacy_prefix = {{WT_OBJECT_STORAGE_PREFIX}}
+files_public_base_url = 'https://wt-media.bucket.oss.longyanyue.cn'

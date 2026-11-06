@@ -518,9 +518,9 @@ onMounted(() => {
             <template #finished_at="{ row }">{{ formatDateTime(row.finished_at) }}</template>
             <template #op="{ row }">
               <ResourceRowActions>
-                <t-button size="small" class="wt-secondary-button" variant="text" @click="activeView === 'batches' ? openBatch(row) : openDetail(row)">详情</t-button>
-                <t-button v-if="activeView === 'tasks' && canCancelTask(row)" size="small" class="wt-secondary-button wt-danger-button" variant="text" @click="cancel(row)">取消</t-button>
-                <t-button v-if="activeView === 'tasks' && canRetryTask(row)" size="small" class="wt-secondary-button" variant="text" @click="retry(row)">重试</t-button>
+                <t-button size="small" variant="text" @click="activeView === 'batches' ? openBatch(row) : openDetail(row)">详情</t-button>
+                <t-button v-if="activeView === 'tasks' && canCancelTask(row)" size="small" class="is-danger" variant="text" @click="cancel(row)">取消</t-button>
+                <t-button v-if="activeView === 'tasks' && canRetryTask(row)" size="small" variant="text" @click="retry(row)">重试</t-button>
               </ResourceRowActions>
             </template>
           </t-table>

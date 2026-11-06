@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -70,7 +71,9 @@ type memoryObjects struct {
 	uploadErr, removeErr error
 }
 
-func (m *memoryObjects) Reference(k string) (string, error) { return "s3://wt-media/" + k, nil }
+func (m *memoryObjects) Reference(k string) (string, error) {
+	return (&url.URL{Scheme: "s3", Host: "wt-media", Path: "/" + k}).String(), nil
+}
 func (m *memoryObjects) Stat(_ context.Context, k string) (storage.ObjectInfo, error) {
 	s, ok := m.contents[k]
 	if !ok {
@@ -112,7 +115,7 @@ func operator(id, team int64, role identity.Role) identity.PublicUser {
 func testService() (*Service, *memoryFiles, *memoryObjects) {
 	r := &memoryFiles{records: map[int64]model.File{}}
 	o := &memoryObjects{contents: map[string]string{}}
-	return &Service{Repo: r, Objects: o, MaxBytes: 64, Inspect: func(context.Context, string, string) (string, string, error) { return "image", "image/png", nil }}, r, o
+	return &Service{Repo: r, Objects: o, PublicBaseURL: "https://wt-media.bucket.example", Bucket: "wt-media", MaxBytes: 64, Inspect: func(context.Context, string, string) (string, string, error) { return "image", "image/png", nil }}, r, o
 }
 
 func TestUploadRequiresNameAndNeverPublishesFailedObject(t *testing.T) {
@@ -140,11 +143,11 @@ func TestVerifiedFileHasIDNameStableURLAndRenameKeepsObject(t *testing.T) {
 		t.Fatal(err)
 	}
 	stored := r.records[f.ID]
-	if stored.ObjectKey != "s3://wt-media/file-ku/files/1_开头图片.png" || f.Filename != "开头图片.png" || !strings.HasPrefix(f.ResourcePath, "/api/v1/file-resources/") {
+	if stored.ObjectKey != "s3://wt-media/file-ku/files/1_%E5%BC%80%E5%A4%B4%E5%9B%BE%E7%89%87.png" || f.Filename != "开头图片.png" || !strings.HasPrefix(f.ResourcePath, "/api/v1/file-resources/") {
 		t.Fatalf("file=%+v stored=%+v", f, stored)
 	}
 	changed, err := s.Rename(a, f.ID, "新名称")
-	if err != nil || changed.ResourcePath != f.ResourcePath || r.records[f.ID].ObjectKey != stored.ObjectKey || len(o.contents) != 1 {
+	if err != nil || changed.ResourcePath != f.ResourcePath || changed.PublicURL != f.PublicURL || r.records[f.ID].ObjectKey != stored.ObjectKey || len(o.contents) != 1 {
 		t.Fatalf("rename=%+v err=%v", changed, err)
 	}
 }
@@ -196,5 +199,44 @@ func TestVideoCannotBypassContainerValidationByRenaming(t *testing.T) {
 		if (err == nil) != tc.valid {
 			t.Fatalf("%+v err=%v", tc, err)
 		}
+	}
+}
+
+func TestPublicURLUsesStoredNameAfterDisplayRename(t *testing.T) {
+	s, _, _ := testService()
+	actor := operator(1, 10, identity.RoleOperator)
+	f, err := s.Upload(context.Background(), actor, "开头 100%#1", "a.png", strings.NewReader("png"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "https://wt-media.bucket.example/file-ku/files/1_%E5%BC%80%E5%A4%B4%20100%25%231.png"
+	if f.PublicURL != want {
+		t.Fatalf("public URL: %q", f.PublicURL)
+	}
+	renamed, err := s.Rename(actor, f.ID, "新名")
+	if err != nil || renamed.PublicURL != want {
+		t.Fatalf("rename: %+v %v", renamed, err)
+	}
+	list, _, err := s.List(actor, "", "", 1, 20)
+	if err != nil || len(list) != 1 || list[0].PublicURL != want {
+		t.Fatalf("list: %+v %v", list, err)
+	}
+}
+
+func TestInvalidPublicConfigurationDoesNotAllocateOrUpload(t *testing.T) {
+	for _, base := range []string{"", "http://bucket.example", "https://bucket.example?signature=x"} {
+		s, r, o := testService()
+		s.PublicBaseURL = base
+		if _, err := s.Upload(context.Background(), operator(1, 10, identity.RoleOperator), "开头", "a.png", strings.NewReader("png")); err == nil {
+			t.Fatal("invalid origin accepted")
+		}
+		if len(r.records) != 0 || len(o.contents) != 0 {
+			t.Fatal("invalid origin caused side effects")
+		}
+	}
+	s, r, _ := testService()
+	s.Bucket = "other-bucket"
+	if _, err := s.Upload(context.Background(), operator(1, 10, identity.RoleOperator), "开头", "a.png", strings.NewReader("png")); err == nil || len(r.records) != 0 {
+		t.Fatal("wrong bucket accepted")
 	}
 }

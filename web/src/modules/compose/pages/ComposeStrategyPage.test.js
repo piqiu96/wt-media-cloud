@@ -40,7 +40,7 @@ describe('compose strategy page', () => {
   })
   // 普通运营只有详情；管理角色可详情、编辑、执行、复制。列宽跟着这份清单走。
   it('derives the op column width from the buttons the current role can see', () => {
-    expect(source).toContain("opColumnWidth(canManage.value ? ['详情', '编辑', '立即执行', '复制'] : ['详情'], { variant: 'text', primary: canManage.value, loading: canManage.value })")
+    expect(source).toContain("opColumnWidth(canManage.value ? ['立即执行', '详情', '编辑', '复制'] : ['详情'], { variant: 'text', primary: canManage.value, loading: canManage.value })")
     expect(source).not.toContain("width: 170, fixed: 'right'")
   })
 
