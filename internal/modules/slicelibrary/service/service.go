@@ -331,13 +331,10 @@ func (s Service) Publish(ctx context.Context, directory string, decision Decisio
 			}
 			index.Clips = append(index.Clips, clips...)
 		}
-		// Revalidate every index member. A missing/corrupt object cannot become a
-		// usable library entry, including after a retry of an earlier publication.
-		for _, clip := range index.Clips {
-			if e = VerifyClip(ctx, s.Store, clip); e != nil {
-				return e
-			}
-		}
+		// Ready rows already passed full immutable-upload read-back. Rebuilding
+		// this projection must not download the growing library on every append.
+		// The explicit verify operation audits all object bytes; composition also
+		// checks the selected resource against its frozen digest before use.
 		data, _ := json.MarshalIndent(index, "", "  ")
 		if e = s.Store.Put(ctx, indexRef, bytes.NewReader(data), int64(len(data)), "application/json"); e != nil {
 			return e
