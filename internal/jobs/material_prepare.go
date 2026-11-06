@@ -523,54 +523,31 @@ func (p *Preparer) probeFile(path string, size int64) (media.Media, error) {
 	return p.Probe(file, size)
 }
 
-// commit puts the verified bytes in the object store and returns the facts to
-// write down.
-//
-// The file goes to a staging key first, is read back for its size, is copied to
-// the key its own digest derives, and is read back again before the staging object
-// is removed. The two readings are the same check at the two moments something
-// could have gone wrong, and they are the only integrity the store can be asked
-// for: `Stat` answers a size and an ETag, and the ETag is the store's own digest
-// under a different algorithm — comparing it with this sha256 would be comparing
-// two different sums and calling the match meaningful.
-//
-// The probe has already run, on the bytes on disk. It runs before any of this
-// because a container that cannot be parsed is not worth two uploads and an object
-// left at a key nothing refers to. The plan's stated order put the probe after the
-// upload; the requirement it was protecting — never write a material's facts for
-// bytes that did not pass verification at the formal key — is unchanged.
+// commit uploads the locally verified source directly to its immutable material
+// ID key. No cloud staging object or promotion copy is needed.
 func (p *Preparer) commit(ctx context.Context, task transfermodel.Task, path string, size int64, digest string, probed media.Media) (producerepo.VideoFacts, error) {
 	// The container the probe read names the extension. `Probe` answers `mp4` for
 	// every file it accepts, and reading it from there rather than from the URL is
 	// what keeps the key's suffix a fact about the bytes.
 	extension := strings.TrimSpace(probed.Container)
-	stagingKey, err := storage.StagingKey(task.AssetID, task.ID, extension)
-	if err != nil {
-		return producerepo.VideoFacts{}, err
-	}
 	formalKey, err := storage.SourceKey(task.AssetID, digest, extension)
 	if err != nil {
 		return producerepo.VideoFacts{}, err
 	}
-
-	if err := p.put(ctx, path, stagingKey, size, extension); err != nil {
+	formalKey, err = storage.Reference(p.Store, formalKey)
+	if err != nil {
+		return producerepo.VideoFacts{}, err
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return producerepo.VideoFacts{}, err
+	}
+	defer file.Close()
+	if err := storage.PutImmutable(ctx, p.Store, formalKey, file, size, "video/"+extension, digest); err != nil {
 		return producerepo.VideoFacts{}, fmt.Errorf("%w: %v", errStagingFailed, err)
-	}
-	if err := p.confirm(ctx, stagingKey, size); err != nil {
-		return producerepo.VideoFacts{}, fmt.Errorf("%w: %v", errStagingVerify, err)
-	}
-	if err := p.Store.Copy(ctx, stagingKey, formalKey); err != nil {
-		return producerepo.VideoFacts{}, fmt.Errorf("%w: %v", errCopyFailed, err)
 	}
 	if err := p.confirm(ctx, formalKey, size); err != nil {
 		return producerepo.VideoFacts{}, fmt.Errorf("%w: %v", errCommitVerify, err)
-	}
-	// The staging object is removed last, and failing to remove it is not a failure
-	// of the preparation: the formal key is verified and the facts about to be
-	// written name it. An object left under `.staging/` is cheaper than telling an
-	// operator a preparation failed that did not.
-	if err := p.Store.Remove(ctx, stagingKey); err != nil {
-		p.record(task, "committed", "the staging object could not be removed")
 	}
 	mediaJSON, err := json.Marshal(probed)
 	if err != nil {

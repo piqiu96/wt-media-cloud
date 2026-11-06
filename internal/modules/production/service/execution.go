@@ -70,6 +70,7 @@ type composeTaskLifecycle interface {
 	RenewComposeLease(taskID, nodeID int64, attempt int, lease time.Duration) (bool, error)
 	ReportComposeProgress(taskID, nodeID int64, attempt int, stage string, progress int) (bool, error)
 	RecordComposeAttemptStep(taskID, nodeID int64, attempt int, step model.ComposeTaskAttemptStep) (bool, error)
+	ReserveComposeOutputID(taskID, nodeID int64, attempt int) (int64, error)
 	CommitComposeOutput(out model.CompositeOutput, outputKey string, nodeID int64, attempt int, step model.ComposeTaskAttemptStep) (model.ComposeOutputCommit, error)
 	ReleaseComposeForRetry(taskID, nodeID int64, attempt int, errorCode, message string) (bool, error)
 	FailComposeTask(taskID, nodeID int64, attempt int, errorCode, message string) (bool, error)
@@ -243,21 +244,31 @@ func RunComposeAttempt(ctx context.Context, deps ComposeExecutorDeps, task model
 	if !ownsProgress(deps.Tasks, task, nodeID, composeStageUploading, 80) {
 		return ComposeAttemptLeaseLost
 	}
-	attemptPath := strconv.FormatInt(task.ID, 10) + "/" + strconv.Itoa(task.AttemptCount) + "/output.mp4"
-	tempKey := "compose-staging/" + attemptPath
-	formalKey := "compose-outputs/" + attemptPath
-	// A failed Put may have stored some bytes before returning an error.
-	// Every exit from this point attempts cleanup; the recovery scan handles
-	// any deletion that fails or is skipped by a crashed worker.
-	defer removeComposeObject(ctx, deps.Store, tempKey)
 	uploadStep := beginStep(model.ComposeStepUpload)
-	size, digest, err := uploadVerified(ctx, deps.Store, output.Path, tempKey)
+	outputID, err := deps.Tasks.ReserveComposeOutputID(task.ID, nodeID, task.AttemptCount)
+	if err != nil {
+		if errors.Is(err, repository.ErrComposeCommitLost) {
+			return ComposeAttemptLeaseLost
+		}
+		return transientFailureInContext(ctx, deps, task, nodeID, uploadStep, composeErrStorageError, "reserve output identity")
+	}
+	formalKey, err := storage.Reference(deps.Store, "media-ku/finalVideo/"+strconv.FormatInt(outputID, 10)+".mp4")
+	if err != nil {
+		return failTerminal(deps.Tasks, task, nodeID, uploadStep, composeErrStorageError, err.Error())
+	}
+	size, digest, err := uploadVerified(ctx, deps.Store, output.Path, formalKey)
 	if err != nil {
 		if errors.Is(err, errComposeOutputInvalid) {
 			return failTerminal(deps.Tasks, task, nodeID, uploadStep, composeErrExecutionFailed, err.Error())
 		}
 		return transientFailureInContext(ctx, deps, task, nodeID, uploadStep, composeErrStorageError, err.Error())
 	}
+	preserveFormal := false
+	defer func() {
+		if !preserveFormal {
+			removeComposeObject(ctx, deps.Store, formalKey)
+		}
+	}()
 	recordStepSuccess(deps.Tasks, task, nodeID, uploadStep, uploadMetrics(size, digest))
 	if !ownsProgress(deps.Tasks, task, nodeID, composeStageCommitting, 90) {
 		return ComposeAttemptLeaseLost
@@ -278,9 +289,6 @@ func RunComposeAttempt(ctx context.Context, deps ComposeExecutorDeps, task model
 	if settingName == "" {
 		settingName = "默认成片"
 	}
-	if err := deps.Store.Copy(ctx, tempKey, formalKey); err != nil {
-		return transientFailureInContext(ctx, deps, task, nodeID, commitStep, composeErrStorageError, "copy to formal key: "+err.Error())
-	}
 	mediaFacts := map[string]int64{"duration_ms": output.DurationMS}
 	if output.Width > 0 {
 		mediaFacts["width"] = int64(output.Width)
@@ -290,6 +298,7 @@ func RunComposeAttempt(ctx context.Context, deps ComposeExecutorDeps, task model
 	}
 	media, _ := json.Marshal(mediaFacts)
 	out := model.CompositeOutput{
+		ID:     outputID,
 		Name:   model.ComposeOutputName(title, settingName),
 		TeamID: task.TeamID, CategoryID: task.CategoryID, OperatorID: task.OperatorID,
 		MaterialID: task.MaterialID, MaterialUsageID: task.MaterialUsageID,
@@ -304,12 +313,13 @@ func RunComposeAttempt(ctx context.Context, deps ComposeExecutorDeps, task model
 	// success it reports are one fact.
 	closing := finishedStep(commitStep)
 	closing.Outcome = model.ComposeStepOutcomeSuccess
+	preserveFormal = true // A lost response may still mean the transaction committed.
 	if _, err := deps.Tasks.CommitComposeOutput(out, formalKey, nodeID, task.AttemptCount, closing); err != nil {
 		// ErrComposeCommitLost proves the transaction rolled back. Other
 		// errors may be a lost response after commit; deleting the formal
 		// object then could leave a success row pointing at missing bytes.
 		if errors.Is(err, repository.ErrComposeCommitLost) {
-			removeComposeObject(ctx, deps.Store, formalKey)
+			preserveFormal = false
 		}
 		// The attempt is left for the recovery scan, so this entry is what
 		// tells the operator the run stopped here with an unknown result.
@@ -488,16 +498,9 @@ func waitForInput(deps ComposeExecutorDeps, task model.ComposeTask, nodeID int64
 	return "", ComposeAttemptWaitInput
 }
 
-// uploadVerified writes the output to the temporary key and proves the store
-// accepted those exact bytes before the caller commits anything formal.
-//
-// The proof is the upload's Content-MD5 (`storage.Put` sends it and the store
-// verifies it): a successful upload already means "the stored bytes hash to the
-// digest computed over the bytes read", with no second transfer. The `Stat` is
-// the independent second reading — a store that accepted the checksum but
-// recorded a different length is a storage fault, and a formal copy must not be
-// built on top of it. There is deliberately no readback: it would move the
-// whole output again to learn what the checksum proved at upload time.
+// uploadVerified hashes the local output and conditionally creates its immutable
+// formal object. The storage implementation verifies the uploaded bytes again
+// before a success record may refer to them.
 func uploadVerified(ctx context.Context, store storage.Store, path, tempKey string) (int64, string, error) {
 	file, err := os.Open(path)
 	if err != nil {
@@ -519,15 +522,15 @@ func uploadVerified(ctx context.Context, store storage.Store, path, tempKey stri
 	if _, err := file.Seek(0, io.SeekStart); err != nil {
 		return 0, "", err
 	}
-	if err := store.Put(ctx, tempKey, file, info.Size(), "video/mp4"); err != nil {
-		return 0, "", fmt.Errorf("upload temporary object: %w", err)
+	if err := storage.PutImmutable(ctx, store, tempKey, file, info.Size(), "video/mp4", digest); err != nil {
+		return 0, "", fmt.Errorf("upload formal object: %w", err)
 	}
 	remote, err := store.Stat(ctx, tempKey)
 	if err != nil {
-		return 0, "", fmt.Errorf("stat temporary object: %w", err)
+		return 0, "", fmt.Errorf("stat formal object: %w", err)
 	}
 	if remote.Size != info.Size() {
-		return 0, "", fmt.Errorf("%w: temporary object size mismatch: local %d, remote %d", errComposeOutputInvalid, info.Size(), remote.Size)
+		return 0, "", fmt.Errorf("%w: formal object size mismatch: local %d, remote %d", errComposeOutputInvalid, info.Size(), remote.Size)
 	}
 	return info.Size(), digest, nil
 }
