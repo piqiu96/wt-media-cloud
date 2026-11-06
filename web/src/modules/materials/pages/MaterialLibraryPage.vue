@@ -348,7 +348,7 @@ onMounted(async () => {
             <template #published_at="{ row }">{{ formatDateTime(row.published_at) }}</template>
             <template #op="{ row }">
               <ResourceRowActions>
-                <t-button size="small" class="wt-secondary-button" variant="text" @click="openDetail(row)">详情</t-button>
+                <t-button size="small" variant="text" @click="openDetail(row)">详情</t-button>
                 <t-button v-if="canAdd(row) && row.usage_status !== 'active'" size="small" theme="primary" variant="text" class="is-primary" :loading="addingId === row.id" :disabled="mutationBusy" @click="addToMine(row)">{{ row.usage_status === 'removed' ? '重新加入' : '加入我的素材' }}</t-button>
               </ResourceRowActions>
             </template>
