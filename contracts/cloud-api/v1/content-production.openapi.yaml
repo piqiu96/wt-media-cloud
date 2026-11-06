@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: WT Media Cloud Content Production API
-  version: 2026.11.06.2
+  version: 2026.11.07.1
   description: Cloud content production API. Every response uses the Cloud errcode/message/data/logid envelope.
 paths:
   /api/v1/compose-templates:
@@ -1244,22 +1244,6 @@ components:
         strategy_name:
           type: string
           description: Resolved strategy display name.
-    BasicCutV1Config:
-      type: object
-      additionalProperties: false
-      required: [start_seconds, end_seconds]
-      properties:
-        start_seconds: {type: integer, minimum: 0}
-        end_seconds: {type: integer, minimum: 1, description: Must exceed start_seconds.}
-    GuideV1Config:
-      type: object
-      additionalProperties: false
-      required: [guide_video_url, insert_seconds, guide_duration_seconds, max_duration_seconds]
-      properties:
-        guide_video_url: {type: string, format: uri, description: Public downloadable HTTPS URL frozen in the task snapshot.}
-        insert_seconds: {type: integer, minimum: 0}
-        guide_duration_seconds: {type: integer, minimum: 0, description: Zero uses the whole guide video.}
-        max_duration_seconds: {type: integer, minimum: 0, description: Zero has no output duration limit.}
     ComposeOperatorOption:
       type: object
       additionalProperties: false
@@ -1283,8 +1267,6 @@ components:
         compose_template_version: {type: integer, minimum: 1}
         config:
           oneOf:
-            - {$ref: '#/components/schemas/BasicCutV1Config'}
-            - {$ref: '#/components/schemas/GuideV1Config'}
             - {$ref: '#/components/schemas/DynamicPIPEndingV1Config'}
         output_settings: {type: array, minItems: 1, maxItems: 20, items: {$ref: '#/components/schemas/ComposeOutputSetting'}, description: "Independent groups in saved order. When omitted by legacy requests config supplies one default group; each group stores complete template parameters."}
         execution_mode: {type: string, enum: [manual, immediate, scheduled]}
@@ -1401,8 +1383,6 @@ components:
         compose_template_version: {type: integer, minimum: 1}
         config:
           oneOf:
-            - {$ref: '#/components/schemas/BasicCutV1Config'}
-            - {$ref: '#/components/schemas/GuideV1Config'}
             - {$ref: '#/components/schemas/DynamicPIPEndingV1Config'}
         output_settings: {type: array, minItems: 1, maxItems: 20, items: {$ref: '#/components/schemas/ComposeOutputSetting'}, description: "Independent groups in saved order. When omitted by legacy requests config supplies one default group; each group stores complete template parameters."}
         execution_mode: {type: string, enum: [manual, immediate, scheduled]}
@@ -1422,8 +1402,6 @@ components:
         name: {type: string}
         config:
           oneOf:
-            - {$ref: '#/components/schemas/BasicCutV1Config'}
-            - {$ref: '#/components/schemas/GuideV1Config'}
             - {$ref: '#/components/schemas/DynamicPIPEndingV1Config'}
         output_settings: {type: array, minItems: 1, maxItems: 20, items: {$ref: '#/components/schemas/ComposeOutputSetting'}, description: "Independent groups in saved order. When omitted existing stored groups are preserved; legacy single-config strategies use config as the default group. Each group stores complete template parameters."}
         execution_mode: {type: string, enum: [manual, immediate, scheduled]}
@@ -1932,7 +1910,7 @@ components:
       additionalProperties: false
       required: [key, params]
       properties: {key: {type: string}, params: {type: object, description: Partial parameter changes within the existing setting. Only
-            template parameters with editable=true may be supplied; fixed/unknown keys and guide_video_url are rejected. Group name/platforms/copies/order
+            template parameters with editable=true may be supplied; fixed/unknown keys and resource URL fields are rejected. Group name/platforms/copies/order
             cannot change.}}
     ComposeTaskPage:
       type: object

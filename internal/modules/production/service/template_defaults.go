@@ -7,6 +7,10 @@ import (
 	"github.com/wt-media/wt-media-cloud/internal/modules/production/executor"
 )
 
+// The package catalog defaults to released executors. Tests can supply minimal
+// stand-ins without shipping retired implementations in the runtime catalog.
+var deployedTemplate = executor.DeployedDefinition
+
 // The code/version mapping owns validation; deployment config supplies values.
 // No caller switches on a concrete template name.
 func templateDefaults(def executor.Definition) (map[string]any, json.RawMessage, error) {
@@ -25,7 +29,7 @@ func templateDefaults(def executor.Definition) (map[string]any, json.RawMessage,
 	return values.Params, raw, err
 }
 func templateTechnicalConfig(code string, version uint32) (json.RawMessage, error) {
-	def, err := executor.DeployedDefinition(code, version)
+	def, err := deployedTemplate(code, version)
 	if err != nil {
 		return nil, err
 	}

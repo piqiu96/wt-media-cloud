@@ -2,17 +2,17 @@ package repository
 
 import (
 	"errors"
+	"github.com/wt-media/wt-media-cloud/internal/testutil/composefixture"
 	"regexp"
 	"testing"
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
-	"github.com/wt-media/wt-media-cloud/internal/modules/production/executor"
 )
 
 func TestPublishTemplateReadsBackTheDeployedDefinition(t *testing.T) {
 	db, mock := newMockGORM(t)
-	definition := executor.BasicCutV1()
+	definition := composefixture.Cut()
 	now := time.Date(2026, 10, 12, 15, 0, 0, 0, time.UTC)
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO compose_templates")).
 		WithArgs(definition.Code, "基础切段", definition.Version, definition.Schema, definition.ExecutorID, now, now).
@@ -20,12 +20,12 @@ func TestPublishTemplateReadsBackTheDeployedDefinition(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT id, code, name, version, schema_json, executor, status FROM compose_templates")).
 		WithArgs(definition.Code, definition.Version).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "code", "name", "version", "schema_json", "executor", "status"}).
-			AddRow(7, "basic_cut", "基础切段", 1, []byte(definition.Schema), "basic_cut_v1", "active"))
+			AddRow(7, "fixture_cut", "基础切段", 1, []byte(definition.Schema), "fixture_cut_v1", "active"))
 	item, err := publishTemplate(db, definition, "基础切段", now)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if item.ID != 7 || item.Code != "basic_cut" || item.Version != 1 {
+	if item.ID != 7 || item.Code != "fixture_cut" || item.Version != 1 {
 		t.Fatalf("published template = %+v", item)
 	}
 	assertExpectations(t, mock)
@@ -33,7 +33,7 @@ func TestPublishTemplateReadsBackTheDeployedDefinition(t *testing.T) {
 
 func TestPublishTemplateRejectsAnExistingVersionWithDifferentSchema(t *testing.T) {
 	db, mock := newMockGORM(t)
-	definition := executor.BasicCutV1()
+	definition := composefixture.Cut()
 	now := time.Date(2026, 10, 12, 15, 0, 0, 0, time.UTC)
 	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO compose_templates")).
 		WithArgs(definition.Code, "基础切段", definition.Version, definition.Schema, definition.ExecutorID, now, now).
@@ -41,7 +41,7 @@ func TestPublishTemplateRejectsAnExistingVersionWithDifferentSchema(t *testing.T
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT id, code, name, version, schema_json, executor, status FROM compose_templates")).
 		WithArgs(definition.Code, definition.Version).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "code", "name", "version", "schema_json", "executor", "status"}).
-			AddRow(7, "basic_cut", "基础切段", 1, []byte(`{"type":"object"}`), "basic_cut_v1", "active"))
+			AddRow(7, "fixture_cut", "基础切段", 1, []byte(`{"type":"object"}`), "fixture_cut_v1", "active"))
 	_, err := publishTemplate(db, definition, "基础切段", now)
 	if !errors.Is(err, ErrTemplateDefinitionConflict) {
 		t.Fatalf("error = %v, want ErrTemplateDefinitionConflict", err)

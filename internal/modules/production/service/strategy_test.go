@@ -3,10 +3,10 @@ package service
 import (
 	"encoding/json"
 	"errors"
+	"github.com/wt-media/wt-media-cloud/internal/testutil/composefixture"
 	"testing"
 
 	identity "github.com/wt-media/wt-media-cloud/internal/modules/identity/service"
-	"github.com/wt-media/wt-media-cloud/internal/modules/production/executor"
 	"github.com/wt-media/wt-media-cloud/internal/modules/production/model"
 	"github.com/wt-media/wt-media-cloud/internal/modules/production/repository"
 )
@@ -52,7 +52,7 @@ func (s *strategyMemoryStore) UpdateAudited(item model.ComposeStrategy, action s
 
 func strategyFixture() (*StrategyService, *strategyMemoryStore, identity.PublicUser) {
 	team := identity.TeamID(7)
-	definition := executor.BasicCutV1()
+	definition := composefixture.Cut()
 	store := &strategyMemoryStore{template: model.ComposeTemplate{ID: 3, Code: definition.Code, Version: definition.Version, Schema: definition.Schema, ExecutorID: definition.ExecutorID, Status: "active"}}
 	service := NewStrategyService(store, func(identity.CategoryID) (identity.Category, bool, error) {
 		return identity.Category{ID: 1, Type: identity.CategoryTypeGame, Enabled: true}, true, nil
@@ -199,7 +199,7 @@ func TestStrategyOperatorCannotReadInactiveTemplate(t *testing.T) {
 
 func TestGuideStrategyStoresDownloadAddress(t *testing.T) {
 	svc, store, actor := strategyFixture()
-	definition := executor.GuideInsertV1()
+	definition := composefixture.Resource()
 	store.template = model.ComposeTemplate{ID: 4, Code: definition.Code, Version: definition.Version, Schema: definition.Schema, ExecutorID: definition.ExecutorID, Status: "active"}
 	config := json.RawMessage(`{"guide_video_url":"https://media.example.com/guide.mp4","insert_seconds":2,"guide_duration_seconds":0,"max_duration_seconds":0}`)
 	created, err := svc.Create(actor, CreateStrategyInput{CategoryID: 1, OperatorID: 9, Name: "引导插入", TemplateID: 4, TemplateVersion: 1, Config: config, ExecutionMode: model.ComposeExecutionManual, PriorityRules: strategyRulesFixture(), SingleLimit: 1, DailyLimit: 2})

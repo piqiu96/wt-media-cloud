@@ -8,7 +8,6 @@ import (
 	"time"
 
 	identity "github.com/wt-media/wt-media-cloud/internal/modules/identity/service"
-	"github.com/wt-media/wt-media-cloud/internal/modules/production/executor"
 	"github.com/wt-media/wt-media-cloud/internal/modules/production/model"
 	"github.com/wt-media/wt-media-cloud/internal/modules/production/repository"
 )
@@ -564,7 +563,7 @@ func (s *ComposeTaskService) usableTemplate(strategy model.ComposeStrategy) (mod
 	if !found {
 		return model.ComposeTemplate{}, ErrStrategyTemplateUnavailable
 	}
-	definition, err := executor.DeployedDefinition(item.Code, item.Version)
+	definition, err := deployedTemplate(item.Code, item.Version)
 	if err != nil || item.ExecutorID != definition.ExecutorID || item.Status != "active" || !sameJSON(item.Schema, definition.Schema) {
 		return model.ComposeTemplate{}, ErrStrategyTemplateUnavailable
 	}
@@ -575,7 +574,7 @@ func (s *ComposeTaskService) usableTemplate(strategy model.ComposeStrategy) (mod
 // config and schema-validates the merge — the merge, not the override alone,
 // is what the snapshot stores (ADR-0021).
 func (s *ComposeTaskService) mergedConfig(template model.ComposeTemplate, strategy model.ComposeStrategy, override json.RawMessage) (json.RawMessage, error) {
-	definition, err := executor.DeployedDefinition(template.Code, template.Version)
+	definition, err := deployedTemplate(template.Code, template.Version)
 	if err != nil {
 		return nil, ErrStrategyTemplateUnavailable
 	}

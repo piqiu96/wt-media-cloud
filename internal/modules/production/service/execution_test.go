@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/wt-media/wt-media-cloud/internal/testutil/composefixture"
 	"io"
 	"net/http"
 	"os"
@@ -248,7 +249,7 @@ func (k killedRunner) Run(ctx context.Context, _ *compose.RunDir, _ compose.Requ
 
 func attemptFixture(t *testing.T) (ComposeExecutorDeps, *lifecycleFake, *storeFake, *runnerStub, model.ComposeTask, *compose.RunDir) {
 	t.Helper()
-	registry, err := executor.NewRegistry(executor.BasicCutV1())
+	registry, err := executor.NewRegistry(composefixture.Cut())
 	if err != nil {
 		t.Fatalf("registry: %v", err)
 	}
@@ -274,7 +275,7 @@ func attemptFixture(t *testing.T) (ComposeExecutorDeps, *lifecycleFake, *storeFa
 	}
 	task := model.ComposeTask{
 		ID: 77, TeamID: 7, CategoryID: 1, TriggerType: "manual", MaterialID: 42, MaterialUsageID: ptrInt64(9),
-		StrategyID: 3, TemplateCode: "basic_cut", TemplateVersion: 1,
+		StrategyID: 3, TemplateCode: "fixture_cut", TemplateVersion: 1,
 		ConfigSnapshot: json.RawMessage(`{"start_seconds":0,"end_seconds":1}`),
 		Status:         model.ComposeTaskRunning, ClaimedNodeID: nodePtr(9),
 		AttemptCount: 1, MaxAttempts: 3, CreatedBy: 11,
@@ -301,7 +302,7 @@ func TestAttemptRunsAndCommitsVerifiedOutput(t *testing.T) {
 		t.Fatal("no output committed")
 	}
 	out := lifecycle.committed
-	if out.TaskID != 77 || out.MaterialID != 42 || usageIDValue(out.MaterialUsageID) != 9 || out.TemplateCode != "basic_cut" || out.TemplateVersion != 1 {
+	if out.TaskID != 77 || out.MaterialID != 42 || usageIDValue(out.MaterialUsageID) != 9 || out.TemplateCode != "fixture_cut" || out.TemplateVersion != 1 {
 		t.Fatalf("committed=%+v", out)
 	}
 	if out.Name == "" {
@@ -377,7 +378,7 @@ func TestGuideAttemptProducesVerifiedOutputFromFrozenAddress(t *testing.T) {
 	source, guide := clip("source.mp4", "red"), clip("guide.mp4", "blue")
 	store := newStoreFake()
 	store.objects[fakeSourceKey] = source
-	registry, err := executor.NewRegistry(executor.DeployedDefinitions()...)
+	registry, err := executor.NewRegistry(composefixture.Resource())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -402,13 +403,13 @@ func TestGuideAttemptProducesVerifiedOutputFromFrozenAddress(t *testing.T) {
 			return os.WriteFile(path, guide, 0o600)
 		},
 	}
-	task := model.ComposeTask{ID: 77, TeamID: 7, CategoryID: 1, MaterialID: 42, MaterialUsageID: ptrInt64(9), StrategyID: 3, TemplateCode: "guide_insert", TemplateVersion: 1, AttemptCount: 1,
+	task := model.ComposeTask{ID: 77, TeamID: 7, CategoryID: 1, MaterialID: 42, MaterialUsageID: ptrInt64(9), StrategyID: 3, TemplateCode: "fixture_resource", TemplateVersion: 1, AttemptCount: 1,
 		ConfigSnapshot: json.RawMessage(`{"guide_video_url":"https://media.example.com/guide.mp4","insert_seconds":1,"guide_duration_seconds":0,"max_duration_seconds":0}`), Status: model.ComposeTaskRunning, ClaimedNodeID: nodePtr(9), CreatedBy: 11}
 	if outcome := RunComposeAttempt(context.Background(), deps, task, 9, runDir, nil); outcome != ComposeAttemptSuccess {
 		t.Fatalf("outcome=%s failed=%v released=%v", outcome, lifecycle.failed, lifecycle.released)
 	}
 	formal := store.objects["media-ku/finalVideo/55.mp4"]
-	if len(formal) == 0 || lifecycle.committed == nil || lifecycle.committed.TemplateCode != "guide_insert" {
+	if len(formal) == 0 || lifecycle.committed == nil || lifecycle.committed.TemplateCode != "fixture_resource" {
 		t.Fatal("verified formal output missing")
 	}
 	if output, err := exec.Command(ffprobe, "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1", filepath.Join(runDir.Path(), "output.mp4")).CombinedOutput(); err != nil || !bytes.Contains(output, []byte("4.0")) {
@@ -721,9 +722,9 @@ func TestAttemptClassifiesGuideDownloadFailure(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			deps, lifecycle, _, _, task, runDir := attemptFixture(t)
-			task.TemplateCode = "guide_insert"
+			task.TemplateCode = "fixture_resource"
 			task.ConfigSnapshot = json.RawMessage(`{"guide_video_url":"https://media.example.com/guide.mp4","insert_seconds":1,"guide_duration_seconds":0,"max_duration_seconds":0}`)
-			registry, err := executor.NewRegistry(executor.DeployedDefinitions()...)
+			registry, err := executor.NewRegistry(composefixture.Resource())
 			if err != nil {
 				t.Fatal(err)
 			}

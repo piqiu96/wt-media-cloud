@@ -1,5 +1,5 @@
 schema_version: 1
-revision: "2026.11.06.2"
+revision: "2026.11.07.1"
 
 # 描述 Cloud 当前返回的 body；未知的可选属性省略，内部对象存储引用不返回。
 
@@ -19,22 +19,21 @@ schemas:
         properties:
           properties: {type: object, additionalProperties: {ref: ComposeTemplateParameter}}
       status: {type: string, enum: [active, inactive]}
-  BasicCutV1Config:
+  DynamicPIPEndingV1Config:
     type: object
-    required: [start_seconds, end_seconds]
     additionalProperties: false
+    required: [intro_video_url, ad_video_url, start_seconds, end_seconds, max_duration_seconds, ad_start_min_seconds, ad_start_max_seconds, intro_pip_width, ad_pip_width, transition_seconds]
     properties:
-      start_seconds: {type: integer, minimum: 0}
-      end_seconds: {type: integer, minimum: 1, description: Must exceed start_seconds.}
-  GuideV1Config:
-    type: object
-    required: [guide_video_url, insert_seconds, guide_duration_seconds, max_duration_seconds]
-    additionalProperties: false
-    properties:
-      guide_video_url: {type: string, format: uri, description: "Public downloadable HTTPS URL, frozen in the task snapshot."}
-      insert_seconds: {type: integer, minimum: 0}
-      guide_duration_seconds: {type: integer, minimum: 0, description: Zero uses the whole guide video.}
-      max_duration_seconds: {type: integer, minimum: 0, description: Zero has no output duration limit.}
+      intro_video_url: {type: string, format: uri, description: "Platform file resource URL or public HTTPS video."}
+      ad_video_url: {type: string, format: uri, description: "Platform file resource URL or public HTTPS video."}
+      start_seconds: {type: number, minimum: 0}
+      end_seconds: {type: number, minimum: 0, description: "Zero selects automatic source end."}
+      max_duration_seconds: {type: number, minimum: 1, maximum: 86400}
+      ad_start_min_seconds: {type: number, minimum: 0}
+      ad_start_max_seconds: {type: number, minimum: 0}
+      intro_pip_width: {type: number, minimum: 0.1, maximum: 1}
+      ad_pip_width: {type: number, minimum: 0.1, maximum: 1}
+      transition_seconds: {type: number, minimum: 0, maximum: 1}
   ComposeStrategy:
     type: object
     required: [id, team_id, category_id, operator_id, operator_name, name, compose_template_id, compose_template_version, config, output_settings, execution_mode, schedule, priority_rules, single_limit, daily_limit, next_run_at, status, created_at, updated_at]
@@ -49,8 +48,7 @@ schemas:
       compose_template_version: {type: integer, minimum: 1}
       config:
         oneOf:
-          - {ref: BasicCutV1Config}
-          - {ref: GuideV1Config}
+          - {ref: DynamicPIPEndingV1Config}
       output_settings: {type: array, minItems: 1, maxItems: 20, items: {ref: ComposeOutputSetting}, description: "Independent groups in saved order. When omitted by legacy requests config supplies one default group; each group stores complete template parameters."}
       execution_mode: {type: string, enum: [manual, scheduled]}
       schedule:

@@ -2,7 +2,6 @@ package service
 
 import (
 	"errors"
-	"github.com/wt-media/wt-media-cloud/internal/modules/production/executor"
 
 	identityservice "github.com/wt-media/wt-media-cloud/internal/modules/identity/service"
 	"github.com/wt-media/wt-media-cloud/internal/modules/production/model"
@@ -39,7 +38,7 @@ func (s *TemplateService) List(actor identityservice.PublicUser) ([]model.Compos
 		return []model.ComposeTemplate{}, nil
 	}
 	for i := range items {
-		if def, e := executor.DeployedDefinition(items[i].Code, items[i].Version); e == nil {
+		if def, e := deployedTemplate(items[i].Code, items[i].Version); e == nil {
 			defaults, _, e := templateDefaults(def)
 			if e != nil {
 				return nil, e

@@ -24,13 +24,8 @@ var ErrUnknownTemplateVersion = errors.New("unknown template version")
 // command: each template version decides what its parameters mean, and the
 // pipeline above never needs to know their shape.
 type Plan interface {
-	// FFmpegArguments is the whole command for the run: a fixed construction,
-	// not a starting point the caller may extend.
-	FFmpegArguments(inputPath, outputPath string) []string
-	// SegmentMS reports the output window the parameters ask for. The pipeline
-	// uses it to check the input covers the window and the output approximates
-	// it; it is a fact about the plan, not a knob the caller may move.
-	SegmentMS() (startMS, endMS int64)
+	Resources(json.RawMessage) ([]ResourceRequest, error)
+	Compile(RenderInput) (RenderResult, error)
 }
 
 // An Executor is the code released with one template version.
@@ -93,3 +88,6 @@ func DeployedDefinition(code string, version uint32) (Definition, error) {
 	}
 	return Definition{}, fmt.Errorf("%w: %s/%d", ErrUnknownTemplateVersion, code, version)
 }
+
+// DeployedDefinitions contains the current catalog; new templates register here.
+func DeployedDefinitions() []Definition { return []Definition{DynamicPIPEndingV1()} }

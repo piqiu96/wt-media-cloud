@@ -10,9 +10,9 @@ import (
 	"time"
 
 	identity "github.com/wt-media/wt-media-cloud/internal/modules/identity/service"
-	"github.com/wt-media/wt-media-cloud/internal/modules/production/executor"
 	"github.com/wt-media/wt-media-cloud/internal/modules/production/model"
 	"github.com/wt-media/wt-media-cloud/internal/modules/production/repository"
+	"github.com/wt-media/wt-media-cloud/internal/testutil/composefixture"
 )
 
 type verifyingOutputLink struct {
@@ -96,7 +96,7 @@ func TestOutputEmptyCategoriesShortCircuitBeforeRepository(t *testing.T) {
 }
 func TestOutputTraceUsesOriginalSnapshotAndSafeOriginalSchema(t *testing.T) {
 	o := outputFixture(1)
-	repo := &outputPagingFake{outputMemoryStore: outputMemoryStore{outputs: []model.CompositeOutput{o}}, template: model.ComposeTemplate{Code: "basic_cut", Version: 1, Schema: json.RawMessage(`{"type":"object","properties":{"guide_video_url":{"type":"string","default":"https://secret.example/guide","editable":false},"end_seconds":{"type":"number","editable":true}}}`)}}
+	repo := &outputPagingFake{outputMemoryStore: outputMemoryStore{outputs: []model.CompositeOutput{o}}, template: model.ComposeTemplate{Code: "fixture_cut", Version: 1, Schema: json.RawMessage(`{"type":"object","properties":{"guide_video_url":{"type":"string","default":"https://secret.example/guide","editable":false},"end_seconds":{"type":"number","editable":true}}}`)}}
 	traces := &outputTraceFakes{strategy: model.ComposeStrategy{ID: 3, Name: "策略", Config: json.RawMessage(`{"end_seconds":999,"guide_video_url":"https://current.secret"}`)}}
 	task := &outputTaskFake{task: model.ComposeTask{ID: 55, Status: model.ComposeTaskSuccess, ConfigSnapshot: json.RawMessage(`{"end_seconds":2,"guide_video_url":"https://original.secret"}`), SettingKey: "original", SettingName: "原组", PlatformsJSON: json.RawMessage(`["baidu"]`)}}
 	s := NewComposeOutputService(repo, traces, traces, traces, task, &verifyingOutputLink{exists: true}, &stubTransfers{})
@@ -169,17 +169,14 @@ func (f *availableOutputTrace) OutputInputAvailable(model.Material) (bool, error
 func TestRemakeRequiresExecutableOriginalParamsAndIgnoresMissingOutputObject(t *testing.T) {
 	team := identity.TeamID(7)
 	owner := identity.PublicUser{ID: 9, Role: identity.RoleOperator, Status: identity.UserStatusEnabled, TeamID: &team, CategoryIDs: []identity.CategoryID{1}}
-	definition, err := executor.DeployedDefinition("basic_cut", 1)
-	if err != nil {
-		t.Fatal(err)
-	}
+	definition := composefixture.Cut()
 	for _, tc := range []struct {
 		params string
 		remake bool
 	}{{`{"start_seconds":0,"end_seconds":2}`, true}, {`{}`, false}} {
 		o := outputFixture(1)
 		task := model.ComposeTask{ID: o.TaskID, TeamID: o.TeamID, CategoryID: o.CategoryID, OperatorID: o.OperatorID, MaterialID: o.MaterialID, StrategyID: o.StrategyID, TemplateCode: o.TemplateCode, TemplateVersion: o.TemplateVersion, SettingKey: "original", SettingName: "原组", PlatformsJSON: json.RawMessage(`["bilibili"]`), ConfigSnapshot: json.RawMessage(tc.params), Status: model.ComposeTaskSuccess}
-		repo := &outputPagingFake{outputMemoryStore: outputMemoryStore{outputs: []model.CompositeOutput{o}}, template: model.ComposeTemplate{Code: "basic_cut", Version: 1, Status: "active", ExecutorID: definition.ExecutorID, Schema: definition.Schema}}
+		repo := &outputPagingFake{outputMemoryStore: outputMemoryStore{outputs: []model.CompositeOutput{o}}, template: model.ComposeTemplate{Code: "fixture_cut", Version: 1, Status: "active", ExecutorID: definition.ExecutorID, Schema: definition.Schema}}
 		category := identity.CategoryID(1)
 		traces := &availableOutputTrace{outputTraceFakes{material: model.Material{ID: 42, TeamID: 7, CategoryID: &category, Status: model.MaterialAvailable, SourceURL: "https://source"}, strategy: model.ComposeStrategy{ID: 3, TeamID: 7, CategoryID: 1, OperatorID: ptrInt64(9), Status: model.ComposeStrategyEnabled}}}
 		s := NewComposeOutputService(repo, traces, traces, traces, &outputTaskFake{task: task}, &verifyingOutputLink{exists: false}, &stubTransfers{})

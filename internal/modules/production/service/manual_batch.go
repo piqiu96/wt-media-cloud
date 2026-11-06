@@ -194,7 +194,7 @@ func (s *ComposeTaskService) createManualBatch(actor identity.PublicUser, input 
 		return nil
 	}
 	command.ResolveSettings = func(strategy model.ComposeStrategy, template model.ComposeTemplate) ([]model.ComposeOutputSetting, error) {
-		definition, err := executor.DeployedDefinition(template.Code, template.Version)
+		definition, err := deployedTemplate(template.Code, template.Version)
 		if err != nil || template.ExecutorID != definition.ExecutorID || template.Status != "active" || !sameJSON(template.Schema, definition.Schema) {
 			return nil, ErrStrategyTemplateUnavailable
 		}

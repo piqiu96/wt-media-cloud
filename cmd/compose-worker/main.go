@@ -2,9 +2,6 @@ package main
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -13,7 +10,6 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"strings"
 	"syscall"
 	"time"
 
@@ -33,11 +29,7 @@ import (
 	identityservice "github.com/wt-media/wt-media-cloud/internal/shared/identity"
 )
 
-// The compose worker binary has two modes. Without -input it is the M4-C5
-// worker: it claims pending compose tasks and drives each through the
-// execution state machine until the row reaches a state no other process
-// depends on it for. With -input it stays the M4-C4 verification shell, which
-// runs one local cut through the same runner and storage path.
+// The worker executes released templates through the common composition entry.
 func main() {
 	if err := run(context.Background(), os.Args[1:]); err != nil {
 		log.Fatal(err)
@@ -46,66 +38,13 @@ func main() {
 
 func run(ctx context.Context, args []string) error {
 	flags := flag.NewFlagSet("compose-worker", flag.ContinueOnError)
-	input := flags.String("input", "", "local video to verify (skips the claim loop)")
-	start := flags.Int64("start", 0, "cut start in seconds")
-	end := flags.Int64("end", 0, "cut end in seconds")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
 	if flags.NArg() != 0 {
 		return errors.New("compose-worker accepts no positional arguments")
 	}
-	if strings.TrimSpace(*input) != "" {
-		return runVerify(ctx, *input, *start, *end)
-	}
 	return runWorker(ctx)
-}
-
-func runVerify(ctx context.Context, input string, start, end int64) error {
-	config.MustInitializeRuntimePaths()
-	cfg, err := config.Load()
-	if err != nil {
-		return err
-	}
-	workspace, lock, err := prepare(ctx, cfg)
-	if err != nil {
-		return err
-	}
-	defer lock.Release()
-	registry, err := executor.NewRegistry(executor.DeployedDefinitions()...)
-	if err != nil {
-		return err
-	}
-	id := make([]byte, 16)
-	if _, err := rand.Read(id); err != nil {
-		return err
-	}
-	runDir, err := workspace.NewRun("verify-" + hex.EncodeToString(id))
-	if err != nil {
-		return err
-	}
-	defer runDir.Release()
-	params, err := json.Marshal(map[string]int64{"start_seconds": start, "end_seconds": end})
-	if err != nil {
-		return err
-	}
-	runner := compose.Runner{FFmpegPath: cfg.Media.FFmpeg.FFmpegPath, FFprobePath: cfg.Media.FFmpeg.FFprobePath, Registry: registry}
-	output, err := runner.Run(ctx, runDir, compose.Request{TemplateCode: "basic_cut", TemplateVersion: 1, Params: params, InputPath: input})
-	if err != nil {
-		return err
-	}
-	if err := storage.Initialize(cfg.Storage.ObjectStorage, cfg.Credentials.ObjectStorage); err != nil {
-		return err
-	}
-	defer storage.Close()
-	if err := compose.VerifyUpload(ctx, storage.Get(), output.Path, filepath.Base(runDir.Path())); err != nil {
-		return err
-	}
-	if err := runDir.Release(); err != nil {
-		return fmt.Errorf("clean compose run directory: %w", err)
-	}
-	fmt.Printf("compose verified: duration=%dms; object storage readback sha256 matched and temporary key removed\n", output.DurationMS)
-	return nil
 }
 
 // runWorker brings up everything one claim needs before claiming anything:

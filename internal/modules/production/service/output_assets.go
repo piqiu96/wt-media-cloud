@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	identity "github.com/wt-media/wt-media-cloud/internal/modules/identity/service"
-	"github.com/wt-media/wt-media-cloud/internal/modules/production/executor"
 	"github.com/wt-media/wt-media-cloud/internal/modules/production/model"
 	"github.com/wt-media/wt-media-cloud/internal/modules/production/repository"
 	"math"
@@ -306,7 +305,7 @@ func (s *ComposeOutputService) decorateOutput(ctx context.Context, actor identit
 	if err != nil {
 		return err
 	}
-	definition, deployedErr := executor.DeployedDefinition(o.TemplateCode, o.TemplateVersion)
+	definition, deployedErr := deployedTemplate(o.TemplateCode, o.TemplateVersion)
 	if !found || deployedErr != nil || template.Status != "active" || template.ExecutorID != definition.ExecutorID || !sameJSON(template.Schema, definition.Schema) {
 		o.Actions.RemakeReason = "原模板版本不可用"
 		return nil

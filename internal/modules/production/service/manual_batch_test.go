@@ -3,14 +3,14 @@ package service
 import (
 	"encoding/json"
 	"errors"
-	"github.com/wt-media/wt-media-cloud/internal/modules/production/executor"
 	"github.com/wt-media/wt-media-cloud/internal/modules/production/model"
 	"github.com/wt-media/wt-media-cloud/internal/modules/production/repository"
+	"github.com/wt-media/wt-media-cloud/internal/testutil/composefixture"
 	"testing"
 )
 
 func TestManualSettingOverridesAreOnlyExplicitlyEditable(t *testing.T) {
-	d := executor.GuideInsertV1()
+	d := composefixture.Resource()
 	base := model.ComposeStrategy{Config: json.RawMessage(`{"guide_video_url":"https://media.example.com/a.mp4","insert_seconds":1,"guide_duration_seconds":0,"max_duration_seconds":0}`)}
 	for _, params := range []map[string]any{{"guide_video_url": "https://media.example.com/a.mp4"}, {"unknown": 1}, {"insert_seconds": "2"}} {
 		if _, err := mergeManualSettings(base, d, []ComposeSettingOverride{{Key: "default", Params: params}}); !errors.Is(err, ErrComposeTaskInvalid) {
@@ -84,7 +84,7 @@ func TestLegacyProductionCreateDispatchesToBatchCapability(t *testing.T) {
 	}
 }
 func TestManualOverridesRejectDuplicateGroupsAndLockedMetadata(t *testing.T) {
-	definition := executor.BasicCutV1()
+	definition := composefixture.Cut()
 	strategy := model.ComposeStrategy{Config: json.RawMessage(`{"start_seconds":0,"end_seconds":9}`)}
 	_, err := mergeManualSettings(strategy, definition, []ComposeSettingOverride{{Key: "default", Params: map[string]any{}}, {Key: "default", Params: map[string]any{}}})
 	if !errors.Is(err, ErrComposeTaskInvalid) {

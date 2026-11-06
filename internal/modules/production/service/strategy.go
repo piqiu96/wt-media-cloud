@@ -13,7 +13,6 @@ import (
 	"unicode/utf8"
 
 	identity "github.com/wt-media/wt-media-cloud/internal/modules/identity/service"
-	"github.com/wt-media/wt-media-cloud/internal/modules/production/executor"
 	"github.com/wt-media/wt-media-cloud/internal/modules/production/model"
 	"github.com/wt-media/wt-media-cloud/internal/modules/production/repository"
 )
@@ -474,7 +473,7 @@ func (s *StrategyService) validateConfig(templateID int64, version uint32, confi
 	if !found {
 		return ErrStrategyTemplateUnavailable
 	}
-	definition, err := executor.DeployedDefinition(item.Code, item.Version)
+	definition, err := deployedTemplate(item.Code, item.Version)
 	if err != nil || item.ExecutorID != definition.ExecutorID || (requireActive && item.Status != "active") || !sameJSON(item.Schema, definition.Schema) {
 		return ErrStrategyTemplateUnavailable
 	}
@@ -505,7 +504,7 @@ func (s *StrategyService) prepareOutputSettings(templateID int64, version uint32
 	if !found {
 		return nil, nil, nil, ErrStrategyTemplateUnavailable
 	}
-	definition, err := executor.DeployedDefinition(template.Code, version)
+	definition, err := deployedTemplate(template.Code, version)
 	if err != nil {
 		return nil, nil, nil, ErrStrategyTemplateUnavailable
 	}
