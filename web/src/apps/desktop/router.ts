@@ -26,6 +26,7 @@ export const desktopRoutes = [
       { path: "publish", name: "Publish", component: () => import("../../shared/ui/ComingSoon.vue") },
       { path: "interact", name: "Interact", component: () => import("../../shared/ui/ComingSoon.vue") },
       { path: "comment-templates", name: "CommentTemplates", component: () => import("../../shared/ui/ComingSoon.vue") },
+      { path: "files", name: "Files", component: () => import("../../modules/files/pages/FilesPage.vue") },
       { path: "stats", name: "Stats", component: () => import("../../shared/ui/ComingSoon.vue") },
       // 社媒账号三角色可见（本地操作按账号归属在页面内判定）；浏览器窗口与代理对
       // 运营和高级运营开放（D08），开户仍是普通运营的本机执行面；其余角色由

@@ -13,7 +13,7 @@ func InitializeServer() (*server.Hertz, func() error, error) {
 		return nil, nil, err
 	}
 
-	engine := server.Default(server.WithHostPorts(config.Get().App.Server.HTTPAddr))
+	engine := server.Default(server.WithHostPorts(config.Get().App.Server.HTTPAddr), server.WithMaxRequestBodySize(int(config.Get().Storage.ObjectStorage.UploadMaxBytes+(1<<20))))
 	if err := registerRoutes(engine); err != nil {
 		_ = closer()
 		return nil, nil, err

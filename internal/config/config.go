@@ -118,14 +118,16 @@ type CredentialsConfig struct {
 
 // ObjectStorageConfig names the bucket every prepared source object lives in.
 type ObjectStorageConfig struct {
-	Endpoint     string   `toml:"endpoint"`
-	Bucket       string   `toml:"bucket"`
-	Region       string   `toml:"region"`
-	Prefix       string   `toml:"prefix"`
-	LegacyBucket string   `toml:"legacy_bucket"`
-	LegacyPrefix string   `toml:"legacy_prefix"`
-	UseSSL       bool     `toml:"use_ssl"`
-	PresignTTL   Duration `toml:"presign_ttl"`
+	Endpoint       string   `toml:"endpoint"`
+	Bucket         string   `toml:"bucket"`
+	Region         string   `toml:"region"`
+	Prefix         string   `toml:"prefix"`
+	LegacyBucket   string   `toml:"legacy_bucket"`
+	LegacyPrefix   string   `toml:"legacy_prefix"`
+	UploadMaxBytes int64    `toml:"upload_max_bytes"`
+	UploadTimeout  Duration `toml:"upload_timeout"`
+	UseSSL         bool     `toml:"use_ssl"`
+	PresignTTL     Duration `toml:"presign_ttl"`
 }
 
 // ObjectStorageCredentialConfig is deliberately optional in both directions.

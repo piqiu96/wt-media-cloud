@@ -1,0 +1,90 @@
+openapi: 3.1.0
+info:
+  title: WT Media Operations Files API
+  version: 2026.11.06.1
+  description: Independent image/video uploads. JSON responses use errcode/message/data/logid. Ordinary operators manage their own uploads, senior operators their team, administrators all files. Only verified uploads are visible. Stored objects are immutable; renaming changes display/download names only.
+paths:
+  /api/v1/files:
+    get:
+      operationId: listOperationsFiles
+      security: [{sessionCookie: []}]
+      parameters:
+        - {in: query, name: type, schema: {type: string, enum: [image, video]}}
+        - {in: query, name: search, schema: {type: string, maxLength: 100}}
+        - {in: query, name: page, schema: {type: integer, minimum: 1, default: 1}}
+        - {in: query, name: page_size, schema: {type: integer, minimum: 1, maximum: 100, default: 20}}
+      responses:
+        '200': {description: '{items: [OperationsFile], total, page, page_size}, scoped on the server.'}
+        '400': {description: Invalid filters.}
+        '403': {description: Actor unavailable.}
+    post:
+      operationId: uploadOperationsFile
+      security: [{sessionCookie: []}]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [name, file]
+              properties:
+                name: {type: string, minLength: 1, maxLength: 80, description: Required filename; original name may be prefilled. Extension follows the uploaded media. Unsafe path characters are refused.}
+                file: {type: string, format: binary, description: Supported image/video within the configured upload byte limit.}
+      responses:
+        '201': {description: Verified OperationsFile. Allocation or upload alone is never success.}
+        '400': {description: Missing/invalid name, empty or unsupported/unreadable media.}
+        '413': {description: Upload exceeds the configured limit.}
+        '503': {description: Storage or persistence failed; no upload success claimed.}
+  /api/v1/files/{file_id}:
+    parameters:
+      - {in: path, name: file_id, required: true, schema: {type: integer, minimum: 1}}
+    patch:
+      operationId: renameOperationsFile
+      security: [{sessionCookie: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, additionalProperties: false, required: [name], properties: {name: {type: string, minLength: 1, maxLength: 80}}}
+      responses:
+        '200': {description: Updated OperationsFile; object key and stable resource path unchanged.}
+        '404': {description: File missing or outside actor scope.}
+    delete:
+      operationId: deleteOperationsFile
+      security: [{sessionCookie: []}]
+      responses:
+        '200': {description: Object and file record removed. Stable URL no longer resolves.}
+        '404': {description: File missing or outside actor scope.}
+        '503': {description: Deletion incomplete; request may be retried.}
+  /api/v1/file-resources/{token}:
+    get:
+      operationId: openOperationsFileResource
+      description: Bearer capability URL, valid until file deletion. Resolve against the actual Cloud origin (HTTPS in production). Each request verifies the current file then redirects to a fresh short-lived private object GET. Does not require a login cookie. No durable bucket credential is exposed.
+      parameters:
+        - {in: path, name: token, required: true, schema: {type: string, pattern: '^[0-9a-f]{64}$'}}
+        - {in: query, name: download, schema: {type: string, enum: ['1']}, description: Request attachment disposition with the current filename.}
+      responses:
+        '307': {description: Fresh object grant; Cache-Control no-store and Referrer-Policy no-referrer.}
+        '404': {description: Unknown/deleted resource or missing object.}
+        '503': {description: Storage verification unavailable.}
+components:
+  securitySchemes:
+    sessionCookie: {type: apiKey, in: cookie, name: wt_media_session}
+  schemas:
+    OperationsFile:
+      type: object
+      required: [id, name, filename, type, content_type, size_bytes, sha256, owner_id, created_at, resource_path]
+      properties:
+        id: {type: integer, format: int64}
+        name: {type: string}
+        filename: {type: string}
+        type: {type: string, enum: [image, video]}
+        content_type: {type: string}
+        size_bytes: {type: integer, format: int64}
+        sha256: {type: string}
+        owner_id: {type: integer, format: int64}
+        owner_name: {type: string}
+        team_id: {type: [integer, 'null'], format: int64}
+        team_name: {type: string}
+        created_at: {type: string, format: date-time}
+        resource_path: {type: string, description: Stable opaque Cloud path, never an expiring S3 signature.}

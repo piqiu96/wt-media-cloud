@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"net/url"
 	"strings"
 	"time"
@@ -124,6 +125,14 @@ func (s *minioStore) object(key string) (string, error) {
 }
 
 func (s *minioStore) PresignGet(ctx context.Context, key string, ttl time.Duration) (Grant, error) {
+	return s.presign(ctx, key, ttl, url.Values{})
+}
+
+func (s *minioStore) PresignDownload(ctx context.Context, key, name string, ttl time.Duration) (Grant, error) {
+	return s.presign(ctx, key, ttl, url.Values{"response-content-disposition": {mime.FormatMediaType("attachment", map[string]string{"filename": name})}})
+}
+
+func (s *minioStore) presign(ctx context.Context, key string, ttl time.Duration, parameters url.Values) (Grant, error) {
 	bucket, object, err := s.resolve(key)
 	if err != nil {
 		return Grant{}, err
@@ -131,7 +140,7 @@ func (s *minioStore) PresignGet(ctx context.Context, key string, ttl time.Durati
 	if ttl <= 0 {
 		return Grant{}, fmt.Errorf("grant lifetime must be positive, got %s", ttl)
 	}
-	signed, err := s.client.PresignedGetObject(ctx, bucket, object, ttl, url.Values{})
+	signed, err := s.client.PresignedGetObject(ctx, bucket, object, ttl, parameters)
 	if err != nil {
 		return Grant{}, fmt.Errorf("presign %s: %w", key, err)
 	}

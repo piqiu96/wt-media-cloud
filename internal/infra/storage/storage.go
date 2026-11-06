@@ -213,3 +213,14 @@ func Reference(store Store, key string) (string, error) {
 	}
 	return key, nil
 }
+
+// PresignDownload requests browser attachment disposition without changing the
+// stored object or its permanent filename identity.
+func PresignDownload(ctx context.Context, store Store, key, name string, ttl time.Duration) (Grant, error) {
+	if signer, ok := store.(interface {
+		PresignDownload(context.Context, string, string, time.Duration) (Grant, error)
+	}); ok {
+		return signer.PresignDownload(ctx, key, name, ttl)
+	}
+	return Grant{}, errors.New("store does not support attachment grants")
+}

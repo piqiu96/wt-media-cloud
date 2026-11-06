@@ -109,6 +109,12 @@ function defaultApiBase(base) {
   return `${desktopCloudOrigin}/api/v1`
 }
 
+export function cloudResourceURL(path, base = '/api/v1') {
+  const origin = typeof window === 'undefined' ? undefined : window.location.origin
+  const api = new URL(defaultApiBase(base), origin)
+  return new URL(path, api.origin).toString()
+}
+
 export function createApiClient({ base = '/api/v1', fetchImpl = globalThis.fetch } = {}) {
   async function request(path, { method = 'GET', body, params } = {}) {
     const apiBase = defaultApiBase(base)
@@ -128,7 +134,12 @@ export function createApiClient({ base = '/api/v1', fetchImpl = globalThis.fetch
       headers: { 'Content-Type': 'application/json' },
     }
     if (sessionToken) options.headers['X-Session-Token'] = sessionToken
-    if (body !== undefined) options.body = JSON.stringify(body)
+    if (body !== undefined) {
+      if (typeof FormData !== 'undefined' && body instanceof FormData) {
+        options.body = body
+        delete options.headers['Content-Type']
+      } else options.body = JSON.stringify(body)
+    }
     if (method === 'GET' || method === 'DELETE') delete options.headers['Content-Type']
 
     const response = await fetchImpl(url, options)

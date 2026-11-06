@@ -29,6 +29,7 @@ export const cloudRoutes = [
       { path: "publish", name: "Publish", component: () => import("../../shared/ui/ComingSoon.vue") },
       { path: "interact", name: "Interact", component: () => import("../../shared/ui/ComingSoon.vue") },
       { path: "comment-templates", name: "CommentTemplates", component: () => import("../../shared/ui/ComingSoon.vue") },
+      { path: "files", name: "Files", component: () => import("../../modules/files/pages/FilesPage.vue") },
       { path: "stats", name: "Stats", component: () => import("../../shared/ui/ComingSoon.vue") },
       { path: "accounts", name: "Accounts", component: () => import("../../modules/accounts/pages/AccountsPage.vue") },
       { path: "browser-windows", name: "BrowserWindows", component: () => import("../../modules/profiles/pages/ProfilesPage.vue") },
