@@ -18,6 +18,14 @@ describe('operations files', () => {
       expect(await options.body.get('file').text()).toBe('png bytes')
     } finally { setSessionToken('') }
   })
+  it('copies the permanent bucket URL without using the Cloud capability path', () => {
+    const client = createFilesClient({ base: 'https://cloud.example/api/v1' })
+    const public_url = 'https://wt-media.bucket.example/file-ku/files/1_%E5%BC%80%20%25%23.png'
+    expect(client.publicURL({ public_url, name: 'renamed' })).toBe(public_url)
+    for (const invalid of [undefined, '', 'http://bucket.example/a', 'javascript:alert(1)', 'https://u:p@bucket.example/a', 'https://bucket.example/a?signature=x', 'https://bucket.example/a#fragment']) {
+      expect(() => client.publicURL({ public_url: invalid, resource_path: '/api/v1/file-resources/' + 'a'.repeat(64) })).toThrow('文件链接无效')
+    }
+  })
   it('builds persistent Cloud resource URLs and refuses unknown paths', () => {
     const client = createFilesClient({ base: 'https://cloud.example/api/v1' })
     const resource_path = '/api/v1/file-resources/' + 'a'.repeat(64)

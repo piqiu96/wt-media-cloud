@@ -213,7 +213,7 @@ const columns = computed(() => [
   { colKey: 'operator', title: '负责人', width: 90 },
   { colKey: 'schedule', title: '执行计划', width: 180 },
   { colKey: 'status', title: '状态', width: 80 },
-  { colKey: 'op', title: '操作', width: opColumnWidth(canManage.value ? ['详情', '编辑', '立即执行', '复制'] : ['详情'], { variant: 'text', primary: canManage.value, loading: canManage.value }), fixed: 'right' },
+  { colKey: 'op', title: '操作', width: opColumnWidth(canManage.value ? ['立即执行', '详情', '编辑', '复制'] : ['详情'], { variant: 'text', primary: canManage.value, loading: canManage.value }), fixed: 'right' },
 ])
 
 // 横向滚动宽度由列宽推导，不写死（写死值与列宽合计无关，是个漂移源）。
@@ -651,7 +651,7 @@ const runColumns = [
   { colKey: 'created_count', title: '创建任务数', width: 95 },
   { colKey: 'failed_count', title: '失败数', width: 65 },
   { colKey: 'created_at', title: '执行时间', width: 155 },
-  { colKey: 'op', title: '操作', width: 120 },
+  { colKey: 'op', title: '操作', width: opColumnWidth(['详情'], { variant: 'text' }), fixed: 'right' },
 ]
 const runTableScroll = computed(() => ({ x: `${runColumns.reduce((sum, column) => sum + column.width, 0)}px` }))
 
@@ -708,11 +708,11 @@ const runTableScroll = computed(() => ({ x: `${runColumns.reduce((sum, column) =
             <template #schedule="{ row }"><div class="strategy-schedule-cell"><span class="strategy-schedule-cell__mode">{{ scheduleState(row) }}</span><span>每次 {{ row.single_limit }}<template v-if="row.execution_mode === 'scheduled'"> / 每日 {{ row.daily_limit }}</template> 条素材</span><span>{{ (row.priority_rules || []).filter(rule => rule.action === 'filter').length }} 条排除 · {{ (row.priority_rules || []).filter(rule => rule.action === 'match').length }} 条选入</span></div></template>
             <template #op="{ row }">
               <ResourceRowActions>
-                <t-button size="small" class="wt-secondary-button" variant="text" @click="openDetail(row)">详情</t-button>
+                <t-button v-if="canManage" size="small" class="is-primary" variant="text" :loading="runPendingID === row.id" :disabled="row.status !== 'enabled' || runPendingID !== null" :title="row.status !== 'enabled' ? '策略已停用，不能执行' : ''" @click="runNow(row)">立即执行</t-button>
+                <t-button size="small" variant="text" @click="openDetail(row)">详情</t-button>
                 <template v-if="canManage">
                   <t-button size="small" theme="primary" variant="text" @click="openEdit(row)">编辑</t-button>
-                  <t-button size="small" class="is-primary" variant="text" :loading="runPendingID === row.id" :disabled="row.status !== 'enabled' || runPendingID !== null" :title="row.status !== 'enabled' ? '策略已停用，不能执行' : ''" @click="runNow(row)">立即执行</t-button>
-                  <t-button size="small" class="wt-secondary-button" variant="text" @click="openCopy(row)">复制</t-button>
+                  <t-button size="small" variant="text" @click="openCopy(row)">复制</t-button>
                 </template>
               </ResourceRowActions>
             </template>
@@ -836,7 +836,7 @@ const runTableScroll = computed(() => ({ x: `${runColumns.reduce((sum, column) =
                     <template #created_at="{ row }">{{ formatDateTime(row.created_at) }}</template>
                     <template #trigger_type="{ row }">{{ triggerLabel(row.trigger_type) }}</template>
                     <template #skipped_count="{ row }">{{ row.skipped?.length ?? 0 }}</template>
-                    <template #op="{ row }"><t-link v-if="row.batch_id" theme="primary" @click="openRunBatch(row)">详情</t-link><span v-else>—</span></template>
+                    <template #op="{ row }"><ResourceRowActions v-if="row.batch_id"><t-button size="small" variant="text" @click="openRunBatch(row)">详情</t-button></ResourceRowActions><span v-else>—</span></template>
                   </t-table>
                 </div>
                 <div class="pagination-bar"><t-pagination :show-jumper="false" v-model:current="runPagination.current" v-model:pageSize="runPagination.pageSize" :total="runHistoryTotal" :page-size-options="[10, 20, 50]" @current-change="onRunPageChange" @page-size-change="onRunPageChange" /></div>

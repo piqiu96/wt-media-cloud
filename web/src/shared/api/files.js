@@ -12,6 +12,12 @@ export function createFilesClient({ base = '/api/v1', fetch = globalThis.fetch }
     },
     rename(id, name) { return api.patch(`/files/${id}`, { name }) },
     delete(id) { return api.delete(`/files/${id}`) },
+    publicURL(file) {
+      let url
+      try { url = new URL(file.public_url) } catch { throw new Error('文件链接无效') }
+      if (url.protocol !== 'https:' || !url.hostname || url.username || url.password || url.search || url.hash) throw new Error('文件链接无效')
+      return url.href
+    },
     resourceURL(file) {
       if (!/^\/api\/v1\/file-resources\/[a-f0-9]{64}$/.test(file.resource_path)) throw new Error('文件链接无效')
       return cloudResourceURL(file.resource_path, base)
