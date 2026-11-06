@@ -2,6 +2,7 @@
 package config
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -184,7 +185,13 @@ type FFmpegConfig struct {
 // concurrency settings join here in M4-C5; the workspace root is the one the
 // M4-C4 verification runs already need.
 type ComposeConfig struct {
-	Worker ComposeWorkerConfig
+	Worker    ComposeWorkerConfig
+	Templates map[string]ComposeTemplateDefaults
+}
+
+type ComposeTemplateDefaults struct {
+	Render map[string]any `toml:"render"`
+	Params map[string]any `toml:"params"`
 }
 
 type ComposeWorkerConfig struct {
@@ -372,6 +379,9 @@ func LoadFromDir(root string) (Config, error) {
 		return Config{}, err
 	}
 	if err := requiredTOML(filepath.Join(root, "scheduler", "compose.toml"), &cfg.Compose.Worker); err != nil {
+		return Config{}, err
+	}
+	if err := optionalTOML(filepath.Join(root, "compose", "templates.toml"), &cfg.Compose.Templates); err != nil {
 		return Config{}, err
 	}
 	if err := requiredTOML(filepath.Join(root, "media", "ffmpeg.toml"), &cfg.Media.FFmpeg); err != nil {
@@ -712,6 +722,11 @@ func loadCloudFile(path string) (pkgconfig.File, error) {
 
 func clone(source Config) Config {
 	cloned := source
+	if source.Compose.Templates != nil {
+		raw, _ := json.Marshal(source.Compose.Templates)
+		cloned.Compose.Templates = nil
+		_ = json.Unmarshal(raw, &cloned.Compose.Templates)
+	}
 	cloned.Databases = append([]DatabaseConfig(nil), source.Databases...)
 	cloned.Clients.HTTP = cloneHTTPClients(source.Clients.HTTP)
 	cloned.Credentials.Douyin.Headers = cloneStringMap(source.Credentials.Douyin.Headers)

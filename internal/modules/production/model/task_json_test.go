@@ -7,6 +7,30 @@ import (
 	"time"
 )
 
+func TestDynamicTaskProjectionPreservesSeedAndHidesLocations(t *testing.T) {
+	task := ComposeTask{RandomSeed: 9223372036854775806, TechnicalConfig: json.RawMessage(`{"private":"s3://wt-media/pool/index.json"}`), ConfigSnapshot: json.RawMessage(`{"intro_video_url":"https://secret.example/intro","ad_video_url":"http://localhost/api/v1/file-resources/secret","start_seconds":0}`), ExecutionManifest: json.RawMessage(`{"source":{"name":"source","location":"s3://wt-media/material/3.mp4","sha256":"abc","size":9,"media":{"duration":30}},"resources":[{"name":"intro","location":"https://secret.example/video","sha256":"def","size":10,"media":{"duration":8}}],"timeline":{"duration":49.2,"segments":[]}}`)}
+	raw, err := json.Marshal(task)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, secret := range []string{"s3://", "secret.example", "file-resources/secret", "technical_config", "execution_manifest"} {
+		if strings.Contains(string(raw), secret) {
+			t.Fatalf("leaked %s", secret)
+		}
+	}
+	var body struct {
+		Seed      string                     `json:"random_seed"`
+		Timeline  struct{ Duration float64 } `json:"execution_timeline"`
+		Resources []ComposeResourceSnapshot  `json:"resource_snapshots"`
+	}
+	if err = json.Unmarshal(raw, &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Seed != "9223372036854775806" || body.Timeline.Duration != 49.2 || len(body.Resources) != 2 || body.Resources[1].Duration != 8 {
+		t.Fatalf("projection=%s", raw)
+	}
+}
+
 func TestComposeTaskAPIProjectionDoesNotExposeRawExecutionErrors(t *testing.T) {
 	for _, value := range []any{
 		ComposeTask{ErrorCode: "storage_error", ErrorMessage: "signed=https://storage.example/object?token=secret"},
@@ -141,7 +165,7 @@ func TestComposeAttemptProjectionRebuildsLabelsAndDropsUnknownSteps(t *testing.T
 	if len(body.Steps) != 2 {
 		t.Fatalf("steps = %+v", body.Steps)
 	}
-	if body.Steps[0].Step != ComposeStepFetchGuide || body.Steps[0].Label != "下载引导视频" || body.Steps[0].ErrorLabel != "" {
+	if body.Steps[0].Step != ComposeStepFetchGuide || body.Steps[0].Label != "准备合成资源" || body.Steps[0].ErrorLabel != "" {
 		t.Fatalf("first step = %+v", body.Steps[0])
 	}
 	if body.Steps[1].Label != "上传并校验成片" || body.Steps[1].ErrorLabel != "存储暂时失败" {

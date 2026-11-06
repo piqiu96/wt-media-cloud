@@ -173,12 +173,13 @@ func listComposeScheduleRuns(db *gorm.DB, strategyID int64, limit int) ([]model.
 }
 
 type ScheduleRunOptions struct {
-	StrategyID   int64
-	Now          time.Time
-	ManualKey    string
-	NextRun      func(model.ComposeStrategy, time.Time) (*time.Time, error)
-	Validate     func(model.ComposeStrategy) error
-	PreviewToken string
+	ResolveTechnicalConfig func(string, uint32) (json.RawMessage, error)
+	StrategyID             int64
+	Now                    time.Time
+	ManualKey              string
+	NextRun                func(model.ComposeStrategy, time.Time) (*time.Time, error)
+	Validate               func(model.ComposeStrategy) error
+	PreviewToken           string
 }
 
 func (ComposeScheduleStore) DueStrategyIDs(now time.Time) ([]int64, error) {
@@ -328,9 +329,17 @@ func runComposeSchedule(db *gorm.DB, options ScheduleRunOptions) (model.ComposeS
 				for copyIndex := 1; copyIndex <= setting.Copies; copyIndex++ {
 					params, _ := json.Marshal(setting.Params)
 					platforms, _ := json.Marshal(setting.Platforms)
+					var technical json.RawMessage
+					if options.ResolveTechnicalConfig != nil {
+						var e error
+						technical, e = options.ResolveTechnicalConfig(templateCode, strategy.TemplateVersion)
+						if e != nil {
+							return e
+						}
+					}
 					task := model.ComposeTask{BatchID: &batch.ID, SettingKey: setting.Key, SettingName: setting.Name, PlatformsJSON: platforms, CopyIndex: copyIndex,
 						TeamID: strategy.TeamID, CategoryID: strategy.CategoryID, OperatorID: strategy.OperatorID, TriggerType: trigger, DisplayName: model.ComposeTaskDisplayName(candidate.Title, candidate.MaterialID, setting.Name),
-						MaterialID: candidate.MaterialID, StrategyID: strategy.ID, TemplateCode: templateCode, TemplateVersion: strategy.TemplateVersion, ConfigSnapshot: params,
+						MaterialID: candidate.MaterialID, StrategyID: strategy.ID, TemplateCode: templateCode, TemplateVersion: strategy.TemplateVersion, TechnicalConfig: technical, ConfigSnapshot: params,
 						Status: model.ComposeTaskPending, RequestKey: scheduledSettingTaskKey(runKey, candidate.MaterialID, setting.Key, copyIndex), CreatedBy: strategy.CreatedBy}
 					if err := composeTaskInsertWithAudit(tx, &task, "compose_task.schedule", strategy.CreatedBy, now); err != nil {
 						return err

@@ -32,6 +32,7 @@ type ManualBatchResult struct {
 	Replayed bool
 }
 type ManualBatchCommand struct {
+	ResolveTechnicalConfig          func(string, uint32) (json.RawMessage, error)
 	SourceOutputID                  int64
 	ActorID, StrategyID, OperatorID int64
 	Name, RequestKey, IntentHash    string
@@ -303,7 +304,15 @@ func createManualBatch(db *gorm.DB, command ManualBatchCommand, now time.Time) (
 					params, _ := json.Marshal(group.Params)
 					platforms, _ := json.Marshal(group.Platforms)
 					digest := sha256.Sum256([]byte(fmt.Sprintf("manual:%d:%d:%s:%d", batch.ID, material.ID, group.Key, copyIndex)))
-					task := model.ComposeTask{BatchID: &batch.ID, SettingKey: group.Key, SettingName: group.Name, PlatformsJSON: platforms, CopyIndex: copyIndex, DisplayName: manualTaskName(command.Name, material.Title, group.Name, copyIndex), TeamID: strategy.TeamID, CategoryID: strategy.CategoryID, OperatorID: strategy.OperatorID, TriggerType: "manual", MaterialID: material.ID, MaterialUsageID: &material.UsageID, StrategyID: strategy.ID, TemplateCode: template.Code, TemplateVersion: template.Version, ConfigSnapshot: params, Status: model.ComposeTaskPending, RequestKey: hex.EncodeToString(digest[:]), CreatedBy: command.ActorID}
+					var technical json.RawMessage
+					if command.ResolveTechnicalConfig != nil {
+						var e error
+						technical, e = command.ResolveTechnicalConfig(template.Code, template.Version)
+						if e != nil {
+							return e
+						}
+					}
+					task := model.ComposeTask{BatchID: &batch.ID, SettingKey: group.Key, SettingName: group.Name, PlatformsJSON: platforms, CopyIndex: copyIndex, DisplayName: manualTaskName(command.Name, material.Title, group.Name, copyIndex), TeamID: strategy.TeamID, CategoryID: strategy.CategoryID, OperatorID: strategy.OperatorID, TriggerType: "manual", MaterialID: material.ID, MaterialUsageID: &material.UsageID, StrategyID: strategy.ID, TemplateCode: template.Code, TemplateVersion: template.Version, TechnicalConfig: technical, ConfigSnapshot: params, Status: model.ComposeTaskPending, RequestKey: hex.EncodeToString(digest[:]), CreatedBy: command.ActorID}
 					if err = composeTaskInsertWithAudit(tx, &task, "compose_task.create", command.ActorID, now); err != nil {
 						return err
 					}

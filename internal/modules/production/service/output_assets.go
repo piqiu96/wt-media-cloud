@@ -245,7 +245,7 @@ func safeOutputSchema(raw json.RawMessage) json.RawMessage {
 		switch x := v.(type) {
 		case map[string]any:
 			for key, value := range x {
-				if key == "guide_video_url" {
+				if strings.HasSuffix(key, "_url") {
 					if prop, ok := value.(map[string]any); ok {
 						delete(prop, "default")
 						delete(prop, "examples")

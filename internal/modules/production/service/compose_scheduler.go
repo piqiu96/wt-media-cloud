@@ -132,7 +132,7 @@ func (s *ComposeSchedulerService) RunDue(now time.Time) (int, error) {
 	processed := 0
 	var failures []error
 	for _, id := range ids {
-		_, done, err := s.store.Run(repository.ScheduleRunOptions{StrategyID: id, Now: now, Validate: validateExecutionStrategy, NextRun: nextRunForStrategy})
+		_, done, err := s.store.Run(repository.ScheduleRunOptions{ResolveTechnicalConfig: templateTechnicalConfig, StrategyID: id, Now: now, Validate: validateExecutionStrategy, NextRun: nextRunForStrategy})
 		if err != nil {
 			failures = append(failures, fmt.Errorf("strategy %d: %w", id, err))
 			continue
@@ -186,7 +186,7 @@ func (s *ComposeSchedulerService) RunNow(actor identity.PublicUser, strategyID i
 	if len(previewTokens) > 0 {
 		token = previewTokens[0]
 	}
-	result, processed, err := s.store.Run(repository.ScheduleRunOptions{StrategyID: strategyID, Now: s.now(), ManualKey: requestKey, Validate: validateExecutionStrategy, NextRun: nextRunForStrategy, PreviewToken: token})
+	result, processed, err := s.store.Run(repository.ScheduleRunOptions{ResolveTechnicalConfig: templateTechnicalConfig, StrategyID: strategyID, Now: s.now(), ManualKey: requestKey, Validate: validateExecutionStrategy, NextRun: nextRunForStrategy, PreviewToken: token})
 	if err != nil {
 		return model.ComposeScheduleRun{}, err
 	}

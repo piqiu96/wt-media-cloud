@@ -1,7 +1,9 @@
 package repository
 
 import (
+	"crypto/rand"
 	"database/sql"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,7 +18,7 @@ import (
 	"gorm.io/gorm"
 )
 
-const composeTaskColumns = `id, display_name, team_id, category_id, operator_id, trigger_type, material_id, material_usage_id, compose_strategy_id, template_code, template_version, config_snapshot_json, status, cancel_requested, request_key, created_by, claimed_node_id, lease_expires_at, heartbeat_at, attempt_count, max_attempts, next_attempt_at, started_at, finished_at, stage, progress, error_code, error_message, output_object_key, composite_output_id, created_at, updated_at, batch_id, setting_key, setting_name, platforms_json, copy_index`
+const composeTaskColumns = `id, display_name, team_id, category_id, operator_id, trigger_type, material_id, material_usage_id, compose_strategy_id, template_code, template_version, config_snapshot_json, status, cancel_requested, request_key, created_by, claimed_node_id, lease_expires_at, heartbeat_at, attempt_count, max_attempts, next_attempt_at, started_at, finished_at, stage, progress, error_code, error_message, output_object_key, composite_output_id, created_at, updated_at, batch_id, setting_key, setting_name, platforms_json, copy_index, random_seed, technical_config_json, execution_manifest_json`
 
 // ErrComposeTaskMaterialUsed reports that the same (strategy, material) pair
 // already has a task row, whatever its status: a pair is produced once, and a
@@ -106,6 +108,16 @@ func composeTaskInsertWithAudit(tx *gorm.DB, item *model.ComposeTask, action str
 	}
 	if item.CopyIndex < 1 {
 		item.CopyIndex = 1
+	}
+	if item.RandomSeed == 0 {
+		var seed [8]byte
+		if _, err := rand.Read(seed[:]); err != nil {
+			return err
+		}
+		item.RandomSeed = int64(binary.BigEndian.Uint64(seed[:]) & 0x7fffffffffffffff)
+		if item.RandomSeed == 0 {
+			return errors.New("invalid random seed")
+		}
 	}
 	item.CreatedAt, item.UpdatedAt = now, now
 	if err := tx.Create(item).Error; err != nil {
@@ -413,11 +425,11 @@ type composeTaskScanner interface{ Scan(...any) error }
 
 func scanComposeTask(row composeTaskScanner) (model.ComposeTask, error) {
 	var item model.ComposeTask
-	var snapshot, platforms []byte
+	var snapshot, platforms, technical, manifest []byte
 	var batchID sql.NullInt64
 	var operatorID, usageID, claimedNode, compositeOutput sql.NullInt64
 	var leaseExpires, heartbeat, nextAttempt, started, finished sql.NullTime
-	err := row.Scan(&item.ID, &item.DisplayName, &item.TeamID, &item.CategoryID, &operatorID, &item.TriggerType, &item.MaterialID, &usageID, &item.StrategyID, &item.TemplateCode, &item.TemplateVersion, &snapshot, &item.Status, &item.CancelRequested, &item.RequestKey, &item.CreatedBy, &claimedNode, &leaseExpires, &heartbeat, &item.AttemptCount, &item.MaxAttempts, &nextAttempt, &started, &finished, &item.Stage, &item.Progress, &item.ErrorCode, &item.ErrorMessage, &item.OutputObjectKey, &compositeOutput, &item.CreatedAt, &item.UpdatedAt, &batchID, &item.SettingKey, &item.SettingName, &platforms, &item.CopyIndex)
+	err := row.Scan(&item.ID, &item.DisplayName, &item.TeamID, &item.CategoryID, &operatorID, &item.TriggerType, &item.MaterialID, &usageID, &item.StrategyID, &item.TemplateCode, &item.TemplateVersion, &snapshot, &item.Status, &item.CancelRequested, &item.RequestKey, &item.CreatedBy, &claimedNode, &leaseExpires, &heartbeat, &item.AttemptCount, &item.MaxAttempts, &nextAttempt, &started, &finished, &item.Stage, &item.Progress, &item.ErrorCode, &item.ErrorMessage, &item.OutputObjectKey, &compositeOutput, &item.CreatedAt, &item.UpdatedAt, &batchID, &item.SettingKey, &item.SettingName, &platforms, &item.CopyIndex, &item.RandomSeed, &technical, &manifest)
 	if err != nil {
 		return model.ComposeTask{}, err
 	}
@@ -437,6 +449,8 @@ func scanComposeTask(row composeTaskScanner) (model.ComposeTask, error) {
 		return model.ComposeTask{}, fmt.Errorf("compose task %d has invalid config_snapshot_json", item.ID)
 	}
 	item.ConfigSnapshot = append(json.RawMessage(nil), snapshot...)
+	item.TechnicalConfig = append(json.RawMessage(nil), technical...)
+	item.ExecutionManifest = append(json.RawMessage(nil), manifest...)
 	if claimedNode.Valid {
 		v := claimedNode.Int64
 		item.ClaimedNodeID = &v

@@ -17,10 +17,11 @@ type ResourceRequest struct {
 	PoolIndexKey string `json:"pool_index_key,omitempty"`
 }
 type MediaInput struct {
-	Path          string
-	Duration      float64
-	Width, Height int
-	HasAudio      bool
+	Path     string  `json:"-"`
+	Duration float64 `json:"duration"`
+	Width    int     `json:"width"`
+	Height   int     `json:"height"`
+	HasAudio bool    `json:"has_audio"`
 }
 type RenderInput struct {
 	Source     MediaInput

@@ -26,7 +26,7 @@ func GuidePIPV1() Definition {
 }
 
 func DeployedDefinitions() []Definition {
-	return []Definition{BasicCutV1(), GuideInsertV1(), GuidePIPV1()}
+	return []Definition{BasicCutV1(), GuideInsertV1(), GuidePIPV1(), DynamicPIPEndingV1()}
 }
 
 type GuideExecutor struct{ Mode GuideMode }

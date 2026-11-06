@@ -49,20 +49,7 @@ func (r *Runner) Run(ctx context.Context, runDir *RunDir, request Request) (Outp
 	if !ok {
 		return Output{}, fmt.Errorf("template executor does not implement the common render entry")
 	}
-	probe := func(filename string) (executor.MediaInput, error) {
-		info, e := probeFile(ctx, r.FFprobePath, filename)
-		if e != nil {
-			return executor.MediaInput{}, e
-		}
-		if !info.hasVideo {
-			return executor.MediaInput{}, fmt.Errorf("input has no video stream")
-		}
-		duration := info.durationMS
-		if info.videoDurationMS > 0 {
-			duration = info.videoDurationMS
-		}
-		return executor.MediaInput{Path: filename, Duration: float64(duration) / 1000, Width: info.width, Height: info.height, HasAudio: info.hasAudio}, nil
-	}
+	probe := func(filename string) (executor.MediaInput, error) { return InspectMedia(ctx, r.FFprobePath, filename) }
 	input, err := probe(request.InputPath)
 	if err != nil {
 		return Output{}, err
@@ -116,4 +103,21 @@ func (r *Runner) Run(ctx context.Context, runDir *RunDir, request Request) (Outp
 		return Output{}, fmt.Errorf("output duration %d ms is longer than 110%% of the requested %d ms", output.durationMS, requestedMS)
 	}
 	return Output{Path: outputPath, DurationMS: output.durationMS, Width: output.width, Height: output.height, Timeline: render.Timeline}, nil
+}
+
+// InspectMedia is shared by manifest preparation and rendering so timelines use
+// exactly the same rounded stream duration in both phases.
+func InspectMedia(ctx context.Context, binary, filename string) (executor.MediaInput, error) {
+	info, err := probeFile(ctx, binary, filename)
+	if err != nil {
+		return executor.MediaInput{}, err
+	}
+	if !info.hasVideo {
+		return executor.MediaInput{}, fmt.Errorf("input has no video stream")
+	}
+	duration := info.durationMS
+	if info.videoDurationMS > 0 {
+		duration = info.videoDurationMS
+	}
+	return executor.MediaInput{Path: filename, Duration: float64(duration) / 1000, Width: info.width, Height: info.height, HasAudio: info.hasAudio}, nil
 }
