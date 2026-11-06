@@ -63,6 +63,12 @@ func InitializeMigration() (func() error, error) {
 	return initializeResources(migrationResourcePlan())
 }
 
+// InitializeSliceTool provides Cloud-owned clients/storage for the explicitly
+// invoked CLI, without starting a discovery or composition worker loop.
+func InitializeSliceTool() (func() error, error) {
+	return initializeResources(workerResourcePlan())
+}
+
 func initializeServer(
 	steps []resourceStep,
 	addr string,

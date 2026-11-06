@@ -15,7 +15,7 @@ import urllib.request
 from pathlib import Path
 
 
-BINARIES = ("wt-media-cloud", "discovery-scheduler", "discovery-worker", "compose-scheduler", "compose-worker", "migrate", "config-check", "wtmctl")
+BINARIES = ("wt-media-cloud", "discovery-scheduler", "discovery-worker", "compose-scheduler", "compose-worker", "migrate", "config-check", "wtmctl", "slice-video")
 TAG = re.compile(r"^v\d+\.\d+\.\d+(?:-rc\.[1-9]\d*)?$")
 
 

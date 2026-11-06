@@ -9,10 +9,11 @@ import (
 )
 
 type Info struct {
-	Duration           float64
-	Width, Height      int
-	HasAudio           bool
-	Format, VideoCodec string
+	Duration                     float64
+	VideoDuration, AudioDuration float64
+	Width, Height                int
+	HasAudio                     bool
+	Format, VideoCodec           string
 }
 
 // Probe runs the configured binary without a shell. It is shared by Cloud
@@ -32,6 +33,7 @@ func ProbeFile(ctx context.Context, binary, filename string) (Info, error) {
 			CodecName string `json:"codec_name"`
 			Width     int    `json:"width"`
 			Height    int    `json:"height"`
+			Duration  string `json:"duration"`
 		} `json:"streams"`
 	}
 	if err := json.Unmarshal(data, &report); err != nil {
@@ -43,9 +45,13 @@ func ProbeFile(ctx context.Context, binary, filename string) (Info, error) {
 	for _, stream := range report.Streams {
 		if stream.CodecType == "video" && info.Width == 0 {
 			info.Width, info.Height, info.VideoCodec = stream.Width, stream.Height, stream.CodecName
+			info.VideoDuration, _ = strconv.ParseFloat(stream.Duration, 64)
 		}
 		if stream.CodecType == "audio" {
 			info.HasAudio = true
+			if info.AudioDuration == 0 {
+				info.AudioDuration, _ = strconv.ParseFloat(stream.Duration, 64)
+			}
 		}
 	}
 	if info.Width <= 0 || info.Height <= 0 {
