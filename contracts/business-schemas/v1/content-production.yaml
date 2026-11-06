@@ -18,6 +18,7 @@ schemas:
         description: Versioned JSON Schema. Each property may declare editable; absent or false means fixed. Required and range validation remains server-side.
         properties:
           properties: {type: object, additionalProperties: {ref: ComposeTemplateParameter}}
+      default_params: {type: object, additionalProperties: true, description: Deployment defaults for form prefill; saved strategies store independent complete values.}
       status: {type: string, enum: [active, inactive]}
   DynamicPIPEndingV1Config:
     type: object
