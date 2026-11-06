@@ -185,7 +185,7 @@ func TestCommitComposeOutputWritesAssetAndSuccessInOneTransaction(t *testing.T) 
 		WithArgs(out.Name, "", int64(7), 1, nil, int64(42), int64(9), int64(77), int64(3), "basic_cut", uint32(1), "outputs/final", int64(1024), "abc", out.Media, "pending_publish", int64(11), now, now).
 		WillReturnResult(sqlmock.NewResult(55, 1))
 	mock.ExpectExec("UPDATE composite_outputs SET file_name").WithArgs(model.ComposeOutputFileName(out.Name, 55, ".mp4"), int64(55)).WillReturnResult(sqlmock.NewResult(0, 1))
-	mock.ExpectExec("UPDATE compose_tasks SET status = 'success'").
+	mock.ExpectExec("UPDATE compose_tasks SET status = 'success', error_code = '', error_message = ''").
 		WithArgs("outputs/final", int64(55), now, now, int64(77), int64(9), 1, now).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectExec("UPDATE compose_task_attempts a JOIN compose_tasks t").
@@ -209,7 +209,7 @@ func TestCommitComposeOutputRollsBackWhenTheTaskRowIsGone(t *testing.T) {
 	now := time.Date(2026, 10, 14, 9, 7, 0, 0, time.UTC)
 	mock.ExpectBegin()
 	mock.ExpectExec("INSERT INTO `composite_outputs`").WillReturnResult(sqlmock.NewResult(55, 1))
-	mock.ExpectExec("UPDATE compose_tasks SET status = 'success'").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec("UPDATE compose_tasks SET status = 'success', error_code = '', error_message = ''").WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectRollback()
 	if _, err := commitComposeOutput(db, composeOutputFixture(77), "outputs/final", 9, 1, closingCommitStep(now), now); !errors.Is(err, ErrComposeCommitLost) {
 		t.Fatalf("want ErrComposeCommitLost, got %v", err)

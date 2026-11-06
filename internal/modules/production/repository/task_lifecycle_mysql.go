@@ -241,7 +241,7 @@ func commitComposeOutput(db *gorm.DB, out model.CompositeOutput, outputKey strin
 				return err
 			}
 		}
-		result := tx.Exec(`UPDATE compose_tasks SET status = 'success', output_object_key = ?, composite_output_id = ?, finished_at = ?, progress = 100, cancel_requested = 0, updated_at = ? WHERE id = ? AND claimed_node_id = ? AND attempt_count = ? AND status = 'running' AND cancel_requested = 0 AND lease_expires_at > ?`, outputKey, out.ID, now, now, out.TaskID, nodeID, attempt, now)
+		result := tx.Exec(`UPDATE compose_tasks SET status = 'success', error_code = '', error_message = '', output_object_key = ?, composite_output_id = ?, finished_at = ?, progress = 100, cancel_requested = 0, updated_at = ? WHERE id = ? AND claimed_node_id = ? AND attempt_count = ? AND status = 'running' AND cancel_requested = 0 AND lease_expires_at > ?`, outputKey, out.ID, now, now, out.TaskID, nodeID, attempt, now)
 		if result.Error != nil {
 			return result.Error
 		}
