@@ -7,11 +7,18 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/minio/minio-go/v7"
 )
 
 var ErrObjectConflict = errors.New("an immutable object already contains different bytes")
+
+// ContentClaims permanently binds a storage location to one expected payload.
+// Same-content retries remain valid even if an earlier upload was interrupted.
+type ContentClaims interface {
+	Claim(context.Context, string, string, int64) (bool, error)
+}
 
 // ImmutableStore is the capability required by formal uploads and migration.
 // Put remains the replacement operation used for the slice library index.
@@ -61,19 +68,34 @@ func (s *minioStore) PutImmutable(ctx context.Context, key string, body io.Reade
 	if size <= 0 {
 		return errors.New("immutable object must not be empty")
 	}
-	err := s.matches(ctx, key, size, digest)
+	if s.claims == nil {
+		return errors.New("immutable uploads require shared content claims")
+	}
+	digest = strings.ToLower(strings.TrimSpace(digest))
+	bucket, object, err := s.resolve(key)
+	if err != nil {
+		return err
+	}
+	// Durable S3 locations identify the configured storage by bucket, not by
+	// an endpoint alias; HTTP/HTTPS or hostname changes must not bypass claims.
+	identity := DigestOf([]byte(bucket + "\n" + object))
+	claimed, err := s.claims.Claim(ctx, identity, digest, size)
+	if err != nil {
+		return fmt.Errorf("claim immutable object: %w", err)
+	}
+	if !claimed {
+		return ErrObjectConflict
+	}
+	err = s.matches(ctx, key, size, digest)
 	if err == nil {
 		return nil
 	}
 	if !errors.Is(err, ErrObjectNotFound) {
 		return err
 	}
-	bucket, object, err := s.resolve(key)
-	if err != nil {
-		return err
-	}
-	// A single conditional PUT closes the race between checking and uploading.
-	// Formal media are bounded by the existing source/output size configuration.
+	// Shared claims reject different payloads before touching the bucket. Some
+	// S3-compatible backends ignore conditional PUT, so the header is additional
+	// protection only. Concurrent writers admitted here have identical bytes.
 	options := minio.PutObjectOptions{ContentType: contentType, SendContentMd5: true, DisableMultipart: true, UserMetadata: map[string]string{"sha256": digest}}
 	options.SetMatchETagExcept("*")
 	_, err = s.client.PutObject(ctx, bucket, object, body, size, options)

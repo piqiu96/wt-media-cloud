@@ -63,6 +63,7 @@ func TestImmutableUploadIsIdempotentAndRejectsConflictingBytes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	s.claims = &testClaims{values: map[string]string{}}
 	key, _ := s.Reference("media-ku/material/42.mp4")
 	for _, body := range []string{"video-A", "video-A", "video-B"} {
 		err = s.PutImmutable(context.Background(), key, strings.NewReader(body), int64(len(body)), "video/mp4", DigestOf([]byte(body)))
@@ -76,5 +77,32 @@ func TestImmutableUploadIsIdempotentAndRejectsConflictingBytes(t *testing.T) {
 	}
 	if string(stored) != "video-A" || puts != 1 {
 		t.Fatalf("stored=%q puts=%d", stored, puts)
+	}
+}
+
+type testClaims struct {
+	sync.Mutex
+	values map[string]string
+}
+
+func (c *testClaims) Claim(_ context.Context, key, digest string, size int64) (bool, error) {
+	c.Lock()
+	defer c.Unlock()
+	identity := fmt.Sprintf("%s:%d", digest, size)
+	if prior, ok := c.values[key]; ok {
+		return prior == identity, nil
+	}
+	c.values[key] = identity
+	return true, nil
+}
+
+func TestImmutableUploadFailsClosedWithoutSharedClaims(t *testing.T) {
+	s, err := newMinioStore(testStorageConfig("127.0.0.1:1"), testCredential())
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = s.PutImmutable(context.Background(), "media-ku/material/42.mp4", strings.NewReader("video-A"), 7, "video/mp4", DigestOf([]byte("video-A")))
+	if err == nil || !strings.Contains(err.Error(), "claims") {
+		t.Fatalf("must refuse an uncoordinated upload: %v", err)
 	}
 }

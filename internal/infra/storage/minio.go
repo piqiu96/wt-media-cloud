@@ -26,6 +26,7 @@ type minioStore struct {
 	prefix       string
 	legacyBucket string
 	legacyPrefix string
+	claims       ContentClaims
 	// now is injectable so that a grant's expiry is asserted against a fixed
 	// clock rather than against whatever the test's own sleep produced.
 	now func() time.Time

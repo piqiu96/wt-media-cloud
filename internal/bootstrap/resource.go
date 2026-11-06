@@ -18,6 +18,7 @@ import (
 	"github.com/wt-media/wt-media-cloud/internal/infra/logger"
 	"github.com/wt-media/wt-media-cloud/internal/infra/metrics"
 	"github.com/wt-media/wt-media-cloud/internal/infra/storage"
+	storagerepository "github.com/wt-media/wt-media-cloud/internal/infra/storage/repository"
 	"github.com/wt-media/wt-media-cloud/internal/infra/tracing"
 	profileservice "github.com/wt-media/wt-media-cloud/internal/modules/profilebinding/service"
 	"github.com/wt-media/wt-media-cloud/internal/shared/agenttoken"
@@ -242,7 +243,7 @@ func storageResource() resourceStep {
 		name: "storage",
 		open: func() (func() error, error) {
 			cfg := config.Get()
-			if err := storage.Initialize(cfg.Storage.ObjectStorage, cfg.Credentials.ObjectStorage); err != nil {
+			if err := storage.Initialize(cfg.Storage.ObjectStorage, cfg.Credentials.ObjectStorage, storagerepository.ContentClaims{DB: database.DB()}); err != nil {
 				return nil, err
 			}
 			return storage.Close, nil
