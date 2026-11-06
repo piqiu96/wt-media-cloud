@@ -44,6 +44,9 @@ const menuItems = [
     { title: '代理管理', path: '/proxies', icon: 'link' },
     { title: '社媒账号', path: '/accounts', icon: 'user' },
   ] },
+  { value: 'operation-tools', title: '运营工具', icon: 'tools', children: [
+    { title: '文件管理', path: '/files', icon: 'folder' },
+  ] },
   { value: 'analytics', title: '数据分析', icon: 'chart-bar', children: [
     { title: '数据统计', path: '/stats', icon: 'chart-bar' },
   ] },
