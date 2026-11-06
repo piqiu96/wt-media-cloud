@@ -16,9 +16,9 @@ const PAGES = [
   ['合成策略', 'src/modules/compose/pages/ComposeStrategyPage.vue', 'load', 'server'],
   ['合成任务', 'src/modules/compose/pages/ComposeTasksPage.vue', 'load', 'server'],
   ['成片管理', 'src/modules/compose/pages/MyOutputsPage.vue', 'load', 'if (resetPage) pagination.value.current = 1'],
-  ['用户管理', 'src/apps/cloud/pages/users/UsersPage.vue', 'loadAll'],
-  ['运营团队', 'src/apps/cloud/pages/users/TeamsPage.vue', 'loadAll'],
-  ['类目管理', 'src/apps/cloud/pages/users/CategoriesPage.vue', 'loadCategories'],
+  ['用户管理', 'src/apps/cloud/pages/users/UsersPage.vue', 'loadAll', 'client'],
+  ['运营团队', 'src/apps/cloud/pages/users/TeamsPage.vue', 'loadAll', 'client'],
+  ['类目管理', 'src/apps/cloud/pages/users/CategoriesPage.vue', 'loadCategories', 'client'],
 ]
 
 function read(path) {
@@ -50,6 +50,23 @@ function serverLoader(path, client, overrides = {}) {
 }
 
 const SERVER_PAGES = PAGES.filter(([, , , pagination]) => pagination === 'server')
+const MANAGEMENT_PAGES = PAGES.filter(([, , , pagination]) => pagination === 'client')
+
+function managementLoader(path, loader, request) {
+  const source = read(path)
+  const start = source.indexOf(`async function ${loader}(`)
+  const load = source.slice(start, source.indexOf('\n}', start) + 2)
+  const ref = (value) => ({ value })
+  const state = {
+    client: { listUsers: request, listTeams: request, listCategories: request },
+    users: ref([{ id: 'previous' }]), teams: ref([{ id: 'previous' }]), categories: ref([{ id: 'previous' }]),
+    filters: ref({ keyword: 'query' }), keyword: ref('query'), canManage: ref(true),
+    pagination: ref({ current: 3, pageSize: 10 }), loading: ref(false), error: ref('previous notice'),
+    friendlyError: (error) => error.message,
+  }
+  const run = new Function(...Object.keys(state), `${load}; return ${loader}({ quiet: true })`)
+  return { state, run: () => run(...Object.values(state)) }
+}
 
 describe('list pages auto refresh', () => {
   it.each(PAGES)('%s refreshes on a timer instead of a button', (_name, path, loader, pageGuard = 'if (!quiet) pagination.value.current = 1') => {
@@ -60,9 +77,35 @@ describe('list pages auto refresh', () => {
     expect(source).toContain('shouldSkip: () =>')
     // quiet 一遍不重置页码、不闪整页 loading。
     expect(source).toContain('if (!quiet) loading.value = true')
-    if (pageGuard !== 'server') expect(source).toContain(pageGuard)
+    if (!['server', 'client'].includes(pageGuard)) expect(source).toContain(pageGuard)
     // 刷新按钮已移除（查询/重置按钮不受影响）。
     expect(source).not.toContain('>刷新<')
+  })
+
+  it.each(MANAGEMENT_PAGES)('%s preserves the current client page during polling and clamps an empty result', async (_name, path, loader) => {
+    const request = vi.fn().mockResolvedValue(Array.from({ length: 35 }, (_, id) => ({ id })))
+    const { state, run } = managementLoader(path, loader, request)
+    await run()
+    expect(state.pagination.value).toEqual({ current: 3, pageSize: 10 })
+    expect(state.filters.value).toEqual({ keyword: 'query' })
+    expect(state.keyword.value).toBe('query')
+    expect(state.error.value).toBe('previous notice')
+    expect(state.loading.value).toBe(false)
+    request.mockResolvedValue([])
+    await run()
+    expect(state.pagination.value.current).toBe(1)
+  })
+
+  it.each(MANAGEMENT_PAGES)('%s retains the last client result when polling fails', async (_name, path, loader) => {
+    const request = vi.fn().mockRejectedValue(new Error('offline'))
+    const { state, run } = managementLoader(path, loader, request)
+    await run()
+    expect(state.pagination.value.current).toBe(3)
+    expect(state.users.value).toEqual([{ id: 'previous' }])
+    expect(state.teams.value).toEqual([{ id: 'previous' }])
+    expect(state.categories.value).toEqual([{ id: 'previous' }])
+    expect(state.error.value).toBe('previous notice')
+    expect(state.loading.value).toBe(false)
   })
 
   it.each(SERVER_PAGES)('%s quietly rereads the current server page and preserves filters', async (_name, path) => {
