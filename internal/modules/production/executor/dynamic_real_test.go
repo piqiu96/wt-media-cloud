@@ -52,7 +52,7 @@ func TestDynamicRealRender(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := plan.(ResourcePlan).Compile(RenderInput{Source: inspect(fixture.Source), Resources: map[string]MediaInput{"intro": inspect(fixture.Intro), "ad": inspect(fixture.Ad), "ending": inspect(fixture.Ending)}, Defaults: fixture.Defaults, Seed: 20261106, OutputPath: fixture.Output})
+	result, err := plan.Compile(RenderInput{Source: inspect(fixture.Source), Resources: map[string]MediaInput{"intro": inspect(fixture.Intro), "ad": inspect(fixture.Ad), "ending": inspect(fixture.Ending)}, Defaults: fixture.Defaults, Seed: 20261106, OutputPath: fixture.Output})
 	if err != nil {
 		t.Fatal(err)
 	}

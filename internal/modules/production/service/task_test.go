@@ -3,13 +3,13 @@ package service
 import (
 	"encoding/json"
 	"errors"
+	"github.com/wt-media/wt-media-cloud/internal/testutil/composefixture"
 	"sort"
 	"strings"
 	"testing"
 	"time"
 
 	identity "github.com/wt-media/wt-media-cloud/internal/modules/identity/service"
-	"github.com/wt-media/wt-media-cloud/internal/modules/production/executor"
 	"github.com/wt-media/wt-media-cloud/internal/modules/production/model"
 	"github.com/wt-media/wt-media-cloud/internal/modules/production/repository"
 )
@@ -192,7 +192,7 @@ func (s *taskMaterialMemoryStore) FindMaterial(id int64) (model.Material, bool, 
 
 func composeTaskFixture() (*ComposeTaskService, *taskMemoryStore, *strategyMemoryStore, *taskMaterialMemoryStore, identity.PublicUser) {
 	team := identity.TeamID(7)
-	definition := executor.BasicCutV1()
+	definition := composefixture.Cut()
 	strategies := &strategyMemoryStore{
 		items:    []model.ComposeStrategy{{ID: 5, TeamID: 7, CategoryID: 1, TemplateID: 3, TemplateVersion: 1, Name: "切段", Config: json.RawMessage(`{"start_seconds":0,"end_seconds":10}`), Status: "enabled", OperatorID: operatorIDPtr(9), CreatedBy: 9}},
 		template: model.ComposeTemplate{ID: 3, Code: definition.Code, Version: definition.Version, Schema: definition.Schema, ExecutorID: definition.ExecutorID, Status: "active"},
@@ -243,7 +243,7 @@ func TestCreateComposeTasksCreatesPerItemWithMergedSnapshot(t *testing.T) {
 	if first.DisplayName != "素材一 · 切段" {
 		t.Fatalf("task name must capture creation-time material and strategy: %q", first.DisplayName)
 	}
-	if first.MaterialID != 42 || usageIDValue(first.MaterialUsageID) != 91 || first.StrategyID != 5 || first.TeamID != 7 || first.CategoryID != 1 || first.TemplateCode != "basic_cut" || first.TemplateVersion != 1 || first.Status != model.ComposeTaskPending || first.CreatedBy != 9 {
+	if first.MaterialID != 42 || usageIDValue(first.MaterialUsageID) != 91 || first.StrategyID != 5 || first.TeamID != 7 || first.CategoryID != 1 || first.TemplateCode != "fixture_cut" || first.TemplateVersion != 1 || first.Status != model.ComposeTaskPending || first.CreatedBy != 9 {
 		t.Fatalf("first task facts drifted: %+v", first)
 	}
 	snapshot := composeTaskSnapshot(t, first.ConfigSnapshot)
@@ -336,7 +336,7 @@ func TestCreateComposeTasksRejectsAnOverlongNameBeforeAnyWrite(t *testing.T) {
 
 func TestGuideTaskFreezesStrategyAddressAndRejectsTaskAddressOverride(t *testing.T) {
 	svc, tasks, strategies, _, actor := composeTaskFixture()
-	definition := executor.GuidePIPV1()
+	definition := composefixture.Resource()
 	strategies.template = model.ComposeTemplate{ID: 3, Code: definition.Code, Version: 1, Schema: definition.Schema, ExecutorID: definition.ExecutorID, Status: "active"}
 	strategies.items[0].Config = json.RawMessage(`{"guide_video_url":"https://media.example.com/guide.mp4","insert_seconds":2,"guide_duration_seconds":0,"max_duration_seconds":0}`)
 	input := CreateComposeTasksInput{StrategyID: 5, Items: []CreateComposeTaskItemInput{{MaterialID: 42, RequestKey: "rk-guide-0001"}}}

@@ -14,7 +14,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/wt-media/wt-media-cloud/internal/config"
 	"github.com/wt-media/wt-media-cloud/internal/infra/storage"
 	files "github.com/wt-media/wt-media-cloud/internal/modules/files/service"
 	"github.com/wt-media/wt-media-cloud/internal/modules/production/compose"
@@ -115,11 +114,7 @@ func resolveFileResource(ctx context.Context, token string) (frozenResource, err
 // prepareResources handles declarations, immutable facts and lease ownership.
 // Rendering style and timeline math stay entirely inside the executor.
 func prepareResources(ctx context.Context, deps ComposeExecutorDeps, task model.ComposeTask, nodeID int64, plan executor.Plan, inputPath, runDir string) (map[string]string, json.RawMessage, error) {
-	rp, ok := plan.(executor.ResourcePlan)
-	if !ok {
-		return nil, nil, errors.New("executor lacks common resource entry")
-	}
-	requests, err := rp.Resources(task.TechnicalConfig)
+	requests, err := plan.Resources(task.TechnicalConfig)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -239,7 +234,7 @@ func prepareResources(ctx context.Context, deps ComposeExecutorDeps, task model.
 		m.Path = paths[r.Name]
 		mediaInputs[r.Name] = m
 	}
-	render, err := rp.Compile(executor.RenderInput{Source: source, Resources: mediaInputs, Defaults: task.TechnicalConfig, Seed: task.RandomSeed, OutputPath: filepath.Join(runDir, "output.mp4")})
+	render, err := plan.Compile(executor.RenderInput{Source: source, Resources: mediaInputs, Defaults: task.TechnicalConfig, Seed: task.RandomSeed, OutputPath: filepath.Join(runDir, "output.mp4")})
 	if err != nil {
 		return nil, nil, err
 	}
@@ -260,7 +255,7 @@ func inspectResource(ctx context.Context, deps ComposeExecutorDeps, path string)
 	if deps.InspectResource != nil {
 		return deps.InspectResource(ctx, path)
 	}
-	return compose.InspectMedia(ctx, config.Get().Media.FFmpeg.FFprobePath, path)
+	return executor.MediaInput{}, errors.New("resource inspector is not configured")
 }
 func choosePoolResource(ctx context.Context, store storage.Store, key string, seed int64) (frozenResource, error) {
 	// This is a current configuration key, not an old stored logical reference.

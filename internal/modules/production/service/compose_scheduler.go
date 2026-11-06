@@ -8,7 +8,6 @@ import (
 
 	"encoding/json"
 	identity "github.com/wt-media/wt-media-cloud/internal/modules/identity/service"
-	"github.com/wt-media/wt-media-cloud/internal/modules/production/executor"
 	"github.com/wt-media/wt-media-cloud/internal/modules/production/model"
 	"github.com/wt-media/wt-media-cloud/internal/modules/production/repository"
 )
@@ -226,7 +225,7 @@ func validateExecutionStrategy(s model.ComposeStrategy) error {
 	if !found || tpl.Status != "active" {
 		return ErrStrategyTemplateUnavailable
 	}
-	def, err := executor.DeployedDefinition(tpl.Code, tpl.Version)
+	def, err := deployedTemplate(tpl.Code, tpl.Version)
 	if err != nil || tpl.ExecutorID != def.ExecutorID || !sameJSON(tpl.Schema, def.Schema) {
 		return ErrStrategyTemplateUnavailable
 	}

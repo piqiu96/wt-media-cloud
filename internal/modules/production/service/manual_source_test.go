@@ -3,10 +3,10 @@ package service
 import (
 	"encoding/json"
 	"errors"
+	"github.com/wt-media/wt-media-cloud/internal/testutil/composefixture"
 	"testing"
 
 	identity "github.com/wt-media/wt-media-cloud/internal/modules/identity/service"
-	"github.com/wt-media/wt-media-cloud/internal/modules/production/executor"
 	"github.com/wt-media/wt-media-cloud/internal/modules/production/model"
 	"github.com/wt-media/wt-media-cloud/internal/modules/production/repository"
 )
@@ -104,7 +104,7 @@ func TestSourceCommandKeepsOutputReadScopeBeforeDerivingPrivateHistory(t *testin
 }
 
 func TestSourceCommandUsesOriginalTemplateSchemaForOverrides(t *testing.T) {
-	definition := executor.GuideInsertV1()
+	definition := composefixture.Resource()
 	original := model.ComposeStrategy{OutputSettings: []model.ComposeOutputSetting{{Key: "old-group", Name: "原设置", Copies: 1, Platforms: []string{"baidu"}, Params: map[string]any{"guide_video_url": "https://media.example.com/original.mp4", "insert_seconds": 1, "guide_duration_seconds": 0, "max_duration_seconds": 0}}}}
 	for _, tt := range []struct {
 		name    string

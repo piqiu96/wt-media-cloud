@@ -27,7 +27,7 @@ var errGuideUnsafe = errors.New("guide endpoint is not public HTTPS")
 // Proxies are disabled; each redirect is checked and each destination is
 // resolved and pinned before a connection is opened.
 func DownloadGuide(ctx context.Context, rawURL, path string) error {
-	if err := executor.ValidateGuideURL(rawURL); err != nil {
+	if err := executor.ValidatePublicMediaURL(rawURL); err != nil {
 		return err
 	}
 	transport := &http.Transport{
@@ -56,7 +56,7 @@ func DownloadGuide(ctx context.Context, rawURL, path string) error {
 	}
 	defer transport.CloseIdleConnections()
 	client := &http.Client{Transport: transport, Timeout: 5 * time.Minute, CheckRedirect: func(next *http.Request, via []*http.Request) error {
-		if len(via) >= 3 || executor.ValidateGuideURL(next.URL.String()) != nil {
+		if len(via) >= 3 || executor.ValidatePublicMediaURL(next.URL.String()) != nil {
 			return http.ErrUseLastResponse
 		}
 		return nil

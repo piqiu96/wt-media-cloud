@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/wt-media/wt-media-cloud/internal/testutil/composefixture"
 	"os"
 	"path/filepath"
 	"strings"
@@ -87,7 +88,7 @@ func fixtureInput(t *testing.T, dir, spec string) string {
 func newRunner(t *testing.T) (*Runner, *Workspace) {
 	t.Helper()
 	ffmpegPath, ffprobePath := fixtureTools(t)
-	registry, err := executor.NewRegistry(executor.BasicCutV1())
+	registry, err := executor.NewRegistry(composefixture.Cut())
 	if err != nil {
 		t.Fatalf("NewRegistry() error = %v", err)
 	}
@@ -104,7 +105,7 @@ func newRunner(t *testing.T) (*Runner, *Workspace) {
 
 func cutRequest(inputPath string) Request {
 	return Request{
-		TemplateCode:    "basic_cut",
+		TemplateCode:    "fixture_cut",
 		TemplateVersion: 1,
 		Params:          json.RawMessage(`{"start_seconds": 5, "end_seconds": 12}`),
 		InputPath:       inputPath,

@@ -1,20 +1,15 @@
-package executor
+package composefixture
 
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"github.com/wt-media/wt-media-cloud/internal/modules/production/executor"
 	"strconv"
 )
 
-// basicCutSchema is the schema published with basic_cut v1. It declares exactly
-// the two parameters v1 can execute; asset keys (intro, outro, bgm) belong to
-// later template versions, after their resource contracts and execution
-// capabilities exist (ADR-0021 ruling 5).
-//
-// Per-property `title` is the display label the shared strategy page renders
-// its template-parameters section from — the form fields are whatever the
-// bound template's schema declares, never a fixed field list.
+// A deliberately minimal clip stand-in isolates lifecycle tests from template styling.
 const basicCutSchema = `{
 	"type": "object",
 	"properties": {
@@ -25,23 +20,23 @@ const basicCutSchema = `{
 	"additionalProperties": false
 }`
 
-// BasicCut is the executor for the basic_cut template: cut one input video to a
+// cutExecutor is the executor for the fixture_cut template: cut one input video to a
 // segment and re-encode it as H.264/AAC MP4.
-type BasicCut struct{}
+type cutExecutor struct{}
 
-// BasicCutV1 returns the definition of basic_cut version 1: the identity, the
+// Cut returns the definition of fixture_cut version 1: the identity, the
 // schema published with it, and this code as its executor.
-func BasicCutV1() Definition {
-	return Definition{
-		Code:       "basic_cut",
+func Cut() executor.Definition {
+	return executor.Definition{
+		Code:       "fixture_cut",
 		Version:    1,
 		Schema:     json.RawMessage(basicCutSchema),
-		ExecutorID: "basic_cut_v1",
-		Executor:   BasicCut{},
+		ExecutorID: "fixture_cut_v1",
+		Executor:   cutExecutor{},
 	}
 }
 
-// cutPlan is the validated form of basic_cut parameters.
+// cutPlan is the validated form of fixture_cut parameters.
 type cutPlan struct {
 	startSeconds int64
 	endSeconds   int64
@@ -49,21 +44,21 @@ type cutPlan struct {
 
 // ValidateParams accepts only the object the v1 schema declares, with integer
 // bounds the schema states: a non-negative start strictly before the end.
-func (BasicCut) ValidateParams(raw json.RawMessage) (Plan, error) {
+func (cutExecutor) ValidateParams(raw json.RawMessage) (executor.Plan, error) {
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &fields); err != nil {
-		return nil, fmt.Errorf("basic_cut v1 params are not a JSON object: %w", err)
+		return nil, fmt.Errorf("fixture_cut v1 params are not a JSON object: %w", err)
 	}
 	for name := range fields {
 		if name != "start_seconds" && name != "end_seconds" {
-			return nil, fmt.Errorf("basic_cut v1 has no parameter %q", name)
+			return nil, fmt.Errorf("fixture_cut v1 has no parameter %q", name)
 		}
 	}
 	if _, ok := fields["start_seconds"]; !ok {
-		return nil, fmt.Errorf("basic_cut v1 requires start_seconds")
+		return nil, fmt.Errorf("fixture_cut v1 requires start_seconds")
 	}
 	if _, ok := fields["end_seconds"]; !ok {
-		return nil, fmt.Errorf("basic_cut v1 requires end_seconds")
+		return nil, fmt.Errorf("fixture_cut v1 requires end_seconds")
 	}
 
 	start, err := integerParam(fields["start_seconds"], "start_seconds")
@@ -75,10 +70,10 @@ func (BasicCut) ValidateParams(raw json.RawMessage) (Plan, error) {
 		return nil, err
 	}
 	if start < 0 {
-		return nil, fmt.Errorf("basic_cut v1 start_seconds must not be negative, got %d", start)
+		return nil, fmt.Errorf("fixture_cut v1 start_seconds must not be negative, got %d", start)
 	}
 	if start >= end {
-		return nil, fmt.Errorf("basic_cut v1 needs start_seconds (%d) strictly before end_seconds (%d)", start, end)
+		return nil, fmt.Errorf("fixture_cut v1 needs start_seconds (%d) strictly before end_seconds (%d)", start, end)
 	}
 	return cutPlan{startSeconds: start, endSeconds: end}, nil
 }
@@ -89,15 +84,15 @@ func integerParam(raw json.RawMessage, name string) (int64, error) {
 	// integer must not.
 	trimmed := bytes.TrimSpace(raw)
 	if len(trimmed) == 0 || (trimmed[0] != '-' && (trimmed[0] < '0' || trimmed[0] > '9')) {
-		return 0, fmt.Errorf("basic_cut v1 %s must be an integer, got %s", name, string(trimmed))
+		return 0, fmt.Errorf("fixture_cut v1 %s must be an integer, got %s", name, string(trimmed))
 	}
 	var number json.Number
 	if err := json.Unmarshal(raw, &number); err != nil {
-		return 0, fmt.Errorf("basic_cut v1 %s must be an integer: %w", name, err)
+		return 0, fmt.Errorf("fixture_cut v1 %s must be an integer: %w", name, err)
 	}
 	value, err := number.Int64()
 	if err != nil {
-		return 0, fmt.Errorf("basic_cut v1 %s must be an integer, got %s", name, number.String())
+		return 0, fmt.Errorf("fixture_cut v1 %s must be an integer, got %s", name, number.String())
 	}
 	return value, nil
 }
@@ -120,4 +115,13 @@ func (p cutPlan) FFmpegArguments(inputPath, outputPath string) []string {
 		"-movflags", "+faststart",
 		"-y", outputPath,
 	}
+}
+
+func (p cutPlan) Resources(json.RawMessage) ([]executor.ResourceRequest, error) { return nil, nil }
+func (p cutPlan) Compile(in executor.RenderInput) (executor.RenderResult, error) {
+	start, end := p.SegmentMS()
+	if in.Source.Duration*1000 < float64(end) {
+		return executor.RenderResult{}, errors.New("source too short")
+	}
+	return executor.RenderResult{Arguments: p.FFmpegArguments(in.Source.Path, in.OutputPath), DurationMS: end - start}, nil
 }

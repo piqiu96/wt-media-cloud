@@ -20,7 +20,7 @@ func resolveComposeUncertain(db *gorm.DB, taskID, actorID int64, evidence string
 	err := db.Transaction(func(tx *gorm.DB) error {
 		// The status guard serializes competing administrators. The output guards
 		// prevent requeueing an uncertain task whose success was already saved.
-		result := tx.Exec(`UPDATE compose_tasks SET status = 'pending', claimed_node_id = NULL, lease_expires_at = NULL, heartbeat_at = NULL, next_attempt_at = NULL, cancel_requested = 0, stage = '', progress = 0, started_at = NULL, finished_at = NULL, max_attempts = max_attempts + 1, updated_at = ? WHERE id = ? AND status = 'failed' AND error_code = 'execution_uncertain' AND attempt_count > 0 AND composite_output_id IS NULL AND output_object_key = '' AND NOT EXISTS (SELECT 1 FROM composite_outputs WHERE compose_task_id = ?)`, now, taskID, taskID)
+		result := tx.Exec(`UPDATE compose_tasks SET status = 'pending', error_code = '', error_message = '', claimed_node_id = NULL, lease_expires_at = NULL, heartbeat_at = NULL, next_attempt_at = NULL, cancel_requested = 0, stage = '', progress = 0, started_at = NULL, finished_at = NULL, max_attempts = max_attempts + 1, updated_at = ? WHERE id = ? AND status = 'failed' AND error_code = 'execution_uncertain' AND attempt_count > 0 AND composite_output_id IS NULL AND output_object_key = '' AND NOT EXISTS (SELECT 1 FROM composite_outputs WHERE compose_task_id = ?)`, now, taskID, taskID)
 		if result.Error != nil {
 			return result.Error
 		}

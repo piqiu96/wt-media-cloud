@@ -8,16 +8,16 @@ import (
 )
 
 func TestRegistryLookupReturnsTheDefinitionItWasBuiltWith(t *testing.T) {
-	registry, err := NewRegistry(BasicCutV1())
+	registry, err := NewRegistry(DynamicPIPEndingV1())
 	if err != nil {
 		t.Fatalf("NewRegistry() error = %v", err)
 	}
 
-	definition, err := registry.Lookup("basic_cut", 1)
+	definition, err := registry.Lookup("dynamic_pip_ending", 1)
 	if err != nil {
 		t.Fatalf("Lookup() error = %v", err)
 	}
-	if definition.Code != "basic_cut" || definition.Version != 1 {
+	if definition.Code != "dynamic_pip_ending" || definition.Version != 1 {
 		t.Fatalf("Lookup() = (%q, %d), want (basic_cut, 1)", definition.Code, definition.Version)
 	}
 	if definition.Executor == nil {
@@ -26,17 +26,17 @@ func TestRegistryLookupReturnsTheDefinitionItWasBuiltWith(t *testing.T) {
 	if len(definition.Schema) == 0 {
 		t.Fatal("Lookup().Schema is empty, want the schema published with the version")
 	}
-	if definition.ExecutorID != "basic_cut_v1" {
-		t.Fatalf("Lookup().ExecutorID = %q, want basic_cut_v1", definition.ExecutorID)
+	if definition.ExecutorID != "dynamic_pip_ending_v1" {
+		t.Fatalf("Lookup().ExecutorID = %q, want dynamic_pip_ending_v1", definition.ExecutorID)
 	}
 }
 
 func TestRegistryRejectsDuplicateTemplateVersions(t *testing.T) {
-	_, err := NewRegistry(BasicCutV1(), BasicCutV1())
+	_, err := NewRegistry(DynamicPIPEndingV1(), DynamicPIPEndingV1())
 	if err == nil {
 		t.Fatal("NewRegistry() = nil error, want a rejection when one (code, version) is registered twice")
 	}
-	if !strings.Contains(err.Error(), "basic_cut") || !strings.Contains(err.Error(), "duplicate") {
+	if !strings.Contains(err.Error(), "dynamic_pip_ending") || !strings.Contains(err.Error(), "duplicate") {
 		t.Fatalf("NewRegistry() error = %v, want it to name the duplicated version", err)
 	}
 }
@@ -45,7 +45,7 @@ func TestRegistryRejectsDuplicateTemplateVersions(t *testing.T) {
 // impossible to paper over: no database record can claim an executable
 // capability that no shipped code provides.
 func TestRegistryRejectsAnUnknownTemplateVersion(t *testing.T) {
-	registry, err := NewRegistry(BasicCutV1())
+	registry, err := NewRegistry(DynamicPIPEndingV1())
 	if err != nil {
 		t.Fatalf("NewRegistry() error = %v", err)
 	}
@@ -54,7 +54,7 @@ func TestRegistryRejectsAnUnknownTemplateVersion(t *testing.T) {
 		code    string
 		version uint32
 	}{
-		{"basic_cut", 2},
+		{"dynamic_pip_ending", 2},
 		{"other_cut", 1},
 		{"", 0},
 	} {
@@ -89,6 +89,18 @@ func TestDeployedTemplateTaskEditabilityIsExplicitAndGuideURLLocked(t *testing.T
 			if property.Editable == nil || *property.Editable != want {
 				t.Errorf("%s.%s editable=%v want %v", definition.Code, name, property.Editable, want)
 			}
+		}
+	}
+}
+
+func TestOnlyCurrentCompositionTemplateIsDeployed(t *testing.T) {
+	definitions := DeployedDefinitions()
+	if len(definitions) != 1 || definitions[0].Code != "dynamic_pip_ending" {
+		t.Fatalf("retired templates are still executable: %+v", definitions)
+	}
+	for _, retired := range []string{"basic_cut", "guide_insert", "guide_pip"} {
+		if _, err := DeployedDefinition(retired, 1); !errors.Is(err, ErrUnknownTemplateVersion) {
+			t.Fatalf("retired %s lookup=%v", retired, err)
 		}
 	}
 }

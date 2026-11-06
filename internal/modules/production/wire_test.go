@@ -286,7 +286,7 @@ func TestComposeTemplateBodyMatchesContract(t *testing.T) {
 	if !ok {
 		t.Fatal("missing ComposeTemplate schema")
 	}
-	if got, want := marshalledKeys(t, model.ComposeTemplate{}), schemaPropertyNames(schema.Properties); !reflect.DeepEqual(got, want) {
+	if got, want := marshalledKeys(t, model.ComposeTemplate{DefaultParams:map[string]any{"start_seconds":0}}), schemaPropertyNames(schema.Properties); !reflect.DeepEqual(got, want) {
 		t.Errorf("ComposeTemplate keys = %v, contract = %v", got, want)
 	}
 }

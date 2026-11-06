@@ -90,7 +90,7 @@ func (f *outputLinkerFake) PresignObjectURL(_ context.Context, key string) (stri
 }
 
 func outputFixture(id int64) model.CompositeOutput {
-	return model.CompositeOutput{ID: id, OperatorID: ptrInt64(9), TeamID: 7, CategoryID: 1, MaterialID: 42, MaterialUsageID: ptrInt64(9), TaskID: 55, StrategyID: 3, TemplateCode: "basic_cut", TemplateVersion: 1, ObjectKey: "compose-outputs/55/output.mp4", FileSizeBytes: 1024, SHA256: "abc", Media: []byte(`{"duration_ms":900}`), PublishStatus: "pending_publish", CreatedBy: 9}
+	return model.CompositeOutput{ID: id, OperatorID: ptrInt64(9), TeamID: 7, CategoryID: 1, MaterialID: 42, MaterialUsageID: ptrInt64(9), TaskID: 55, StrategyID: 3, TemplateCode: "fixture_cut", TemplateVersion: 1, ObjectKey: "compose-outputs/55/output.mp4", FileSizeBytes: 1024, SHA256: "abc", Media: []byte(`{"duration_ms":900}`), PublishStatus: "pending_publish", CreatedBy: 9}
 }
 
 func newOutputService(store *outputMemoryStore, traces *outputTraceFakes, tasks *outputTaskFake, linker *outputLinkerFake) *ComposeOutputService {

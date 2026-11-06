@@ -44,7 +44,7 @@ type DynamicParams struct {
 	Transition  float64 `json:"transition_seconds"`
 }
 type DynamicPlan interface {
-	ResourcePlan
+	Plan
 	Timeline(source, intro, ad, tail float64, seed int64) (DynamicTimeline, error)
 }
 type dynamicPlan struct{ DynamicParams }
@@ -149,7 +149,7 @@ func ValidateMediaURL(value string) error {
 	if _, ok := FileResourceToken(value); ok {
 		return nil
 	}
-	return ValidateGuideURL(value)
+	return ValidatePublicMediaURL(value)
 }
 func parseDynamicDefaults(raw json.RawMessage) (DynamicDefaults, error) {
 	var c DynamicDefaults
@@ -173,8 +173,6 @@ func (DynamicExecutor) ValidateDefaults(raw json.RawMessage) error {
 	_, err := parseDynamicDefaults(raw)
 	return err
 }
-func (p dynamicPlan) SegmentMS() (int64, int64)             { return int64(p.Start * 1000), int64(p.End * 1000) }
-func (dynamicPlan) FFmpegArguments(string, string) []string { return nil }
 func (p dynamicPlan) Resources(raw json.RawMessage) ([]ResourceRequest, error) {
 	c, err := parseDynamicDefaults(raw)
 	if err != nil {
