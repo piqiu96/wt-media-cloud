@@ -51,6 +51,20 @@ type resourceStore struct {
 	statErr error
 }
 
+func (s *resourceStore) Reference(key string) (string, error) { return "s3://wt-media/" + key, nil }
+
+func TestPoolIndexUsesCurrentBucketWhileLegacyReadsRemainSeparate(t *testing.T) {
+	objects := &resourceStore{storeFake: newStoreFake()}
+	objects.objects["s3://wt-media/pool/index.json"] = []byte(`{"version":1,"clips":[{"location":"s3://wt-media/pool/one.mp4","size":9,"sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}]}`)
+	got, err := choosePoolResource(context.Background(), objects, "pool/index.json", 42)
+	if err != nil || got.Location != "s3://wt-media/pool/one.mp4" {
+		t.Fatalf("pool routed through legacy bucket: %+v %v", got, err)
+	}
+	if len(objects.opens) != 1 || objects.opens[0] != "s3://wt-media/pool/index.json" {
+		t.Fatalf("opens=%v", objects.opens)
+	}
+}
+
 func (s *resourceStore) Open(_ context.Context, key string) (io.ReadCloser, error) {
 	s.opens = append(s.opens, key)
 	b, ok := s.objects[key]
@@ -100,13 +114,13 @@ func TestPreparedRetryKeepsPoolChoiceAndRejectsChangedObject(t *testing.T) {
 	location := "s3://wt-media/file-ku/随机视频切片/tail_1.mp4"
 	store.objects[location] = tail
 	index, _ := json.Marshal(slices.Index{Version: 1, Clips: []slices.Clip{{Location: location, Size: int64(len(tail)), SHA256: hex.EncodeToString(sum[:])}}})
-	store.objects["pool/index.json"] = index
+	store.objects["s3://wt-media/pool/index.json"] = index
 	_, first, err := prepareResources(context.Background(), deps, task, 9, plan, input, t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
 	task.ExecutionManifest = ms.raw
-	delete(store.objects, "pool/index.json")
+	delete(store.objects, "s3://wt-media/pool/index.json")
 	objects.opens = nil
 	_, second, err := prepareResources(context.Background(), deps, task, 9, plan, input, t.TempDir())
 	if err != nil || !sameJSON(first, second) {

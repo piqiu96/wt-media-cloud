@@ -50,3 +50,17 @@ func TestDynamicRejectsInsufficientBackgroundAndInvalidInsertion(t *testing.T) {
 		t.Fatal("seed/budget is not stable")
 	}
 }
+
+func TestDynamicBoundarySegmentsNeedOnlyTheirActualTransition(t *testing.T) {
+	raw := json.RawMessage(`{"intro_video_url":"https://example.com/i.mp4","ad_video_url":"https://example.com/a.mp4","start_seconds":0,"end_seconds":0,"max_duration_seconds":60,"ad_start_min_seconds":10,"ad_start_max_seconds":10,"intro_pip_width":0.9,"ad_pip_width":0.92,"transition_seconds":1}`)
+	p, err := DynamicPIPEndingV1().Executor.ValidateParams(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = p.(DynamicPlan).Timeline(100, 1.5, 4, 6, 1); err != nil {
+		t.Fatalf("one outgoing transition fits the opening: %v", err)
+	}
+	if _, err = p.(DynamicPlan).Timeline(100, .9, 4, 6, 1); err == nil {
+		t.Fatal("opening shorter than its outgoing transition accepted")
+	}
+}

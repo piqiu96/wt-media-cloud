@@ -212,7 +212,11 @@ func (p dynamicPlan) Timeline(source, intro, ad, tail float64, seed int64) (Dyna
 	sourceStarts := []float64{p.Start, p.Start, p.Start + t.Insert, p.Start + t.Insert, 0}
 	cursor := 0.0
 	for i, d := range lengths {
-		if d <= 2*p.Transition {
+		connections := 2
+		if i == 0 || i == len(lengths)-1 {
+			connections = 1
+		}
+		if d <= float64(connections)*p.Transition {
 			return t, errors.New("segment is too short for transitions")
 		}
 		start := cursor

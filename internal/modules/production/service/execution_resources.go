@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/wt-media/wt-media-cloud/internal/config"
 	"github.com/wt-media/wt-media-cloud/internal/infra/storage"
@@ -262,6 +263,16 @@ func inspectResource(ctx context.Context, deps ComposeExecutorDeps, path string)
 	return compose.InspectMedia(ctx, config.Get().Media.FFmpeg.FFprobePath, path)
 }
 func choosePoolResource(ctx context.Context, store storage.Store, key string, seed int64) (frozenResource, error) {
+	// This is a current configuration key, not an old stored logical reference.
+	// Resolve it explicitly before reads so legacy material routing cannot move
+	// the newly published slice index back to the retiring bucket.
+	if !strings.HasPrefix(key, "s3://") {
+		var err error
+		key, err = storage.Reference(store, key)
+		if err != nil {
+			return frozenResource{}, err
+		}
+	}
 	reader, ok := store.(interface {
 		Open(context.Context, string) (io.ReadCloser, error)
 	})
