@@ -118,10 +118,10 @@ func runWorker(ctx context.Context) error {
 	defer stop()
 
 	config.MustInitializeRuntimePaths()
-	cfg, err := config.Load()
-	if err != nil {
+	if err := config.Initialize(); err != nil {
 		return fmt.Errorf("compose worker config: %w", err)
 	}
+	cfg := config.Get()
 	if err := logger.Initialize(cfg.Loggers); err != nil {
 		return fmt.Errorf("compose worker logger: %w", err)
 	}
