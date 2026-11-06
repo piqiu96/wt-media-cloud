@@ -3,11 +3,11 @@ import { computed, onUnmounted, watch } from 'vue'
 import BusinessSelect from '../../../shared/ui/fields/BusinessSelect.vue'
 import { createComposeClient } from '../../../shared/api/compose.js'
 import { useStrategyDirectory } from '../strategyDirectory.js'
-const props = defineProps({ modelValue: [String, Number], filters: { type: Object, default: () => ({}) }, disabled: Boolean, placeholder: String, status: String })
+const props = defineProps({ modelValue: [String, Number], filters: { type: Object, default: () => ({}) }, disabled: Boolean, placeholder: String, status: String, showAssignment: Boolean })
 const emit = defineEmits(['update:modelValue', 'detail'])
 const directory = useStrategyDirectory(createComposeClient())
 const { rows, total, loading, error, selected, hasMore } = directory
-const options = computed(() => [...new Map([...(selected.value ? [selected.value] : []), ...rows.value].map(row => [row.id, {value: row.id, label: row.name}])).values()])
+const options = computed(() => [...new Map([...(selected.value ? [selected.value] : []), ...rows.value].map(row => [row.id, {value: row.id, label: props.showAssignment && row.operator_name ? `${row.name} · ${row.operator_name}` : row.name}])).values()])
 let timer
 function search(term) { clearTimeout(timer); timer = setTimeout(() => directory.load(props.filters, term), 250) }
 watch([() => JSON.stringify(props.filters), () => props.disabled], () => { clearTimeout(timer); directory.invalidate(); if (!props.disabled) directory.load(props.filters) }, { immediate: true })

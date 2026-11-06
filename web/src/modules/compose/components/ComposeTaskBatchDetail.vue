@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue'
 import { DialogPlugin } from 'tdesign-vue-next'
 import { createComposeClient } from '../../../shared/api/compose.js'
 import ComposeBatchProgress from './ComposeBatchProgress.vue'
+import ResourceFilterBar from '../../../shared/ui/resource/ResourceFilterBar.vue'
 import ResourceSection from '../../../shared/ui/resource/ResourceSection.vue'
 import ResourceDescriptions from '../../../shared/ui/resource/ResourceDescriptions.vue'
 import ResourceStatusBadge from '../../../shared/ui/resource/ResourceStatusBadge.vue'
@@ -45,7 +46,7 @@ watch(() => [props.visible, props.batchId], () => {
   if (!props.visible) { ++sequence; return }
   batch.value = null; selectedKeys.value = []; knownTasks.value = {}; result.value = null; status.value = ''; pagination.value.current = 1
   load()
-})
+}, { immediate: true })
 function filter() { pagination.value.current = 1; load() }
 function close() { if (!busy.value) emit('update:visible', false) }
 function command(action) {
@@ -73,7 +74,7 @@ function command(action) {
 useAutoRefresh(() => load(true), { shouldSkip: () => !props.visible || busy.value || selectedKeys.value.length > 0 })
 </script>
 <template>
-  <ResourceOverlay kind="drawer" :visible="visible" :title="batch?.name || '任务批次详情'" :width="1040" :busy="busy" :footer="!!batch && (actionCount('cancel') > 0 || actionCount('retry') > 0)" @close="close">
+  <ResourceOverlay kind="drawer" :visible="visible" :title="batch?.name || '任务批次详情'" :width="960" :busy="busy" :footer="!!batch && (actionCount('cancel') > 0 || actionCount('retry') > 0)" @close="close">
     <FeedbackAlert v-if="error" theme="error" :message="error" />
     <t-loading :loading="loading" :show-overlay="true">
       <div v-if="batch" class="batch-detail wt-resource-page resource-visual-approved production-page">
@@ -81,7 +82,7 @@ useAutoRefresh(() => load(true), { shouldSkip: () => !props.visible || busy.valu
         <ResourceSection title="全批进度"><ComposeBatchProgress :counts="batch.counts" /></ResourceSection>
         <FeedbackAlert v-if="result" :theme="result.failed || result.skipped ? 'warning' : 'success'" :message="bulkResultMessage(result, result.action)" />
         <div v-if="result?.items?.some((item) => item.status !== 'accepted')" class="batch-detail__results"><p v-for="item in result.items.filter((item) => item.status !== 'accepted')" :key="item.task_id">任务 {{ item.task_id }} · {{ item.status === 'skipped' ? '跳过' : '失败' }} · {{ item.reason }}</p></div>
-        <div class="batch-detail__toolbar"><label class="wt-filter-field"><span class="wt-filter-field__label">任务状态</span><t-select v-model="status" :options="statusOptions" clearable placeholder="全部" @change="filter" /></label><span v-if="!selectedKeys.length" class="batch-detail__scope">操作范围：整个批次</span></div>
+        <ResourceFilterBar class="batch-detail__toolbar"><label class="wt-filter-field"><span class="wt-filter-field__label">任务状态</span><t-select v-model="status" :options="statusOptions" clearable placeholder="全部" @change="filter" /></label><span v-if="!selectedKeys.length" class="batch-detail__scope">操作范围：整个批次</span></ResourceFilterBar>
         <ResourceSelectionToolbar :count="selectedKeys.length" unit="条任务" @clear="selectedKeys = []" />
         <div class="table-scroll-wrap"><t-table class="wt-resource-table" :data="rows" :columns="columns" row-key="id" v-model:selected-row-keys="selectedKeys" reserve-selected-row-on-paginate :scroll="tableScroll" size="small" hover empty="暂无符合条件的任务"><template #status="{row}"><ResourceStatusBadge :label="TASK_STATUS_LABELS[row.status] || row.status" :tone="({pending:'warning',running:'info',success:'success',failed:'danger',cancelled:'neutral'})[row.status]" /><template v-if="row.cancel_requested && row.status === 'running'"> · 已请求停止</template></template><template #created_at="{row}">{{ formatDateTime(row.created_at) }}</template><template #op="{row}"><ResourceRowActions><t-button size="small" variant="text" @click="emit('task', row)">详情</t-button></ResourceRowActions></template></t-table></div>
         <div class="pagination-bar"><t-pagination :show-jumper="false" v-model:current="pagination.current" v-model:pageSize="pagination.pageSize" :total="total" :page-size-options="[10,20,50]" @current-change="load()" @page-size-change="filter" /></div>

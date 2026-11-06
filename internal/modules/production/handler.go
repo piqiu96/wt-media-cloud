@@ -78,10 +78,14 @@ func parseMaterialListFilter(c *hertzapp.RequestContext) (repository.MaterialFil
 	filter := repository.MaterialFilter{
 		UsageStatus: strings.TrimSpace(c.Query("usage_status")),
 		Search:      strings.TrimSpace(c.Query("search")),
+		Platform:    strings.TrimSpace(c.Query("platform")),
 		CategoryID:  categoryID,
 		VideoStatus: strings.TrimSpace(c.Query("video_status")),
 		SortBy:      strings.TrimSpace(c.Query("sort_by")),
 		SortOrder:   strings.TrimSpace(c.Query("sort_order")),
+	}
+	if filter.Platform != "" && filter.Platform != "douyin" {
+		return repository.MaterialFilter{}, errors.New("platform 无效")
 	}
 	if raw := strings.TrimSpace(c.Query("team_id")); raw != "" {
 		value, err := strconv.ParseInt(raw, 10, 64)

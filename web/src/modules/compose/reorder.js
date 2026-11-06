@@ -1,4 +1,4 @@
-export const REORDER_MIME = 'application/x-wt-compose-reorder'
+export const REORDER_MIME = 'application/x-wt-resource-reorder'
 
 // Retain object identity so a move never reconstructs or resets a form draft.
 export function reorderItems(items, sourceKey, targetKey, keyField = 'key') {

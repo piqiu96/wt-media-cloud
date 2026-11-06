@@ -546,14 +546,14 @@ func TestParseMaterialListFilter(t *testing.T) {
 		return parseMaterialListFilter(ctx)
 	}
 
-	filter, err := parse("team_id=8&category_ids=6,%207,6&category_id=5&joined=joined&my_usage=used&team_usage=unused&search=%20demo%20&video_status=ready")
+	filter, err := parse("platform=douyin&team_id=8&category_ids=6,%207,6&category_id=5&joined=joined&my_usage=used&team_usage=unused&search=%20demo%20&video_status=ready")
 	if err != nil {
 		t.Fatalf("parseMaterialListFilter() error = %v", err)
 	}
 	if filter.TeamID == nil || *filter.TeamID != 8 || !slices.Equal(filter.CategoryIDs, []sharedidentity.CategoryID{6, 7}) || filter.CategoryID != 5 {
 		t.Fatalf("filter = %+v, want the named team, deduplicated categories and the legacy single category", filter)
 	}
-	if filter.Joined != "joined" || filter.MyUsage != "used" || filter.TeamUsage != "unused" || filter.Search != "demo" || filter.VideoStatus != "ready" {
+	if filter.Platform != "douyin" || filter.Joined != "joined" || filter.MyUsage != "used" || filter.TeamUsage != "unused" || filter.Search != "demo" || filter.VideoStatus != "ready" {
 		t.Fatalf("filter = %+v, want every parsed dimension", filter)
 	}
 
@@ -567,6 +567,7 @@ func TestParseMaterialListFilter(t *testing.T) {
 		"joined=all",
 		"my_usage=used_up",
 		"team_usage=none",
+		"platform=bilibili",
 	} {
 		if _, err := parse(raw); err == nil {
 			t.Fatalf("%q parsed, want a refusal", raw)

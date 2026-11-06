@@ -98,6 +98,8 @@ func readyMaterial() model.Material {
 		TeamID:          3,
 		CategoryID:      &category,
 		SourceContentID: 42,
+		PlatformContentID: "7123456789012345678",
+		MetricsUpdatedAt: &published,
 		Title:           "一条素材",
 		SourceURL:       "https://example.invalid/video/42",
 		Platform:        "douyin",
@@ -143,8 +145,8 @@ func TestMaterialBodyMarshalsExactlyTheFrozenPropertySet(t *testing.T) {
 	}
 	want := schemaPropertyNames(schema.Properties)
 	// Existing 31 properties plus the four optional authorized selector projections.
-	if len(want) != 35 {
-		t.Fatalf("Material declares %d properties, want 35: %v", len(want), want)
+	if len(want) != 37 {
+		t.Fatalf("Material declares %d properties, want 37: %v", len(want), want)
 	}
 
 	if got := marshalledKeys(t, readyMaterial()); !reflect.DeepEqual(got, want) {

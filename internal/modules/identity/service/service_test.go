@@ -1045,6 +1045,24 @@ func TestListTeamsFiltersByKeywordAndID(t *testing.T) {
 	}
 }
 
+func TestTeamNameLimitCountsCharacters(t *testing.T) {
+	service := NewService(NewMemoryStore())
+	admin, _ := service.BootstrapAdmin("admin", "a-long-initial-password")
+	team, err := service.CreateTeam(admin.ID, strings.Repeat("团", 64))
+	if err != nil {
+		t.Fatalf("64-character name rejected: %v", err)
+	}
+	if _, err := service.RenameTeam(admin.ID, team.ID, strings.Repeat("组", 64)); err != nil {
+		t.Fatalf("64-character rename rejected: %v", err)
+	}
+	if _, err := service.CreateTeam(admin.ID, strings.Repeat("团", 65)); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("65-character create = %v, want ErrInvalidInput", err)
+	}
+	if _, err := service.RenameTeam(admin.ID, team.ID, strings.Repeat("组", 65)); !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("65-character rename = %v, want ErrInvalidInput", err)
+	}
+}
+
 func TestResetPasswordFailureDoesNotLeaveNewPasswordWithLiveOldSession(t *testing.T) {
 	base := NewMemoryStore()
 	store := &failingIdentityStore{Store: base}

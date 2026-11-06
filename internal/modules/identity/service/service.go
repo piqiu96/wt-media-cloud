@@ -649,7 +649,7 @@ func (s *Service) CreateTeam(actorID UserID, name string) (OperationTeam, error)
 	if !ok || !isAdmin(actor) {
 		return OperationTeam{}, ErrForbidden
 	}
-	if name == "" || len(name) > 64 {
+	if name == "" || utf8.RuneCountInString(name) > 64 {
 		return OperationTeam{}, ErrInvalidInput
 	}
 	now := s.now()
@@ -683,7 +683,7 @@ func (s *Service) RenameTeam(actorID UserID, teamID TeamID, name string) (Operat
 	if !ok || !isAdmin(actor) {
 		return OperationTeam{}, ErrForbidden
 	}
-	if teamID <= 0 || name == "" || len(name) > 64 {
+	if teamID <= 0 || name == "" || utf8.RuneCountInString(name) > 64 {
 		return OperationTeam{}, ErrInvalidInput
 	}
 	team, found, err := s.store.FindTeam(teamID)

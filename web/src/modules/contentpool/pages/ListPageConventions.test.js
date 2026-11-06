@@ -16,11 +16,11 @@ const FILES = ['ContentPoolPage.vue', 'DiscoveryStrategiesPage.vue', 'CrawlTasks
 // 三张列表页的每一张表。数字是「列数」——写死是为了让分母可见：
 // 抽不到列或列数变了都会直接失败，而不是安静地变成一条空转的断言。
 const TABLES = [
-  { file: 'ContentPoolPage.vue', name: 'columns', count: 15 },
+  { file: 'ContentPoolPage.vue', name: 'columns', count: 11 },
   { file: 'ContentPoolPage.vue', name: 'resultColumns', count: 9 },
-  { file: 'DiscoveryStrategiesPage.vue', name: 'columns', count: 13 },
-  { file: 'CrawlTasksPage.vue', name: 'columns', count: 12 },
-  { file: 'CrawlTasksPage.vue', name: 'resultColumns', count: 7 },
+  { file: 'DiscoveryStrategiesPage.vue', name: 'columns', count: 12 },
+  { file: 'CrawlTasksPage.vue', name: 'columns', count: 10 },
+  { file: 'CrawlTasksPage.vue', name: 'resultColumns', count: 4 },
 ]
 
 describe('content pool list page conventions', () => {

@@ -13,21 +13,26 @@ import { transferRow } from '../transfer/transferRows.js'
 import { isDesktopRuntime, revealSavedFile, savedFileStates } from '../transfer/desktopBridge.js'
 import { handOverCloudVideo } from './cloudVideo.js'
 import ResourceOverlay from '../../shared/ui/resource/ResourceOverlay.vue'
+import FeedbackAlert from '../../shared/ui/feedback/FeedbackAlert.vue'
 import ResourceSection from '../../shared/ui/resource/ResourceSection.vue'
 import ResourceDescriptions from '../../shared/ui/resource/ResourceDescriptions.vue'
-import { materialVideoState, metricLabel } from './materialFilters.js'
+import { materialVideoState } from './materialFilters.js'
 import ResourceStatusBadge from '../../shared/ui/resource/ResourceStatusBadge.vue'
 import { formatDateTime } from '../../shared/utils/datetime.js'
 import { platformLabel } from '../../shared/utils/platforms.js'
 import { formatBytes } from '../../shared/utils/units.js'
 import MaterialCover from './components/MaterialCover.vue'
+import MaterialPerformance from './components/MaterialPerformance.vue'
+import MaterialUsageDialog from './components/MaterialUsageDialog.vue'
+import { CopyIcon } from 'tdesign-icons-vue-next'
 import {
   downloadActionLabel,
   categoryName,
   joinStatus,
   myUsageLabel,
   myUsageTone,
-  usageFacts,
+  usageSummary,
+  usageOutputCount,
   usageStatusLabel,
   usageStatusTone,
 } from './labels.js'
@@ -36,6 +41,7 @@ const props = defineProps({
   visible: { type: Boolean, default: false },
   material: { type: Object, default: null },
   loading: { type: Boolean, default: false },
+  error: { type: String, default: '' },
   categories: { type: Array, default: () => [] },
   // 上下文决定动作：素材库给「加入我的素材」，我的素材这一组按关系与文件状态分支，
   // readonly 只读（关联实体引用的那类打开方式）——正文照旧，页脚一个动作都不给。
@@ -44,7 +50,7 @@ const props = defineProps({
   // 只在素材库上下文有意义：用它把主操作换成「去我的素材」。
   mine: { type: Boolean, default: false },
 })
-const emit = defineEmits(['update:visible', 'add', 'download', 'redownload', 'go-mine', 'go-page', 'give-up', 'restore', 'cancel'])
+const emit = defineEmits(['update:visible', 'add', 'download', 'redownload', 'go-mine', 'go-page', 'give-up', 'restore', 'cancel', 'retry'])
 
 const downloadUser = ref(null)
 const downloadReason = computed(() => localDownloadReason(downloadUser.value))
@@ -55,7 +61,12 @@ const transfer = createFileTransferClient()
 // 素材库上下文里，`usage_status` 是「当前查看者加没加入」，不是「使用中/已放弃」；
 // 我的素材继续用关系自己的两档文案。两边共用一份数据，但说给用户的话不同。
 const join = computed(() => joinStatus(props.material))
-const usageRows = computed(() => usageFacts(props.material))
+const usageVisible = ref(false)
+watch(() => props.visible, visible => { if (!visible) usageVisible.value = false })
+async function copyPlatformID() {
+  try { await navigator.clipboard.writeText(props.material.platform_content_id); feedback.toast.success('已复制') }
+  catch { feedback.toast.error('复制失败，请手动复制') }
+}
 // 本机那一份：扫描结果里的一条（`{ name, directory, presence, bytes }`），没量到就是
 // `null`。名字也在里面 —— 「打开目录」按下去那一刻要把它送出去。
 const localFile = ref(null)
@@ -209,8 +220,10 @@ async function openDirectory() {
 </script>
 
 <template>
-  <ResourceOverlay :visible="visible" title="素材详情" kind="drawer" :width="880"
-    :footer="mode !== 'readonly' || showPageLink" @update:visible="$emit('update:visible', $event)">
+  <ResourceOverlay :visible="visible" title="素材详情" kind="drawer" :width="800"
+    :footer="(mode === 'readonly' && showPageLink) || (mode === 'mine' && downloadStatus === 'downloading' && !!activeTransferTask)" @update:visible="$emit('update:visible', $event)">
+    <FeedbackAlert v-if="error" theme="error" :message="error" />
+    <t-button v-if="error" variant="text" @click="$emit('retry')">重试</t-button>
     <t-loading :loading="loading" :show-overlay="true">
       <div v-if="material" class="detail-workspace">
         <section class="detail-hero">
@@ -219,27 +232,25 @@ async function openDirectory() {
         </section>
         <ResourceSection title="基本信息"><ResourceDescriptions>
           <t-descriptions-item label="素材 ID">{{ material.id }}</t-descriptions-item>
+          <t-descriptions-item label="平台">{{ platformLabel(material.platform) }}</t-descriptions-item>
+          <t-descriptions-item label="平台作品 ID"><span>{{ material.platform_content_id || '—' }}</span><t-button v-if="material.platform_content_id" size="small" variant="text" aria-label="复制平台作品 ID" @click="copyPlatformID"><CopyIcon /></t-button></t-descriptions-item>
           <t-descriptions-item label="类目">{{ categoryName(categories, material.category_id) }}</t-descriptions-item>
-          <t-descriptions-item label="来源平台">{{ platformLabel(material.platform) }}</t-descriptions-item>
           <t-descriptions-item label="作者"><a v-if="material.author_home_url" class="wt-primary-link" :href="material.author_home_url" target="_blank" rel="noopener noreferrer">{{ material.author_name || '作者主页' }}</a><template v-else>{{ material.author_name || '—' }}</template></t-descriptions-item>
           <t-descriptions-item label="发布时间">{{ formatDateTime(material.published_at) }}</t-descriptions-item>
           <t-descriptions-item label="入库时间">{{ formatDateTime(material.created_at) }}</t-descriptions-item>
           <t-descriptions-item label="操作人">{{ material.created_by_name || '—' }}</t-descriptions-item>
-          <t-descriptions-item label="原作品"><a v-if="material.source_url" class="wt-primary-link" :href="material.source_url" target="_blank" rel="noopener noreferrer">打开原作品</a><template v-else>—</template></t-descriptions-item>
+          <t-descriptions-item label="平台作品链接" full><a v-if="material.source_url" class="wt-primary-link" :href="material.source_url" target="_blank" rel="noopener noreferrer">{{ material.source_url }}</a><template v-else>—</template></t-descriptions-item>
         </ResourceDescriptions></ResourceSection>
-        <ResourceSection title="内容表现"><ResourceDescriptions>
-          <t-descriptions-item v-for="[key,label] in [['view_count','浏览'],['like_count','点赞'],['favorite_count','收藏'],['comment_count','评论'],['share_count','分享']]" :key="key" :label="label">{{ metricLabel(material,key) }}</t-descriptions-item>
-        </ResourceDescriptions></ResourceSection>
+        <ResourceSection title="内容表现"><MaterialPerformance :material="material" detail /></ResourceSection>
         <ResourceSection title="使用情况"><ResourceDescriptions>
           <t-descriptions-item :label="mode === 'mine' ? '使用状态' : '加入状态'"><template v-if="mode === 'mine'"><ResourceStatusBadge v-if="material.usage_status" :tone="usageStatusTone(material.usage_status)" :label="usageStatusLabel(material.usage_status)" /><template v-else>—</template></template><ResourceStatusBadge v-else :tone="join.tone" :label="join.label" /></t-descriptions-item>
           <t-descriptions-item label="我的使用"><ResourceStatusBadge :tone="myUsageTone(material.my_usage)" :label="myUsageLabel(material.my_usage)" /></t-descriptions-item>
           <t-descriptions-item v-if="mode === 'mine'" label="加入时间">{{ material.added_at ? formatDateTime(material.added_at) : '—' }}</t-descriptions-item>
-          <t-descriptions-item v-for="fact in usageRows" :key="fact.key" :label="fact.label">{{ fact.value }}</t-descriptions-item>
+          <t-descriptions-item label="团队使用" full><t-link v-if="usageOutputCount(material)" theme="primary" @click="usageVisible = true">{{ usageSummary(material) }}</t-link><template v-else>—</template></t-descriptions-item>
         </ResourceDescriptions></ResourceSection>
         <ResourceSection title="视频文件"><ResourceDescriptions>
           <t-descriptions-item label="视频状态"><ResourceStatusBadge :tone="fileStatus.tone" :label="fileStatus.label" /></t-descriptions-item>
           <t-descriptions-item label="文件大小">{{ formatBytes(material.video_size_bytes) }}</t-descriptions-item>
-          <t-descriptions-item label="准备完成时间">{{ formatDateTime(material.video_prepared_at) }}</t-descriptions-item>
           <t-descriptions-item label="视频文件"><a v-if="material.video_status === 'ready'" class="wt-primary-link" href="#" @click.prevent="openCloudVideo">打开视频</a><template v-else>—</template></t-descriptions-item>
         </ResourceDescriptions>
           <!-- 下载进行中：进度/速度/预计时间都是服务端任务表里的读数（与下载中心同一
@@ -277,33 +288,12 @@ async function openDirectory() {
       </div>
     </t-loading>
 
-    <!-- 必须接管 footer：TDesign 的 footer 属性默认是 true，不给插槽就渲染出一对
-         「取消 / 确认」；接管同时让动作条钉在底部，不随正文高度跳动。 -->
     <template #footer>
-      <div v-if="material" class="material-detail__actions">
-        <!-- 只读上下文（关联实体引用）只给一个明确命名的前往入口：它不改路由，用户自己点才跳。 -->
-        <t-button v-if="mode === 'readonly' && showPageLink" class="wt-secondary-button" variant="outline" @click="$emit('go-page', material)">前往素材页面</t-button>
-        <t-button v-if="mode === 'library' && !mine" theme="primary" @click="$emit('add', material)">{{ material.usage_status === 'removed' ? '重新加入' : '加入我的素材' }}</t-button>
-        <t-button v-if="mode === 'library' && mine" theme="primary" @click="$emit('go-mine')">去我的素材</t-button>
-        <!-- 我的素材这一组由「使用状态 × 下载状态 × 本机文件」矩阵驱动（CHG-069 任务 23，
-             与行内同一张表）：已放弃只给恢复；使用中按下载状态给一步主操作 —— 下载中不给
-             「再下载」（文件已经在准备了，再点还是同一条命令），给的是「取消下载」；已下载
-             只在**实测本机那份文件不在了**时才给一次「重新下载」（合成的入口在合成任务页）。 -->
-        <template v-if="mode === 'mine'">
-          <span v-if="downloadReason" class="detail-download-reason">{{ downloadReason }}</span>
-          <template v-if="material.usage_status === 'removed'">
-            <t-button theme="primary" @click="$emit('restore', material)">恢复使用</t-button>
-          </template>
-          <template v-else>
-            <t-button v-if="needsRedownload(downloadStatus, localFile?.presence)" theme="primary" :disabled="Boolean(downloadReason)" :title="downloadReason" @click="$emit('download', material)">重新下载</t-button>
-            <t-button v-else-if="downloadStatus === 'downloading'" theme="primary" :disabled="cancelRequested" @click="cancelDownload">{{ cancelRequested ? '正在取消…' : '取消下载' }}</t-button>
-            <t-button v-else-if="downloadStatus !== 'downloaded'" theme="primary" :disabled="Boolean(downloadReason)" :title="downloadReason" @click="$emit('download', material)">{{ downloadActionLabel(downloadStatus) }}</t-button>
-            <t-button class="wt-secondary-button wt-danger-button" variant="outline" @click="$emit('give-up', material)">放弃使用</t-button>
-          </template>
-        </template>
-      </div>
+      <t-button v-if="mode === 'readonly' && showPageLink" class="wt-secondary-button" variant="outline" @click="$emit('go-page', material)">前往素材页面</t-button>
+      <t-button v-if="mode === 'mine' && downloadStatus === 'downloading' && activeTransferTask" class="wt-secondary-button" variant="outline" :disabled="cancelRequested" @click="cancelDownload">{{ cancelRequested ? '正在取消…' : '取消下载' }}</t-button>
     </template>
   </ResourceOverlay>
+  <MaterialUsageDialog v-model:visible="usageVisible" :material="material" />
 </template>
 
 <style scoped>

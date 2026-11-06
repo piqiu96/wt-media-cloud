@@ -2,7 +2,7 @@
 import { ref } from 'vue'
 import ResourceForm from '../../../shared/ui/resource/ResourceForm.vue'
 import ResourceFieldHelp from '../../../shared/ui/resource/ResourceFieldHelp.vue'
-import ComposeReorderActions from './ComposeReorderActions.vue'
+import ResourceReorderActions from '../../../shared/ui/resource/ResourceReorderActions.vue'
 import { draggedKey, reorderItems } from '../reorder.js'
 import { preserveDraftScroll } from '../preserveDraftScroll.js'
 import { OUTPUT_PLATFORMS, newSetting, copySetting } from '../strategySettings.js'
@@ -36,10 +36,10 @@ function remove(index) { if (props.modelValue.length > 1) update(props.modelValu
 <template>
   <div ref="root" class="strategy-settings">
     <section v-for="(group, index) in modelValue" :key="group.key" class="strategy-setting" :class="{ 'is-drop-target': dropTarget === group.key }" @dragover.prevent="dropTarget = group.key" @dragleave.self="dropTarget = null" @drop.prevent="drop($event, group)">
-      <ComposeReorderActions :item-key="group.key" scope="settings" :index="index" :count="modelValue.length" :remove-disabled="modelValue.length === 1" @move="move(index, $event)" @remove="remove(index)" @dragend="dropTarget = null">
+      <ResourceReorderActions :item-key="group.key" scope="settings" :index="index" :count="modelValue.length" :remove-disabled="modelValue.length === 1" @move="move(index, $event)" @remove="remove(index)" @dragend="dropTarget = null">
         成片设置 {{ index + 1 }}
         <template #extra><t-button size="small" variant="text" :disabled="modelValue.length >= limit" @click="copy(group)">复制</t-button></template>
-      </ComposeReorderActions>
+      </ResourceReorderActions>
       <ResourceForm class="strategy-setting__grid">
         <t-form-item label="成片设置名称" required-mark>
           <div class="strategy-setting__field"><t-input v-model="group.name" :maxlength="120" placeholder="例如：通用版" :status="errors[group.key]?.name ? 'error' : undefined" /><p v-if="errors[group.key]?.name" class="strategy-setting__error">{{ errors[group.key].name }}</p></div>
@@ -62,11 +62,12 @@ function remove(index) { if (props.modelValue.length > 1) update(props.modelValu
         </t-form-item>
       </ResourceForm>
     </section>
-    <t-button variant="outline" class="strategy-settings__add" :disabled="modelValue.length >= limit" :title="modelValue.length >= limit ? '最多 20 组成片设置' : undefined" @click="add">新增成片设置</t-button>
+    <t-button variant="outline" class="strategy-settings__add" :disabled="modelValue.length >= limit" :title="modelValue.length >= limit ? '最多 20 组成片设置' : undefined" @click="add">添加成片设置</t-button>
   </div>
 </template>
 <style scoped>
 .strategy-settings { display: grid; gap: 12px; }
+.strategy-settings__add { justify-self: start; }
 .strategy-setting { padding: 20px; border: 1px solid var(--wt-border); border-radius: var(--wt-radius-md); overflow-anchor: none; }
 .strategy-setting.is-drop-target { border-color: var(--wt-primary); }
 .strategy-setting__subtitle { grid-column: 1 / -1; padding-top: 20px; border-top: 1px solid var(--wt-border); color: var(--wt-text-primary); font-weight: 600; }

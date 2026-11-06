@@ -11,7 +11,8 @@ import { describe, expect, it } from 'vitest'
 // 取消/确认，而这类缺陷只会在人打开抽屉时暴露。所以把「每个抽屉都必须对页脚表态」
 // 钉成一条站级约定：给 `#footer` 插槽，或显式写 `footer` 属性。
 //
-// 只管 `t-drawer`。`t-dialog` 有同样默认值，但确认对话框要的**正是**那对取消/确认，
+// 同时覆盖原生抽屉与 kind="drawer" 的 ResourceOverlay；后者统一处理默认页脚与 X。
+// `t-dialog` 有同样默认值，但确认对话框要的**正是**那对取消/确认，
 // 一并扫会造出一堆假阳性。
 
 const SRC = new URL('./', import.meta.url).pathname
@@ -45,7 +46,7 @@ function openingTag(text, start) {
 /** 取出 `#footer` 插槽本身。页脚里会有嵌套的 `<template v-if>`，按第一个
     `</template>` 切会把动作条从第一个分支处剪断，所以按标签配对找收尾。 */
 function footerSlot(block) {
-  const at = block.search(/<template\s+#footer\b/)
+  const at = block.search(/<template\b[^>]*#footer\b/)
   if (at === -1) return null
   let i = at + openingTag(block, at).length
   let depth = 1
@@ -69,20 +70,20 @@ export function auditDrawers() {
   const found = []
   for (const file of vueFiles(SRC)) {
     const text = readFileSync(file, 'utf8')
-    let from = 0
-    for (;;) {
-      const at = text.indexOf('<t-drawer', from)
-      if (at === -1) break
-      from = at + 9
+    for (const match of text.matchAll(/<(t-drawer|ResourceOverlay)\b/g)) {
+      const at = match.index
       const tag = openingTag(text, at)
-      const end = text.indexOf('</t-drawer>', at)
+      const shared = match[1] === 'ResourceOverlay'
+      if (shared && !/kind="drawer"/.test(tag)) continue
+      const end = text.indexOf(`</${match[1]}>`, at)
       const block = text.slice(at + tag.length, end === -1 ? text.length : end)
       found.push({
         file: file.replace(SRC, ''),
         line: text.slice(0, at).split('\n').length,
         tag,
+        shared,
         hasFooterProp: /\bfooter\s*=/.test(tag),
-        hasFooterSlot: /<template\s+#footer\b/.test(block),
+        hasFooterSlot: /<template\b[^>]*#footer\b/.test(block),
         footerText: footerSlot(block),
       })
     }
@@ -97,15 +98,14 @@ describe('drawer footer convention', () => {
   // 实测 2026-09-30 全站 12 个（materials 1、contentpool 3、profiles 2、proxy 1、
   // accounts 1、transfer 1、users 1、shared 模板 1）。
   it('scans every drawer in the app', () => {
-    const sharedDrawers = vueFiles(SRC).reduce((count, file) => count + (readFileSync(file, 'utf8').match(/<ResourceOverlay\b[^>]*kind="drawer"/g) || []).length, 0)
-    expect(drawers.length + sharedDrawers, '原生与公共抽屉必须被覆盖').toBeGreaterThanOrEqual(12)
+    expect(drawers.length, '原生与公共抽屉必须被覆盖').toBeGreaterThanOrEqual(12)
     expect(drawers.some(drawer => drawer.file.endsWith('ResourceOverlay.vue'))).toBe(true)
     expect(new Set(drawers.map((d) => d.file)).size).toBeGreaterThanOrEqual(8)
   })
 
   it('never leaves a drawer on the framework default footer pair', () => {
     const missing = drawers
-      .filter((d) => !d.hasFooterProp && !d.hasFooterSlot)
+      .filter((d) => !d.shared && !d.hasFooterProp && !d.hasFooterSlot)
       .map((d) => `${d.file}:${d.line}`)
     expect(
       missing,
@@ -142,7 +142,7 @@ describe('drawer footer convention', () => {
       .filter((d) => {
         // 公共容器只在提交时隐藏 X，关闭处理器同时阻断；隔离浏览器覆盖忙碌与恢复状态。
         const guardedOverlay = d.file === 'shared/ui/resource/ResourceOverlay.vue' && /:close-btn="!busy"/.test(d.tag)
-        return !/:close-btn\s*=\s*"true"/.test(d.tag) && !guardedOverlay
+        return !d.shared && !/:close-btn\s*=\s*"true"/.test(d.tag) && !guardedOverlay
       })
       .map((d) => `${d.file}:${d.line}`)
     expect(off, '不写 :close-btn="true" 的抽屉没有关闭入口').toEqual([])

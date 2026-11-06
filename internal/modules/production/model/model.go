@@ -77,7 +77,7 @@ type Material struct {
 	// SourceContentID: that is this database's row id in `source_contents`, and a
 	// provider asked for it answers that no such video exists. Hidden from JSON
 	// because it is worker plumbing, not part of the material the UI reads.
-	PlatformContentID string `json:"-"`
+	PlatformContentID string `json:"platform_content_id,omitempty"`
 	Title             string `json:"title"`
 	SourceURL         string `json:"source_url"`
 	Platform          string `json:"platform"`
@@ -96,6 +96,7 @@ type Material struct {
 	FavoriteCount int64          `json:"favorite_count"`
 	CommentCount  int64          `json:"comment_count"`
 	ShareCount    int64          `json:"share_count"`
+	MetricsUpdatedAt *time.Time     `json:"metrics_updated_at,omitempty"`
 	PublishedAt   *time.Time     `json:"published_at,omitempty"`
 	Status        MaterialStatus `json:"status"`
 	VideoStatus   VideoStatus    `json:"video_status"`

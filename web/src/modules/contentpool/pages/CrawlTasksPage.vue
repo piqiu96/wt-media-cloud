@@ -1,4 +1,15 @@
 <script setup>
+import '../mining.css'
+import { scheduleLabel } from '../labels.js'
+import { materialRulesSummary } from '../miningRules.js'
+import { taskContents, taskExecutionEvents, taskExceptions, taskResultSummary } from '../crawlTaskDetail.js'
+import { opColumnWidth } from '../../../shared/ui/resource/opColumnWidth.js'
+import ResourceFilterBar from '../../../shared/ui/resource/ResourceFilterBar.vue'
+import ResourceRowActions from '../../../shared/ui/resource/ResourceRowActions.vue'
+import ResourceOverlay from '../../../shared/ui/resource/ResourceOverlay.vue'
+import ResourceSection from '../../../shared/ui/resource/ResourceSection.vue'
+import ResourceDescriptions from '../../../shared/ui/resource/ResourceDescriptions.vue'
+import ResourceNotice from '../../../shared/ui/resource/ResourceNotice.vue'
 import BusinessSelect from "../../../shared/ui/fields/BusinessSelect.vue"
 import { feedback } from '../../../shared/ui/feedback/index.js'
 import FeedbackAlert from '../../../shared/ui/feedback/FeedbackAlert.vue'
@@ -29,7 +40,13 @@ const error = ref('')
 const detail = ref(null)
 const visible = ref(false)
 const retrying = ref(false)
-const activeTab = ref('overview')
+const activeTab = ref('info')
+const failedCovers = ref(new Set())
+const contentPagination = ref({ current: 1, pageSize: 10 })
+const detailContents = computed(() => detail.value ? taskContents(detail.value) : [])
+const pagedContents = computed(() => detailContents.value.slice((contentPagination.value.current - 1) * contentPagination.value.pageSize, contentPagination.value.current * contentPagination.value.pageSize))
+const detailExceptions = computed(() => detail.value ? taskExceptions(detail.value) : [])
+const contentTabLabel = computed(() => `${detail.value?.task_type === 'retry_failed_task' ? '处理内容' : '发现内容'}（${detailContents.value.length}）`)
 const categories = ref([])
 const strategyDrawerVisible = ref(false)
 const strategyDrawer = ref(null)
@@ -48,9 +65,9 @@ const canManage = computed(() => ['admin', 'senior_operator'].includes(currentUs
 // 而所有声明 width 的列逐列精确（ID 69.5 / 类目 110 / 触发方式 90 / 状态 100 /
 // 执行时间 170 / 修改时间 170 / 修改人 110）。任务名称被压成「m3a…」就是这么来的。
 // 机理与「Chrome 看不出问题」的原因见 ContentPoolPage.vue 里 columns 上方的完整说明。
-const columns = [
+const columns = computed(() => [
   { colKey: 'id', title: 'ID', width: 70 },
-  { colKey: 'name', title: '任务名称', width: 220 },
+  { colKey: 'name', title: '任务名称', width: 260 },
   { colKey: 'strategy', title: '任务来源', width: 160 },
   { colKey: 'team', title: '运营团队', width: 120 },
   { colKey: 'category', title: '类目', width: 110 },
@@ -61,25 +78,21 @@ const columns = [
   { colKey: 'found', title: '发现结果', width: 130 },
   { colKey: 'status', title: '状态', width: 100 },
   { colKey: 'executed_at', title: '执行时间', width: 150 },
-  { colKey: 'updated_at', title: '修改时间', width: 150 },
-  { colKey: 'updated_by_name', title: '修改人', width: 110 },
-  { colKey: 'op', title: '操作', width: 140, fixed: 'right' },
-]
+  { colKey: 'op', title: '操作', width: opColumnWidth(canManage.value ? ['详情', '重试'] : ['详情'], { variant: 'text', primary: true }), fixed: 'right' },
+])
 
 // 横向滚动宽度由列宽推导，不写死（写死的 '1200px' 与列宽合计无关，是个漂移源）。
 const tableScroll = computed(() => ({
-  x: `${columns.reduce((sum, col) => sum + (col.width || 0), 0)}px`,
+  x: `${columns.value.reduce((sum, col) => sum + (col.width || 0), 0)}px`,
 }))
 
 const resultColumns = [
-  { colKey: 'cover', title: '封面', width: 72 },
-  { colKey: 'title', title: '标题', width: 220 },
-  { colKey: 'author_name', title: '作者', width: 120 },
-  { colKey: 'like_count', title: '点赞', width: 90 },
-  { colKey: 'favorite_count', title: '收藏', width: 90 },
-  { colKey: 'processing_status', title: '处理状态', width: 110 },
-  { colKey: 'op', title: '操作', width: 100 },
+  { colKey: 'content', title: '内容信息', width: 360 },
+  { colKey: 'metrics', title: '互动数据', width: 150 },
+  { colKey: 'processing_status', title: '处理结果', width: 220 },
+  { colKey: 'op', title: '操作', width: opColumnWidth(['查看素材']), fixed: 'right' },
 ]
+const resultScroll = computed(() => ({ x: `${resultColumns.reduce((sum, col) => sum + col.width, 0)}px` }))
 
 const pagedRows = computed(() => {
   const start = (pagination.value.current - 1) * pagination.value.pageSize
@@ -143,7 +156,8 @@ function resetFilters() {
 async function open(row) {
   try {
     detail.value = await client.getTask(row.id)
-    activeTab.value = 'overview'
+    activeTab.value = 'info'
+    contentPagination.value.current = 1
     visible.value = true
   } catch (e) {
     error.value = e.message || '任务详情加载失败'
@@ -201,27 +215,6 @@ function teamName(id) {
 
 function changeTeamFilter() { load() }
 
-function formatThreshold(value) {
-  const n = Number(value || 0)
-  if (n <= 0) return ''
-  if (n >= 10000) {
-    const w = n / 10000
-    return `${Number.isInteger(w) ? w : w.toFixed(1).replace(/\.0$/, '')}万`
-  }
-  return String(n)
-}
-
-function snapshotMaterialLabel(snapshot) {
-  if (!snapshot?.auto_material) return '关闭'
-  const like = Number(snapshot.like_threshold || 0)
-  const fav = Number(snapshot.favorite_threshold || 0)
-  const parts = []
-  if (like > 0) parts.push(`赞≥${formatThreshold(like)}`)
-  if (fav > 0) parts.push(`藏≥${formatThreshold(fav)}`)
-  const joiner = snapshot.material_rule === 'OR' ? ' 或 ' : ' 且 '
-  return parts.length ? parts.join(joiner) : '关闭'
-}
-
 // 任务名称里内嵌的时间戳，不带秒：20260923-143045 → 20260923-1430。
 // 秒对「这条任务是什么时候跑的」没有信息量，却让任务名称长出一截。
 function compactTime(value) {
@@ -268,56 +261,11 @@ function statusTone(status) {
 }
 
 function processingLabel(value) {
-  return ({ unprocessed: '未入池', pending: '待审核', auto_materialized: '自动转素材', material_failed: '转素材失败', duplicate: '重复', failed: '失败' })[value] || value || '未知'
+  return ({ unprocessed: '未入池', pending: '待审核', auto_materialized: '已转素材', material_failed: '转素材失败', duplicate: '已在内容池', failed: '失败' })[value] || value || '未知'
 }
 
 function processingTone(value) {
   return ({ pending: 'warning', auto_materialized: 'success', material_failed: 'danger', duplicate: 'neutral', failed: 'danger' })[value] || 'info'
-}
-
-function timeHM(value) {
-  if (!value) return ''
-  const d = new Date(value)
-  const pad = (n) => String(n).padStart(2, '0')
-  return `${pad(d.getHours())}:${pad(d.getMinutes())}`
-}
-
-function duration(task) {
-  if (!task.started_at || !task.finished_at) return '-'
-  const ms = new Date(task.finished_at) - new Date(task.started_at)
-  if (ms < 0) return '-'
-  const total = Math.round(ms / 1000)
-  const min = Math.floor(total / 60)
-  const sec = total % 60
-  return min > 0 ? `${min}分${sec}秒` : `${sec}秒`
-}
-
-function timeline(task) {
-  const steps = []
-  const s = task.stats || {}
-  steps.push({ time: timeHM(task.created_at), label: '创建任务' })
-  if (task.started_at) steps.push({ time: timeHM(task.started_at), label: '开始执行策略' })
-  steps.push({ time: '', label: `加载关键词并发现内容 ${s.found || 0} 条` })
-  steps.push({ time: '', label: `完成去重，新增 ${s.added || 0} 条` })
-  if (s.auto_materialized > 0) steps.push({ time: '', label: `执行自动转素材 ${s.auto_materialized} 条` })
-  const finished = task.finished_at || (task.status !== 'pending' && task.status !== 'running' ? task.updated_at : null)
-  steps.push({ time: finished ? timeHM(finished) : '', label: task.status === 'success' || task.status === 'partial_success' ? '任务完成' : `任务${statusLabel(task.status)}` })
-  return steps
-}
-
-function exceptions(task) {
-  const list = (task.results || [])
-    .filter((item) => ['failed', 'material_failed'].includes(item.processing_status))
-    .map((item) => ({
-      stage: item.processing_status === 'material_failed' ? '转素材失败' : '内容抓取失败',
-      reason: item.failure_reason || '平台接口异常',
-      scope: item.failure_key || item.title || item.platform_content_id || '-',
-      time: task.finished_at || task.updated_at,
-    }))
-  if (!list.length && task.error) {
-    list.push({ stage: '任务失败', reason: task.error, scope: '-', time: task.finished_at || task.updated_at })
-  }
-  return list
 }
 
 function rowAction(item) {
@@ -326,10 +274,10 @@ function rowAction(item) {
     return { label: '查看素材', to: item.material_id ? `/material-library?material_id=${item.material_id}` : '/material-library' }
   }
   if (item.processing_status === 'pending') {
-    return { label: '审核', to: `/content-pool?crawl_task_id=${detail.value?.id}${id ? `&search=${id}` : ''}` }
+    return { label: '去审核', to: `/content-pool?crawl_task_id=${detail.value?.id}${id ? `&search=${id}` : ''}` }
   }
   if (item.processing_status === 'duplicate') {
-    return { label: '查看原内容', to: id ? `/content-pool?search=${id}` : `/content-pool?crawl_task_id=${detail.value?.id}` }
+    return { label: '查看内容', to: id ? `/content-pool?search=${id}` : `/content-pool?crawl_task_id=${detail.value?.id}` }
   }
   return null
 }
@@ -348,10 +296,10 @@ function hasFailed(task) {
   <t-loading :loading="loading" :show-overlay="true">
     <div class="wt-resource-page resource-visual-approved task-page">
       <FeedbackAlert v-if="error" theme="error" :message="error" closable style="margin-bottom:16px" @close="error=''" />
-      <ResourcePageHeader title="挖掘任务" description="查看策略执行情况，发现内容结果，定位异常问题" />
+      <ResourcePageHeader title="挖掘任务" description="查看发现结果和执行记录，处理失败任务。" />
 
       <ResourceCard class="task-card">
-        <div class="filter-bar">
+        <ResourceFilterBar>
           <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">综合搜索</span><t-input v-model="filters.search" clearable placeholder="搜索任务 ID / 任务名称 / 来源策略" @enter="load" /></label>
           <label v-if="isAdmin" class="wt-filter-field"><span class="wt-filter-field__label">运营团队</span><BusinessSelect kind="team" filter v-model="teamFilter" clearable @change="changeTeamFilter"><t-option v-for="team in teams" :key="team.id" :value="team.id" :label="team.name" /></BusinessSelect></label>
           <label class="wt-filter-field"><span class="wt-filter-field__label">状态</span><t-select v-model="filters.status" clearable placeholder="全部">
@@ -362,14 +310,14 @@ function hasFailed(task) {
             <t-option value="pending" label="待执行" />
           </t-select></label>
           <div class="wt-filter-actions"><t-button theme="primary" @click="load">查询</t-button><t-button class="wt-secondary-button" variant="outline" @click="resetFilters">重置</t-button></div>
-        </div>
+        </ResourceFilterBar>
         <div class="table-scroll-wrap">
           <t-table class="wt-resource-table" :data="pagedRows" :columns="columns" row-key="id" hover :scroll="tableScroll" empty="暂无挖掘任务">
             <template #name="{ row }">
               <span class="task-name" :title="taskName(row)">{{ taskName(row) }}</span>
             </template>
             <template #strategy="{ row }">
-              <a v-if="isStrategyTask(row)" class="task-source-link" @click="openStrategy(row)">{{ sourceName(row) }}</a>
+              <t-link v-if="isStrategyTask(row)" theme="primary" @click="openStrategy(row)">{{ sourceName(row) }}</t-link>
               <span v-else>{{ sourceName(row) }}</span>
             </template>
             <template #team="{ row }">{{ teamName(row.team_id) }}</template>
@@ -378,147 +326,105 @@ function hasFailed(task) {
             <template #found="{ row }"><MetricList :items="foundStats(row)" /></template>
             <template #status="{ row }"><ResourceStatusBadge :tone="statusTone(row.status)" :label="statusLabel(row.status)" /></template>
             <template #executed_at="{ row }">{{ formatDateTime(row.created_at) }}</template>
-            <template #updated_at="{ row }">{{ formatDateTime(row.updated_at) }}</template>
-            <template #op="{ row }">
-              <t-space size="small">
-                <t-button size="small" class="wt-secondary-button" variant="outline" @click="open(row)">详情</t-button>
-                <t-button v-if="canManage && hasFailed(row)" size="small" theme="primary" @click="retry(row)">重试</t-button>
-              </t-space>
-            </template>
+            <template #op="{ row }"><ResourceRowActions><t-button size="small" variant="text" @click="open(row)">详情</t-button><t-button v-if="canManage && hasFailed(row)" size="small" variant="text" class="is-primary" :loading="retrying" @click="retry(row)">重试</t-button></ResourceRowActions></template>
           </t-table>
         </div>
         <div class="pagination-bar"><t-pagination v-model:current="pagination.current" v-model:pageSize="pagination.pageSize" :total="rows.length" :page-size-options="[10, 20, 50]" /></div>
       </ResourceCard>
 
-      <t-drawer :close-btn="true" v-model:visible="visible" header="挖掘任务详情" size="min(92vw, 760px)" :footer="Boolean(canManage && detail && hasFailed(detail))">
-        <div v-if="detail" class="task-detail">
-          <div class="detail-head">
-            <h3 class="task-title">{{ taskName(detail) }}</h3>
-            <ResourceStatusBadge :tone="statusTone(detail.status)" :label="statusLabel(detail.status)" />
-          </div>
-          <div class="detail-meta">
-            <div><span>任务来源</span><strong><a v-if="isStrategyTask(detail)" class="task-source-link" @click="openStrategy(detail)">{{ sourceName(detail) }}</a><span v-else>{{ sourceName(detail) }}</span></strong></div>
-            <div><span>业务分类</span><strong>{{ categoryName(detail.snapshot?.category_id) }}</strong></div>
-            <div><span>触发方式</span><strong>{{ triggerLabel(detail) }}</strong></div>
-            <div><span>创建时间</span><strong>{{ formatDateTime(detail.created_at) }}</strong></div>
-            <div><span>修改时间</span><strong>{{ formatDateTime(detail.updated_at) }}</strong></div>
-            <div><span>创建人</span><strong>{{ detail.created_by_name || '-' }}</strong></div>
-            <div><span>修改人</span><strong>{{ detail.updated_by_name || '-' }}</strong></div>
-            <div><span>耗时</span><strong>{{ duration(detail) }}</strong></div>
-          </div>
+      <ResourceOverlay v-model:visible="visible" title="挖掘任务详情" kind="drawer" :width="960" :footer="false">
+        <div v-if="detail" class="mining-detail">
+          <t-tabs v-model="activeTab" class="mining-task-tabs task-detail-tabs">
+            <t-tab-panel value="info" label="任务信息" :destroy-on-hide="true">
+              <ResourceSection title="基本信息"><ResourceDescriptions>
+                <t-descriptions-item label="任务名称" full>{{ taskName(detail) }}</t-descriptions-item>
+                <t-descriptions-item label="任务 ID">{{ detail.id }}</t-descriptions-item><t-descriptions-item label="状态"><ResourceStatusBadge :tone="statusTone(detail.status)" :label="statusLabel(detail.status)" /></t-descriptions-item>
+                <t-descriptions-item label="类目">{{ categoryName(detail.snapshot?.category_id) }}</t-descriptions-item><t-descriptions-item label="运营团队">{{ teamName(detail.team_id) }}</t-descriptions-item>
+                <t-descriptions-item label="任务来源"><t-link v-if="isStrategyTask(detail)" theme="primary" @click="openStrategy(detail)">{{ sourceName(detail) }}</t-link><span v-else>{{ sourceName(detail) }}</span></t-descriptions-item><t-descriptions-item label="触发方式">{{ triggerLabel(detail) }}</t-descriptions-item>
+                <t-descriptions-item label="发起人" full>{{ triggerLabel(detail) === '定时' ? '系统' : detail.created_by_name || '—' }}</t-descriptions-item>
+              </ResourceDescriptions></ResourceSection>
+              <ResourceSection title="执行结果">
+                <p class="task-result-summary">{{ taskResultSummary(detail) }}</p>
+                <ResourceNotice v-if="detailExceptions.length" tone="warning">
+                  {{ detailExceptions[0].reason }}
 
-          <div class="result-summary">
-            <div class="summary-tile"><strong>{{ detail.stats?.found || 0 }}</strong><span>发现内容</span></div>
-            <div class="summary-tile"><strong>{{ detail.stats?.added || 0 }}</strong><span>新增内容</span></div>
-            <div class="summary-tile"><strong>{{ detail.stats?.auto_materialized || 0 }}</strong><span>自动素材</span></div>
-            <div class="summary-tile"><strong>{{ detail.stats?.pending || 0 }}</strong><span>待审核</span></div>
-            <div class="summary-tile"><strong>{{ detail.stats?.failed || 0 }}</strong><span>失败</span></div>
-          </div>
-
-          <t-tabs v-model="activeTab">
-            <t-tab-panel value="overview" label="结果概览">
-              <div class="overview-summary">
-                <p>共发现 <strong>{{ detail.stats?.found || 0 }}</strong> 条内容，其中 <strong>{{ detail.stats?.added || 0 }}</strong> 条为新增内容，<strong>{{ detail.stats?.auto_materialized || 0 }}</strong> 条已自动转为素材，<strong>{{ detail.stats?.pending || 0 }}</strong> 条待审核。</p>
-              </div>
+                </ResourceNotice>
+                <details :key="detail.id" class="task-process">
+                  <summary><span class="task-process-open">查看过程</span><span class="task-process-close">收起过程</span></summary>
+                  <div class="task-process-body">
+                    <t-timeline>
+                      <t-timeline-item v-for="(event, index) in taskExecutionEvents(detail)" :key="index"><div>{{ event.label }}</div><time class="task-event-time">{{ formatDateTime(event.time) }}</time></t-timeline-item>
+                    </t-timeline>
+                    <div v-if="detailExceptions.length" class="task-exceptions">
+                      <div v-for="(item, index) in detailExceptions" :key="index" class="task-exception">
+                        <strong>{{ item.stage }}</strong>
+                        <ResourceDescriptions><t-descriptions-item label="处理对象" full>{{ item.scope }}</t-descriptions-item><t-descriptions-item label="失败原因" full>{{ item.reason }}</t-descriptions-item></ResourceDescriptions>
+                      </div>
+                    </div>
+                  </div>
+                </details>
+              </ResourceSection>
             </t-tab-panel>
 
-            <t-tab-panel value="items" label="发现内容">
-              <t-table class="wt-resource-table" :data="detail.results || []" :columns="resultColumns" row-key="platform_content_id" hover size="small" :scroll="{ y: '360px' }" empty="暂无发现结果">
-                <template #cover="{ row }">
-                  <img v-if="row.cover_url" class="result-cover" :src="row.cover_url" alt="" loading="lazy" referrerpolicy="no-referrer" />
-                  <span v-else class="result-cover result-cover--empty">暂无</span>
+            <t-tab-panel value="items" :label="contentTabLabel" :destroy-on-hide="true">
+              <t-table class="wt-resource-table" :data="pagedContents" :columns="resultColumns" row-key="platform_content_id" hover :scroll="resultScroll" empty="暂无内容">
+                <template #content="{ row }">
+                  <div class="task-content-cell">
+                    <img v-if="row.cover_url && !failedCovers.has(row.cover_url)" @error="failedCovers.add(row.cover_url)" class="result-cover" :src="row.cover_url" alt="" loading="lazy" referrerpolicy="no-referrer" />
+                    <div class="task-content-text">
+                      <span class="result-title" :title="row.title || row.platform_content_id">{{ truncateTitle(row.title || row.platform_content_id) }}</span>
+                      <span class="task-content-author">{{ row.author_name || '—' }}</span>
+                    </div>
+                  </div>
                 </template>
-                <template #title="{ row }">
-                  <span class="result-title" :title="row.title || row.failure_key || '未命名内容'">{{ truncateTitle(row.title || row.failure_key || '未命名内容') }}</span>
+                <template #metrics="{ row }"><MetricList :items="[{ label: '点赞', value: Number(row.like_count || 0).toLocaleString() }, { label: '收藏', value: Number(row.favorite_count || 0).toLocaleString() }]" /></template>
+                <template #processing_status="{ row }">
+                  <ResourceStatusBadge :tone="processingTone(row.processing_status)" :label="processingLabel(row.processing_status)" />
+                  <span v-if="row.failure_reason" class="task-content-error">{{ row.failure_reason }}</span>
                 </template>
-                <template #author_name="{ row }">{{ row.author_name || '-' }}</template>
-                <template #like_count="{ row }">{{ Number(row.like_count || 0).toLocaleString() }}</template>
-                <template #favorite_count="{ row }">{{ Number(row.favorite_count || 0).toLocaleString() }}</template>
-                <template #processing_status="{ row }"><ResourceStatusBadge :tone="processingTone(row.processing_status)" :label="processingLabel(row.processing_status)" /></template>
                 <template #op="{ row }">
-                  <t-button v-if="rowAction(row)" size="small" class="wt-secondary-button" variant="outline" @click="router.push(rowAction(row).to)">{{ rowAction(row).label }}</t-button>
-                  <span v-else>-</span>
+                  <ResourceRowActions><t-button v-if="rowAction(row)" size="small" variant="text" @click="router.push(rowAction(row).to)">{{ rowAction(row).label }}</t-button><span v-else>—</span></ResourceRowActions>
                 </template>
               </t-table>
+              <div v-if="detailContents.length > 10" class="pagination-bar"><t-pagination v-model:current="contentPagination.current" v-model:pageSize="contentPagination.pageSize" :total="detailContents.length" :page-size-options="[10, 20, 50]" /></div>
             </t-tab-panel>
 
-            <t-tab-panel value="process" label="执行过程">
-              <div class="timeline">
-                <div v-for="(step, index) in timeline(detail)" :key="index" class="timeline-item">
-                  <span class="timeline-time">{{ step.time || '—' }}</span>
-                  <span class="timeline-label">{{ step.label }}</span>
-                </div>
-              </div>
-            </t-tab-panel>
-
-            <t-tab-panel value="errors" label="异常记录">
-              <div v-if="exceptions(detail).length" class="exception-list">
-                <div v-for="(item, index) in exceptions(detail)" :key="index" class="exception-item">
-                  <div class="exception-head"><strong>{{ item.stage }}</strong><span>{{ formatDateTime(item.time) }}</span></div>
-                  <div class="exception-body"><span>失败原因</span><p>{{ item.reason }}</p></div>
-                  <div class="exception-body"><span>影响范围</span><p>{{ item.scope }}</p></div>
-                </div>
-              </div>
-              <div v-else class="exception-empty">暂无异常记录</div>
-            </t-tab-panel>
           </t-tabs>
         </div>
-        <template #footer>
-          <t-button v-if="canManage && detail && hasFailed(detail)" theme="primary" :loading="retrying" @click="retry(detail)">重试</t-button>
+      </ResourceOverlay>
+      <ResourceOverlay v-model:visible="strategyDrawerVisible" title="执行时策略配置" kind="drawer" :width="800">
+        <template v-if="strategyDrawer">
+          <ResourceNotice>本次任务创建时保存的配置。</ResourceNotice>
+          <ResourceSection title="策略信息"><ResourceDescriptions>
+            <t-descriptions-item label="策略名称" full>{{ strategyDrawer.strategy_name || '—' }}</t-descriptions-item>
+            <t-descriptions-item label="类目">{{ categoryName(strategyDrawer.category_id) }}</t-descriptions-item><t-descriptions-item label="平台">{{ platformLabel(strategyDrawer.platform) }}</t-descriptions-item>
+            <t-descriptions-item label="类型">{{ strategyDrawer.strategy_type === 'author' ? '作者' : '关键词' }}</t-descriptions-item><t-descriptions-item label="执行周期">{{ scheduleLabel(strategyDrawer.schedule) }}</t-descriptions-item>
+            <t-descriptions-item label="关键词 / 作者" full>{{ (strategyDrawer.keywords || []).join('、') || strategyDrawer.author || '—' }}</t-descriptions-item><t-descriptions-item label="转素材规则" full>{{ materialRulesSummary(strategyDrawer) }}</t-descriptions-item>
+          </ResourceDescriptions></ResourceSection>
         </template>
-      </t-drawer>
-
-      <t-drawer :close-btn="true" v-model:visible="strategyDrawerVisible" header="策略详情" size="min(92vw, 560px)" :footer="Boolean(strategyDrawer)">
-        <div v-if="strategyDrawer" class="strategy-drawer">
-          <div class="strategy-drawer__field"><span>策略名称</span><strong>{{ strategyDrawer.strategy_name || '-' }}</strong></div>
-          <div class="strategy-drawer__field"><span>业务分类</span><strong>{{ categoryName(strategyDrawer.category_id) }}</strong></div>
-          <div class="strategy-drawer__field"><span>平台</span><strong>{{ platformLabel(strategyDrawer.platform) }}</strong></div>
-          <div class="strategy-drawer__field"><span>类型</span><strong>{{ strategyDrawer.strategy_type === 'author' ? '作者' : '关键词' }}</strong></div>
-          <div class="strategy-drawer__field"><span>关键词</span><strong>{{ (strategyDrawer.keywords || []).join('、') || strategyDrawer.author || '-' }}</strong></div>
-          <div class="strategy-drawer__field"><span>执行周期</span><strong>{{ strategyDrawer.schedule || '-' }}</strong></div>
-          <div class="strategy-drawer__field"><span>转素材规则</span><strong>{{ snapshotMaterialLabel(strategyDrawer) }}</strong></div>
-        </div>
-        <template #footer><t-button v-if="strategyDrawer" theme="primary" @click="goStrategy">查看策略</t-button></template>
-      </t-drawer>
+        <template #footer><t-button v-if="strategyDrawer?.strategy_id" theme="primary" @click="goStrategy">查看策略</t-button></template>
+      </ResourceOverlay>
     </div>
   </t-loading>
 </template>
 
 <style scoped>
-.task-card { padding: 18px 20px; margin-top: 16px; }
-.task-detail { display: flex; flex-direction: column; gap: 14px; }
-.detail-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.task-title { margin: 0; color: var(--wt-text-primary); font-size: 18px; font-weight: 600; }
-.task-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; }
-.detail-meta { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
-.detail-meta > div { padding: 10px 12px; border: 1px solid var(--wt-border); border-radius: 8px; }
-.detail-meta span { display: block; color: var(--wt-text-tertiary); font-size: 12px; }
-.detail-meta strong { display: block; margin-top: 4px; color: var(--wt-text-primary); font-size: 14px; font-weight: 600; }
-.result-summary { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; }
-.summary-tile { padding: 14px 10px; border: 1px solid var(--wt-border); border-radius: 8px; text-align: center; }
-.summary-tile strong { display: block; color: var(--wt-primary); font-size: 22px; font-weight: 650; }
-.summary-tile span { display: block; margin-top: 5px; color: var(--wt-text-tertiary); font-size: 12px; }
-.result-cover { width: 48px; height: 48px; border-radius: 6px; object-fit: cover; display: flex; align-items: center; justify-content: center; background: var(--wt-bg-page); color: var(--wt-text-tertiary); font-size: 11px; }
-.result-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; }
-.overview-summary p { margin: 0; color: var(--wt-text-secondary); font-size: 14px; line-height: 1.7; }
-.overview-summary strong { color: var(--wt-primary); }
-.timeline { display: flex; flex-direction: column; gap: 12px; padding: 6px 2px; }
-.timeline-item { display: flex; gap: 14px; align-items: baseline; }
-.timeline-time { width: 44px; color: var(--wt-text-tertiary); font-size: 12px; flex-shrink: 0; }
-.timeline-label { color: var(--wt-text-primary); font-size: 14px; }
-.exception-list { display: flex; flex-direction: column; gap: 10px; }
-.exception-item { padding: 12px; border: 1px solid var(--wt-border); border-radius: 8px; }
-.exception-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
-.exception-head strong { color: var(--wt-danger); font-size: 14px; }
-.exception-head span { color: var(--wt-text-tertiary); font-size: 12px; }
-.exception-body { display: grid; grid-template-columns: 64px 1fr; gap: 8px; margin-top: 6px; }
-.exception-body span { color: var(--wt-text-tertiary); font-size: 12px; }
-.exception-body p { margin: 0; color: var(--wt-text-primary); font-size: 13px; }
-.exception-empty { padding: 24px; text-align: center; color: var(--wt-text-tertiary); font-size: 13px; }
-.strategy-drawer { display: flex; flex-direction: column; gap: 12px; }
-.strategy-drawer__field { display: flex; justify-content: space-between; gap: 12px; padding: 10px 12px; border: 1px solid var(--wt-border); border-radius: 8px; }
-.strategy-drawer__field span { color: var(--wt-text-tertiary); font-size: 12px; flex-shrink: 0; }
-.strategy-drawer__field strong { color: var(--wt-text-primary); font-size: 14px; font-weight: 600; text-align: right; word-break: break-all; }
-.task-source-link { color: #7c3aed; cursor: pointer; font-weight: 500; }
-.task-source-link:hover { text-decoration: underline; }
+.task-name, .result-title { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; display:block; }
+.result-cover { width:40px; height:48px; flex:0 0 40px; object-fit:cover; border-radius:4px; }
+.task-detail-tabs { margin-top:0; }
+.task-result-summary { margin:0; line-height:24px; color:var(--wt-text-primary); }
+.task-process { margin-top:12px; }
+.task-process > summary { width:fit-content; color:var(--wt-primary); cursor:pointer; line-height:24px; border-radius:4px; }
+.task-process > summary:focus-visible { outline:2px solid var(--wt-primary); outline-offset:3px; }
+.task-process-close, .task-process[open] .task-process-open { display:none; }
+.task-process[open] .task-process-close { display:inline; }
+.task-process-body { padding-top:20px; }
+.task-exceptions { padding-top:16px; border-top:1px solid var(--wt-border); }
+.task-content-cell { display:flex; align-items:center; gap:12px; }
+.task-content-text { min-width:0; }
+.task-content-author { display:block; margin-top:4px; font-size:12px; color:var(--wt-text-tertiary); }
+.task-event-time { font-size:12px; color:var(--wt-text-tertiary); }
+.task-content-error { display:block; margin-top:6px; font-size:12px; line-height:20px; color:var(--wt-danger); overflow-wrap:anywhere; }
+.task-exception + .task-exception { margin-top:16px; padding-top:16px; border-top:1px solid var(--wt-border); }
+.task-exception > strong { color:var(--wt-danger); font-size:13px; font-weight:500; }
 </style>

@@ -662,13 +662,13 @@ func writeIdentityError(c *hertzapp.RequestContext, err error) {
 	case errors.Is(err, identityservice.ErrTeamNameTaken):
 		api.Conflict(c, 20002, "团队名称已被使用")
 	case errors.Is(err, identityservice.ErrTeamInUse):
-		api.Conflict(c, 20003, "该团队下还有用户或业务引用，不能删除，请先转移用户")
+		api.Conflict(c, 20003, "团队仍有用户或业务数据，无法删除")
 	case errors.Is(err, identityservice.ErrCategoryNameTaken):
 		api.Conflict(c, 20004, "类目名称已被使用")
 	case errors.Is(err, identityservice.ErrInvalidCategoryType):
 		api.BadRequest(c, 10004, "类目一级类型无效")
 	case errors.Is(err, identityservice.ErrCategoryInUse):
-		api.Conflict(c, 20005, "该类目已分配给用户或已有业务引用，不能停用或删除，请先调整用户类目范围")
+		api.Conflict(c, 20005, "类目仍有关联数据，无法完成此操作")
 	case errors.Is(err, identityservice.ErrCategoryUnavailable):
 		api.BadRequest(c, 10002, "请选择已启用的类目")
 	case errors.Is(err, identityservice.ErrPasswordTooShort):

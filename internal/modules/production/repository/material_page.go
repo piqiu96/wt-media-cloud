@@ -58,19 +58,19 @@ func MaterialMetricPresence(ids []int64) (map[int64]map[string]bool, error) {
 	for _, id := range ids {
 		args = append(args, id)
 	}
-	query := fmt.Sprintf("SELECT m.id,s.raw_json,s.view_count,s.like_count,s.favorite_count FROM materials m JOIN source_contents s ON s.id=m.source_content_id WHERE m.id IN (%s)", strings.TrimSuffix(strings.Repeat("?,", len(ids)), ","))
+	query := fmt.Sprintf("SELECT m.id,s.raw_json,s.view_count,s.like_count,s.favorite_count,s.comment_count,s.share_count FROM materials m JOIN source_contents s ON s.id=m.source_content_id WHERE m.id IN (%s)", strings.TrimSuffix(strings.Repeat("?,", len(ids)), ","))
 	rows, err := database.DB().Raw(query, args...).Rows()
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	for rows.Next() {
-		var id, views, likes, favorites int64
+		var id, views, likes, favorites, comments, shares int64
 		var raw []byte
-		if err := rows.Scan(&id, &raw, &views, &likes, &favorites); err != nil {
+		if err := rows.Scan(&id, &raw, &views, &likes, &favorites, &comments, &shares); err != nil {
 			return nil, err
 		}
-		result[id] = map[string]bool{"view_count": SourceMetricKnown(raw, "view_count", views), "like_count": SourceMetricKnown(raw, "like_count", likes), "favorite_count": SourceMetricKnown(raw, "favorite_count", favorites)}
+		result[id] = map[string]bool{"view_count": SourceMetricKnown(raw, "view_count", views), "like_count": SourceMetricKnown(raw, "like_count", likes), "favorite_count": SourceMetricKnown(raw, "favorite_count", favorites), "comment_count": SourceMetricKnown(raw, "comment_count", comments), "share_count": SourceMetricKnown(raw, "share_count", shares)}
 	}
 	return result, rows.Err()
 }

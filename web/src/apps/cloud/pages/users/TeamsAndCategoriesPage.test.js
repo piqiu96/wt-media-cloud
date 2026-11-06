@@ -21,7 +21,7 @@ describe('M2-A3 management pages', () => {
     for (const required of ['运营团队', '综合搜索', '团队 ID / 名称', '查询', '重置', '用户数', 't-table', 't-pagination', '该团队下还有']) {
       expect(teamsSource).toContain(required)
     }
-    expect(teamsSource).toContain(':disabled="row.user_count > 0"')
+    expect(teamsSource).toContain(':disabled="row.user_count > 0 || pendingActions.has(row.id)"')
   })
 
   it('sends the team keyword to the backend and paginates the returned rows', () => {
@@ -43,11 +43,11 @@ describe('M2-A3 management pages', () => {
   })
 
   it('gives category page search/list/filter/pagination basics', () => {
-    for (const required of ['类目管理', '综合搜索', '类目 ID / 名称', '状态', '查询', '重置', '关联情况', '用户授权', '媒体账号', '新增类目', 't-table', 't-pagination', '查看关联详情']) {
+    for (const required of ['类目管理', '综合搜索', '类目 ID / 名称', '状态', '查询', '重置', '用户／账号关联', '用户授权', '媒体账号', '新增类目', 't-table', 't-pagination', '关联信息']) {
       expect(categoriesSource).toContain(required)
     }
-    expect(categoriesSource).toContain(":disabled=\"row.enabled && hasReferences(row)\"")
-    expect(categoriesSource).toContain(':disabled="hasReferences(row)"')
+    expect(categoriesSource).toContain('(row.enabled && hasReferences(row))')
+    expect(categoriesSource).toContain(':disabled="hasReferences(row) || pendingActions.has(row.id)"')
   })
 
   // 高级运营读的是 management 视图：全部状态、无关联摘要、无写入口。

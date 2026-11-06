@@ -504,8 +504,9 @@ func teamHasReferences(db *gorm.DB, teamID model.TeamID) (bool, error) {
 	err := queryRow(db, `SELECT
         (SELECT COUNT(*) FROM users WHERE team_id = ?) +
         (SELECT COUNT(*) FROM media_accounts WHERE team_id = ?) +
-        (SELECT COUNT(*) FROM browser_profiles WHERE team_id = ?)`,
-		teamID, teamID, teamID,
+        (SELECT COUNT(*) FROM browser_profiles WHERE team_id = ?) +
+        (SELECT COUNT(*) FROM compose_task_batches WHERE team_id = ?)`,
+		teamID, teamID, teamID, teamID,
 	).Scan(&count)
 	return count > 0, err
 }
@@ -603,6 +604,17 @@ func DeleteCategoryWithAudit(id model.CategoryID, event model.AuditEvent) error 
 func deleteCategoryWithAudit(db *gorm.DB, id model.CategoryID, event model.AuditEvent) error {
 	tx := db.Begin()
 	defer rollbackTx(tx)
+	// These historical references either use SET NULL or have no FK. Preserve
+	// their category identity; restrictive FKs protect the remaining references.
+	var historical bool
+	if err := queryRow(tx, `SELECT EXISTS(SELECT 1 FROM source_contents WHERE category_id = ?)
+   OR EXISTS(SELECT 1 FROM discovery_strategies WHERE category_id = ?)
+   OR EXISTS(SELECT 1 FROM compose_task_batches WHERE category_id = ?)`, id, id, id).Scan(&historical); err != nil {
+		return err
+	}
+	if historical {
+		return model.ErrCategoryInUse
+	}
 	result, err := execSQL(tx, `DELETE FROM categories WHERE id = ?`, id)
 	if err != nil {
 		if foreignKeyReferenced(err) {
@@ -688,7 +700,7 @@ func categoryReferences(db *gorm.DB, categoryID model.CategoryID) (model.Categor
 	if err := userRows.Err(); err != nil {
 		return model.CategoryReferences{}, err
 	}
-	accountRows, err := queryRows(db, `SELECT ma.id, COALESCE(ma.name, ''), ma.platform, ma.user_id, u.username
+	accountRows, err := queryRows(db, `SELECT ma.id, COALESCE(NULLIF(ma.platform_name, ''), ma.platform_account_id, ''), ma.platform, ma.user_id, u.username
 		FROM media_account_categories relations
 		JOIN media_accounts ma ON ma.id = relations.media_account_id
 		JOIN users u ON u.id = ma.user_id

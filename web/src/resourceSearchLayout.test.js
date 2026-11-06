@@ -31,10 +31,11 @@ describe('resource search layout', () => {
     it(`${name} compiles with filters in the existing resource card`, () => {
       const source = readFileSync(new URL(path, import.meta.url), 'utf8')
       expect(component).toBeTruthy()
-      expect(source).toContain('class="filter-bar"')
+      const filterAt = source.includes('<ResourceFilterBar>') ? source.indexOf('<ResourceFilterBar>') : source.indexOf('class="filter-bar"')
+      expect(filterAt).toBeGreaterThan(0)
       expect(source).toContain('class="wt-filter-actions"')
       expect(source).toContain('class="table-scroll-wrap"')
-      expect(source.indexOf('class="filter-bar"')).toBeLessThan(source.indexOf('class="table-scroll-wrap"'))
+      expect(filterAt).toBeLessThan(source.indexOf('class="table-scroll-wrap"'))
       expect(source).not.toContain('class="filter-row"')
     })
   }

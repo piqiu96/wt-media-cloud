@@ -11,7 +11,7 @@ const names = { category: '分类', team: '运营团队', member: '成员' }
 </script>
 
 <template>
-  <TSelect class="business-select" filterable clearable :filter="remote ? () => true : undefined"
+  <TSelect class="business-select" filterable clearable :min-collapsed-num="1" :filter="remote ? () => true : undefined"
     :placeholder="filter ? '全部' : `选择${names[kind] || '选项'}`" v-bind="$attrs">
     <template v-for="(_, name) in $slots" #[name]="scope"><slot :name="name" v-bind="scope || {}" /></template>
   </TSelect>

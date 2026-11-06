@@ -1,11 +1,12 @@
 <script setup>
+import ResourceFilterBar from '../../../shared/ui/resource/ResourceFilterBar.vue'
+import ResourceDateRange from '../../../shared/ui/resource/ResourceDateRange.vue'
 import '../production.css'
 import ResourceOverlay from '../../../shared/ui/resource/ResourceOverlay.vue'
-import ResourceAdvancedToggle from '../../../shared/ui/resource/ResourceAdvancedToggle.vue'
 import ResourceRowActions from '../../../shared/ui/resource/ResourceRowActions.vue'
 import ResourceSelectionToolbar from '../../../shared/ui/resource/ResourceSelectionToolbar.vue'
 import { computed,onMounted,onUnmounted,ref } from 'vue'
-import { useRoute,useRouter } from 'vue-router'
+import { useRoute } from 'vue-router'
 import BusinessSelect from '../../../shared/ui/fields/BusinessSelect.vue'
 import FeedbackAlert from '../../../shared/ui/feedback/FeedbackAlert.vue'
 import { feedback } from '../../../shared/ui/feedback/index.js'
@@ -28,17 +29,20 @@ import { downloadedFileName } from '../../transfer/downloadFacts.js'
 import { isDesktopRuntime,openSavedFile,savedFileStates } from '../../transfer/desktopBridge.js'
 import { useDownloadCentre } from '../../transfer/downloadCentre.js'
 import { createDownloadFailureMessage } from '../../transfer/downloadErrors.js'
+import ComposeRelatedDetail from '../components/ComposeRelatedDetail.vue'
 import ComposeOutputTable from '../components/ComposeOutputTable.vue'
 import ComposeOutputMaterialDetail from '../components/ComposeOutputMaterialDetail.vue'
 import ComposeOutputDetail from '../components/ComposeOutputDetail.vue'
 import ComposeTaskCreateDialog from '../components/ComposeTaskCreateDialog.vue'
 import ComposeStrategySummary from '../components/ComposeStrategySummary.vue'
 import MaterialDetailDrawer from '../../materials/MaterialDetailDrawer.vue'
-const client=createComposeClient(),materialsClient=createMaterialsClient(),transferClient=createFileTransferClient(),sessionClient=createSessionClient(),downloadCentre=useDownloadCentre(),route=useRoute(),router=useRouter()
-const activeView=ref('batches'),rows=ref([]),total=ref(0),loading=ref(false),error=ref(''),advancedFiltersVisible=ref(false)
+const client=createComposeClient(),materialsClient=createMaterialsClient(),transferClient=createFileTransferClient(),sessionClient=createSessionClient(),downloadCentre=useDownloadCentre(),route=useRoute()
+const related=ref({visible:false,kind:'task',id:null})
+const activeView=ref('batches'),rows=ref([]),total=ref(0),loading=ref(false),error=ref('')
 const pages=ref({batches:{current:1,pageSize:20},outputs:{current:1,pageSize:20}}),pagination=computed(()=>pages.value[activeView.value])
+const appliedScope=ref({})
 const filters=ref({search:'',team_id:'',category_id:'',operator:'',platform:'',video_status:'',created_range:[]})
-const currentUser=ref(null),teams=ref([]),categories=ref([]),enabledCategories=ref([]),operatorOptions=ref([]),operatorsLoading=ref(false)
+const currentUser=ref(null),teams=ref([]),templates=ref([]),categories=ref([]),enabledCategories=ref([]),operatorOptions=ref([]),operatorsLoading=ref(false)
 const selectedRowKeys=ref([]),knownRows=ref({}),batchDownloading=ref(false),batchResult=ref(''),downloadingID=ref(null)
 const downloadTasks=ref([]),localFiles=ref({}),downloadKnown=ref(false),detailVisible=ref(false),detail=ref(null),previewUrl=ref(''),previewLoading=ref(false),detailLoading=ref(false)
 const materialGroup=ref(null),materialGroupVisible=ref(false),materialDrawer=ref({visible:false,row:null,loading:false}),strategyDrawer=ref({visible:false,row:null,loading:false}),createVisible=ref(false),createSource=ref(null)
@@ -82,7 +86,8 @@ async function loadOperators() {
 }
 
 function onTeamFilterChange(){filters.value.operator='';loadOperators().catch(()=>{})}
-async function load({resetPage=false,quiet=false}={}) {
+const requestedScope=ref(null)
+async function load({resetPage=false,quiet=false,applyFilters=false}={}) {
  if (resetPage) pagination.value.current = 1
  if (!quiet) loading.value = true
  if(!quiet)error.value=''
@@ -93,22 +98,26 @@ async function load({resetPage=false,quiet=false}={}) {
   if(isAdmin.value&&filters.value.team_id)params.team_id=Number(filters.value.team_id)
   const namedOperator=operatorIdFromOption(filters.value.operator)
   if((isAdmin.value||isSenior.value)&&namedOperator)params.operator_id=namedOperator
+  if(applyFilters||!requestedScope.value){requestedScope.value={...params};delete requestedScope.value.page;delete requestedScope.value.page_size}
+  for(const key of Object.keys(params))if(!['page','page_size'].includes(key))delete params[key]
+  Object.assign(params,requestedScope.value)
   const data=await(activeView.value==='batches'?client.listComposeOutputMaterials(params):client.listComposeOutputs(params))
   if(sequence!==loadSequence)return
+  appliedScope.value={...params};delete appliedScope.value.page;delete appliedScope.value.page_size
   rows.value=data.items||[];total.value=data.total||0
   if(activeView.value==='outputs')for(const row of rows.value)knownRows.value[row.id]=row
  }catch(e){if(!quiet&&sequence===loadSequence)error.value=e?.message||'读取成片失败'}finally{if(!quiet&&sequence===loadSequence)loading.value=false}
 }
-function query(){selectedRowKeys.value=[];load({resetPage:true})}
+function query(){selectedRowKeys.value=[];load({resetPage:true,applyFilters:true})}
 function reset(){filters.value={search:'',team_id:'',category_id:'',operator:'',platform:'',video_status:'',created_range:[]};query()}
 function switchView(value){activeView.value=value;load()}
 function paginate(data){pagination.value.current=data.current;pagination.value.pageSize=data.pageSize;load()}
-useAutoRefresh(() => load({ quiet: true }), { shouldSkip: () =>detailVisible.value||materialGroupVisible.value||materialDrawer.value.visible||strategyDrawer.value.visible||createVisible.value||selectedRowKeys.value.length>0||batchDownloading.value||downloadingID.value!==null})
+useAutoRefresh(() => load({ quiet: true }), { shouldSkip: () =>detailVisible.value||materialGroupVisible.value||materialDrawer.value.visible||strategyDrawer.value.visible||createVisible.value||related.value.visible||selectedRowKeys.value.length>0||batchDownloading.value||downloadingID.value!==null})
 function openMaterialGroup(row){materialGroup.value=row;materialGroupVisible.value=true}
 async function openMaterial(id){materialDrawer.value={visible:true,row:null,loading:true};try{materialDrawer.value.row=await materialsClient.get(id)}catch(e){feedback.toast.error(e?.message||'读取素材失败');materialDrawer.value.visible=false}finally{materialDrawer.value.loading=false}}
-async function openStrategy(id){strategyDrawer.value={visible:true,row:null,loading:true};try{strategyDrawer.value.row=await client.getStrategy(id)}catch(e){feedback.toast.error(e?.message||'读取策略失败');strategyDrawer.value.visible=false}finally{strategyDrawer.value.loading=false}}
-function openTask(id){router.push({name:'Compose',query:{task_id:id}})}
-function openBatch(id){router.push({name:'Compose',query:{batch_id:id}})}
+async function openStrategy(id){strategyDrawer.value={visible:true,row:null,loading:true};try{[strategyDrawer.value.row,templates.value]=await Promise.all([client.getStrategy(id),client.listTemplates()])}catch(e){feedback.toast.error(e?.message||'读取策略失败');strategyDrawer.value.visible=false}finally{strategyDrawer.value.loading=false}}
+function openTask(id){related.value={visible:true,kind:'task',id:Number(id)}}
+function openBatch(id){related.value={visible:true,kind:'batch',id:Number(id)}}
 async function openDetail(row){const sequence=++detailSequence;detailVisible.value=true;detailLoading.value=true;detail.value=null;previewUrl.value='';try{const data=await client.getComposeOutput(row.id);if(sequence!==detailSequence)return;detail.value=data;await refreshDownloadFacts();await retryPreview()}catch(e){feedback.toast.error(e?.message||'打开成片失败');detailVisible.value=false}finally{if(sequence===detailSequence)detailLoading.value=false}}
 async function retryPreview(){if(!detail.value?.output?.id||previewLoading.value)return;const id=detail.value.output.id;previewLoading.value=true;try{const link=await client.getComposeOutputVideoUrl(id);if(detail.value?.output?.id===id)previewUrl.value=publicObjectReadUrl(link?.url)}catch{if(detail.value?.output?.id===id)previewUrl.value=''}finally{previewLoading.value=false}}
 async function openLocalFile(){const state=downloadFor(detail.value.output);if(state.key!=='downloaded'||!state.fileName)return;try{await openSavedFile(state.fileName)}catch(e){feedback.toast.error(e?.message||'打开本机文件失败');await refreshDownloadFacts()}}
@@ -125,33 +134,39 @@ onUnmounted(()=>{loadSequence++;detailSequence++;if(downloadPoller)clearInterval
   <FeedbackAlert v-if="error" theme="error" :message="error" closable @close="error=''" />
   <ResourceCard class="my-outputs-card">
    <t-tabs :value="activeView" @change="switchView"><t-tab-panel value="batches" label="成片批次" /><t-tab-panel value="outputs" label="成片列表" /></t-tabs>
-   <div class="filter-bar">
+   <ResourceFilterBar>
     <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">综合搜索</span><t-input v-model="filters.search" clearable placeholder="名称、素材 ID、批次 ID" @enter="query" /></label>
     <label v-if="isAdmin" class="wt-filter-field"><span class="wt-filter-field__label">运营团队</span><BusinessSelect kind="team" filter v-model="filters.team_id" clearable @change="onTeamFilterChange"><t-option v-for="team in teams" :key="team.id" :value="team.id" :label="team.name" /></BusinessSelect></label>
     <label class="wt-filter-field"><span class="wt-filter-field__label">类目</span><BusinessSelect kind="category" filter v-model="filters.category_id" :options="categoryFilterOptions" clearable /></label>
-    <div class="wt-filter-actions"><t-button theme="primary" @click="query">查询</t-button><t-button variant="outline" class="wt-secondary-button" @click="reset">重置</t-button></div>
-          <ResourceAdvancedToggle v-model="advancedFiltersVisible" />
-    <div v-if="advancedFiltersVisible" class="wt-advanced-filters">
-     <label v-if="canFilterOperators" class="wt-filter-field"><span class="wt-filter-field__label">负责人</span><BusinessSelect kind="member" filter v-model="filters.operator" :options="operatorFilterOptions" :loading="operatorsLoading" :disabled="operatorsLoading||(isAdmin&&!filters.team_id)" clearable /></label>
-     <label class="wt-filter-field"><span class="wt-filter-field__label">适用平台</span><t-select v-model="filters.platform" :options="OUTPUT_PLATFORMS" placeholder="全部" clearable /></label>
-     <label class="wt-filter-field"><span class="wt-filter-field__label">视频状态</span><t-select v-model="filters.video_status" :options="videoOptions" placeholder="全部" clearable /></label>
-     <label class="wt-filter-field compose-date-filter"><span class="wt-filter-field__label">生成时间</span><t-date-range-picker v-model="filters.created_range" value-type="YYYY-MM-DD" clearable /></label>
+    <label v-if="canFilterOperators" class="wt-filter-field"><span class="wt-filter-field__label">负责人</span><BusinessSelect kind="member" filter v-model="filters.operator" :options="operatorFilterOptions" :loading="operatorsLoading" :disabled="operatorsLoading||(isAdmin&&!filters.team_id)" clearable /></label>
+<label class="wt-filter-field"><span class="wt-filter-field__label">适用平台</span><t-select v-model="filters.platform" :options="OUTPUT_PLATFORMS" placeholder="全部" clearable /></label>
+<label class="wt-filter-field"><span class="wt-filter-field__label">视频状态</span><t-select v-model="filters.video_status" :options="videoOptions" placeholder="全部" clearable /></label>
+<label class="wt-filter-field compose-date-filter"><span class="wt-filter-field__label">生成时间</span><ResourceDateRange v-model="filters.created_range" value-type="YYYY-MM-DD" clearable /></label>
 
-    </div>
-   </div>
+
+
+
+
+
+
+
+
+   <div class="wt-filter-actions"><t-button theme="primary" @click="query">查询</t-button><t-button variant="outline" class="wt-secondary-button" @click="reset">重置</t-button></div>
+</ResourceFilterBar>
    <FeedbackAlert v-if="batchResult" theme="info" :message="batchResult" closable @close="batchResult=''" />
    <ResourceSelectionToolbar v-if="activeView==='outputs'" :count="selectedRowKeys.length" unit="个成片" @clear="selectedRowKeys=[]"><t-button variant="outline" :loading="batchDownloading" :disabled="!selectedRows.some(canDownload)" :title="localDownloadReason(currentUser)" @click="batchDownload(selectedRows)">下载（{{ selectedRowKeys.length }}）</t-button><span :title="publishingReason"><t-button variant="outline" disabled>去发布</t-button></span></ResourceSelectionToolbar>
    <template v-if="activeView==='batches'"><div class="table-scroll-wrap"><t-table class="wt-resource-table" :data="rows" :columns="columns" row-key="material_id" :scroll="tableScroll" size="small" hover empty="暂无成片"><template #material="{row}"><div class="output-related"><strong :title="row.material_title">{{ row.material_title||'—' }}</strong><span>{{ row.author_name||'—' }}</span></div></template><template #category="{row}">{{ categoryName(row.category_id) }}</template><template #strategies="{row}"><div class="output-related"><span v-for="strategy in (row.strategies||[]).slice(0,2)" :key="strategy.id" :title="strategy.name">{{ strategy.name||'—' }}</span><t-tooltip v-if="row.strategies?.length>2" :content="row.strategies.map(item=>item.name).join('、')"><span>共 {{ row.strategies.length }} 个策略</span></t-tooltip></div></template><template #latest_created_at="{row}">{{ formatDateTime(row.latest_created_at) }}</template><template #op="{row}"><ResourceRowActions><t-button size="small" variant="text" @click="openMaterialGroup(row)">详情</t-button></ResourceRowActions></template></t-table></div></template>
    <ComposeOutputTable v-else :rows="rows" v-model:selected-keys="selectedRowKeys" :video-state="videoFor" :can-download="canDownload" :download-reason="downloadReason" :downloading-id="downloadingID" :category-name="categoryName" @detail="openDetail" @download="download" @remake="remake" @material="openMaterial" />
    <div class="pagination-bar"><t-pagination :show-jumper="false" :current="pagination.current" :page-size="pagination.pageSize" :total="total" :page-size-options="[10,20,50]" @change="paginate" /></div>
   </ResourceCard>
-  <ComposeOutputMaterialDetail v-model:visible="materialGroupVisible" :material="materialGroup" :video-state="videoFor" :can-download="canDownload" :download-reason="downloadReason" :category-name="categoryName" :downloading-id="downloadingID" :busy="batchDownloading" :publishing-reason="publishingReason" :result="batchResult" @detail="openDetail" @download="download" @downloads="batchDownload" @remake="remake" @batch="openBatch" />
-  <ResourceOverlay v-model:visible="detailVisible" kind="drawer" title="成片详情" :width="880" :footer="Boolean(detail?.output && (canDownload(detail.output)||downloadReason(detail.output)||detail.output.actions?.remake))"><t-loading :loading="detailLoading"><ComposeOutputDetail v-if="detail" :detail="detail" :preview-url="previewUrl" :preview-loading="previewLoading" :download-state="downloadFor(detail.output)" management linkable @retry-preview="retryPreview" @open-file="openLocalFile" @open-material="openMaterial" @open-strategy="openStrategy" @open-task="openTask" @open-batch="openBatch" /></t-loading><template #footer><t-space v-if="detail" class="wt-resource-actions"><span v-if="downloadReason(detail.output)" class="output-filter-hint">{{ downloadReason(detail.output) }}</span><t-button v-if="canDownload(detail.output)||downloadReason(detail.output)" :disabled="!canDownload(detail.output)" :title="downloadReason(detail.output)" variant="outline" class="wt-secondary-button" :loading="downloadingID===detail.output.id" @click="download(detail.output)">下载</t-button><t-button v-if="detail.output.actions?.remake" theme="primary" @click="remake(detail.output)">再次制作</t-button></t-space></template></ResourceOverlay>
+  <ComposeOutputMaterialDetail v-model:visible="materialGroupVisible" :material="materialGroup" :scope="appliedScope" :video-state="row=>outputVideoState(row)" :can-download="canDownload" :download-reason="downloadReason" :category-name="categoryName" :downloading-id="downloadingID" :busy="batchDownloading" :publishing-reason="publishingReason" :result="batchResult" @detail="openDetail" @download="download" @downloads="batchDownload" @remake="remake" @batch="openBatch" />
+  <ResourceOverlay v-model:visible="detailVisible" kind="drawer" title="成片详情" :width="800" :footer="false"><t-loading :loading="detailLoading"><ComposeOutputDetail v-if="detail" :detail="detail" :preview-url="previewUrl" :preview-loading="previewLoading" :download-state="downloadFor(detail.output)" management linkable @retry-preview="retryPreview" @open-file="openLocalFile" @open-material="openMaterial" @open-strategy="openStrategy" @open-task="openTask" @open-batch="openBatch" /></t-loading></ResourceOverlay>
   <ComposeTaskCreateDialog v-model:visible="createVisible" :source-output="createSource" @created="onCreated" />
+  <ComposeRelatedDetail v-model:visible="related.visible" :kind="related.kind" :entity-id="related.id" :can-retry="isAdmin||isSenior" />
   <MaterialDetailDrawer :visible="materialDrawer.visible" :material="materialDrawer.row" :loading="materialDrawer.loading" :categories="categories" mode="readonly" :show-page-link="false" @update:visible="materialDrawer.visible=$event" />
-  <ResourceOverlay :visible="strategyDrawer.visible" title="策略详情" kind="drawer" :width="880" :footer="false"  @update:visible="strategyDrawer.visible=$event"><t-loading :loading="strategyDrawer.loading"><ComposeStrategySummary v-if="strategyDrawer.row" :strategy="strategyDrawer.row" :team="teamName(strategyDrawer.row.team_id)" :category="categoryName(strategyDrawer.row.category_id)" /></t-loading></ResourceOverlay>
+  <ResourceOverlay :visible="strategyDrawer.visible" title="策略详情" kind="drawer" :width="960" :footer="false"  @update:visible="strategyDrawer.visible=$event"><t-loading :loading="strategyDrawer.loading"><ComposeStrategySummary v-if="strategyDrawer.row" :strategy="strategyDrawer.row" :templates="templates" :team="teamName(strategyDrawer.row.team_id)" :category="categoryName(strategyDrawer.row.category_id)" /></t-loading></ResourceOverlay>
  </div></t-loading>
 </template>
 <style scoped>
-.my-outputs-card{padding:14px 20px 18px;}.wt-advanced-filters>.compose-date-filter{flex:0 0 320px;width:320px;min-width:280px;max-width:100%;}.compose-date-filter :deep(.t-date-range-picker){width:100%;min-width:0;}.output-filter-hint{font-size:12px;line-height:1.6;color:var(--wt-text-tertiary);}.wt-advanced-filters>.output-filter-hint{flex-basis:100%;margin:0;}.output-related{display:flex;flex-direction:column;gap:4px;min-width:0;}.output-related strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500;}.output-related span{font-size:12px;color:var(--wt-text-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.compose-date-filter :deep(.t-date-range-picker){width:100%;min-width:0;}.output-filter-hint{font-size:12px;line-height:1.6;color:var(--wt-text-tertiary);}.wt-advanced-filters>.output-filter-hint{flex-basis:100%;margin:0;}.output-related{display:flex;flex-direction:column;gap:4px;min-width:0;}.output-related strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500;}.output-related span{font-size:12px;color:var(--wt-text-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 </style>

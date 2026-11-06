@@ -25,7 +25,6 @@ function conditionText(condition) {
       <t-alert theme="info" message="该策略有任务执行中" />
       <ResourceDescriptions><t-descriptions-item label="任务批次">{{ view.active_batch.name || view.active_batch.id }}</t-descriptions-item><t-descriptions-item label="创建时间">{{ formatDateTime(view.active_batch.created_at) }}</t-descriptions-item></ResourceDescriptions>
       <ComposeBatchProgress :counts="view.active_batch.counts || {}" />
-      <t-link theme="primary" @click="$emit('progress', view.active_batch)">查看详情</t-link>
     </template>
     <template v-else>
       <div class="execution-preview__summary"><span>本次素材 <strong>{{ view.selected_count }} 条</strong></span><span>预计成片 <strong>{{ view.estimated_output_count }} 个</strong></span></div>

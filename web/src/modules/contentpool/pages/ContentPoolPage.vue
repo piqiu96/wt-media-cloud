@@ -1,4 +1,20 @@
 <script setup>
+import '../mining.css'
+import { DialogPlugin } from 'tdesign-vue-next'
+import ContentCoverPlaceholder from '../components/ContentCoverPlaceholder.vue'
+import { opColumnWidth } from '../../../shared/ui/resource/opColumnWidth.js'
+import ResourceFilterBar from '../../../shared/ui/resource/ResourceFilterBar.vue'
+import ResourceDateRange from '../../../shared/ui/resource/ResourceDateRange.vue'
+import ResourceSelectionToolbar from '../../../shared/ui/resource/ResourceSelectionToolbar.vue'
+import ResourceRowActions from '../../../shared/ui/resource/ResourceRowActions.vue'
+import ResourceOverlay from '../../../shared/ui/resource/ResourceOverlay.vue'
+import ResourceForm from '../../../shared/ui/resource/ResourceForm.vue'
+import ResourceSection from '../../../shared/ui/resource/ResourceSection.vue'
+import ResourceDescriptions from '../../../shared/ui/resource/ResourceDescriptions.vue'
+import ResourceChoiceCards from '../../../shared/ui/resource/ResourceChoiceCards.vue'
+import ResourceFieldHelp from '../../../shared/ui/resource/ResourceFieldHelp.vue'
+import ResourceNotice from '../../../shared/ui/resource/ResourceNotice.vue'
+import ResourceEmptyState from '../../../shared/ui/resource/ResourceEmptyState.vue'
 import BusinessSelect from "../../../shared/ui/fields/BusinessSelect.vue"
 import { feedback } from '../../../shared/ui/feedback/index.js'
 import FeedbackAlert from '../../../shared/ui/feedback/FeedbackAlert.vue'
@@ -96,25 +112,17 @@ const pagedRows = computed(() => {
 
 // TDesign 的 fixed 表格布局在 WebKit 中需要明确 width，minWidth 不能保证内容列宽度。
 const columns = [
-  { colKey: 'row-select', type: 'multiple', width: 48 },
-  { colKey: 'id', title: 'ID', width: 80, sorter: true },
-  { colKey: 'title', title: '内容', width: 340 },
-  { colKey: 'platform', title: '平台', width: 110 },
-  { colKey: 'category', title: '类目', width: 110 },
-  { colKey: 'author_name', title: '作者', width: 140 },
-  // 互动列为较长的带千分位数值留出宽度。
-  { colKey: 'interaction', title: '互动', width: 120 },
-  { colKey: 'source_type', title: '来源方式', width: 110 },
-  // 用户 2026-10-27 显式裁定：来源策略与来源任务合成一列（§4.1「一种实体一列」的例外）。
-  // 来源链以策略为可见锚点，任务细节进关联弹窗；人工来源没有实体，显示固定文案。
-  { colKey: 'source', title: '来源', width: 180 },
-  // 状态排在关联实体与时间之后（§4.1：主体 → 属性 → 关联实体 → 状态/结果 → 时间）。
-  { colKey: 'status', title: '状态', width: 120 },
+  { colKey: 'row-select', type: 'multiple', width: 48, fixed: 'left' },
+  { colKey: 'id', title: 'ID', width: 70, sorter: true },
+  { colKey: 'title', title: '内容 / 作者', width: 280 },
+  { colKey: 'platform', title: '平台', width: 80 },
+  { colKey: 'category', title: '类目', width: 100 },
+  { colKey: 'interaction', title: '互动', width: 130 },
+  { colKey: 'source', title: '来源', width: 160 },
+  { colKey: 'status', title: '状态', width: 100 },
   { colKey: 'published_at', title: '发布时间', width: 150, sorter: true },
   { colKey: 'created_at', title: '入库时间', width: 150, sorter: true },
-  { colKey: 'updated_at', title: '修改时间', width: 150, sorter: true },
-  { colKey: 'updated_by_name', title: '修改人', width: 120 },
-  { colKey: 'op', title: '操作', width: 260, fixed: 'right' },
+  { colKey: 'op', title: '操作', width: opColumnWidth(['详情', '转素材', '忽略'], { variant: 'text', primary: true }), fixed: 'right' },
 ]
 
 // 横向滚动宽度与列宽共用一份定义，避免单独维护总宽度。
@@ -185,7 +193,20 @@ function openManual(mode) {
   selectedResultKeys.value = []
   resetManualPagination()
   manualForm.value = { platform: 'douyin', idList: [], keyword: '', keywords: [] }
+  manualBaseline = manualDraft()
   manualVisible.value = true
+}
+
+const discoverModes = [
+  { value: 'id', label: 'ID/链接发现', description: '输入抖音作品 ID 或链接' },
+  { value: 'keyword', label: '关键词发现', description: '按关键词搜索作品' },
+]
+let manualBaseline = ''
+function manualDraft() { return JSON.stringify([manualMode.value, manualTeamId.value, manualCategoryId.value, manualForm.value]) }
+function requestCloseManual() {
+  if (manualLoading.value) return
+  if (manualDraft() === manualBaseline && !manualResults.value.length) { manualVisible.value = false; return }
+  const dialog = DialogPlugin.confirm({ header: '放弃本次发现？', body: '输入和已选结果不会保留。', confirmBtn: { content: '放弃', theme: 'danger' }, onConfirm: () => { dialog.hide(); manualVisible.value = false } })
 }
 
 function manualTitle() {
@@ -568,23 +589,22 @@ function openImageViewer(url) {
         </template>
       </ResourcePageHeader>
       <ResourceCard class="content-pool-card" :class="{ 'is-reviewing': reviewMode }">
-        <div class="filter-bar">
+        <ResourceFilterBar>
             <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">综合搜索</span><t-input v-model="search" clearable placeholder="标题、内容 ID、作者" /></label>
-            <label class="wt-filter-field"><span class="wt-filter-field__label">内容 ID</span><t-input v-model="contentID" clearable placeholder="精确匹配" /></label>
+            <label class="wt-filter-field"><span class="wt-filter-field__label">类目</span><BusinessSelect kind="category" filter v-model="categoryFilter" multiple clearable><t-option v-for="category in enabledCategoryOptions" :key="category.id" :value="category.id" :label="category.name" /></BusinessSelect></label>
             <label class="wt-filter-field"><span class="wt-filter-field__label">平台</span><t-select v-model="platform" clearable placeholder="全部"><t-option v-for="option in MINING_PLATFORM_OPTIONS" :key="option.value" :value="option.value" :label="option.label" /></t-select></label>
-            <label v-if="isAdmin" class="wt-filter-field"><span class="wt-filter-field__label">运营团队</span><BusinessSelect kind="team" filter v-model="teamFilter" clearable @change="changeTeamFilter"><t-option v-for="team in teams" :key="team.id" :value="team.id" :label="team.name" /></BusinessSelect></label>
-            <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">业务分类</span><BusinessSelect kind="category" filter v-model="categoryFilter" multiple clearable><t-option v-for="category in enabledCategoryOptions" :key="category.id" :value="category.id" :label="category.name" /></BusinessSelect></label>
-            <label class="wt-filter-field"><span class="wt-filter-field__label">来源方式</span><t-select v-model="sourceType" clearable placeholder="全部"><t-option value="link" label="ID/链接发现" /><t-option value="search" label="关键词发现" /><t-option value="author" label="博主发现" /><t-option value="strategy" label="挖掘策略" /></t-select></label>
             <label v-if="!isLibrary" class="wt-filter-field"><span class="wt-filter-field__label">处理状态</span><t-select v-model="status" clearable placeholder="全部"><t-option value="pending" label="待处理" /><t-option value="material_created" label="已转素材" /><t-option value="ignored" label="已忽略" /></t-select></label>
-            <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">发布时间</span><t-date-range-picker v-model="publishedRange" value-type="YYYY-MM-DD" clearable /></label>
+            <label class="wt-filter-field"><span class="wt-filter-field__label">发布时间</span><ResourceDateRange v-model="publishedRange" /></label>
+            <label class="wt-filter-field"><span class="wt-filter-field__label">来源方式</span><t-select v-model="sourceType" clearable placeholder="全部"><t-option value="link" label="ID/链接发现" /><t-option value="search" label="关键词发现" /><t-option value="author" label="博主发现" /><t-option value="strategy" label="挖掘策略" /></t-select></label>
+            <label v-if="isAdmin" class="wt-filter-field"><span class="wt-filter-field__label">运营团队</span><BusinessSelect kind="team" filter v-model="teamFilter" clearable @change="changeTeamFilter"><t-option v-for="team in teams" :key="team.id" :value="team.id" :label="team.name" /></BusinessSelect></label>
+            <label class="wt-filter-field"><span class="wt-filter-field__label">内容 ID</span><t-input v-model="contentID" clearable placeholder="精确匹配" /></label>
             <div class="wt-filter-actions"><t-button theme="primary" @click="load">查询</t-button><t-button class="wt-secondary-button" variant="outline" @click="reset">重置</t-button></div>
-        </div>
-        <div v-if="!isLibrary && selectedRowKeys.length" class="wt-selection-toolbar">
-          <span class="wt-selection-toolbar__count">已选 {{ selectedRowKeys.length }} 项</span>
-          <t-button theme="primary" :loading="batchLoading" @click="batchMaterialize">批量转素材</t-button>
-          <t-button class="wt-secondary-button" variant="outline" :loading="batchLoading" @click="batchSetStatus('ignored', '批量人工忽略')">批量忽略</t-button>
-          <t-button class="wt-secondary-button" variant="outline" :loading="batchLoading" @click="batchSetStatus('pending', '')">批量恢复</t-button>
-        </div>
+        </ResourceFilterBar>
+        <ResourceSelectionToolbar v-if="!isLibrary" :count="selectedRowKeys.length" unit="条内容" @clear="selectedRowKeys = []">
+          <t-button variant="outline" :loading="batchLoading" @click="batchMaterialize">批量转素材</t-button>
+          <t-button variant="outline" :loading="batchLoading" @click="batchSetStatus('ignored', '批量人工忽略')">批量忽略</t-button>
+          <t-button variant="outline" :loading="batchLoading" @click="batchSetStatus('pending', '')">批量恢复</t-button>
+        </ResourceSelectionToolbar>
         <div class="table-scroll-wrap">
           <t-table class="wt-resource-table" :data="pagedRows" :columns="columns" row-key="id" hover size="small" :scroll="tableScroll" :sort="{ sortBy, descending: sortOrder === 'desc' }" @sort-change="changeSort" v-model:selected-row-keys="selectedRowKeys" empty="暂无内容">
             <template #title="{ row }">
@@ -592,164 +612,119 @@ function openImageViewer(url) {
                 <button v-if="coverAvailable(row.cover_url)" type="button" class="title-media is-clickable" @click.stop="openImageViewer(row.cover_url)">
                   <img :src="row.cover_url" alt="" loading="lazy" referrerpolicy="no-referrer" @error="markCoverFailed(row.cover_url)" />
                 </button>
-                <div v-else class="title-media"><span>暂无封面</span></div>
+                <ContentCoverPlaceholder v-else />
                 <div class="title-copy">
                   <a v-if="row.source_url" class="wt-primary-link" :href="row.source_url" target="_blank" rel="noopener noreferrer" :title="row.title || '未命名内容'">{{ truncateTitle(row.title) || '未命名内容' }}</a>
                   <span v-else :title="row.title || '未命名内容'">{{ truncateTitle(row.title) || '未命名内容' }}</span>
-                  <small>{{ row.platform_content_id }}</small>
+                  <small><a v-if="row.author_home_url" class="wt-primary-link" :href="row.author_home_url" target="_blank" rel="noopener noreferrer">{{ authorLabel(row) }}</a><span v-else>{{ authorLabel(row) }}</span></small>
                 </div>
               </div>
             </template>
             <template #platform="{ row }">{{ platformLabel(row.platform) }}</template>
             <template #category="{ row }">{{ categoryName(row.category_id) }}</template>
-            <template #author_name="{ row }">
-              <a v-if="row.author_home_url" class="wt-primary-link" :href="row.author_home_url" target="_blank" rel="noopener noreferrer">{{ authorLabel(row) }}</a>
-              <span v-else>{{ authorLabel(row) }}</span>
-            </template>
-            <template #source_type="{ row }">{{ sourceTypeLabel(row.source_type) }}</template>
             <template #interaction="{ row }"><MetricList :items="interactionLabel(row)" /></template>
             <template #source="{ row }">
               <t-link v-if="row.strategy_id" class="wt-primary-link" theme="primary" @click="openSource(row)">{{ strategyLabel(row) }}</t-link>
               <span v-else>人工</span>
+              <small class="mining-secondary">{{ sourceTypeLabel(row.source_type) }}</small>
             </template>
-            <template #updated_at="{ row }">{{ formatDateTime(row.updated_at) }}</template>
             <template #published_at="{ row }">{{ formatDateTime(row.published_at) }}</template>
             <template #created_at="{ row }">{{ formatDateTime(row.created_at) }}</template>
             <template #status="{ row }"><ResourceStatusBadge :tone="statusTone(row.status)" :label="statusLabel(row.status)" /></template>
             <template #op="{ row }">
-              <t-space class="wt-resource-actions">
-                <t-button size="small" class="wt-secondary-button" variant="outline" @click="openDetail(row)">详情</t-button>
-                <t-button v-if="!isLibrary && row.status === 'pending'" size="small" theme="primary" @click="materialize(row)">转素材</t-button>
-                <t-button v-if="!isLibrary && row.status === 'pending'" size="small" class="wt-secondary-button" variant="outline" @click="updateStatus(row, 'ignored')">忽略</t-button>
-                <t-button v-if="!isLibrary && row.status === 'ignored'" size="small" class="wt-secondary-button" variant="outline" @click="updateStatus(row, 'pending')">恢复</t-button>
-              </t-space>
+              <ResourceRowActions>
+                <t-button size="small" variant="text" @click="openDetail(row)">详情</t-button>
+                <t-button v-if="!isLibrary && row.status === 'pending'" size="small" variant="text" class="is-primary" @click="materialize(row)">转素材</t-button>
+                <t-button v-if="!isLibrary && row.status === 'pending'" size="small" variant="text" @click="updateStatus(row, 'ignored')">忽略</t-button>
+                <t-button v-if="!isLibrary && row.status === 'ignored'" size="small" variant="text" @click="updateStatus(row, 'pending')">恢复</t-button>
+              </ResourceRowActions>
             </template>
           </t-table>
         </div>
         <div class="pagination-bar"><t-pagination v-model:current="pagination.current" v-model:pageSize="pagination.pageSize" :total="rows.length" :page-size-options="[10, 20, 50]" /></div>
       </ResourceCard>
-      <t-drawer :close-btn="true" v-model:visible="detailVisible" class="content-detail-drawer" :header="reviewMode ? '内容审核' : '内容详情'" size="min(92vw, 960px)" destroy-on-close :footer="reviewMode || Boolean(detail?.source_url || (!isLibrary && ['pending', 'ignored'].includes(detail?.status)))" @close="exitReviewMode()">
-        <div v-if="detail" class="detail-workspace">
-          <div v-if="reviewMode" class="review-progress">
-            <span>待审核 {{ reviewQueue.length }}</span>
-            <strong>当前 {{ reviewIndex + 1 }} / {{ reviewQueue.length }}</strong>
-          </div>
-          <section class="detail-hero">
-            <button v-if="coverAvailable(detail.cover_url)" type="button" class="detail-cover is-clickable" @click.stop="openImageViewer(detail.cover_url)">
-              <img :src="detail.cover_url" alt="" referrerpolicy="no-referrer" @error="markCoverFailed(detail.cover_url)" />
-            </button>
-            <div v-else class="detail-cover"><span>暂无封面</span></div>
-            <div class="detail-primary">
-              <div class="detail-title-row">
-                <h3>
-                <a v-if="detail.source_url" class="wt-primary-link" :href="detail.source_url" target="_blank" rel="noopener noreferrer">{{ detail.title || '未命名内容' }}</a>
-                <span v-else>{{ detail.title || '未命名内容' }}</span>
-              </h3>
-                <ResourceStatusBadge :tone="statusTone(detail.status)" :label="statusLabel(detail.status)" />
-              </div>
-              <div class="detail-meta-grid">
-                <div>
-                  <span>作者</span>
-                  <strong>
-                    <a v-if="detail.author_home_url" class="wt-primary-link" :href="detail.author_home_url" target="_blank" rel="noopener noreferrer">{{ authorLabel(detail) }}</a>
-                    <span v-else>{{ authorLabel(detail) }}</span>
-                  </strong>
-                </div>
-                <div><span>平台</span><strong>{{ platformLabel(detail.platform) }}</strong></div>
-                <div><span>发布时间</span><strong>{{ formatDateTime(detail.published_at) }}</strong></div>
-                <div><span>入库时间</span><strong>{{ formatDateTime(detail.created_at) }}</strong></div>
-                <div><span>修改时间</span><strong>{{ formatDateTime(detail.updated_at) }}</strong></div>
-                <div><span>操作人</span><strong>{{ detail.created_by_name || '-' }}</strong></div>
-                <div><span>审核时间</span><strong>{{ formatDateTime(detail.audited_at) }}</strong></div>
-                <div><span>审核人</span><strong>{{ detail.audited_by_name || '-' }}</strong></div>
-              </div>
-              <div class="detail-metrics">
-                <div><span>点赞</span><strong>{{ countLabel(detail.like_count) }}</strong></div>
-                <div><span>收藏</span><strong>{{ countLabel(detail.favorite_count) }}</strong></div>
-                <div><span>浏览</span><strong>{{ countLabel(detail.view_count) }}</strong></div>
-                <div><span>评论</span><strong>{{ countLabel(detail.comment_count) }}</strong></div>
-                <div><span>分享</span><strong>{{ countLabel(detail.share_count) }}</strong></div>
-              </div>
-              <p v-if="detail.description" class="detail-description">{{ detail.description }}</p>
-            </div>
-          </section>
-          <div class="detail-columns">
-            <section class="detail-panel">
-              <h4>来源追溯</h4>
-              <dl>
-                <div><dt>来源方式</dt><dd>{{ sourceTypeLabel(detail.source_type) }}</dd></div>
-                <div><dt>来源策略</dt><dd><t-link v-if="detail.strategy_id" class="wt-primary-link" theme="primary" @click="router.push(`/crawl-tasks?strategy_id=${detail.strategy_id}`)">{{ strategyLabel(detail) }}</t-link><span v-else>-</span></dd></div>
-                <div><dt>来源任务</dt><dd><t-link v-if="detail.crawl_task_id" class="wt-primary-link" theme="primary" @click="router.push(`/crawl-tasks?task_id=${detail.crawl_task_id}`)">{{ taskLabel(detail) }}</t-link><span v-else>-</span></dd></div>
-                <div><dt>平台内容 ID</dt><dd>{{ detail.platform_content_id || '-' }}</dd></div>
-                <div><dt>作者 sec_uid</dt><dd>{{ detail.author_sec_uid || '-' }}</dd></div>
-                <div><dt>作者 uid</dt><dd>{{ detail.author_uid || '-' }}</dd></div>
-              </dl>
-            </section>
-            <section class="detail-panel">
-              <h4>处理结果</h4>
-              <dl>
-                <div><dt>关联素材</dt><dd><t-link v-if="detail.material_id" class="wt-primary-link" theme="primary" @click="viewMaterial(detail)">素材详情</t-link><span v-else>未转换</span></dd></div>
-                <div><dt>审核备注</dt><dd>{{ detail.audit_note || '-' }}</dd></div>
-                <div><dt>失败原因</dt><dd :class="{ 'is-danger': detail.failure_reason }">{{ detail.failure_reason || '-' }}</dd></div>
-              </dl>
-            </section>
-          </div>
-        </div>
-        <template #footer>
-          <div v-if="reviewMode" class="review-footer">
+      <ResourceOverlay :visible="detailVisible" @update:visible="value => { if (!value) exitReviewMode() }" :title="reviewMode ? '内容审核' : '内容详情'" kind="drawer" :width="960" :busy="reviewProcessing" :footer="reviewMode">
+        <div v-if="detail" class="mining-detail">
+          <ResourceNotice v-if="reviewMode">当前 {{ reviewIndex + 1 }} / {{ reviewQueue.length }} · 按顺序审核待处理内容</ResourceNotice>
+          <ResourceSection title="基本信息">
+            <ResourceDescriptions>
+              <t-descriptions-item label="内容标题" full><div class="mining-content-heading"><button v-if="coverAvailable(detail.cover_url)" type="button" class="mining-cover-button" aria-label="查看封面" @click.stop="openImageViewer(detail.cover_url)"><img :src="detail.cover_url" alt="" referrerpolicy="no-referrer" @error="markCoverFailed(detail.cover_url)" /></button><span>{{ detail.title || '未命名内容' }}</span></div></t-descriptions-item>
+              <t-descriptions-item label="内容 ID">{{ detail.id }}</t-descriptions-item>
+              <t-descriptions-item label="状态"><ResourceStatusBadge :tone="statusTone(detail.status)" :label="statusLabel(detail.status)" /></t-descriptions-item>
+              <t-descriptions-item label="类目">{{ categoryName(detail.category_id) }}</t-descriptions-item>
+              <t-descriptions-item label="平台">{{ platformLabel(detail.platform) }}</t-descriptions-item>
+              <t-descriptions-item label="作者"><a v-if="detail.author_home_url" class="wt-primary-link" :href="detail.author_home_url" target="_blank" rel="noopener noreferrer">{{ authorLabel(detail) }}</a><span v-else>{{ authorLabel(detail) }}</span></t-descriptions-item>
+              <t-descriptions-item label="发布时间">{{ formatDateTime(detail.published_at) }}</t-descriptions-item>
+              <t-descriptions-item v-if="detail.description && detail.description !== detail.title" label="内容描述" full>{{ detail.description }}</t-descriptions-item>
+            </ResourceDescriptions>
+          </ResourceSection>
+          <ResourceSection title="内容表现">
+            <div class="mining-metrics"><div v-for="metric in [{ label: '点赞', value: detail.like_count }, { label: '收藏', value: detail.favorite_count }, { label: '浏览', value: detail.view_count }, { label: '评论', value: detail.comment_count }, { label: '分享', value: detail.share_count }]" :key="metric.label"><span>{{ metric.label }}</span><strong>{{ countLabel(metric.value) }}</strong></div></div>
+          </ResourceSection>
+          <ResourceSection title="来源追溯">
+            <ResourceDescriptions>
+              <t-descriptions-item label="来源方式">{{ sourceTypeLabel(detail.source_type) }}</t-descriptions-item>
+              <t-descriptions-item label="来源策略"><t-link v-if="detail.strategy_id" theme="primary" @click="openSource(detail)">{{ strategyLabel(detail) }}</t-link><span v-else>—</span></t-descriptions-item>
+              <t-descriptions-item label="来源任务"><t-link v-if="detail.crawl_task_id" theme="primary" @click="router.push(`/crawl-tasks?task_id=${detail.crawl_task_id}`)">{{ taskLabel(detail) }}</t-link><span v-else>—</span></t-descriptions-item>
+              <t-descriptions-item label="平台作品 ID">{{ detail.platform_content_id || '—' }}</t-descriptions-item>
+              <t-descriptions-item label="平台作品链接" full><a v-if="detail.source_url" class="wt-primary-link" :href="detail.source_url" target="_blank" rel="noopener noreferrer">{{ detail.source_url }}</a><span v-else>—</span></t-descriptions-item>
+              <t-descriptions-item label="作者 sec_uid" full>{{ detail.author_sec_uid || '—' }}</t-descriptions-item>
+              <t-descriptions-item label="作者 uid">{{ detail.author_uid || '—' }}</t-descriptions-item>
+            </ResourceDescriptions>
+          </ResourceSection>
+          <ResourceSection title="处理结果">
+            <ResourceDescriptions>
+              <t-descriptions-item label="关联素材"><t-link v-if="detail.material_id" theme="primary" @click="viewMaterial(detail)">素材详情</t-link><span v-else>未转换</span></t-descriptions-item>
+              <t-descriptions-item label="审核备注">{{ detail.audit_note || '—' }}</t-descriptions-item>
+              <t-descriptions-item v-if="detail.failure_reason" label="失败原因" full>{{ detail.failure_reason }}</t-descriptions-item>
+            </ResourceDescriptions>
+          </ResourceSection>
+          <ResourceSection title="操作记录">
+            <ResourceDescriptions>
+              <t-descriptions-item label="入库时间">{{ formatDateTime(detail.created_at) }}</t-descriptions-item>
+              <t-descriptions-item label="操作人">{{ detail.created_by_name || '—' }}</t-descriptions-item>
+              <t-descriptions-item label="修改时间">{{ formatDateTime(detail.updated_at) }}</t-descriptions-item>
+              <t-descriptions-item label="修改人">{{ detail.updated_by_name || '—' }}</t-descriptions-item>
+              <t-descriptions-item label="审核时间">{{ formatDateTime(detail.audited_at) }}</t-descriptions-item>
+              <t-descriptions-item label="审核人">{{ detail.audited_by_name || '—' }}</t-descriptions-item>
+            </ResourceDescriptions>
+          </ResourceSection>
+          <ResourceSection v-if="reviewMode" title="本次审核">
             <FeedbackAlert v-if="reviewError" theme="error" :message="reviewError" />
-            <t-textarea v-model="reviewNote" :rows="3" placeholder="审核备注（可选）" />
-            <div class="review-actions">
-              <t-button theme="primary" :loading="reviewProcessing" @click="reviewAction('materialize')">转素材并下一条</t-button>
-              <t-button class="wt-secondary-button" variant="outline" :loading="reviewProcessing" @click="reviewAction('ignore')">忽略并下一条</t-button>
-              <t-button class="wt-secondary-button" variant="outline" :disabled="reviewProcessing" @click="reviewAction('skip')">跳过</t-button>
-              <t-button class="wt-secondary-button" variant="outline" :disabled="reviewProcessing" @click="exitReviewMode()">取消审核</t-button>
-            </div>
-          </div>
-          <div v-else-if="detail" class="detail-actions">
-            <a v-if="detail.source_url" class="wt-primary-link" :href="detail.source_url" target="_blank" rel="noopener noreferrer">打开原作品</a>
-            <template v-if="!isLibrary && detail.status === 'pending'">
-              <t-button theme="primary" @click="materialize(detail)">转素材</t-button>
-              <t-button class="wt-secondary-button" variant="outline" @click="updateStatus(detail, 'ignored')">忽略</t-button>
-            </template>
-            <t-button v-if="!isLibrary && detail.status === 'ignored'" class="wt-secondary-button" variant="outline" @click="updateStatus(detail, 'pending')">恢复</t-button>
-          </div>
+            <ResourceForm><t-form-item label="审核备注"><t-textarea v-model="reviewNote" :rows="3" placeholder="填写审核备注（选填）" /></t-form-item></ResourceForm>
+          </ResourceSection>
+        </div>
+        <template v-if="reviewMode" #footer>
+          <t-button variant="outline" :disabled="reviewProcessing" @click="exitReviewMode()">取消审核</t-button>
+          <t-button variant="outline" :disabled="reviewProcessing" @click="reviewAction('skip')">跳过</t-button>
+          <t-button variant="outline" :loading="reviewProcessing" @click="reviewAction('ignore')">忽略并下一条</t-button>
+          <t-button theme="primary" :loading="reviewProcessing" @click="reviewAction('materialize')">转素材并下一条</t-button>
         </template>
-      </t-drawer>
-      <t-dialog v-model:visible="manualVisible" header="发现内容" width="920px" :footer="false">
-        <div class="discover-dialog">
-          <div class="discover-modes">
-            <button type="button" class="discover-mode" :class="{ 'is-active': manualMode === 'id' }" @click="manualMode = 'id'">
-              <strong>ID/链接发现</strong><span>通过视频 ID 或链接发现内容</span>
-            </button>
-            <button type="button" class="discover-mode" :class="{ 'is-active': manualMode === 'keyword' }" @click="manualMode = 'keyword'">
-              <strong>关键词发现</strong><span>通过关键词搜索发现内容</span>
-            </button>
-          </div>
-
-          <div class="discover-section">
-            <div class="discover-section__title"><span class="discover-no">①</span>基础信息<small>选择平台和归属类目，用于内容分类和数据统计</small></div>
-            <t-form label-width="80px">
+      </ResourceOverlay>
+      <ResourceOverlay :visible="manualVisible" @update:visible="value => { if (!value) requestCloseManual() }" title="发现内容" :width="960" :busy="manualLoading">
+        <div class="mining-detail discover-dialog">
+          <ResourceChoiceCards class="mining-discovery-modes" v-model="manualMode" :options="discoverModes" :disabled="manualLoading" />
+          <ResourceSection title="基本信息" variant="form">
+            <ResourceForm><div class="resource-form-grid">
               <t-form-item label="运营团队"><BusinessSelect kind="team" v-model="manualTeamId" :disabled="manualTeamLocked"><t-option v-for="team in teams" :key="team.id" :value="team.id" :label="team.name" /></BusinessSelect></t-form-item>
-              <t-form-item label="业务分类"><BusinessSelect kind="category" v-model="manualCategoryId" clearable><t-option v-for="category in enabledCategoryOptions" :key="category.id" :value="category.id" :label="category.name" /></BusinessSelect></t-form-item>
+              <t-form-item label="类目"><BusinessSelect kind="category" v-model="manualCategoryId" clearable><t-option v-for="category in enabledCategoryOptions" :key="category.id" :value="category.id" :label="category.name" /></BusinessSelect></t-form-item>
               <t-form-item label="平台"><t-select v-model="manualForm.platform"><t-option v-for="option in MINING_PLATFORM_OPTIONS" :key="option.value" :value="option.value" :label="option.label" /></t-select></t-form-item>
-            </t-form>
-          </div>
-
-          <div class="discover-section">
-            <div class="discover-section__title"><span class="discover-no">②</span>{{ manualMode === 'id' ? '输入内容' : '关键词配置' }}<small>{{ manualMode === 'id' ? '支持抖音视频 ID、视频链接或分享短链接，按回车生成标签，可批量粘贴' : '添加关键词，支持批量粘贴，按回车自动生成标签' }}</small></div>
-            <KeywordTags v-if="manualMode === 'id'" v-model="manualForm.idList" :max="100" placeholder="输入视频 ID 或链接，按回车添加" />
+            </div></ResourceForm>
+          </ResourceSection>
+          <ResourceSection :title="manualMode === 'id' ? '输入内容' : '关键词'" variant="form">
+            <template #title-extra><ResourceFieldHelp :content="manualMode === 'id' ? '支持抖音视频 ID、作品链接或分享短链接，可批量粘贴。' : '多个关键词共同用于本次搜索，可批量粘贴。'" /></template>
+            <KeywordTags v-if="manualMode === 'id'" v-model="manualForm.idList" subject="ID或链接" :max="100" placeholder="输入视频 ID 或链接，按回车添加" />
             <KeywordTags v-else v-model="manualForm.keywords" :max="100" placeholder="输入关键词，按回车添加" />
-          </div>
-
-          <p v-if="manualSearched" class="discover-counter">发现 {{ manualResults.length }} 条，已选 {{ selectedResultKeys.length }} 条</p>
+          </ResourceSection>
+          <ResourceNotice v-if="manualSearched">发现 {{ manualResults.length }} 条 · 已选 {{ selectedResultKeys.length }} 条，所选内容将加入内容池。</ResourceNotice>
+          <ResourceEmptyState v-if="manualSearched && !manualResults.length" title="未发现内容" description="请调整输入后重新发现。" />
           <div v-if="manualResults.length" class="discover-results">
             <div class="discover-section__title">结果预览<small>仅所选内容会加入内容池</small></div>
             <t-table v-model:selected-row-keys="selectedResultKeys" :data="manualResults" :columns="resultColumns" row-key="platform_content_id" hover size="small" :scroll="{ y: '300px' }" empty="暂无结果">
               <template #title="{ row }">
                 <div class="title-cell">
                   <button v-if="coverAvailable(row.cover_url)" type="button" class="title-media is-clickable" @click.stop="openImageViewer(row.cover_url)"><img :src="row.cover_url" alt="" loading="lazy" referrerpolicy="no-referrer" @error="markCoverFailed(row.cover_url)" /></button>
-                  <div v-else class="title-media"><span>暂无封面</span></div>
+                  <ContentCoverPlaceholder v-else />
                   <div class="title-copy">
                     <a v-if="row.source_url" class="wt-primary-link" :href="row.source_url" target="_blank" rel="noopener noreferrer" :title="row.title || '未命名内容'">{{ truncateTitle(row.title) || '未命名内容' }}</a>
                     <span v-else :title="row.title || '未命名内容'">{{ truncateTitle(row.title) || '未命名内容' }}</span>
@@ -774,12 +749,12 @@ function openImageViewer(url) {
             </div>
           </div>
 
-          <div class="discover-footer">
-            <t-button variant="outline" @click="manualVisible = false">取消</t-button>
-            <t-button theme="primary" :loading="manualLoading" @click="confirmManual">{{ manualResults.length ? '加入内容池' : '开始发现' }}</t-button>
-          </div>
         </div>
-      </t-dialog>
+        <template #footer>
+          <t-button variant="outline" :disabled="manualLoading" @click="requestCloseManual">取消</t-button>
+          <t-button theme="primary" :loading="manualLoading" @click="confirmManual">{{ manualResults.length ? '加入内容池' : '开始发现' }}</t-button>
+        </template>
+      </ResourceOverlay>
       <ContentPoolSourceDrawer v-model:visible="sourceVisible" :source="sourceRow" />
       <t-image-viewer
         v-model:visible="imageViewerVisible"
@@ -792,77 +767,16 @@ function openImageViewer(url) {
 </template>
 
 <style scoped>
-.content-pool-card { padding: 18px 20px; }
-.title-cell { display: flex; align-items: center; gap: 12px; min-height: 64px; }
-.title-media { display: flex; align-items: center; justify-content: center; overflow: hidden; width: 88px; height: 56px; border: 1px solid var(--wt-border); border-radius: 8px; background: var(--wt-bg-page); color: var(--wt-text-tertiary); font-size: 12px; flex-shrink: 0; }
-.title-media { padding: 0; cursor: default; }
-.title-media img { width: 100%; height: 100%; object-fit: cover; }
-.title-media.is-clickable { cursor: zoom-in; }
- /* 文字块占用封面之外的剩余宽度。 */
-.title-copy { display: flex; min-width: 0; flex: 1; flex-direction: column; gap: 4px; }
-.wt-primary-link { color: var(--wt-primary); font-weight: 600; text-decoration: none; }
-.wt-primary-link:hover, .wt-primary-link:focus-visible { text-decoration: underline; }
-.review-mode-button.is-active { box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.16); }
-.content-pool-card.is-reviewing { border-color: rgba(37, 99, 235, 0.36); box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.10); }
- /* 链接和纯文本标题都需截断，保持表格行高稳定。 */
+.title-cell { display:flex; align-items:center; gap:12px; min-width:0; }
+.title-media { width:40px; height:48px; flex:none; border:0; padding:0; border-radius:4px; overflow:hidden; background:var(--wt-bg-page); }
+.title-media img { width:100%; height:100%; object-fit:cover; }
+.title-media.is-clickable { cursor:zoom-in; }
+.title-copy { min-width:0; flex:1; }
 .title-copy > a,
-.title-copy > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.title-copy > span { color: var(--wt-text-primary); font-weight: 600; }
-.title-copy small { overflow: hidden; color: var(--wt-text-tertiary); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
-.content-pool-page :deep(.wt-resource-actions) { max-width: 360px; }
-.content-detail-drawer :deep(.t-drawer) { max-width: 960px; }
-.detail-workspace { display: flex; flex-direction: column; gap: 18px; }
-.review-progress { display: flex; align-items: center; justify-content: space-between; padding: 12px 14px; border: 1px solid rgba(37, 99, 235, 0.18); border-radius: 10px; background: var(--wt-info-bg); }
-.review-progress span { color: var(--wt-text-tertiary); font-size: 13px; }
-.review-progress strong { color: var(--wt-primary); font-size: 14px; }
-.detail-hero { display: grid; grid-template-columns: minmax(280px, 38%) 1fr; gap: 20px; }
-.detail-cover { display: flex; align-items: center; justify-content: center; overflow: hidden; width: 100%; min-height: 260px; border: 1px solid var(--wt-border); border-radius: 12px; background: var(--wt-bg-page); color: var(--wt-text-tertiary); }
-.detail-cover img { width: 100%; height: 100%; object-fit: cover; }
-.detail-cover.is-clickable { padding: 0; cursor: zoom-in; }
-.detail-primary { min-width: 0; }
-.detail-title-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
-.detail-title-row h3 { margin: 0; color: var(--wt-text-primary); font-size: 21px; font-weight: 650; line-height: 1.35; }
-.detail-meta-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 18px; }
-.detail-meta-grid div, .detail-metrics div { padding: 10px 12px; border: 1px solid var(--wt-border); border-radius: 10px; background: var(--wt-bg-card); }
-.detail-meta-grid span, .detail-metrics span { display: block; color: var(--wt-text-tertiary); font-size: 12px; }
-.detail-meta-grid strong, .detail-metrics strong { display: block; margin-top: 5px; color: var(--wt-text-primary); font-size: 14px; font-weight: 600; }
-.detail-metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 12px; }
-.detail-description { margin: 14px 0 0; color: var(--wt-text-secondary); font-size: 14px; line-height: 1.65; white-space: pre-line; }
-.detail-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
-.detail-panel { padding: 14px 16px; border: 1px solid var(--wt-border); border-radius: 12px; background: var(--wt-bg-card); }
-.detail-panel h4 { margin: 0 0 12px; color: var(--wt-text-primary); font-size: 15px; font-weight: 650; }
-.detail-panel dl { display: flex; flex-direction: column; gap: 10px; margin: 0; }
-.detail-panel dl > div { display: grid; grid-template-columns: 96px 1fr; gap: 10px; align-items: baseline; }
-.detail-panel dt { color: var(--wt-text-tertiary); font-size: 13px; }
-.detail-panel dd { overflow-wrap: anywhere; margin: 0; color: var(--wt-text-primary); font-size: 14px; line-height: 1.5; }
-.detail-panel dd.is-danger { color: var(--wt-danger); }
-.detail-actions { display: flex; align-items: center; justify-content: flex-end; gap: 10px; }
-.review-footer { display: flex; flex-direction: column; gap: 10px; }
-.review-actions { display: flex; justify-content: flex-end; gap: 8px; }
-.manual-search-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
-@media (max-width: 1180px) {
-  .detail-hero, .detail-columns { grid-template-columns: 1fr; }
-  .detail-cover { min-height: 220px; }
-}
-@media (max-width: 760px) {
-  .detail-title-row, .detail-actions { align-items: stretch; flex-direction: column; }
-  .review-actions { flex-wrap: wrap; }
-}
-.discover-dialog { display: flex; flex-direction: column; gap: 14px; }
-.discover-modes { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-.discover-mode { display: flex; flex-direction: column; gap: 3px; padding: 12px 14px; border: 1px solid var(--wt-border); border-radius: 10px; background: var(--wt-bg-page); text-align: left; cursor: pointer; }
-.discover-mode strong { color: var(--wt-text-primary); font-size: 14px; }
-.discover-mode span { color: var(--wt-text-tertiary); font-size: 12px; }
-.discover-mode.is-active { border-color: var(--wt-primary); background: var(--wt-info-bg); }
-.discover-mode.is-active strong { color: var(--wt-primary); }
-.discover-section { border: 1px solid var(--wt-border); border-radius: 10px; padding: 12px 14px; }
-.discover-section__title { display: flex; align-items: baseline; gap: 8px; margin-bottom: 10px; color: var(--wt-text-primary); font-size: 14px; font-weight: 600; }
-.discover-section__title small { color: var(--wt-text-tertiary); font-size: 12px; font-weight: 400; }
-.discover-no { color: var(--wt-primary); font-weight: 700; }
-.discover-counter { margin-top: 4px; text-align: right; color: var(--wt-text-tertiary); font-size: 12px; }
-.discover-collapse { width: 100%; border: none; background: transparent; cursor: pointer; }
-.discover-toggle { margin-left: auto; color: var(--wt-primary); font-size: 12px; font-weight: 400; }
-.discover-advanced { margin-top: 8px; }
-.discover-results { display: flex; flex-direction: column; gap: 10px; }
-.discover-footer { display: flex; justify-content: flex-end; gap: 8px; padding-top: 4px; }
+.title-copy > span { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.title-copy small { display:block; margin-top:5px; color:var(--wt-text-tertiary); font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.discover-results { min-width:0; overflow:auto; }
+.discover-section__title { margin-bottom:12px; font-weight:500; }
+.discover-section__title small { margin-left:12px; font-weight:400; color:var(--wt-text-tertiary); }
+.manual-search-actions { display:flex; justify-content:flex-end; gap:8px; margin-top:12px; }
 </style>

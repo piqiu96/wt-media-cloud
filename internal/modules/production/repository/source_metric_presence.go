@@ -16,6 +16,10 @@ func SourceMetricKnown(raw json.RawMessage, field string, value int64) bool {
 		statistic = "play_count"
 	case "favorite_count":
 		statistic = "collect_count"
+	case "comment_count":
+		statistic = "comment_count"
+	case "share_count":
+		statistic = "share_count"
 	default:
 		return false
 	}
