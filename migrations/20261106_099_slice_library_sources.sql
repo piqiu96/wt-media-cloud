@@ -1,0 +1,12 @@
+CREATE TABLE IF NOT EXISTS slice_library_sources (
+ source_id VARCHAR(64) NOT NULL PRIMARY KEY,
+ sha256 CHAR(64) NOT NULL,
+ original_title TEXT NOT NULL,
+ basename VARCHAR(160) NOT NULL,
+ profile_json JSON NOT NULL,
+ clips_json JSON NULL,
+ review_reason TEXT NOT NULL,
+ created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+ updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+ UNIQUE KEY uk_slice_basename (basename)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;

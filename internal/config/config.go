@@ -148,7 +148,21 @@ type StorageConfig struct {
 
 // MediaConfig groups the external media tooling Cloud shells out to.
 type MediaConfig struct {
-	FFmpeg FFmpegConfig
+	FFmpeg       FFmpegConfig
+	SliceLibrary SliceLibraryConfig
+}
+
+// SliceLibraryConfig is used by the bounded, explicitly invoked library CLI.
+type SliceLibraryConfig struct {
+	Prefix            string   `toml:"prefix"`
+	ClipSeconds       float64  `toml:"clip_seconds"`
+	MaxCandidates     int      `toml:"max_candidates"`
+	MaxClipsPerSource int      `toml:"max_clips_per_source"`
+	MaxSourceBytes    int64    `toml:"max_source_bytes"`
+	Timeout           Duration `toml:"timeout"`
+	CRF               int      `toml:"crf"`
+	Preset            string   `toml:"preset"`
+	SampleCount       int      `toml:"sample_count"`
 }
 
 // FFmpegConfig names the video-processing binaries the compose worker depends
@@ -361,6 +375,9 @@ func LoadFromDir(root string) (Config, error) {
 		return Config{}, err
 	}
 	if err := requiredTOML(filepath.Join(root, "media", "ffmpeg.toml"), &cfg.Media.FFmpeg); err != nil {
+		return Config{}, err
+	}
+	if err := optionalTOML(filepath.Join(root, "media", "slice_library.toml"), &cfg.Media.SliceLibrary); err != nil {
 		return Config{}, err
 	}
 	if err := requiredTOML(filepath.Join(root, "storage", "object_storage.toml"), &cfg.Storage.ObjectStorage); err != nil {

@@ -111,3 +111,31 @@ func checkedAddress(address string) (string, error) {
 	// the very thing the provider is checking.
 	return address, nil
 }
+
+// SearchItems reads the measured search/batch envelope shapes. It does not
+// activate author discovery or persist signed media addresses.
+func SearchItems(payload map[string]any) []map[string]any {
+	data := payload["data"]
+	values, ok := data.([]any)
+	if !ok {
+		root, _ := data.(map[string]any)
+		for _, key := range []string{"datalist", "data", "aweme_list"} {
+			if list, yes := root[key].([]any); yes {
+				values = list
+				break
+			}
+		}
+	}
+	out := make([]map[string]any, 0, len(values))
+	for _, value := range values {
+		item, ok := value.(map[string]any)
+		if !ok {
+			continue
+		}
+		if nested, ok := item["aweme_info"].(map[string]any); ok {
+			item = nested
+		}
+		out = append(out, item)
+	}
+	return out
+}
