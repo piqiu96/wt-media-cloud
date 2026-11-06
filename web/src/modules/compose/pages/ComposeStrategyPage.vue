@@ -243,7 +243,7 @@ const formSchemaFields = computed(() => {
   } else {
     schema = templates.value.find((item) => item.id === form.value.compose_template_id)?.schema
   }
-  return settingFields(schema)
+  return settingFields(schema, templates.value.find((item) => item.id === form.value.compose_template_id)?.default_params)
 })
 
 

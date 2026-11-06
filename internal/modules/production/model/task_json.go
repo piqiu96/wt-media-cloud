@@ -36,6 +36,28 @@ func (task ComposeTask) MarshalJSON() ([]byte, error) {
 	type projection ComposeTask
 	task.ErrorMessage = safeComposeErrorMessage(task.ErrorCode, task.ErrorMessage)
 	task.ConfigSnapshot = safeComposeSnapshot(task.ConfigSnapshot)
+	var manifest struct {
+		Source struct {
+			Name   string
+			SHA256 string
+			Size   int64
+			Media  struct{ Duration float64 }
+		} `json:"source"`
+		Resources []struct {
+			Name   string
+			SHA256 string
+			Size   int64
+			Media  struct{ Duration float64 }
+		} `json:"resources"`
+		Timeline json.RawMessage `json:"timeline"`
+	}
+	if len(task.ExecutionManifest) > 0 && json.Unmarshal(task.ExecutionManifest, &manifest) == nil {
+		task.ExecutionTimeline = manifest.Timeline
+		task.ResourceSnapshots = []ComposeResourceSnapshot{{Name: manifest.Source.Name, SHA256: manifest.Source.SHA256, Size: manifest.Source.Size, Duration: manifest.Source.Media.Duration}}
+		for _, r := range manifest.Resources {
+			task.ResourceSnapshots = append(task.ResourceSnapshots, ComposeResourceSnapshot{Name: r.Name, SHA256: r.SHA256, Size: r.Size, Duration: r.Media.Duration})
+		}
+	}
 	return json.Marshal(projection(task))
 }
 
@@ -47,10 +69,17 @@ func safeComposeSnapshot(snapshot json.RawMessage) json.RawMessage {
 	if err := json.Unmarshal(snapshot, &fields); err != nil || fields == nil {
 		return json.RawMessage(`{}`)
 	}
-	if _, exists := fields["guide_video_url"]; !exists {
+	changed := false
+	for key := range fields {
+		if strings.HasSuffix(key, "_url") {
+			fields[key] = json.RawMessage(`"（下载地址已隐藏）"`)
+			changed = true
+		}
+	}
+	if !changed {
 		return snapshot
 	}
-	fields["guide_video_url"] = json.RawMessage(`"（下载地址已隐藏）"`)
+
 	safe, err := json.Marshal(fields)
 	if err != nil {
 		return json.RawMessage(`{}`)
@@ -64,7 +93,7 @@ func safeComposeSnapshot(snapshot json.RawMessage) json.RawMessage {
 var composeStepLabels = map[string]string{
 	ComposeStepValidateInput: "校验任务参数",
 	ComposeStepPrepareInput:  "准备源素材",
-	ComposeStepFetchGuide:    "下载引导视频",
+	ComposeStepFetchGuide:    "准备合成资源",
 	ComposeStepCut:           "视频合成",
 	ComposeStepUpload:        "上传并校验成片",
 	ComposeStepCommit:        "保存成片记录",

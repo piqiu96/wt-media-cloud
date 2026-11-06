@@ -81,7 +81,7 @@ func TestGuideTemplatesProducePlayableVideo(t *testing.T) {
 			}
 			defer runDir.Release()
 			params, _ := json.Marshal(map[string]any{"guide_video_url": "https://media.example.com/guide.mp4", "insert_seconds": tc.insert, "guide_duration_seconds": tc.guideDuration, "max_duration_seconds": tc.maxDuration})
-			output, err := runner.Run(ctx, runDir, Request{TemplateCode: tc.mode, TemplateVersion: 1, Params: params, InputPath: source, GuidePath: guide})
+			output, err := runner.Run(ctx, runDir, Request{TemplateCode: tc.mode, TemplateVersion: 1, Params: params, InputPath: source, Resources: map[string]string{"guide": guide}})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -141,7 +141,7 @@ func TestGuideInsertAcceptsVideoWithoutAudio(t *testing.T) {
 	}
 	defer runDir.Release()
 	runner := Runner{FFmpegPath: ffmpeg, FFprobePath: ffprobe, Registry: registry}
-	output, err := runner.Run(context.Background(), runDir, Request{TemplateCode: "guide_insert", TemplateVersion: 1, Params: json.RawMessage(`{"guide_video_url":"https://media.example.com/guide.mp4","insert_seconds":1,"guide_duration_seconds":0,"max_duration_seconds":0}`), InputPath: source, GuidePath: guide})
+	output, err := runner.Run(context.Background(), runDir, Request{TemplateCode: "guide_insert", TemplateVersion: 1, Params: json.RawMessage(`{"guide_video_url":"https://media.example.com/guide.mp4","insert_seconds":1,"guide_duration_seconds":0,"max_duration_seconds":0}`), InputPath: source, Resources: map[string]string{"guide": guide}})
 	if err != nil {
 		t.Fatal(err)
 	}

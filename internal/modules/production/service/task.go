@@ -254,6 +254,10 @@ func (s *ComposeTaskService) Create(actor identity.PublicUser, input CreateCompo
 	if err != nil {
 		return CreateComposeTasksResult{}, err
 	}
+	technical, err := templateTechnicalConfig(template.Code, template.Version)
+	if err != nil {
+		return CreateComposeTasksResult{}, err
+	}
 	res := CreateComposeTasksResult{Created: []model.ComposeTask{}, Failed: []CreateComposeTaskFailure{}}
 	for index, item := range input.Items {
 		key := strings.TrimSpace(item.RequestKey)
@@ -288,7 +292,7 @@ func (s *ComposeTaskService) Create(actor identity.PublicUser, input CreateCompo
 			DisplayName: model.ComposeTaskBatchDisplayName(input.Name, index, len(input.Items), material.Title, item.MaterialID, strategy.Name),
 			MaterialID:  item.MaterialID, StrategyID: strategy.ID,
 			TemplateCode: template.Code, TemplateVersion: strategy.TemplateVersion,
-			ConfigSnapshot: merged, Status: model.ComposeTaskPending,
+			TechnicalConfig: technical, ConfigSnapshot: merged, Status: model.ComposeTaskPending,
 			RequestKey: key, CreatedBy: int64(actor.ID),
 		}
 		created, written, err := s.tasks.CreateForUsage(task, "compose_task.create")
@@ -591,9 +595,10 @@ func (s *ComposeTaskService) mergedConfig(template model.ComposeTemplate, strate
 		if err := json.Unmarshal(override, &extra); err != nil || extra == nil {
 			return nil, fmt.Errorf("%w: config_override must be an object", ErrComposeTaskInvalid)
 		}
-		if _, changesURL := extra["guide_video_url"]; changesURL {
-			return nil, fmt.Errorf("%w: guide video address belongs to the strategy", ErrComposeTaskInvalid)
-		}
+
+	}
+	if err := validateTaskOverride(definition.Schema, base, extra); err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrComposeTaskInvalid, err)
 	}
 	merged := make(map[string]any, len(base)+len(extra))
 	for key, value := range base {

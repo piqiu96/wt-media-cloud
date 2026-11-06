@@ -25,7 +25,7 @@ func run() error {
 		definition executor.Definition
 		name       string
 	}{
-		{executor.BasicCutV1(), "基础切段"}, {executor.GuideInsertV1(), "引导片段插入"}, {executor.GuidePIPV1(), "引导画中画"},
+		{executor.DynamicPIPEndingV1(), "动态画中画与配乐片尾"},
 	} {
 		item, err := repository.PublishTemplate(entry.definition, entry.name)
 		if err != nil {

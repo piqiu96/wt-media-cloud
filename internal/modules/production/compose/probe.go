@@ -14,11 +14,12 @@ import (
 // videoProbe is what the pipeline needs to know about one file: whether it has
 // a video stream and how long it declares itself to be.
 type videoProbe struct {
-	durationMS int64
-	hasVideo   bool
-	hasAudio   bool
-	width      int
-	height     int
+	durationMS                       int64
+	videoDurationMS, audioDurationMS int64
+	hasVideo                         bool
+	hasAudio                         bool
+	width                            int
+	height                           int
 }
 
 // probeFile asks ffprobe about one file with fixed arguments. The report is
@@ -40,6 +41,7 @@ func probeFile(ctx context.Context, ffprobePath, path string) (videoProbe, error
 			CodecType string `json:"codec_type"`
 			Width     int    `json:"width"`
 			Height    int    `json:"height"`
+			Duration  string `json:"duration"`
 		} `json:"streams"`
 	}
 	if err := json.Unmarshal(stdout.Bytes(), &report); err != nil {
@@ -56,9 +58,13 @@ func probeFile(ctx context.Context, ffprobePath, path string) (videoProbe, error
 	for _, stream := range report.Streams {
 		if stream.CodecType == "video" {
 			probe.hasVideo = true
+			value, _ := strconv.ParseFloat(stream.Duration, 64)
+			probe.videoDurationMS = int64(value*1000 + .5)
 			probe.width, probe.height = stream.Width, stream.Height
 		} else if stream.CodecType == "audio" {
 			probe.hasAudio = true
+			value, _ := strconv.ParseFloat(stream.Duration, 64)
+			probe.audioDurationMS = int64(value*1000 + .5)
 		}
 	}
 	return probe, nil

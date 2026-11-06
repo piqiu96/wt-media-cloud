@@ -498,8 +498,29 @@ func (s *StrategyService) prepareOutputSettings(templateID int64, version uint32
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("%w: %v", ErrStrategyInvalid, err)
 	}
+	template, found, err := s.store.FindTemplate(templateID, version)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	if !found {
+		return nil, nil, nil, ErrStrategyTemplateUnavailable
+	}
+	definition, err := executor.DeployedDefinition(template.Code, version)
+	if err != nil {
+		return nil, nil, nil, ErrStrategyTemplateUnavailable
+	}
+	defaults, _, err := templateDefaults(definition)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("%w: %v", ErrStrategyInvalid, err)
+	}
 	var first json.RawMessage
 	for i, group := range normalized {
+		for key, value := range defaults {
+			if _, ok := group.Params[key]; !ok {
+				group.Params[key] = value
+			}
+		}
+
 		raw, err := json.Marshal(group.Params)
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("%w: params cannot be encoded", ErrStrategyInvalid)
@@ -511,7 +532,7 @@ func (s *StrategyService) prepareOutputSettings(templateID int64, version uint32
 			first = raw
 		}
 	}
-	if legacyInput {
+	if legacyInput && len(defaults) == 0 {
 		first = append(json.RawMessage(nil), legacy...)
 	}
 	encoded, err := json.Marshal(normalized)

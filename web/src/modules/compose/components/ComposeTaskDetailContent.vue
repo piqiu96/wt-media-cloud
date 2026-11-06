@@ -11,6 +11,8 @@ import { UNCERTAIN_CODE, retryHint } from '../retryPolicy.js'
 import { safeComposeError } from '../uncertainReview.js'
 const props=defineProps({detail:Object,templates:{type:Array,default:()=>[]},attempts:{type:Array,default:()=>[]},attemptsError:String,outputSummary:Object,canRetry:Boolean,tab:{type:String,default:'overview'}})
 const emit=defineEmits(['update:tab','material','strategy','output','batch'])
+const segmentLabels = {opening_pip:'开头引导',source_before_ad:'正片前段',ad_pip:'广告引导',source_after_ad:'正片后段',ending:'配乐片尾'}
+const seconds = value => `${Number(value).toFixed(2)} 秒`
 const taskName = row => row.display_name?.trim() || `合成任务 ${row.id}`
 const outputID = row => row.status === 'success' ? row.composite_output_id : null
 const strategyName = row => row.strategy_name || `策略 ${row.compose_strategy_id}`
@@ -45,7 +47,7 @@ function stageText(row) {
 
 function snapshotFields(row) {
   const template = props.templates.find((item) => item.code === row.template_code && item.version === row.template_version)
-  return schemaFields(template?.schema).filter((field) => Object.hasOwn(row.config_snapshot || {}, field.key) && field.key !== 'guide_video_url')
+  return schemaFields(template?.schema).filter((field) => Object.hasOwn(row.config_snapshot || {}, field.key) && field.format !== 'uri' && field.key !== 'guide_video_url')
 }
 function snapshotValue(row, field) {
   const value = row.config_snapshot?.[field.key]
@@ -89,6 +91,14 @@ function snapshotValue(row, field) {
                     <div v-for="field in snapshotFields(detail)" :key="field.key"><span class="compose-detail__label">{{ field.label }}</span><span>{{ snapshotValue(detail, field) }}</span></div>
                   </div>
                   <p v-if="!snapshotFields(detail).length" class="compose-detail__hint">当前没有可安全展示的模板参数定义。</p>
+                </div>
+                <div v-if="detail.execution_timeline?.segments?.length" class="compose-detail__section">
+                  <h4>实际合成时间线</h4>
+                  <p class="compose-detail__hint">成片 {{ seconds(detail.execution_timeline.duration) }} · 广告从 {{ seconds(detail.execution_timeline.ad_start) }} 开始出现</p>
+                  <div class="compose-detail__grid">
+                    <div v-for="segment in detail.execution_timeline.segments" :key="segment.name"><span class="compose-detail__label">{{ segmentLabels[segment.name] || segment.name }}</span><span>{{ seconds(segment.start) }} ～ {{ seconds(segment.end) }}</span></div>
+                  </div>
+                  <details class="compose-detail__hint"><summary>复现信息</summary><p>随机种子：{{ detail.random_seed }}</p><p v-for="resource in detail.resource_snapshots || []" :key="resource.name">{{ resource.name }} · {{ seconds(resource.duration) }} · {{ resource.sha256 }}</p></details>
                 </div>
                 <div class="compose-detail__section">
                   <h4>关联信息</h4>

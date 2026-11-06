@@ -5,7 +5,7 @@
 // 时 start_seconds（13 字节）会掉到 end_seconds（11 字节）后面，页面上就成了「先结束、
 // 后开始」。执行器 schema 本身不能动（已发布版本拒绝 schema 变更，存量策略也按 schema
 // 匹配），所以这里给出人读顺序；不在表里的参数保持 schema 原序，排在其后。
-const PARAM_ORDER = ['start_seconds', 'end_seconds', 'insert_seconds']
+const PARAM_ORDER = ['intro_video_url', 'ad_video_url', 'start_seconds', 'end_seconds', 'max_duration_seconds', 'ad_start_min_seconds', 'ad_start_max_seconds', 'intro_pip_width', 'ad_pip_width', 'transition_seconds', 'insert_seconds']
 
 function paramRank(key) {
   const index = PARAM_ORDER.indexOf(key)

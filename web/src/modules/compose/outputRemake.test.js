@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { outputRemakeBody, outputRemakeSeed, submitOutputRemake, remakeTaskName } from './outputRemake.js'
-const schema={properties:{start:{type:'integer',editable:true},fixed:{type:'integer'},guide_video_url:{type:'string',editable:true}}}
+const schema={properties:{start:{type:'integer',editable:true},fixed:{type:'integer'},guide_video_url:{type:'string',editable:false}}}
 const detail={output:{id:8,material_id:3,actions:{remake:true}},trace:{material:{title:'原素材'},compose_task:{setting_key:'old',setting_name:'原组',platforms:['baidu'],template_code:'cut',template_version:1,config_snapshot:{start:2,fixed:5,guide_video_url:'（下载地址已隐藏）'}}}}
 const templates=[{code:'cut',version:2,schema:{properties:{wrong:{}}}},{code:'cut',version:1,schema}]
 describe('output remake source',()=>{

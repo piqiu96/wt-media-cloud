@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 
@@ -21,7 +22,9 @@ type Request struct {
 	TemplateVersion uint32
 	Params          json.RawMessage
 	InputPath       string
-	GuidePath       string
+	Resources       map[string]string
+	Defaults        json.RawMessage
+	Seed            int64
 }
 
 // Output.Path remains in the run directory until the caller releases it.
@@ -30,6 +33,7 @@ type Output struct {
 	DurationMS int64
 	Width      int
 	Height     int
+	Timeline   json.RawMessage
 }
 
 func (r *Runner) Run(ctx context.Context, runDir *RunDir, request Request) (Output, error) {
@@ -41,42 +45,32 @@ func (r *Runner) Run(ctx context.Context, runDir *RunDir, request Request) (Outp
 	if err != nil {
 		return Output{}, err
 	}
-	startMS, endMS := plan.SegmentMS()
-
-	input, err := probeFile(ctx, r.FFprobePath, request.InputPath)
+	resourcePlan, ok := plan.(executor.ResourcePlan)
+	if !ok {
+		return Output{}, fmt.Errorf("template executor does not implement the common render entry")
+	}
+	probe := func(filename string) (executor.MediaInput, error) { return InspectMedia(ctx, r.FFprobePath, filename) }
+	input, err := probe(request.InputPath)
 	if err != nil {
-		return Output{}, fmt.Errorf("input %s: %w", request.InputPath, err)
+		return Output{}, err
 	}
-	if !input.hasVideo {
-		return Output{}, fmt.Errorf("input %s has no video stream", request.InputPath)
+	resources := map[string]executor.MediaInput{}
+	for name, filename := range request.Resources {
+		if filename == "" {
+			continue
+		}
+		item, e := probe(filename)
+		if e != nil {
+			return Output{}, fmt.Errorf("resource %s: %w", name, e)
+		}
+		resources[name] = item
 	}
-	if _, guide := plan.(executor.GuidePlan); !guide && input.durationMS < endMS {
-		return Output{}, fmt.Errorf("input %s is %d ms long, shorter than the requested window ending at %d ms", request.InputPath, input.durationMS, endMS)
-	}
-
 	outputPath := filepath.Join(runDir.Path(), "output.mp4")
-	arguments := plan.FFmpegArguments(request.InputPath, outputPath)
-	requestedMS := endMS - startMS
-	if guidePlan, guide := plan.(executor.GuidePlan); guide {
-		if request.GuidePath == "" {
-			return Output{}, fmt.Errorf("guide video is required")
-		}
-		guideInput, err := probeFile(ctx, r.FFprobePath, request.GuidePath)
-		if err != nil {
-			return Output{}, fmt.Errorf("guide input: %w", err)
-		}
-		if !guideInput.hasVideo {
-			return Output{}, fmt.Errorf("guide input has no video stream")
-		}
-		requestedMS, err = guidePlan.OutputDurationMS(input.durationMS, guideInput.durationMS)
-		if err != nil {
-			return Output{}, err
-		}
-		arguments, err = guidePlan.FFmpegGuideArguments(request.InputPath, request.GuidePath, outputPath, input.durationMS, guideInput.durationMS, input.width, input.height, input.hasAudio, guideInput.hasAudio)
-		if err != nil {
-			return Output{}, err
-		}
+	render, err := resourcePlan.Compile(executor.RenderInput{Source: input, Resources: resources, Defaults: request.Defaults, Seed: request.Seed, OutputPath: outputPath})
+	if err != nil {
+		return Output{}, err
 	}
+	arguments, requestedMS := render.Arguments, render.DurationMS
 	if err := runFFmpeg(ctx, r.FFmpegPath, arguments); err != nil {
 		return Output{}, err
 	}
@@ -91,11 +85,39 @@ func (r *Runner) Run(ctx context.Context, runDir *RunDir, request Request) (Outp
 	if !output.hasVideo {
 		return Output{}, fmt.Errorf("output has no video stream")
 	}
+	if render.RequireAudio && !output.hasAudio {
+		return Output{}, fmt.Errorf("output has no audio stream")
+	}
+	if render.ToleranceMS > 0 {
+		if math.Abs(float64(output.durationMS-requestedMS)) > float64(render.ToleranceMS) || output.videoDurationMS <= 0 || math.Abs(float64(output.videoDurationMS-requestedMS)) > float64(render.ToleranceMS) || render.RequireAudio && (output.audioDurationMS <= 0 || math.Abs(float64(output.audioDurationMS-requestedMS)) > float64(render.ToleranceMS)) {
+			return Output{}, fmt.Errorf("output audio/video duration does not match the timeline")
+		}
+		if err := runFFmpeg(ctx, r.FFmpegPath, []string{"-v", "error", "-nostdin", "-xerror", "-protocol_whitelist", "file,pipe", "-i", outputPath, "-f", "null", "-"}); err != nil {
+			return Output{}, err
+		}
+	}
 	if output.durationMS*10 < requestedMS*9 {
 		return Output{}, fmt.Errorf("output duration %d ms is shorter than 90%% of the requested %d ms", output.durationMS, requestedMS)
 	}
 	if output.durationMS*10 > requestedMS*11 {
 		return Output{}, fmt.Errorf("output duration %d ms is longer than 110%% of the requested %d ms", output.durationMS, requestedMS)
 	}
-	return Output{Path: outputPath, DurationMS: output.durationMS, Width: output.width, Height: output.height}, nil
+	return Output{Path: outputPath, DurationMS: output.durationMS, Width: output.width, Height: output.height, Timeline: render.Timeline}, nil
+}
+
+// InspectMedia is shared by manifest preparation and rendering so timelines use
+// exactly the same rounded stream duration in both phases.
+func InspectMedia(ctx context.Context, binary, filename string) (executor.MediaInput, error) {
+	info, err := probeFile(ctx, binary, filename)
+	if err != nil {
+		return executor.MediaInput{}, err
+	}
+	if !info.hasVideo {
+		return executor.MediaInput{}, fmt.Errorf("input has no video stream")
+	}
+	duration := info.durationMS
+	if info.videoDurationMS > 0 {
+		duration = info.videoDurationMS
+	}
+	return executor.MediaInput{Path: filename, Duration: float64(duration) / 1000, Width: info.width, Height: info.height, HasAudio: info.hasAudio}, nil
 }

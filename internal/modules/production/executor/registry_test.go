@@ -85,7 +85,7 @@ func TestDeployedTemplateTaskEditabilityIsExplicitAndGuideURLLocked(t *testing.T
 			t.Fatal(err)
 		}
 		for name, property := range schema.Properties {
-			want := name != "guide_video_url"
+			want := name == "start_seconds" || name == "end_seconds" || name == "insert_seconds" || name == "max_duration_seconds" || name == "guide_duration_seconds"
 			if property.Editable == nil || *property.Editable != want {
 				t.Errorf("%s.%s editable=%v want %v", definition.Code, name, property.Editable, want)
 			}

@@ -121,6 +121,8 @@ type ComposeInputGate struct {
 // ComposeExecutorDeps carries the collaborators of one attempt. Everything is
 // an interface or a function so the unit tests substitute memory fakes.
 type ComposeExecutorDeps struct {
+	ResolveFileResource func(context.Context, string) (frozenResource, error)
+	InspectResource     func(context.Context, string) (executor.MediaInput, error)
 	Tasks               composeTaskLifecycle
 	Materials           composeTaskMaterialSource
 	Registry            *executor.Registry
@@ -190,28 +192,24 @@ func RunComposeAttempt(ctx context.Context, deps ComposeExecutorDeps, task model
 	if outcome != "" {
 		return outcome
 	}
-	guidePath := ""
-	if guide, ok := plan.(executor.GuidePlan); ok {
-		fetchStep := beginStep(model.ComposeStepFetchGuide)
-		guidePath = filepath.Join(runDir.Path(), "guide-input")
-		fetch := deps.FetchGuide
-		if fetch == nil {
-			fetch = compose.DownloadGuide
+	fetchStep := beginStep(model.ComposeStepFetchGuide)
+	resources, timeline, err := prepareResources(ctx, deps, task, nodeID, plan, inputPath, runDir.Path())
+	if err != nil {
+		if cancelRequested(deps.Tasks, task.ID) {
+			return ComposeAttemptCancelled
 		}
-		if err := fetch(ctx, guide.GuideURL(), guidePath); err != nil {
-			if cancelRequested(deps.Tasks, task.ID) {
-				return ComposeAttemptCancelled
-			}
-			if errors.Is(ctx.Err(), context.Canceled) {
-				return ComposeAttemptLeaseLost
-			}
-			if errors.Is(err, compose.ErrGuideTemporary) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
-				return transientFailureInContext(ctx, deps, task, nodeID, fetchStep, composeErrStorageError, err.Error())
-			}
-			return failTerminal(deps.Tasks, task, nodeID, fetchStep, composeErrInputInvalid, err.Error())
+		if errors.Is(err, errManifestLeaseLost) || errors.Is(ctx.Err(), context.Canceled) {
+			return ComposeAttemptLeaseLost
 		}
-		recordStepSuccess(deps.Tasks, task, nodeID, fetchStep, fileMetrics(guidePath))
+		if errors.Is(err, compose.ErrGuideTemporary) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return transientFailureInContext(ctx, deps, task, nodeID, fetchStep, composeErrStorageError, "media resource temporarily unavailable")
+		}
+		return failTerminal(deps.Tasks, task, nodeID, fetchStep, composeErrInputInvalid, "media resource preparation failed: "+err.Error())
 	}
+	if len(resources) > 0 {
+		recordStepSuccess(deps.Tasks, task, nodeID, fetchStep, model.ComposeAttemptStepMetrics{})
+	}
+
 	if cancelRequested(deps.Tasks, task.ID) {
 		return ComposeAttemptCancelled
 	}
@@ -219,7 +217,7 @@ func RunComposeAttempt(ctx context.Context, deps ComposeExecutorDeps, task model
 		return ComposeAttemptLeaseLost
 	}
 	cutStep := beginStep(model.ComposeStepCut)
-	output, err := deps.Runner.Run(ctx, runDir, compose.Request{TemplateCode: task.TemplateCode, TemplateVersion: task.TemplateVersion, Params: task.ConfigSnapshot, InputPath: inputPath, GuidePath: guidePath})
+	output, err := deps.Runner.Run(ctx, runDir, compose.Request{TemplateCode: task.TemplateCode, TemplateVersion: task.TemplateVersion, Params: task.ConfigSnapshot, InputPath: inputPath, Resources: resources, Defaults: task.TechnicalConfig, Seed: task.RandomSeed})
 	if err != nil {
 		// A run the worker terminated speaks with its context, not with
 		// FFmpeg's last words: a cancel request is a controlled stop, a spent
@@ -236,6 +234,11 @@ func RunComposeAttempt(ctx context.Context, deps ComposeExecutorDeps, task model
 			return ComposeAttemptLeaseLost
 		}
 		return failTerminal(deps.Tasks, task, nodeID, cutStep, composeErrExecutionFailed, err.Error())
+	}
+	if len(timeline) > 0 {
+		if err := checkFrozenTimeline(timeline, output.Timeline); err != nil {
+			return failTerminal(deps.Tasks, task, nodeID, cutStep, composeErrExecutionFailed, err.Error())
+		}
 	}
 	recordStepSuccess(deps.Tasks, task, nodeID, cutStep, durationMetrics(output.DurationMS))
 	if cancelRequested(deps.Tasks, task.ID) {

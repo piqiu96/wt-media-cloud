@@ -1,5 +1,5 @@
 schema_version: 1
-revision: "2026.11.05.5"
+revision: "2026.11.06.2"
 
 # 描述 Cloud 当前返回的 body；未知的可选属性省略，内部对象存储引用不返回。
 
@@ -103,7 +103,7 @@ schemas:
       name: {type: string, minLength: 1, maxLength: 120}
       platforms: {type: array, minItems: 1, maxItems: 3, uniqueItems: true, items: {type: string, enum: [bilibili, baidu, xiaohongshu]}}
       copies: {type: integer, minimum: 1, maximum: 20}
-      params: {type: object, description: "Complete template config; only parameters explicitly declared editable may differ from template defaults. Fixed values and unknown keys are rejected by the server."}
+      params: {type: object, description: "Complete independently saved strategy parameters. Task overrides may change only explicitly editable properties and may not raise a maximum_from_strategy limit."}
   ComposeTemplateParameter:
     type: object
     description: Versioned JSON Schema parameter definition. Missing editable means fixed; disabled UI controls do not grant override permission.
@@ -296,7 +296,10 @@ schemas:
       compose_strategy_id: {type: integer, format: int64}
       template_code: {type: string}
       template_version: {type: integer, minimum: 1}
-      config_snapshot: {type: object, description: "Frozen execution settings projected for readers; guide_video_url is replaced with a redaction label while the stored execution snapshot stays unchanged."}
+      random_seed: {type: string, pattern: '^[0-9]+$', description: "Frozen 64-bit seed as a decimal string; zero only on historical tasks."}
+      execution_timeline: {type: [object, 'null'], description: "Actual numeric timeline fixed at preparation; null before preparation. Contains duration, ad_start, source_insert, main_start, main_end, overlap, transitions and segments with name/start/end/duration/source_start/source_end."}
+      resource_snapshots: {type: [array, 'null'], items: {type: object, properties: {name: {type: string}, sha256: {type: string}, size: {type: integer, format: int64}, duration: {type: number}}}, description: "Verified source and resource facts; no URLs, local paths or object locations."}
+      config_snapshot: {type: object, description: "Frozen execution settings projected for readers; URL parameters are replaced with a redaction label while the stored execution snapshot stays unchanged."}
       status: {type: string, enum: [pending, running, success, failed, cancelled]}
       cancel_requested: {type: boolean, description: "A cancel was requested while running; the task stays running until the worker confirms the controlled stop."}
       stage: {type: string, description: "Worker phase projection from the bounded set validating_input, waiting_input, cutting, uploading, committing; a pending task carries an empty stage."}

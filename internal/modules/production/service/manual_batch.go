@@ -128,14 +128,6 @@ func mergeManualSettings(strategy model.ComposeStrategy, definition executor.Def
 	if len(groups) == 0 {
 		return invalid("strategy output settings are invalid")
 	}
-	var schema struct {
-		Properties map[string]struct {
-			Editable bool `json:"editable"`
-		} `json:"properties"`
-	}
-	if json.Unmarshal(definition.Schema, &schema) != nil {
-		return invalid("template schema is invalid")
-	}
 	indices := map[string]int{}
 	for i, g := range groups {
 		indices[g.Key] = i
@@ -147,11 +139,10 @@ func mergeManualSettings(strategy model.ComposeStrategy, definition executor.Def
 			return invalid("setting override key is invalid, duplicated, or params is not an object")
 		}
 		seen[override.Key] = true
+		if err := validateTaskOverride(definition.Schema, groups[index].Params, override.Params); err != nil {
+			return invalid(err.Error())
+		}
 		for key, value := range override.Params {
-			property, ok := schema.Properties[key]
-			if !ok || !property.Editable || key == "guide_video_url" {
-				return invalid("parameter is fixed or unknown: " + key)
-			}
 			groups[index].Params[key] = value
 		}
 	}
@@ -176,6 +167,7 @@ func (s *ComposeTaskService) createManualBatch(actor identity.PublicUser, input 
 		return CreateComposeTasksResult{}, err
 	}
 	command := normalized.ManualBatchCommand
+	command.ResolveTechnicalConfig = templateTechnicalConfig
 	command.AuthorizeSource = func(output model.CompositeOutput) error {
 		if !canReadComposeOutput(actor, output) {
 			return ErrComposeTaskNotFound

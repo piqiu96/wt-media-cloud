@@ -94,7 +94,7 @@ func TestLiveGuideDownloadComposeAndStorageReadback(t *testing.T) {
 	defer runDir.Release()
 	params, _ := json.Marshal(map[string]any{"guide_video_url": grant.URL, "insert_seconds": 1, "guide_duration_seconds": 0, "max_duration_seconds": 0})
 	runner := compose.Runner{FFmpegPath: cfg.Media.FFmpeg.FFmpegPath, FFprobePath: cfg.Media.FFmpeg.FFprobePath, Registry: registry}
-	output, err := runner.Run(ctx, runDir, compose.Request{TemplateCode: "guide_insert", TemplateVersion: 1, Params: params, InputPath: source, GuidePath: downloaded})
+	output, err := runner.Run(ctx, runDir, compose.Request{TemplateCode: "guide_insert", TemplateVersion: 1, Params: params, InputPath: source, Resources: map[string]string{"guide": downloaded}})
 	if err != nil {
 		t.Fatal(err)
 	}
