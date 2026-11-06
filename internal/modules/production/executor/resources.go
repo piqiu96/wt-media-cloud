@@ -2,10 +2,8 @@ package executor
 
 import "encoding/json"
 
-// ResourcePlan is the common execution extension for templates that need
-// additional media. The worker owns downloads, leases and publication; templates
-// declare inputs and compile only their own validated rendering/timeline.
-type ResourcePlan = Plan
+// The worker owns downloads, leases and publication; templates declare inputs
+// and compile their validated rendering and timeline through Plan.
 type DefaultsValidator interface{ ValidateDefaults(json.RawMessage) error }
 type ResourceRequest struct {
 	Name         string `json:"name"`

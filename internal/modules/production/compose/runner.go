@@ -45,10 +45,6 @@ func (r *Runner) Run(ctx context.Context, runDir *RunDir, request Request) (Outp
 	if err != nil {
 		return Output{}, err
 	}
-	resourcePlan, ok := plan.(executor.ResourcePlan)
-	if !ok {
-		return Output{}, fmt.Errorf("template executor does not implement the common render entry")
-	}
 	probe := func(filename string) (executor.MediaInput, error) { return InspectMedia(ctx, r.FFprobePath, filename) }
 	input, err := probe(request.InputPath)
 	if err != nil {
@@ -66,7 +62,7 @@ func (r *Runner) Run(ctx context.Context, runDir *RunDir, request Request) (Outp
 		resources[name] = item
 	}
 	outputPath := filepath.Join(runDir.Path(), "output.mp4")
-	render, err := resourcePlan.Compile(executor.RenderInput{Source: input, Resources: resources, Defaults: request.Defaults, Seed: request.Seed, OutputPath: outputPath})
+	render, err := plan.Compile(executor.RenderInput{Source: input, Resources: resources, Defaults: request.Defaults, Seed: request.Seed, OutputPath: outputPath})
 	if err != nil {
 		return Output{}, err
 	}

@@ -44,7 +44,7 @@ type DynamicParams struct {
 	Transition  float64 `json:"transition_seconds"`
 }
 type DynamicPlan interface {
-	ResourcePlan
+	Plan
 	Timeline(source, intro, ad, tail float64, seed int64) (DynamicTimeline, error)
 }
 type dynamicPlan struct{ DynamicParams }
