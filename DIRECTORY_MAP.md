@@ -23,6 +23,7 @@
 | `web/src/apps/desktop/` | Desktop Vue 应用入口、专属页面和运行适配 | Desktop 页面、Tauri 调用和桌面运行适配 |
 | `web/src/modules/` | Cloud 与 Desktop 共用的业务模块 | 业务页面、Store、业务组件 |
 | `web/src/shared/` | 通用 API、Runtime、UI、布局和样式 | 无业务归属的跨应用能力 |
+| `web/example/` | 公共组件示例、业务原型与独立预览；设计工作稿引用 Workspace `docs/design/` | 原型设计、评审、组件复用 |
 | `web/src/generated/` | 自动生成内容 | 仅在核对生成结果时读取，不手工修改 |
 
 ## 测试与验证入口

@@ -1,0 +1,31 @@
+const {test}=require('node:test'),assert=require('node:assert/strict'),vm=require('node:vm'),fs=require('node:fs'),path=require('node:path');
+const read=file=>fs.readFileSync(path.join(__dirname,'..',file),'utf8');
+test('规模演示按当前支持平台完整载入，重复打开不重复插入',()=>{
+ const context={window:{},addEventListener:()=>{},PIPublishModel:{}};
+ vm.createContext(context);vm.runInContext(read('production/data.js'),context);
+ let seq=10000,actions=new Map(),body='';
+ const C=context.CP={db:{...context.window.CPSeed(),suiteVersion:1},id:()=>++seq,save:()=>{},close:()=>{},toast:()=>{},get:(kind,id)=>C.db[kind].find(x=>x.id===id),btn:(label,action)=>{actions.set(label,action);return label;},open:options=>{body=options.body();options.footer();return {};}};
+ const P=context.PI={db:{suiteVersion:1,accounts:[],tasks:[],assets:[],replies:[]},id:()=>++seq,save:()=>{},asset:id=>P.db.assets.find(x=>x.id===id),defaultPost:()=>({})};
+ vm.runInContext(read('workspace.js'),context);context.OPS=context.window.OPS;context.OPS.go=()=>{};
+ vm.runInContext(read('scale-demo.js'),context);
+ context.OPS.scaleDemo();actions.get('载入规模演示数据')();
+ assert.equal(P.db.accounts.filter(x=>x.scaleDemo).length,240);
+ assert.equal(C.db.outputs.filter(x=>x.scaleDemo).length,240);
+ assert.equal(P.db.tasks.filter(x=>x.scaleDemo).length,200);
+ assert.equal(P.db.replies.filter(x=>x.scaleDemo).length,80);
+ assert.equal(P.db.tasks.every(t=>context.OPS.platforms.includes(t.platform)),true);
+ assert.match(body,/240 个账号/);
+ context.OPS.scaleDemo();assert.equal(actions.has('查看发布任务'),true);actions.get('查看发布任务')();
+ assert.equal(P.db.tasks.filter(x=>x.scaleDemo).length,200);
+});
+test('日期范围兼容明确的2026年旧演示日期，未知日期不命中单边范围',()=>{
+ const C={db:{productionRevision:4,tasks:[],strategies:[],materials:[]},prod:{},read:()=>({from:'2026-10-01',to:'2026-10-31'})};
+ C.get=(kind,id)=>C.db[kind].find(x=>x.id===id);
+ const context={CP:C,OPS:{actor:'陈小雨'}};vm.runInNewContext(read('production/experience.js'),context);
+ assert.equal(C.match({created:'10-30 10:12'},'tasks'),true);
+ assert.equal(C.match({date:'10-30 10:12'},'outputs'),true);
+ assert.equal(C.match({created:'2026-11-01 10:12'},'tasks'),false);
+ C.read=()=>({to:'2026-10-31'});
+ assert.equal(C.match({created:'未知'},'tasks'),false);
+ assert.equal(C.match({created:'2026-10-30 10:12'},'tasks'),true);
+});

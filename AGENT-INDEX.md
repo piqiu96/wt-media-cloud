@@ -7,6 +7,7 @@
 - Cloud 是业务事实中心，负责业务对象、权限、状态、HTTP API、业务数据，以及 Cloud 自有调度和执行任务状态。
 - Cloud 承担已确认的云端执行能力；运营电脑、本地浏览器、登录环境和文件执行归 Agent，Tauri 原生桥与 Local Agent Sidecar 生命周期归 Desktop。
 - `web/` 是 Cloud Web 与 Desktop 共用 Vue 业务源码的唯一维护位置。
+- `web/example/common/`、`web/example/proto/` 是公共示例与业务原型的唯一代码位置；设计工作稿归 Workspace `docs/design/`。原型预览独立启动/构建，允许只读挂载本地文档，不成为正式运行或发布依赖。
 - Workspace 维护系统级 Product、Architecture、Contract、Decision 和 Delivery；Cloud Runtime 和发布产物不依赖 Workspace。
 
 ## 2. Workspace 协作
