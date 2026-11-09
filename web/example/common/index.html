@@ -1,0 +1,2240 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>
+      WT Media · 公共视觉参考
+    </title>
+    <link rel="stylesheet" href="example.css?v=20261104-selection-r4">
+    <script src="controls.js?v=20261104-filters" defer></script>
+    <script src="example.js?v=20261104-filters-r2" defer>
+    </script>
+  </head>
+  <body>
+    <div class="ex-shell">
+      <aside class="ex-sidebar">
+        <div class="ex-brand">
+          <span class="ex-brand-mark">
+            WT
+          </span>
+          公共视觉参考
+        </div>
+        <div class="ex-nav-label">
+          页面与交互模式
+        </div>
+        <nav class="ex-nav" aria-label="示例导航">
+          <a href="#list" data-scene-link="list" aria-current="page">
+            <span>
+              01
+            </span>
+            资源列表
+          </a>
+          <a href="#details" data-scene-link="details">
+            <span>
+              02
+            </span>
+            自适应详情
+          </a>
+          <a href="#forms" data-scene-link="forms">
+            <span>
+              03
+            </span>
+            新建与编辑
+          </a>
+          <a href="#overlays" data-scene-link="overlays">
+            <span>
+              04
+            </span>
+            选择与确认
+          </a>
+          <a href="#feedback" data-scene-link="feedback">
+            <span>
+              05
+            </span>
+            反馈与空态
+          </a>
+          <a href="#batch" data-scene-link="batch">
+            <span>
+              06
+            </span>
+            批量过程与结果
+          </a>
+          <a href="#foundations" data-scene-link="foundations">
+            <span>
+              07
+            </span>
+            视觉基础
+          </a>
+        </nav>
+        <div class="ex-sidebar-foot">
+          配套 frontend 正式规范
+          <br>
+          演示数据 · 离线可用
+          <br>
+          <a href="README.md">
+            使用与维护说明
+          </a>
+        </div>
+      </aside>
+      <main class="ex-main">
+        <div class="ex-topbar">
+          <div>
+            <strong>
+              WT Media / 设计参考
+            </strong>
+            <small>
+              演示数据与交互，不连接业务服务
+            </small>
+          </div>
+          <div class="ex-topbar-links">
+            <a href="https://github.com/piqiu96/wt-media-workspace/blob/main/docs/standards/frontend/README.md">
+              规范入口
+            </a>
+            <a href="../proto/starter.html">
+              原型起始页 ↗
+            </a>
+          </div>
+        </div>
+        <div class="ex-content">
+          <section data-scene="list" id="scene-list">
+            <header class="ex-page-head">
+              <div>
+                <h1>
+                  浏览器窗口
+                </h1>
+                <p>
+                  集中查看运营窗口、代理配置与关联账号。
+                </p>
+              </div>
+              <div class="ex-actions">
+                <button class="ex-button" data-open="batch">
+                  同步窗口
+                </button>
+                <button class="ex-button primary" data-open="create">
+                  新增窗口
+                </button>
+              </div>
+            </header>
+            <div class="ex-panel ex-list-pattern" data-list>
+              <form class="ex-filters ex-filters-stacked" data-filter-form>
+                <div class="ex-field ex-filter-search">
+                  <label for="list-search">
+                    搜索
+                  </label>
+                  <input id="list-search" name="q" placeholder="名称 / ID / 备注">
+                </div>
+                <div class="ex-field ex-filter-select">
+                  <label for="list-mode">
+                    代理方式
+                  </label>
+                  <select id="list-mode" name="mode">
+                    <option value="">
+                      全部
+                    </option>
+                    <option>
+                      系统托管
+                    </option>
+                    <option>
+                      比特自管
+                    </option>
+                  </select>
+                </div>
+                <div class="ex-field ex-filter-select">
+                  <label for="list-status">
+                    业务状态
+                  </label>
+                  <select id="list-status" name="status">
+                    <option value="">
+                      全部
+                    </option>
+                    <option>
+                      正常
+                    </option>
+                    <option>
+                      配置不一致
+                    </option>
+                    <option>
+                      代理已到期
+                    </option>
+                    <option>
+                      待确认
+                    </option>
+                    <option>
+                      窗口缺失
+                    </option>
+                  </select>
+                </div>
+                <div class="ex-actions">
+                  <button class="ex-button primary" type="submit">
+                    查询
+                  </button>
+                  <button class="ex-button" type="reset">
+                    重置
+                  </button>
+                </div>
+                <details class="ex-filter-advanced" id="list-advanced">
+                  <summary>高级筛选<span class="ex-filter-applied" data-advanced-count hidden></span></summary>
+                  <div class="ex-filter-extra">
+                  <div class="ex-field ex-filter-select">
+                    <label for="list-group">
+                      比特分组
+                    </label>
+                    <select id="list-group" name="group">
+                      <option value="">
+                        全部
+                      </option>
+                      <option>
+                        主力账号组
+                      </option>
+                      <option>
+                        备用账号组
+                      </option>
+                    </select>
+                  </div>
+                  </div>
+                </details>
+              </form>
+              <div class="ex-selection" data-selection hidden>
+                <span>
+                  已选择
+                  <strong data-selection-count>
+                    0
+                  </strong>
+                  条代理
+                </span>
+                <button class="ex-button" data-open="batch">
+                  批量检测代理
+                </button>
+                <button class="ex-text-button" data-open="picker">
+                  设置代理
+                </button>
+                <button class="ex-text-button" data-clear-selection>
+                  清除选择
+                </button>
+              </div>
+              <div class="ex-table-scroll">
+                <table class="ex-table" style="min-width:1120px">
+                  <thead>
+                    <tr>
+                      <th style="width:44px">
+                        <input class="ex-check" type="checkbox" aria-label="选择当前筛选结果" data-check-all>
+                      </th>
+                      <th>
+                        ID
+                      </th>
+                      <th>
+                        窗口名称
+                      </th>
+                      <th>
+                        关联媒体账号
+                      </th>
+                      <th>
+                        代理方式
+                      </th>
+                      <th>
+                        代理信息
+                      </th>
+                      <th>
+                        状态
+                      </th>
+                      <th style="width:292px">
+                        操作
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr class="ex-resource-row" data-resource-row data-name="B站主号 · 上海01" data-mode="系统托管" data-status="正常">
+                      <td>
+                        <input class="ex-check" type="checkbox" aria-label="选择B站主号 · 上海01" data-row-check value="328">
+                      </td>
+                      <td>
+                        328
+                      </td>
+                      <td>
+                        <span class="ex-name" title="B站主号 · 上海01">
+                          B站主号 · 上海01
+                        </span>
+                        <small>
+                          主力账号组
+                        </small>
+                      </td>
+                      <td>
+                        B站 · 运营号01
+                        <small>
+                          百度 · 内容号01
+                        </small>
+                      </td>
+                      <td>
+                        <span class="ex-tag info">
+                          系统托管
+                        </span>
+                      </td>
+                      <td>
+                        203.0.113.18:1080
+                        <small>
+                          沪线 · 静态01
+                        </small>
+                      </td>
+                      <td>
+                        <span class="ex-tag success">
+                          正常
+                        </span>
+                      </td>
+                      <td>
+                        <div class="ex-row-actions">
+<button class="ex-text-button ex-row-primary" data-local-note="打开窗口是本机业务能力；本页仅示范按钮状态。" ><span>打开</span></button>
+                          <button class="ex-text-button" data-open="detail" data-record="B站主号 · 上海01">
+                            详情
+                          </button>
+                          <button class="ex-text-button" data-open="edit" data-record="B站主号 · 上海01">
+                            编辑
+                          </button>
+
+                          <button class="ex-text-button" data-open="picker" data-record="B站主号 · 上海01">
+                            选择代理
+                          </button>
+                          <button class="ex-text-button danger" data-open="confirm" data-record="B站主号 · 上海01">
+                            停用
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                    <tr class="ex-resource-row" data-resource-row data-name="百度 · 上海02" data-mode="比特自管" data-status="正常">
+                      <td>
+                        <input class="ex-check" type="checkbox" aria-label="选择百度 · 上海02" data-row-check value="329">
+                      </td>
+                      <td>
+                        329
+                      </td>
+                      <td>
+                        <span class="ex-name" title="百度 · 上海02">
+                          百度 · 上海02
+                        </span>
+                        <small>
+                          主力账号组
+                        </small>
+                      </td>
+                      <td>
+                        B站 · 运营号02
+                        <small>
+                          百度 · 内容号02
+                        </small>
+                      </td>
+                      <td>
+                        <span class="ex-tag ">
+                          比特自管
+                        </span>
+                      </td>
+                      <td>
+                        203.0.113.19:1080
+                        <small>
+                          沪线 · 静态02
+                        </small>
+                      </td>
+                      <td>
+                        <span class="ex-tag success">
+                          正常
+                        </span>
+                      </td>
+                      <td>
+                        <div class="ex-row-actions">
+<button class="ex-text-button ex-row-primary" data-local-note="打开窗口是本机业务能力；本页仅示范按钮状态。" ><span>打开</span></button>
+                          <button class="ex-text-button" data-open="detail" data-record="百度 · 上海02">
+                            详情
+                          </button>
+                          <button class="ex-text-button" data-open="edit" data-record="百度 · 上海02">
+                            编辑
+                          </button>
+
+                          <button class="ex-text-button" data-open="picker" data-record="百度 · 上海02">
+                            选择代理
+                          </button>
+                          <button class="ex-text-button danger" data-open="confirm" data-record="百度 · 上海02">
+                            停用
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                    <tr class="ex-resource-row" data-resource-row data-name="B站备用 · 华东03" data-mode="系统托管" data-status="配置不一致">
+                      <td>
+                        <input class="ex-check" type="checkbox" aria-label="选择B站备用 · 华东03" data-row-check value="330">
+                      </td>
+                      <td>
+                        330
+                      </td>
+                      <td>
+                        <span class="ex-name" title="B站备用 · 华东03">
+                          B站备用 · 华东03
+                        </span>
+                        <small>
+                          主力账号组
+                        </small>
+                      </td>
+                      <td>
+                        B站 · 运营号03
+                        <small>
+                          百度 · 内容号03
+                        </small>
+                      </td>
+                      <td>
+                        <span class="ex-tag info">
+                          系统托管
+                        </span>
+                      </td>
+                      <td>
+                        203.0.113.20:1080
+                        <small>
+                          沪线 · 静态03
+                        </small>
+                      </td>
+                      <td>
+                        <span class="ex-tag warning">
+                          配置不一致
+                        </span>
+                      </td>
+                      <td>
+                        <div class="ex-row-actions">
+<button class="ex-text-button ex-row-primary" data-local-note="打开窗口是本机业务能力；本页仅示范按钮状态。" ><span>打开</span></button>
+                          <button class="ex-text-button" data-open="detail" data-record="B站备用 · 华东03">
+                            详情
+                          </button>
+                          <button class="ex-text-button" data-open="edit" data-record="B站备用 · 华东03">
+                            编辑
+                          </button>
+
+                          <button class="ex-text-button" data-open="picker" data-record="B站备用 · 华东03">
+                            选择代理
+                          </button>
+                          <button class="ex-text-button danger" data-open="confirm" data-record="B站备用 · 华东03">
+                            停用
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                    <tr class="ex-resource-row" data-resource-row data-name="B站主号 · 广州01" data-mode="系统托管" data-status="代理已到期">
+                      <td>
+                        <input class="ex-check" type="checkbox" aria-label="选择B站主号 · 广州01" data-row-check value="331">
+                      </td>
+                      <td>
+                        331
+                      </td>
+                      <td>
+                        <span class="ex-name" title="B站主号 · 广州01">
+                          B站主号 · 广州01
+                        </span>
+                        <small>
+                          主力账号组
+                        </small>
+                      </td>
+                      <td>
+                        B站 · 运营号04
+                        <small>
+                          百度 · 内容号04
+                        </small>
+                      </td>
+                      <td>
+                        <span class="ex-tag info">
+                          系统托管
+                        </span>
+                      </td>
+                      <td>
+                        203.0.113.21:1080
+                        <small>
+                          沪线 · 静态04
+                        </small>
+                      </td>
+                      <td>
+                        <span class="ex-tag danger">
+                          代理已到期
+                        </span>
+                      </td>
+                      <td>
+                        <div class="ex-row-actions">
+<button class="ex-text-button ex-row-primary" data-local-note="打开窗口是本机业务能力；本页仅示范按钮状态。" ><span>打开</span></button>
+                          <button class="ex-text-button" data-open="detail" data-record="B站主号 · 广州01">
+                            详情
+                          </button>
+                          <button class="ex-text-button" data-open="edit" data-record="B站主号 · 广州01">
+                            编辑
+                          </button>
+
+                          <button class="ex-text-button" data-open="picker" data-record="B站主号 · 广州01">
+                            选择代理
+                          </button>
+                          <button class="ex-text-button danger" data-open="confirm" data-record="B站主号 · 广州01">
+                            停用
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                    <tr class="ex-resource-row" data-resource-row data-name="百度 · 杭州01" data-mode="比特自管" data-status="待确认">
+                      <td>
+                        <input class="ex-check" type="checkbox" aria-label="选择百度 · 杭州01" data-row-check value="332">
+                      </td>
+                      <td>
+                        332
+                      </td>
+                      <td>
+                        <span class="ex-name" title="百度 · 杭州01">
+                          百度 · 杭州01
+                        </span>
+                        <small>
+                          主力账号组
+                        </small>
+                      </td>
+                      <td>
+                        B站 · 运营号05
+                        <small>
+                          百度 · 内容号05
+                        </small>
+                      </td>
+                      <td>
+                        <span class="ex-tag ">
+                          比特自管
+                        </span>
+                      </td>
+                      <td>
+                        203.0.113.22:1080
+                        <small>
+                          沪线 · 静态05
+                        </small>
+                      </td>
+                      <td>
+                        <span class="ex-tag warning">
+                          待确认
+                        </span>
+                      </td>
+                      <td>
+                        <div class="ex-row-actions">
+<button class="ex-text-button ex-row-primary" data-local-note="打开窗口是本机业务能力；本页仅示范按钮状态。" ><span>打开</span></button>
+                          <button class="ex-text-button" data-open="detail" data-record="百度 · 杭州01">
+                            详情
+                          </button>
+                          <button class="ex-text-button" data-open="edit" data-record="百度 · 杭州01">
+                            编辑
+                          </button>
+
+                          <button class="ex-text-button" data-open="picker" data-record="百度 · 杭州01">
+                            选择代理
+                          </button>
+                          <button class="ex-text-button danger" data-open="confirm" data-record="百度 · 杭州01">
+                            停用
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                    <tr class="ex-resource-row" data-resource-row data-name="B站备用 · 南京02" data-mode="系统托管" data-status="窗口缺失">
+                      <td>
+                        <input class="ex-check" type="checkbox" aria-label="选择B站备用 · 南京02" data-row-check value="333">
+                      </td>
+                      <td>
+                        333
+                      </td>
+                      <td>
+                        <span class="ex-name" title="B站备用 · 南京02">
+                          B站备用 · 南京02
+                        </span>
+                        <small>
+                          备用账号组
+                        </small>
+                      </td>
+                      <td>
+                        B站 · 运营号06
+                        <small>
+                          百度 · 内容号06
+                        </small>
+                      </td>
+                      <td>
+                        <span class="ex-tag info">
+                          系统托管
+                        </span>
+                      </td>
+                      <td>
+                        203.0.113.23:1080
+                        <small>
+                          沪线 · 静态06
+                        </small>
+                      </td>
+                      <td>
+                        <span class="ex-tag danger">
+                          窗口缺失
+                        </span>
+                      </td>
+                      <td>
+                        <div class="ex-row-actions">
+<button class="ex-text-button ex-row-primary" data-local-note="打开窗口是本机业务能力；本页仅示范按钮状态。" disabled><span>打开</span></button>
+                          <button class="ex-text-button" data-open="detail" data-record="B站备用 · 南京02">
+                            详情
+                          </button>
+                          <button class="ex-text-button" data-open="edit" data-record="B站备用 · 南京02">
+                            编辑
+                          </button>
+
+                          <button class="ex-text-button" data-open="picker" data-record="B站备用 · 南京02">
+                            选择代理
+                          </button>
+                          <button class="ex-text-button danger" data-open="confirm" data-record="B站备用 · 南京02">
+                            停用
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                    <tr class="ex-resource-row" data-resource-row data-name="百度 · 成都01" data-mode="系统托管" data-status="正常">
+                      <td>
+                        <input class="ex-check" type="checkbox" aria-label="选择百度 · 成都01" data-row-check value="334">
+                      </td>
+                      <td>
+                        334
+                      </td>
+                      <td>
+                        <span class="ex-name" title="百度 · 成都01">
+                          百度 · 成都01
+                        </span>
+                        <small>
+                          备用账号组
+                        </small>
+                      </td>
+                      <td>
+                        B站 · 运营号07
+                        <small>
+                          百度 · 内容号07
+                        </small>
+                      </td>
+                      <td>
+                        <span class="ex-tag info">
+                          系统托管
+                        </span>
+                      </td>
+                      <td>
+                        203.0.113.24:1080
+                        <small>
+                          沪线 · 静态07
+                        </small>
+                      </td>
+                      <td>
+                        <span class="ex-tag success">
+                          正常
+                        </span>
+                      </td>
+                      <td>
+                        <div class="ex-row-actions">
+<button class="ex-text-button ex-row-primary" data-local-note="打开窗口是本机业务能力；本页仅示范按钮状态。" ><span>打开</span></button>
+                          <button class="ex-text-button" data-open="detail" data-record="百度 · 成都01">
+                            详情
+                          </button>
+                          <button class="ex-text-button" data-open="edit" data-record="百度 · 成都01">
+                            编辑
+                          </button>
+
+                          <button class="ex-text-button" data-open="picker" data-record="百度 · 成都01">
+                            选择代理
+                          </button>
+                          <button class="ex-text-button danger" data-open="confirm" data-record="百度 · 成都01">
+                            停用
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                    <tr class="ex-resource-row" data-resource-row data-name="日常运营多平台窗口 · 上海04" data-mode="比特自管" data-status="正常">
+                      <td>
+                        <input class="ex-check" type="checkbox" aria-label="选择日常运营多平台窗口 · 上海04" data-row-check value="335">
+                      </td>
+                      <td>
+                        335
+                      </td>
+                      <td>
+                        <span class="ex-name" title="日常运营多平台窗口 · 上海04">
+                          日常运营多平台窗口 · 上海04
+                        </span>
+                        <small>
+                          备用账号组
+                        </small>
+                      </td>
+                      <td>
+                        B站 · 运营号08
+                        <small>
+                          百度 · 内容号08
+                        </small>
+                      </td>
+                      <td>
+                        <span class="ex-tag ">
+                          比特自管
+                        </span>
+                      </td>
+                      <td>
+                        203.0.113.25:1080
+                        <small>
+                          沪线 · 静态08
+                        </small>
+                      </td>
+                      <td>
+                        <span class="ex-tag success">
+                          正常
+                        </span>
+                      </td>
+                      <td>
+                        <div class="ex-row-actions">
+<button class="ex-text-button ex-row-primary" data-local-note="打开窗口是本机业务能力；本页仅示范按钮状态。" ><span>打开</span></button>
+                          <button class="ex-text-button" data-open="detail" data-record="日常运营多平台窗口 · 上海04">
+                            详情
+                          </button>
+                          <button class="ex-text-button" data-open="edit" data-record="日常运营多平台窗口 · 上海04">
+                            编辑
+                          </button>
+
+                          <button class="ex-text-button" data-open="picker" data-record="日常运营多平台窗口 · 上海04">
+                            选择代理
+                          </button>
+                          <button class="ex-text-button danger" data-open="confirm" data-record="日常运营多平台窗口 · 上海04">
+                            停用
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <div class="ex-empty" data-list-empty hidden>
+                <div class="ex-empty-symbol" aria-hidden="true">
+                  ⌕
+                </div>
+                <h3>
+                  没有匹配的窗口
+                </h3>
+                <p>
+                  试试其他关键词，或清除筛选条件。
+                </p>
+                <button class="ex-button" data-reset-list>
+                  清除筛选
+                </button>
+              </div>
+              <footer class="ex-pagination ex-pagination-compact">
+                <span data-list-count aria-live="polite">
+                  共 8 条
+                </span>
+                <div class="ex-actions">
+                  <select aria-label="每页条数"><option value="8">8 条 / 页</option><option value="20" selected>20 条 / 页</option><option value="50">50 条 / 页</option></select>
+                  <button class="ex-button ex-page-number" aria-label="上一页" disabled>
+                    ‹
+                  </button>
+                  <span class="ex-tag info" aria-current="page">
+                    1
+                  </span>
+                  <button class="ex-button ex-page-number" aria-label="下一页" disabled>
+                    ›
+                  </button>
+                </div>
+              </footer>
+            </div>
+            <div class="ex-reference">
+              <div>
+                规范依据：
+                <a href="https://github.com/piqiu96/wt-media-workspace/blob/main/docs/standards/frontend/AdminUI页面规范.md">
+                  §2–§4 页面 / 筛选 / 列表
+                </a>
+                <a href="https://github.com/piqiu96/wt-media-workspace/blob/main/docs/standards/frontend/前端架构与视觉规范.md">
+                  §3.7、§4.1 控件密度
+                </a>
+                <span>分页展示总数、每页条数和翻页，不展示跳页输入框。</span>
+              </div>
+              <button class="ex-text-button" data-show-code="list">
+                查看 / 复制结构
+              </button>
+            </div>
+          </section>
+          <section data-scene="details" id="scene-details" hidden>
+            <header class="ex-page-head">
+              <div>
+                <h1>
+                  自适应详情
+                </h1>
+                <p>
+                  每组标签和值横向阅读，按内容密度与容器宽度决定列数。
+                </p>
+              </div>
+              <button class="ex-button" data-open="detail">
+                查看详情 Drawer
+              </button>
+            </header>
+            <div class="ex-demo-controls">
+              <div class="ex-field">
+                <label class="ex-label" for="detail-density">
+                  字段密度
+                </label>
+                <select id="detail-density">
+                  <option value="dense">
+                    密集短字段 + 长内容
+                  </option>
+                  <option value="sparse">
+                    少量字段
+                  </option>
+                </select>
+              </div>
+              <div class="ex-field">
+                <label class="ex-label" for="detail-width">
+                  内容容器宽度
+                </label>
+                <select id="detail-width">
+                  <option value="800">
+                    800px
+                  </option>
+                  <option value="560">
+                    560px
+                  </option>
+                  <option value="380">
+                    380px
+                  </option>
+                </select>
+              </div>
+              <span class="ex-help" data-detail-layout aria-live="polite">
+              </span>
+            </div>
+            <div class="ex-panel ex-panel-pad ex-detail-preview" id="detail-preview">
+              <div class="ex-description-container">
+                <section class="ex-section">
+                  <h2 class="ex-section-title detail">
+                    基础信息
+                  </h2>
+                  <dl class="ex-description-list" data-density="dense">
+                    <div class="ex-desc-item">
+                      <dt>
+                        窗口 ID
+                      </dt>
+                      <dd>
+                        328
+                      </dd>
+                    </div>
+                    <div class="ex-desc-item">
+                      <dt>
+                        业务状态
+                      </dt>
+                      <dd>
+                        <span class="ex-tag success">
+                          正常
+                        </span>
+                      </dd>
+                    </div>
+                    <div class="ex-desc-item">
+                      <dt>
+                        比特分组
+                      </dt>
+                      <dd>
+                        主力账号组
+                      </dd>
+                    </div>
+                    <div class="ex-desc-item">
+                      <dt>
+                        代理方式
+                      </dt>
+                      <dd>
+                        系统托管
+                      </dd>
+                    </div>
+                    <div class="ex-desc-item">
+                      <dt>
+                        最近核实
+                      </dt>
+                      <dd>
+                        2026-10-28 11:30
+                      </dd>
+                    </div>
+                    <div class="ex-desc-item">
+                      <dt>
+                        关联账号
+                      </dt>
+                      <dd>
+                        2 个平台 · 2 个账号
+                      </dd>
+                    </div>
+                    <div class="ex-desc-item full">
+                      <dt>
+                        窗口名称
+                      </dt>
+                      <dd data-detail-name>
+                        B站主号 · 上海01
+                      </dd>
+                    </div>
+                    <div class="ex-desc-item full">
+                      <dt>
+                        备注
+                      </dt>
+                      <dd>
+                        用于华东日常内容发布与多平台运营。长备注按自然高度展示，保留完整说明，不挤入另一字段，也不为凑双列截断。
+                      </dd>
+                    </div>
+                  </dl>
+                </section>
+                <section class="ex-section" data-dense-only>
+                  <h2 class="ex-section-title detail">
+                    代理配置核对
+                  </h2>
+                  <div class="ex-compare">
+                    <div class="ex-compare-card">
+                      <h3>
+                        系统托管配置
+                      </h3>
+                      <p>
+                        SOCKS5 · 203.0.113.18:1080
+                      </p>
+                      <p class="ex-help">
+                        认证用户：demo-shanghai
+                      </p>
+                    </div>
+                    <div class="ex-compare-card">
+                      <h3>
+                        比特实际配置
+                        <span class="ex-tag warning">
+                          不一致
+                        </span>
+                      </h3>
+                      <p>
+                        SOCKS5 · 203.0.113.66:1080
+                      </p>
+                      <p class="ex-help">
+                        地址与托管配置不同
+                      </p>
+                    </div>
+                  </div>
+                </section>
+                <section class="ex-section" data-dense-only>
+                  <h2 class="ex-section-title detail">
+                    关联媒体账号
+                  </h2>
+                  <div class="ex-table-scroll">
+                    <table class="ex-table">
+                      <thead>
+                        <tr>
+                          <th>
+                            ID
+                          </th>
+                          <th>
+                            平台
+                          </th>
+                          <th>
+                            账号名称
+                          </th>
+                          <th>
+                            状态
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr>
+                          <td>
+                            1001
+                          </td>
+                          <td>
+                            B站
+                          </td>
+                          <td>
+                            华东内容主号
+                          </td>
+                          <td>
+                            <span class="ex-tag success">
+                              正常
+                            </span>
+                          </td>
+                        </tr>
+                        <tr>
+                          <td>
+                            1002
+                          </td>
+                          <td>
+                            百度
+                          </td>
+                          <td>
+                            华东百度
+                          </td>
+                          <td>
+                            <span class="ex-tag success">
+                              正常
+                            </span>
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </section>
+              </div>
+            </div>
+            <div class="ex-reference">
+              <div>
+                规范依据：
+                <a href="https://github.com/piqiu96/wt-media-workspace/blob/main/docs/standards/frontend/AdminUI页面规范.md">
+                  §7.2 自适应字段布局
+                </a>
+                <a href="https://github.com/piqiu96/wt-media-workspace/blob/main/docs/standards/frontend/前端架构与视觉规范.md">
+                  §4.4.2 键值与组件
+                </a>
+              </div>
+              <button class="ex-text-button" data-show-code="details">
+                查看 / 复制结构
+              </button>
+            </div>
+          </section>
+          <section data-scene="forms" id="scene-forms" hidden>
+            <header class="ex-page-head">
+              <div>
+                <h1>
+                  新建与编辑
+                </h1>
+                <p>
+                  短任务居中，长配置侧开。字段按关系组合，帮助留在字段下方。
+                </p>
+              </div>
+            </header>
+            <div class="ex-spec-grid">
+              <section class="ex-panel ex-spec-block">
+                <h2>
+                  短表单 · 居中 Dialog
+                </h2>
+                <p class="ex-help">
+                  560px，随内容自然增高；保留卡片选择和必要帮助。
+                </p>
+                <div class="ex-form-container" style="margin-top:20px">
+                  <fieldset class="ex-choices">
+                    <legend>
+                      代理方式
+                    </legend>
+                    <label class="ex-choice">
+                      <input type="radio" name="preview-mode" checked>
+                      <span>
+                        <strong>
+                          比特自管
+                        </strong>
+                        <small>
+                          在比特中维护代理
+                        </small>
+                      </span>
+                    </label>
+                    <label class="ex-choice">
+                      <input type="radio" name="preview-mode">
+                      <span>
+                        <strong>
+                          系统托管
+                        </strong>
+                        <small>
+                          创建后选择托管代理
+                        </small>
+                      </span>
+                    </label>
+                  </fieldset>
+                </div>
+                <div class="ex-actions" style="margin-top:24px">
+                  <button class="ex-button primary" data-open="create">
+                    新建窗口
+                  </button>
+                  <button class="ex-button" data-open="edit">
+                    编辑窗口
+                  </button>
+                </div>
+              </section>
+              <section class="ex-panel ex-spec-block">
+                <h2>
+                  长配置 · 分区 Drawer
+                </h2>
+                <p class="ex-help">
+                  800px，多区配置；相关短字段成对，地址与备注满行。
+                </p>
+                <div class="ex-form-container" style="margin-top:20px">
+                  <div class="ex-form-grid">
+                    <div class="ex-field">
+                      <label for="preview-protocol">
+                        协议
+                      </label>
+                      <select id="preview-protocol">
+                        <option>
+                          SOCKS5
+                        </option>
+                        <option>
+                          HTTP
+                        </option>
+                      </select>
+                    </div>
+                    <div class="ex-field">
+                      <label for="preview-port">
+                        端口
+                      </label>
+                      <input id="preview-port" value="1080" type="number">
+                    </div>
+                    <div class="ex-field full">
+                      <label for="preview-host">
+                        代理地址
+                      </label>
+                      <input id="preview-host" value="203.0.113.18">
+                    </div>
+                  </div>
+                </div>
+                <div class="ex-actions" style="margin-top:24px">
+                  <button class="ex-button primary" data-open="proxy">
+                    新建代理
+                  </button>
+                  <button class="ex-button" data-open="proxy-edit">
+                    编辑代理
+                  </button>
+                <button class="ex-button" data-open="paired">组合短表单 · 640px</button>
+                </div>
+              </section>
+            </div>
+            <div class="ex-reference">
+              <div>
+                规范依据：
+                <a href="https://github.com/piqiu96/wt-media-workspace/blob/main/docs/standards/frontend/AdminUI页面规范.md">
+                  §6 容器 / 字段关系 / 选择卡片
+                </a>
+                <a href="https://github.com/piqiu96/wt-media-workspace/blob/main/docs/standards/frontend/前端交互规范.md">
+                  §8、§9 输入与关闭
+                </a>
+              </div>
+              <button class="ex-text-button" data-show-code="forms">
+                查看 / 复制结构
+              </button>
+            </div>
+          </section>
+          <section data-scene="overlays" id="scene-overlays" hidden>
+            <header class="ex-page-head">
+              <div>
+                <h1>
+                  选择与确认
+                </h1>
+                <p>
+                  按任务选择容器，保留层级、焦点和返回上下文。
+                </p>
+              </div>
+            </header>
+            <div class="ex-spec-grid">
+              <section class="ex-panel ex-spec-block">
+                <h2>
+                  资源选择
+                </h2>
+                <p class="ex-help">
+                  有候选时960px，无资源时收为560px。不可用项保留原因。
+                </p>
+                <div class="ex-stack" style="margin-top:20px">
+                  <div class="ex-actions">
+                    <button class="ex-button primary" data-open="picker">
+                      可用与不可用资源
+                    </button>
+                    <button class="ex-button" data-open="picker-empty">
+                      空资源
+                    </button>
+                  </div>
+                  <div class="ex-notice">
+                    <span class="ex-notice-icon" aria-hidden="true">
+                      i
+                    </span>
+                    <div>
+                      少量代理属性就地展开；完整详情进入下一层，返回后保留筛选与已选项。
+                    </div>
+                  </div>
+                </div>
+              </section>
+              <section class="ex-panel ex-spec-block">
+                <h2>
+                  风险与简短摘要
+                </h2>
+                <p class="ex-help">
+                  关键影响直接可见；只读摘要没有空 Footer。
+                </p>
+                <div class="ex-actions" style="margin-top:20px">
+                  <button class="ex-button" data-open="confirm">
+                    停用确认
+                  </button>
+                  <button class="ex-button" data-open="summary">
+                    只读摘要
+                  </button>
+                <button class="ex-button" data-open="detail-complex">复杂详情 · 960px</button>
+                </div>
+              </section>
+            </div>
+            <div class="ex-reference">
+              <div>
+                规范依据：
+                <a href="https://github.com/piqiu96/wt-media-workspace/blob/main/docs/standards/frontend/AdminUI页面规范.md">
+                  §6.1、§7.4 容器与操作区
+                </a>
+                <a href="https://github.com/piqiu96/wt-media-workspace/blob/main/docs/standards/frontend/前端交互规范.md">
+                  §9 弹层与上下文
+                </a>
+              </div>
+              <button class="ex-text-button" data-show-code="overlays">
+                查看 / 复制结构
+              </button>
+            </div>
+          </section>
+          <section data-scene="feedback" id="scene-feedback" hidden>
+            <header class="ex-page-head">
+              <div>
+                <h1>
+                  反馈与空态
+                </h1>
+                <p>
+                  减少重复描述，保留运营决策需要的影响与恢复动作。
+                </p>
+              </div>
+            </header>
+            <div class="ex-spec-grid">
+              <section class="ex-panel ex-spec-block">
+                <h2>
+                  帮助、影响与风险
+                </h2>
+                <div class="ex-stack">
+                  <p class="ex-help">
+                    支持名称、地址和供应商搜索。
+                  </p>
+                  <div class="ex-notice">
+                    <span class="ex-notice-icon" aria-hidden="true">
+                      i
+                    </span>
+                    <div class="ex-impact-body"><div class="ex-impact-heading"><span>本次调整涉及 2 个关联账号。</span><button class="ex-text-button ex-disclosure-trigger" data-toggle="impact-accounts" aria-expanded="false" aria-controls="impact-accounts">查看关联账号<span class="ex-chevron" aria-hidden="true"></span></button></div><div class="ex-impact-list" id="impact-accounts" hidden><div><span>B站</span><div>华东内容主号</div></div><div><span>百度</span><div>华东百度</div></div></div></div>
+                  </div>
+                  <div class="ex-notice warning">
+                    <span class="ex-notice-icon" aria-hidden="true">
+                      !
+                    </span>
+                    <div>
+                      切换为比特自管后，系统不再维护此窗口的代理配置。执行前请确认比特中的连接方式。
+                    </div>
+                  </div>
+                  <div class="ex-notice danger" role="alert">
+                    <span class="ex-notice-icon" aria-hidden="true">
+                      !
+                    </span>
+                    <div>
+                      读取代理资源失败。已填写的内容仍保留。
+                      <br>
+                      <button class="ex-text-button" data-local-note="本页不连接服务。实际页面应重新读取资源并保留输入。">
+                        重新读取
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </section>
+              <section class="ex-panel ex-spec-block">
+                <h2>
+                  一处状态，一个恢复入口
+                </h2>
+                <div class="ex-field" style="margin-bottom:16px">
+                  <label class="ex-label" for="empty-case">
+                    演示状态
+                  </label>
+                  <select id="empty-case">
+                    <option value="empty">
+                      当前没有资源
+                    </option>
+                    <option value="filtered">
+                      筛选无结果
+                    </option>
+                    <option value="unavailable">
+                      已有资源但不可用
+                    </option>
+                    <option value="error">
+                      加载失败
+                    </option>
+                    <option value="denied">
+                      无权限
+                    </option>
+                    <option value="loading">
+                      加载中
+                    </option>
+                  </select>
+                </div>
+                <div id="feedback-state" aria-live="polite">
+                </div>
+              </section>
+            </div>
+            <div class="ex-reference">
+              <div>
+                规范依据：
+                <a href="https://github.com/piqiu96/wt-media-workspace/blob/main/docs/standards/frontend/用户反馈规范.md">
+                  选型、轻提示和空态
+                </a>
+                <a href="https://github.com/piqiu96/wt-media-workspace/blob/main/docs/standards/frontend/前端架构与视觉规范.md">
+                  §4.5 公共反馈
+                </a>
+              </div>
+              <button class="ex-text-button" data-show-code="feedback">
+                查看 / 复制结构
+              </button>
+            </div>
+          </section>
+          <section data-scene="batch" id="scene-batch" hidden>
+            <header class="ex-page-head">
+              <div>
+                <h1>
+                  批量过程与结果
+                </h1>
+                <p>
+                  状态摘要居中，计数在同一区域，逐项原因可读取。
+                </p>
+              </div>
+              <button class="ex-button primary" data-open="batch">
+                打开处理过程
+              </button>
+            </header>
+            <div class="ex-demo-controls">
+              <div class="ex-field">
+                <label class="ex-label" for="batch-case">
+                  演示状态
+                </label>
+                <select id="batch-case">
+                  <option value="partial">
+                    部分完成
+                  </option>
+                  <option value="processing">
+                    处理中 · 关闭受保护
+                  </option>
+                  <option value="success">
+                    全部成功
+                  </option>
+                  <option value="failed">
+                    全部失败
+                  </option>
+                  <option value="uncertain">
+                    待确认
+                  </option>
+                  <option value="interrupted">
+                    已中断
+                  </option>
+                </select>
+              </div>
+            </div>
+            <div class="ex-panel ex-panel-pad" data-batch-preview>
+            </div>
+            <div class="ex-reference">
+              <div>
+                规范依据：
+                <a href="https://github.com/piqiu96/wt-media-workspace/blob/main/docs/standards/frontend/AdminUI页面规范.md">
+                  §7.7 批量结果结构
+                </a>
+                <a href="https://github.com/piqiu96/wt-media-workspace/blob/main/docs/standards/frontend/前端交互规范.md">
+                  §11 互斥计数与恢复
+                </a>
+              </div>
+              <button class="ex-text-button" data-show-code="batch">
+                查看 / 复制结构
+              </button>
+            </div>
+          </section>
+          <section data-scene="foundations" id="scene-foundations" hidden>
+            <header class="ex-page-head">
+              <div>
+                <h1>
+                  视觉基础
+                </h1>
+                <p>
+                  统一取值与状态。示例样式共用规范中的 Token，不另立配色。
+                </p>
+              </div>
+            </header>
+            <div class="ex-spec-grid">
+              <section class="ex-panel ex-spec-block">
+                <h2>
+                  冷灰、品牌与语义色
+                </h2>
+                <div class="ex-stack" data-swatches>
+                </div>
+              </section>
+              <section class="ex-panel ex-spec-block">
+                <h2>
+                  字号与间距
+                </h2>
+                <div class="ex-stack">
+                  <div style="font-size:24px;font-weight:600">
+                    页面标题 24 / 600
+                  </div>
+                  <div style="font-size:18px;font-weight:600">
+                    弹层标题 18 / 600
+                  </div>
+                  <h3>
+                    分区标题 14 / 600
+                  </h3>
+                  <p>
+                    正文与表单值 14px
+                  </p>
+                  <p style="font-size:13px">
+                    列表正文 13px，单行约48px
+                  </p>
+                  <p class="ex-help">
+                    辅助文字 12px。字段间16–20px，分区间24–28px。
+                  </p>
+                  <div class="ex-field">
+                    <label for="base-input">
+                      常规控件 36px
+                    </label>
+                    <input id="base-input" placeholder="输入内容以查看焦点">
+                  </div>
+                </div>
+              </section>
+              <section class="ex-panel ex-spec-block">
+                <h2>
+                  按钮与行操作
+                </h2>
+                <div class="ex-stack">
+                  <div class="ex-actions">
+                    <button class="ex-button primary" data-local-note="主动作示例">
+                      主操作
+                    </button>
+                    <button class="ex-button" data-local-note="辅助动作示例">
+                      次操作
+                    </button>
+                    <button class="ex-text-button" data-local-note="文字动作示例">
+                      文字操作
+                    </button>
+                  </div>
+                  <div class="ex-actions">
+                    <button class="ex-button" disabled>
+                      暂不可用
+                    </button>
+                    <button class="ex-text-button" disabled>
+                      不可编辑
+                    </button>
+                    <button class="ex-text-button" disabled aria-busy="true">
+                      处理中…
+                    </button>
+                  </div>
+                  <div>
+                    <p class="ex-help">
+                      5项全平铺
+                    </p>
+                    <div class="ex-row-actions">
+<button class="ex-text-button ex-row-primary" data-local-note="打开状态示例"><span>打开</span></button>
+                      <button class="ex-text-button" data-open="detail">
+                        详情
+                      </button>
+                      <button class="ex-text-button" data-open="edit">
+                        编辑
+                      </button>
+
+                      <button class="ex-text-button" data-open="picker">
+                        设置代理
+                      </button>
+                      <button class="ex-text-button danger" data-open="confirm">
+                        停用
+                      </button>
+                    </div>
+                  </div>
+                  <div>
+                    <p class="ex-help">
+                      超过5项才收纳
+                    </p>
+                    <div class="ex-row-actions">
+<button class="ex-text-button ex-row-primary" data-local-note="打开状态示例"><span>打开</span></button>
+                      <button class="ex-text-button" data-open="detail">
+                        详情
+                      </button>
+                      <button class="ex-text-button" data-open="edit">
+                        编辑
+                      </button>
+
+                      <button class="ex-text-button" data-open="picker">
+                        设置代理
+                      </button>
+                      <div class="ex-action-menu" data-action-menu><button class="ex-text-button ex-menu-trigger" data-menu-trigger>更多<span class="ex-chevron" aria-hidden="true"></span></button><div class="ex-menu-popup" data-menu-popup popover="manual"><button data-open="summary">核实配置</button><div class="ex-menu-divider" role="separator"></div><button class="danger" data-open="confirm">停用</button></div></div>
+                    </div>
+                  </div>
+                  <div>
+                    <p class="ex-help">删除操作：入口写「删除」，悬停红字浅红底，最终确认使用实心红色</p>
+                    <div class="ex-row-actions">
+                      <button class="ex-text-button" data-local-note="详情操作示例">详情</button>
+                      <button class="ex-text-button danger" data-local-note="仅演示删除按钮状态；实际删除须先确认影响">删除</button>
+                    </div>
+                  </div>
+                </div>
+              </section>
+              <section class="ex-panel ex-spec-block">
+                <h2>
+                  配置、运行事实与结果
+                </h2>
+                <div class="ex-stack">
+                  <label class="ex-switch">
+                    <input type="checkbox" checked>
+                    启用资源（配置）
+                  </label>
+                  <div class="ex-inline">
+                    <span class="ex-tag success dot">
+                      已打开
+                    </span>
+                    <span class="ex-tag">
+                      已关闭
+                    </span>
+                    <span class="ex-tag info">
+                      处理中
+                    </span>
+                  </div>
+                  <div class="ex-inline">
+                    <span class="ex-tag success">
+                      正常
+                    </span>
+                    <span class="ex-tag warning">
+                      待确认
+                    </span>
+                    <span class="ex-tag danger">
+                      连接失败
+                    </span>
+                  </div>
+                  <p class="ex-help">
+                    颜色辅助识别，状态始终有文字；配置开关不代替运行事实或检测结论。
+                  </p>
+                </div>
+              </section>
+            </div>
+            <div class="ex-reference">
+              <div>
+                规范依据：
+                <a href="https://github.com/piqiu96/wt-media-workspace/blob/main/docs/standards/frontend/前端架构与视觉规范.md">
+                  §3.6–§3.9 基础取值和状态
+                </a>
+                <a href="https://github.com/piqiu96/wt-media-workspace/blob/main/docs/standards/frontend/AdminUI页面规范.md">
+                  §4.3 操作区阈值
+                </a>
+              </div>
+              <button class="ex-text-button" data-show-code="foundations">
+                查看 / 复制结构
+              </button>
+            </div>
+          </section>
+        </div>
+      </main>
+    </div>
+    <div class="ex-toast" role="status" aria-live="polite" id="example-toast">
+    </div>
+    <noscript>
+      <p class="ex-panel-pad">
+        本参考页需要JavaScript切换示例。页面、表单与详情结构也可直接在源文件中读取。
+      </p>
+    </noscript>
+    <template id="tpl-window">
+      <form data-local-form novalidate>
+        <div class="ex-overlay-body">
+          <div class="ex-form-container">
+            <div class="ex-form-grid">
+              <div class="ex-field required full">
+                <label for="window-name">
+                  窗口名称
+                </label>
+                <input id="window-name" name="name" placeholder="例如 B站主号 · 上海05" required maxlength="80" autocomplete="off" aria-describedby="window-name-error">
+                <span class="ex-error" id="window-name-error" role="alert" hidden>
+                  请输入窗口名称
+                </span>
+              </div>
+              <div class="ex-field full">
+                <label for="window-group">
+                  比特分组
+                </label>
+                <select id="window-group" name="group">
+                  <option value="">
+                    请选择分组
+                  </option>
+                  <option>
+                    主力账号组
+                  </option>
+                  <option>
+                    备用账号组
+                  </option>
+                </select>
+                <p class="ex-help">
+                  分组由比特同步。没有可选项时，先在比特中建立分组。
+                </p>
+              </div>
+              <div class="ex-field full">
+                <label for="window-note">
+                  比特备注
+                </label>
+                <textarea id="window-note" name="note" placeholder="可填写运营用途"></textarea>
+              </div>
+              <fieldset class="ex-choices full">
+                <legend>
+                  代理方式
+                </legend>
+                <label class="ex-choice">
+                  <input type="radio" name="proxy-mode" value="self" checked>
+                  <span>
+                    <strong>
+                      比特自管
+                    </strong>
+                    <small>
+                      在比特中维护代理
+                    </small>
+                  </span>
+                </label>
+                <label class="ex-choice">
+                  <input type="radio" name="proxy-mode" value="managed">
+                  <span>
+                    <strong>
+                      系统托管
+                    </strong>
+                    <small>
+                      创建后选择托管代理
+                    </small>
+                  </span>
+                </label>
+              </fieldset>
+              <div class="ex-notice success full" data-form-receipt role="status" hidden>
+                <span class="ex-notice-icon" aria-hidden="true">
+                  ✓
+                </span>
+                <div>
+                  已在本页记录演示输入，未创建或修改真实窗口。
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <footer class="ex-overlay-footer">
+          <button class="ex-button" type="button" data-close>
+            取消
+          </button>
+          <button class="ex-button primary" type="submit">
+            保存演示输入
+          </button>
+        </footer>
+      </form>
+    </template>
+    <template id="tpl-proxy">
+      <form data-local-form novalidate>
+        <div class="ex-overlay-body">
+          <div class="ex-form-container">
+            <section class="ex-section">
+              <h3 class="ex-section-title form">
+                基础信息
+              </h3>
+              <div class="ex-form-grid">
+                <div class="ex-field required full">
+                  <label for="proxy-name">
+                    代理名称
+                  </label>
+                  <input id="proxy-name" name="name" required aria-describedby="proxy-name-error" placeholder="例如 沪线 · 静态01">
+                  <span id="proxy-name-error" class="ex-error" data-name-error role="alert" hidden>
+                    请输入代理名称
+                  </span>
+                </div>
+                <div class="ex-field">
+                  <label for="proxy-region">
+                    地区
+                  </label>
+                  <select id="proxy-region">
+                    <option>
+                      上海
+                    </option>
+                    <option>
+                      广州
+                    </option>
+                  </select>
+                </div>
+                <div class="ex-field">
+                  <label for="proxy-provider">
+                    供应商
+                  </label>
+                  <input id="proxy-provider" placeholder="供应商名称">
+                </div>
+              </div>
+            </section>
+            <section class="ex-section">
+              <h3 class="ex-section-title form">
+                连接配置
+              </h3>
+              <div class="ex-form-grid">
+                <div class="ex-field">
+                  <label for="proxy-protocol">
+                    协议
+                  </label>
+                  <select id="proxy-protocol">
+                    <option>
+                      SOCKS5
+                    </option>
+                    <option>
+                      HTTP
+                    </option>
+                    <option>
+                      HTTPS
+                    </option>
+                  </select>
+                </div>
+                <div class="ex-field">
+                  <label for="proxy-port">
+                    端口
+                  </label>
+                  <input id="proxy-port" type="number" min="1" max="65535" value="1080">
+                </div>
+                <div class="ex-field full">
+                  <label for="proxy-host">
+                    代理地址
+                  </label>
+                  <input id="proxy-host" placeholder="例如 203.0.113.18">
+                </div>
+                <div class="ex-field">
+                  <label for="proxy-user">
+                    认证用户名
+                  </label>
+                  <input id="proxy-user" autocomplete="off" placeholder="选填">
+                </div>
+                <div class="ex-field">
+                  <label for="proxy-password">
+                    认证密码
+                  </label>
+                  <input id="proxy-password" type="password" autocomplete="new-password" placeholder="选填">
+                </div>
+              </div>
+            </section>
+            <section class="ex-section">
+              <h3 class="ex-section-title form">
+                运营信息
+              </h3>
+              <div class="ex-form-grid">
+                <div class="ex-field">
+                  <label for="proxy-quota">
+                    可用配额
+                  </label>
+                  <input id="proxy-quota" type="number" min="1" value="5">
+                </div>
+                <div class="ex-field">
+                  <label for="proxy-expiry">
+                    到期日期
+                  </label>
+                  <input id="proxy-expiry" type="date" value="2026-12-31">
+                </div>
+                <div class="ex-field full">
+                  <label for="proxy-note">
+                    备注
+                  </label>
+                  <textarea id="proxy-note" placeholder="补充使用范围或续费信息"></textarea>
+                </div>
+              </div>
+            </section>
+            <div class="ex-notice success" data-form-receipt role="status" hidden>
+              <span class="ex-notice-icon" aria-hidden="true">
+                ✓
+              </span>
+              <div>
+                已在本页记录演示输入，未保存到真实服务。
+              </div>
+            </div>
+          </div>
+        </div>
+        <footer class="ex-overlay-footer">
+          <button class="ex-button" type="button" data-close>
+            取消
+          </button>
+          <button class="ex-button primary" type="submit">
+            保存演示输入
+          </button>
+        </footer>
+      </form>
+    </template>
+    <template id="tpl-detail">
+      <div class="ex-overlay-body">
+        <div class="ex-description-container">
+          <section class="ex-section">
+            <h2 class="ex-section-title detail">
+              基础信息
+            </h2>
+            <dl class="ex-description-list" data-density="dense">
+              <div class="ex-desc-item">
+                <dt>
+                  窗口 ID
+                </dt>
+                <dd>
+                  328
+                </dd>
+              </div>
+              <div class="ex-desc-item">
+                <dt>
+                  业务状态
+                </dt>
+                <dd>
+                  <span class="ex-tag success">
+                    正常
+                  </span>
+                </dd>
+              </div>
+              <div class="ex-desc-item">
+                <dt>
+                  比特分组
+                </dt>
+                <dd>
+                  主力账号组
+                </dd>
+              </div>
+              <div class="ex-desc-item">
+                <dt>
+                  代理方式
+                </dt>
+                <dd>
+                  系统托管
+                </dd>
+              </div>
+              <div class="ex-desc-item">
+                <dt>
+                  最近核实
+                </dt>
+                <dd>
+                  2026-10-28 11:30
+                </dd>
+              </div>
+              <div class="ex-desc-item">
+                <dt>
+                  关联账号
+                </dt>
+                <dd>
+                  2 个平台 · 2 个账号
+                </dd>
+              </div>
+              <div class="ex-desc-item full">
+                <dt>
+                  窗口名称
+                </dt>
+                <dd data-detail-name>
+                  B站主号 · 上海01
+                </dd>
+              </div>
+              <div class="ex-desc-item full">
+                <dt>
+                  备注
+                </dt>
+                <dd>
+                  用于华东日常内容发布与多平台运营。长备注按自然高度展示，保留完整说明，不挤入另一字段，也不为凑双列截断。
+                </dd>
+              </div>
+            </dl>
+          </section>
+          <section class="ex-section" data-dense-only>
+            <h2 class="ex-section-title detail">
+              代理配置核对
+            </h2>
+            <div class="ex-compare">
+              <div class="ex-compare-card">
+                <h3>
+                  系统托管配置
+                </h3>
+                <p>
+                  SOCKS5 · 203.0.113.18:1080
+                </p>
+                <p class="ex-help">
+                  认证用户：demo-shanghai
+                </p>
+              </div>
+              <div class="ex-compare-card">
+                <h3>
+                  比特实际配置
+                  <span class="ex-tag warning">
+                    不一致
+                  </span>
+                </h3>
+                <p>
+                  SOCKS5 · 203.0.113.66:1080
+                </p>
+                <p class="ex-help">
+                  地址与托管配置不同
+                </p>
+              </div>
+            </div>
+          </section>
+          <section class="ex-section" data-dense-only>
+            <h2 class="ex-section-title detail">
+              关联媒体账号
+            </h2>
+            <div class="ex-table-scroll">
+              <table class="ex-table">
+                <thead>
+                  <tr>
+                    <th>
+                      ID
+                    </th>
+                    <th>
+                      平台
+                    </th>
+                    <th>
+                      账号名称
+                    </th>
+                    <th>
+                      状态
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>
+                      1001
+                    </td>
+                    <td>
+                      B站
+                    </td>
+                    <td>
+                      华东内容主号
+                    </td>
+                    <td>
+                      <span class="ex-tag success">
+                        正常
+                      </span>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td>
+                      1002
+                    </td>
+                    <td>
+                      百度
+                    </td>
+                    <td>
+                      华东百度
+                    </td>
+                    <td>
+                      <span class="ex-tag success">
+                        正常
+                      </span>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </div>
+      </div>
+    </template>
+    <template id="tpl-summary">
+      <div class="ex-overlay-body">
+        <div class="ex-description-container">
+          <dl class="ex-description-list" data-density="sparse">
+            <div class="ex-desc-item">
+              <dt>
+                代理名称
+              </dt>
+              <dd>
+                沪线 · 静态01
+              </dd>
+            </div>
+            <div class="ex-desc-item">
+              <dt>
+                代理地址
+              </dt>
+              <dd>
+                203.0.113.18:1080
+              </dd>
+            </div>
+            <div class="ex-desc-item">
+              <dt>
+                地区
+              </dt>
+              <dd>
+                上海
+              </dd>
+            </div>
+            <div class="ex-desc-item">
+              <dt>
+                可用性
+              </dt>
+              <dd>
+                <span class="ex-tag success">
+                  可使用
+                </span>
+              </dd>
+            </div>
+          </dl>
+        </div>
+      </div>
+    </template>
+    <template id="tpl-confirm">
+      <div class="ex-overlay-body">
+        <p>
+          停用“
+          <strong data-record-name>
+            B站主号 · 上海01
+          </strong>
+          ”？
+        </p>
+        <div class="ex-notice warning" style="margin-top:16px">
+          <span class="ex-notice-icon" aria-hidden="true">
+            !
+          </span>
+          <div>
+            停用后将不能打开、关闭或编辑此窗口。关联媒体账号保留，不会随窗口停用而删除。
+          </div>
+        </div>
+        <p class="ex-help" style="margin-top:12px">
+          此处仅演示风险确认，不执行真实停用。
+        </p>
+      </div>
+      <footer class="ex-overlay-footer">
+        <button class="ex-button" data-close>
+          取消
+        </button>
+        <button class="ex-button danger" data-demo-confirm>
+          演示确认停用
+        </button>
+      </footer>
+    </template>
+    <template id="tpl-picker">
+      <div class="ex-overlay-body">
+        <div class="ex-picker-summary">
+          <div>
+            <span>
+              窗口
+            </span>
+            <strong data-record-name>
+              B站主号 · 上海01
+            </strong>
+          </div>
+          <div>
+            <span>
+              当前方式
+            </span>
+            比特自管
+          </div>
+        </div>
+        <form class="ex-picker-filters" data-picker-search>
+          <div class="ex-field">
+            <label for="picker-q">
+              搜索代理
+            </label>
+            <input id="picker-q" placeholder="名称 / 地址 / 供应商">
+          </div>
+          <div class="ex-field">
+            <label for="picker-region">
+              地区
+            </label>
+            <select id="picker-region">
+              <option value="">
+                全部地区
+              </option>
+              <option>
+                上海
+              </option>
+              <option>
+                广州
+              </option>
+            </select>
+          </div>
+        </form>
+        <div data-picker-results>
+          <div class="ex-table-scroll">
+            <table class="ex-table" style="min-width:650px">
+              <thead>
+                <tr>
+                  <th>
+                  </th>
+                  <th>
+                    ID
+                  </th>
+                  <th>
+                    代理名称 / 地址
+                  </th>
+                  <th>
+                    地区
+                  </th>
+                  <th>
+                    可用额度
+                  </th>
+                  <th>
+                    可用性
+                  </th>
+                  <th>
+                    操作
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr data-proxy-row data-region="上海">
+                  <td>
+                    <input type="radio" name="proxy-choice" class="ex-check" value="沪线 · 静态01" aria-label="选择沪线静态01">
+                  </td>
+                  <td>
+                    81
+                  </td>
+                  <td>
+                    沪线 · 静态01
+                    <small>
+                      203.0.113.18:1080
+                    </small>
+                  </td>
+                  <td>
+                    上海
+                  </td>
+                  <td>
+                    3 / 5
+                  </td>
+                  <td>
+                    <span class="ex-tag success">
+                      可使用
+                    </span>
+                  </td>
+                  <td>
+                    <button class="ex-text-button" data-proxy-peek="available">
+                      详情
+                    </button>
+                  </td>
+                </tr>
+                <tr data-proxy-row data-region="上海">
+                  <td>
+                    <input type="radio" name="proxy-choice" class="ex-check" value="沪线 · 静态02" disabled aria-label="沪线静态02不可用，配额已满">
+                  </td>
+                  <td>
+                    82
+                  </td>
+                  <td>
+                    沪线 · 静态02
+                    <small>
+                      203.0.113.19:1080
+                    </small>
+                  </td>
+                  <td>
+                    上海
+                  </td>
+                  <td>
+                    0 / 3
+                  </td>
+                  <td>
+                    <span class="ex-tag warning">
+                      配额已满
+                    </span>
+                  </td>
+                  <td>
+                    <button class="ex-text-button" data-proxy-peek="quota">
+                      原因
+                    </button>
+                  </td>
+                </tr>
+                <tr data-proxy-row data-region="广州">
+                  <td>
+                    <input type="radio" name="proxy-choice" class="ex-check" value="粤线 · 静态01" disabled aria-label="粤线静态01不可用，已到期">
+                  </td>
+                  <td>
+                    83
+                  </td>
+                  <td>
+                    粤线 · 静态01
+                    <small>
+                      198.51.100.35:9090
+                    </small>
+                  </td>
+                  <td>
+                    广州
+                  </td>
+                  <td>
+                    2 / 5
+                  </td>
+                  <td>
+                    <span class="ex-tag danger">
+                      已到期
+                    </span>
+                  </td>
+                  <td>
+                    <button class="ex-text-button" data-proxy-peek="expired">
+                      原因
+                    </button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <div class="ex-empty" data-picker-empty hidden>
+          <div class="ex-empty-symbol" aria-hidden="true">
+            ⌕
+          </div>
+          <h3>
+            没有匹配的代理
+          </h3>
+          <p>
+            调整搜索或地区条件后重试。
+          </p>
+          <button class="ex-button" data-clear-picker>
+            清除筛选
+          </button>
+        </div>
+        <section class="ex-picker-preview" data-proxy-preview aria-live="polite" hidden></section>
+        <div class="ex-notice" style="margin-top:20px">
+          <span class="ex-notice-icon" aria-hidden="true">
+            i
+          </span>
+          <div class="ex-impact-body"><div class="ex-impact-heading"><span>更换代理将影响此窗口关联的 2 个平台账号。</span><button class="ex-text-button ex-disclosure-trigger" data-toggle="picker-accounts" aria-expanded="false" aria-controls="picker-accounts">查看账号<span class="ex-chevron" aria-hidden="true"></span></button></div><div class="ex-impact-list" id="picker-accounts" hidden><div><span>B站</span><div>华东内容主号</div></div><div><span>百度</span><div>华东百度</div></div></div></div>
+        </div>
+      </div>
+      <footer class="ex-overlay-footer">
+        <button class="ex-button" data-close>
+          取消
+        </button>
+        <span class="ex-help" data-picker-selected>
+          尚未选择代理
+        </span>
+        <button class="ex-button primary" data-apply-picker disabled>
+          演示应用代理
+        </button>
+      </footer>
+    </template>
+    <template id="tpl-picker-empty">
+      <div class="ex-overlay-body">
+        <div class="ex-empty">
+          <div class="ex-empty-symbol" aria-hidden="true">
+            ＋
+          </div>
+          <h3>
+            当前团队还没有代理资源
+          </h3>
+          <p>
+            先补充代理，再为窗口选择托管代理。
+          </p>
+          <button class="ex-button primary" data-open="proxy">
+            新增代理
+          </button>
+        </div>
+      </div>
+      <footer class="ex-overlay-footer">
+        <button class="ex-button" data-close>
+          取消
+        </button>
+      </footer>
+    </template>
+    <template id="tpl-batch">
+      <div class="ex-overlay-body">
+        <div class="ex-demo-harness">
+          <span>
+            演示控制 · 手动推进，不连接服务
+          </span>
+          <button class="ex-text-button" data-next-batch>
+            推进到结果
+          </button>
+        </div>
+        <div data-batch-content>
+        </div>
+      </div>
+      <footer class="ex-overlay-footer" data-batch-footer>
+      </footer>
+    </template>
+    <template id="tpl-code">
+      <div class="ex-overlay-body">
+        <p class="ex-help" style="margin-bottom:12px">
+          复制目标结构，并在原型中引用example.css、controls.js和example.js。业务实现仍使用TDesign与shared/ui。
+        </p>
+        <label for="example-code" class="ex-help">
+          示例结构
+        </label>
+        <textarea id="example-code" class="ex-code" readonly spellcheck="false"></textarea>
+        <p class="ex-help" data-copy-status role="status">
+        </p>
+      </div>
+      <footer class="ex-overlay-footer">
+        <button class="ex-button" data-close>
+          关闭
+        </button>
+        <button class="ex-button primary" data-copy-code>
+          复制结构
+        </button>
+      </footer>
+    </template>
+    <template id="tpl-paired">
+    <form data-local-form novalidate>
+      <div class="ex-overlay-body"><div class="ex-form-container"><div class="ex-form-grid">
+        <div class="ex-field required full"><label for="paired-name">资源名称</label><input id="paired-name" name="name" required placeholder="请输入名称" aria-describedby="paired-error"><span id="paired-error" class="ex-error" role="alert" hidden>请输入资源名称</span></div>
+        <div class="ex-field"><label for="paired-region">地区</label><select id="paired-region"><option>上海</option><option>广州</option></select></div>
+        <div class="ex-field"><label for="paired-provider">供应商</label><input id="paired-provider" placeholder="选填"></div>
+        <div class="ex-field full"><label for="paired-note">备注</label><textarea id="paired-note" placeholder="补充使用范围"></textarea></div>
+        <div class="ex-notice success full" data-form-receipt role="status" hidden><div>已记录本页演示输入，未修改真实资源。</div></div>
+      </div></div></div>
+      <footer class="ex-overlay-footer"><button class="ex-button" type="button" data-close>取消</button><button class="ex-button primary" type="submit">保存演示输入</button></footer>
+    </form>
+  </template>
+<template id="tpl-proxy-detail"><div class="ex-overlay-body"><div class="ex-description-container"><section class="ex-section"><h3 class="ex-section-title detail">代理信息</h3><dl class="ex-description-list" data-density="dense"><div class="ex-desc-item"><dt>ID</dt><dd>81</dd></div><div class="ex-desc-item"><dt>可用性</dt><dd><span class="ex-tag success">可使用</span></dd></div><div class="ex-desc-item"><dt>地区</dt><dd>上海</dd></div><div class="ex-desc-item"><dt>供应商</dt><dd>示例线路商</dd></div><div class="ex-desc-item"><dt>到期时间</dt><dd>2026-12-31</dd></div><div class="ex-desc-item"><dt>可用额度</dt><dd>3 / 5</dd></div><div class="ex-desc-item full"><dt>代理名称</dt><dd>沪线 · 静态01</dd></div><div class="ex-desc-item full"><dt>地址</dt><dd>SOCKS5 · 203.0.113.18:1080</dd></div></dl></section><section class="ex-section"><h3 class="ex-section-title detail">关联窗口</h3><div class="ex-table-scroll"><table class="ex-table"><thead><tr><th>ID</th><th>窗口名称</th><th>代理方式</th></tr></thead><tbody><tr><td>328</td><td>B站主号 · 上海01</td><td>系统托管</td></tr><tr><td>335</td><td>日常运营 · 上海04</td><td>系统托管</td></tr></tbody></table></div></section></div></div></template>
+</body>
+</html>

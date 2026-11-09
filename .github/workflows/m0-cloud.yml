@@ -45,6 +45,12 @@ jobs:
       - name: Test Cloud and Web
         run: scripts/test.sh
 
+      - name: Verify isolated prototype preview
+        working-directory: web
+        run: |
+          npm run test:example
+          npm run build:example
+
       - name: Apply MySQL migrations
         env:
           WT_MEDIA_MYSQL_DSN: root:root123@tcp(127.0.0.1:3306)/wt_media_m0_ci?parseTime=true&multiStatements=true

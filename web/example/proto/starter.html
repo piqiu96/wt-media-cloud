@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>
+      WT Media · 原型起始页
+    </title>
+    <link rel="stylesheet" href="../common/example.css">
+    <script src="../common/controls.js" defer></script>
+    <script src="../common/example.js" defer>
+    </script>
+  </head>
+  <body>
+    <main class="ex-content">
+      <div class="ex-page-head">
+        <div>
+          <h1>
+            资源名称
+          </h1>
+          <p>
+            从这里开始替换业务字段与文案。此页仅使用演示数据。
+          </p>
+        </div>
+        <div class="ex-actions">
+          <a class="ex-button" href="../common/index.html">
+            公共参考
+          </a>
+          <button class="ex-button primary" data-open="create">
+            新建资源
+          </button>
+        </div>
+      </div>
+      <div class="ex-panel ex-panel-pad">
+        <section class="ex-section">
+          <h2 class="ex-section-title detail">
+            当前资源
+          </h2>
+          <div class="ex-description-container">
+            <dl class="ex-description-list" data-density="dense">
+              <div class="ex-desc-item">
+                <dt>
+                  ID
+                </dt>
+                <dd>
+                  1001
+                </dd>
+              </div>
+              <div class="ex-desc-item">
+                <dt>
+                  状态
+                </dt>
+                <dd>
+                  <span class="ex-tag success">
+                    正常
+                  </span>
+                </dd>
+              </div>
+              <div class="ex-desc-item full">
+                <dt>
+                  资源名称
+                </dt>
+                <dd>
+                  将实际业务字段替换到这里，长内容保留完整。
+                </dd>
+              </div>
+            </dl>
+          </div>
+        </section>
+      </div>
+      <div class="ex-reference">
+        <span>
+          共享样式：example.css · 演示行为：example.js
+        </span>
+        <a href="README.md">
+          复用说明与边界
+        </a>
+      </div>
+    </main>
+    <div class="ex-toast" role="status" aria-live="polite" id="example-toast">
+    </div>
+    <template id="tpl-window">
+      <form data-local-form novalidate>
+        <div class="ex-overlay-body">
+          <div class="ex-form-container">
+            <div class="ex-form-grid">
+              <div class="ex-field required full">
+                <label for="resource-name">
+                  资源名称
+                </label>
+                <input id="resource-name" name="name" required placeholder="请输入名称">
+                <span class="ex-error" data-name-error role="alert" hidden>
+                  请输入资源名称
+                </span>
+              </div>
+              <div class="ex-field full">
+                <label for="resource-note">
+                  备注
+                </label>
+                <textarea id="resource-note" placeholder="选填"></textarea>
+              </div>
+              <div class="ex-notice success full" data-form-receipt role="status" hidden>
+                <div>
+                  已记录本页演示输入，未写入真实服务。
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <footer class="ex-overlay-footer">
+          <button class="ex-button" data-close type="button">
+            取消
+          </button>
+          <button class="ex-button primary" type="submit">
+            保存演示输入
+          </button>
+        </footer>
+      </form>
+    </template>
+  </body>
+</html>

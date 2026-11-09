@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>新增合成任务 · 第一轮设计提案</title>
+<link rel="stylesheet" href="../../common/example.css">
+<link rel="stylesheet" href="compose-design.css">
+<script src="../../common/controls.js" defer></script>
+<script src="compose-design.js?v=20261103-baidu" defer></script>
+</head>
+<body>
+<header class="design-bar"><div><strong>起飞 · 第一轮设计提案</strong><span>新增合成任务及素材选择器 · 已接入完整工作台</span></div><a href="index.html#tasks">回到完整工作台 ↗</a></header>
+<nav class="design-scenes" aria-label="设计状态"><span>查看示例</span><button class="ex-button" data-scene="filled">已填写</button><button class="ex-button" data-scene="blank">空白新增</button><button class="ex-button" data-scene="picker">素材选择器</button><button class="ex-button" data-scene="settings">成片设置与命名</button><button class="ex-button" data-scene="empty">无可用策略</button><button class="ex-button" data-scene="failure">提交失败</button><small>独立设计预览 · 示例操作仅在本页生效，刷新复位</small></nav>
+<div class="design-workspace"><aside class="design-context"><img src="assets/logo.png" alt="起飞"><h2>内容生产</h2><p>素材库</p><p>我的素材</p><p>合成策略</p><p class="current">合成任务</p><p>成片管理</p><div class="context-note"><strong>合成任务</strong><p>新增入口仍在这里。</p><p>本轮只评审创建表单和素材选择器。</p></div></aside><main id="design-form" class="design-form" aria-label="新增合成任务设计"></main></div>
+<dialog id="material-picker" class="ex-overlay wide" aria-labelledby="picker-heading"></dialog>
+<dialog id="design-confirm" class="ex-overlay" aria-labelledby="confirm-heading"></dialog>
+<dialog id="design-result" class="ex-overlay medium" aria-labelledby="result-heading"></dialog>
+<div id="design-message" role="status" aria-live="polite" class="design-message"></div>
+</body></html>

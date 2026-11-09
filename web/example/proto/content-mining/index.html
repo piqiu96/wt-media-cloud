@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>内容挖掘 · 设计评审</title>
+  <link rel="stylesheet" href="../../common/example.css"><link rel="stylesheet" href="review.css">
+  <script src="scenarios.js" defer></script><script src="review.js" defer></script>
+</head>
+<body>
+  <header id="book-header">
+    <div class="review-brand">内容挖掘 <span>设计评审稿</span></div>
+    <button class="scene-switch" data-book="catalog" aria-controls="catalog" aria-expanded="false"><span id="scene-number">P01</span><strong id="scene-title">内容池 · 日常处理</strong><span aria-hidden="true">⌄</span></button>
+    <div class="book-tools"><button class="ex-text-button" data-book="prev" aria-label="上一场景">←</button><span id="scene-position">1 / 38</span><button class="ex-text-button" data-book="next" aria-label="下一场景">→</button><i></i><button class="ex-text-button" data-book="notes" aria-controls="review-notes" aria-expanded="false">本屏说明</button><button class="ex-text-button" data-book="focus">仅看产品 ↗</button></div>
+  </header>
+  <aside id="catalog" hidden><div class="catalog-heading"><strong>按场景查看</strong><button class="ex-close" data-book="catalog" aria-label="关闭场景目录">×</button></div><nav id="scene-nav" aria-label="评审场景"></nav><div class="book-links"><a href="https://github.com/piqiu96/wt-media-workspace/blob/main/docs/design/content-mining.md">设计依据与逐页 Review ↗</a><a href="../social-accounts/index.html">社媒账号参考 ↗</a></div></aside>
+  <main id="stage-wrap"><iframe id="product-frame" title="内容挖掘可操作原型" src="product.html?scene=P01"></iframe></main>
+  <aside id="review-notes" hidden><div class="catalog-heading"><strong>本屏设计说明</strong><button class="ex-close" data-book="notes" aria-label="关闭设计说明">×</button></div><p id="scene-caption"></p><div class="review-label">设计判断</div><p id="scene-review"></p><div class="review-label">走查重点</div><p id="scene-check"></p><div id="demo-controls"></div><p class="review-boundary">虚构数据，仅在页面内存中演示；未连接业务服务。</p></aside>
+  <button id="return-review" class="ex-button" data-book="focus" hidden>返回评审</button>
+</body></html>

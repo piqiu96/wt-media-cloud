@@ -1,0 +1,23 @@
+const {test}=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm'),path=require('node:path');
+const read=file=>fs.readFileSync(path.join(__dirname,'..',file),'utf8');
+test('素材来源只有抖音，成片和发布候选不包含抖音；旧账号关联保留但不可选用',()=>{
+ const ctx={window:{},addEventListener:()=>{},PIPublishModel:{}};
+ vm.createContext(ctx);vm.runInContext(read('production/data.js'),ctx);
+ const seed=ctx.window.CPSeed();
+ assert.deepEqual([...new Set(seed.materials.map(m=>m.platform))],['抖音']);
+ assert.deepEqual([...seed.platforms],['B站','百度','小红书']);
+ assert.equal(seed.accounts.some(a=>a.platform==='抖音'),false);
+ const historic={id:501,platform:'抖音',enabled:true};
+ const C=ctx.CP={db:{...seed,suiteVersion:1},save:()=>{},get:(key,id)=>C.db[key].find(x=>x.id===id)};
+ const P=ctx.PI={db:{suiteVersion:1,accounts:[historic],tasks:[],assets:[]},save:()=>{},asset:id=>P.db.assets.find(a=>a.id===id)};
+ vm.runInContext(read('workspace.js'),ctx);
+ const O=ctx.window.OPS;
+ assert.deepEqual([...O.sourcePlatforms],['抖音']);
+ assert.deepEqual([...O.platforms],['B站','百度','小红书']);
+ assert.equal(P.db.accounts.find(a=>a.id===501),historic);
+ assert.equal(historic.enabled,false);
+ ctx.OPS=O;vm.runInContext(read('production.js'),ctx);
+ const good={...C.prod.newVersion(),guideUrl:'https://media.example.test/guide.mp4'};
+ assert.equal(C.prod.valid([good],'引导视频插入'),true);
+ assert.equal(C.prod.valid([{...good,platforms:['抖音']}],'引导视频插入'),false);
+});
