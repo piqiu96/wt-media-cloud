@@ -419,8 +419,7 @@ defineExpose({ open });
 .plan-section .platform-group h3 { display:flex; align-items:center; gap:10px; margin:0 0 12px; font-size:15px; }
 .plan-section .platform-group .plan-split { border:1px solid #e4ebf5; border-radius:7px; }
 .plan-section .platform-group .plan-split label { display:flex; gap:8px; align-items:center; }
-.plan-section .platform-group .plan-split :deep(.t-input-number) { width:105px; }
-.plan-section .platform-group .plan-split :deep(.t-input-number .t-input__wrap) { width:105px; }
+.plan-section .platform-group .plan-split :deep(.t-input-number) { width:132px; }
 .plan-section .platform-group .plan-split :deep(.t-input__wrap) { min-width:170px; }
 .plan-section .platform-group .plan-split :deep(.t-input-number .t-input__wrap) { min-width:0; }
 .closure-table { min-width:950px; }
