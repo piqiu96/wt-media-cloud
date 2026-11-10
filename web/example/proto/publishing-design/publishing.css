@@ -396,11 +396,22 @@
   gap: 20px;
   margin-bottom: 24px;
 }
-.snapshot > img {
-  width: 200px;
+.snapshot > .media-thumb {
+  width: min(200px, 100%);
+  align-self: flex-start;
+  overflow: hidden;
+}
+.snapshot > .media-thumb img {
+  display: block;
+  width: 100%;
   height: 150px;
-  object-fit: cover;
+  object-fit: contain;
   border-radius: 6px;
+}
+.snapshot > div {
+  min-width: 0;
+  flex: 1;
+  overflow-wrap: anywhere;
 }
 .metric-grid {
   display: grid;
