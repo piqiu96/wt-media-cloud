@@ -1,73 +1,200 @@
-// Prototype-only relationships and dispatch. No platform API or production data access.
+// Offline prototype business rules. No runtime API or external platform calls.
 import { platforms, validate, nextBatch, stats } from "./model.js";
-export const batchTasks = (db, batch) =>
-  db.tasks.filter((t) => t.batchId === batch.id);
-export const planItems = (plan) => plan.items || [];
-export const itemTasks = (db, item) =>
-  item?.kind === "batch"
-    ? db.batches.some((b) => b.id === item.id)
-      ? batchTasks(
-          db,
-          db.batches.find((b) => b.id === item.id),
-        )
-      : []
-    : item?.kind === "task"
-      ? db.tasks.filter((t) => t.id === item.id && !t.batchId)
-      : [];
-export const planTasks = (db, plan) => [
-  ...new Map(
-    planItems(plan)
-      .flatMap((item) => itemTasks(db, item))
-      .map((t) => [t.id, t]),
-  ).values(),
-];
-export const itemRecord = (db, item) =>
-  (item.kind === "batch" ? db.batches : db.tasks).find((r) => r.id === item.id);
-export const sameItem = (a, b) => a.kind === b.kind && a.id === b.id;
-export const associatedPlan = (db, item) =>
-  db.plans.find((p) => planItems(p).some((i) => sameItem(i, item)));
-export function batchSummary(db, batch) {
-  const rows = batchTasks(db, batch);
+export const clone = (x) => JSON.parse(JSON.stringify(x));
+export const batchTasks = (db, b) =>
+  b ? db.tasks.filter((t) => t.batchId === b.id) : [];
+export const planItems = (p) =>
+  (p.items || []).filter((i) => i.kind === "batch");
+export const itemRecord = (db, i) =>
+  i?.kind === "batch" ? db.batches.find((b) => b.id === i.id) : null;
+export const itemTasks = (db, i) =>
+  i?.kind === "batch" ? batchTasks(db, itemRecord(db, i)) : [];
+export const planTasks = (db, p) =>
+  planItems(p).flatMap((i) => itemTasks(db, i));
+export const associatedPlan = (db, i) =>
+  i?.kind === "batch"
+    ? db.plans.find((p) => planItems(p).some((x) => x.id === i.id))
+    : null;
+export const targetTotal = (b) =>
+  (b.targets || []).reduce((n, t) => n + Number(t.count), 0);
+export const unresolved = (t) =>
+  ["待执行", "排队中", "执行中", "等待人工", "结果待确认"].includes(t.status);
+export const nextId = (db) =>
+  Math.max(
+    1000,
+    ...[
+      "tasks",
+      "batches",
+      "plans",
+      "images",
+      "templates",
+      "assets",
+      "accounts",
+    ].flatMap((k) => (db[k] || []).map((r) => r.id)),
+  ) + 1;
+export function batchSummary(db, b) {
+  const rows = batchTasks(db, b);
   return {
-    ...stats(rows),
+    ...stats(rows, targetTotal(b)),
     videos: new Set(rows.map((t) => t.assetId)).size,
-    categories: [...new Set(rows.map((t) => t.category))],
+    categories: b.categories || [],
     waiting: rows.filter((t) => t.status === "待执行").length,
     running: rows.filter((t) => ["排队中", "执行中"].includes(t.status)).length,
     unresolved: rows.filter((t) =>
       ["等待人工", "结果待确认"].includes(t.status),
     ).length,
+    target: targetTotal(b),
+    creationGap: Math.max(0, targetTotal(b) - rows.length),
+    closed: rows.filter((t) => !unresolved(t)).length,
   };
 }
-export function canLink(db, plan, item) {
-  const record = itemRecord(db, item),
-    rows = itemTasks(db, item);
-  if (!record || !rows.length || associatedPlan(db, item)) return false;
-  if (item.kind === "task" && record.batchId) return false;
-  return rows.every((r) =>
-    plan.targets.some(
-      (t) => t.platform === r.platform && t.category === r.category,
-    ),
-  );
+export const canLink = () => false;
+export function linkItem() {
+  throw Error("计划只通过确认拆批生成骨架，不直接绑定独立任务或追加批次");
 }
-export function linkItem(db, plan, item) {
-  if (!canLink(db, plan, item))
-    throw Error("此项目已关联计划、没有任务或不符合计划目标");
-  plan.items.push({ ...item });
-  if (plan.position >= plan.items.length - 1 && plan.control === "执行已结束")
-    plan.control = "已暂停";
-}
-export function moveItem(plan, index, delta) {
+export function moveItem(p, index, delta) {
   const to = index + delta;
-  if (to < 0 || to >= plan.items.length) return false;
-  // Completed/current dispatch order is immutable once dispatch starts.
-  if (
-    plan.control !== "规划中" &&
-    (index <= plan.position || to <= plan.position)
-  )
+  if (p.lockedAt || p.control !== "规划中" || to < 0 || to >= p.items.length)
     return false;
-  [plan.items[index], plan.items[to]] = [plan.items[to], plan.items[index]];
-  return true;
+  // Structure changes are saved through the impact-checked plan editor.
+  return false;
+}
+const key = (t) => t.platform + ":" + t.category;
+const targetSignature = (targets = []) =>
+  JSON.stringify(
+    targets
+      .filter((t) => Number(t.count) > 0)
+      .map((t) => [t.category, Number(t.count)])
+      .sort((a, b) => a[0].localeCompare(b[0])),
+  );
+export function validatePlan(draft) {
+  const errors = [];
+  if (!draft.name?.trim()) errors.push("请输入计划名称");
+  if (!draft.targets?.some((t) => Number(t.count) > 0))
+    errors.push("至少填写一个正目标");
+  const sums = new Map();
+  for (const b of draft.splits || []) {
+    if (!platforms.includes(b.platform) || !b.name?.trim())
+      errors.push("每批必须有平台和名称");
+    for (const t of b.targets || []) {
+      if (!Number.isInteger(Number(t.count)) || Number(t.count) < 0)
+        errors.push("目标须为非负整数");
+      sums.set(
+        b.platform + ":" + t.category,
+        (sums.get(b.platform + ":" + t.category) || 0) + Number(t.count),
+      );
+    }
+  }
+  if (!(draft.splits || []).length) errors.push("请按平台拆分批次");
+  if ((draft.splits || []).some((b) => targetTotal(b) <= 0))
+    errors.push("每批至少需要一个正目标");
+  if (
+    new Set(draft.platformOrder).size !== draft.platformOrder?.length ||
+    (draft.splits || []).some((b) => !draft.platformOrder?.includes(b.platform))
+  )
+    errors.push("平台分组顺序必须完整且不重复");
+  if (new Set(draft.targets?.map(key)).size !== draft.targets?.length)
+    errors.push("目标维度不可重复");
+  for (const t of draft.targets || []) {
+    if (!Number.isInteger(Number(t.count)) || Number(t.count) < 0)
+      errors.push("目标须为非负整数");
+    if ((sums.get(key(t)) || 0) !== Number(t.count))
+      errors.push(key(t) + "拆批合计与目标不一致");
+    sums.delete(key(t));
+  }
+  if ([...sums.values()].some(Boolean))
+    errors.push("存在目标矩阵以外的批次目标");
+  return [...new Set(errors)];
+}
+export function planImpact(db, p, draft) {
+  if (p?.lockedAt || ["已取消", "执行已结束"].includes(p?.control))
+    throw Error("首次启动后结构永久锁定");
+  const errors = validatePlan(draft);
+  if (errors.length) throw Error(errors.join("；"));
+  const changes = [];
+  for (const b of db.batches.filter((b) => b.planId === p?.id)) {
+    const s = draft.splits.find((s) => s.id === b.id);
+    const changed =
+      !s ||
+      s.platform !== b.platform ||
+      targetSignature(s.targets) !== targetSignature(b.targets);
+    if (changed && batchTasks(db, b).length)
+      throw Error(b.name + "已有正式任务，禁止修改目标、平台或类目");
+    changes.push({
+      id: b.id,
+      name: b.name,
+      candidates: b.candidates?.length || 0,
+      changed,
+      removed: !s,
+    });
+  }
+  return changes;
+}
+export function confirmPlan(db, draft, { draftOnly = false } = {}) {
+  const existing = db.plans.find(
+    (p) => p.id === draft.id || p.confirmKey === draft.confirmKey,
+  );
+  if (existing?.confirmed && draftOnly)
+    throw Error("已确认计划不能退回无骨架草稿，请确认安全修改");
+  if (existing?.confirmed && draft.revision === undefined) return existing; // retry after lost response
+  const impact = existing?.confirmed ? planImpact(db, existing, draft) : [];
+  const errors = validatePlan(draft);
+  if (errors.length && !draftOnly) throw Error(errors.join("；"));
+  let seq = nextId(db);
+  const p = existing || {
+    id: seq++,
+    position: 0,
+    items: [],
+    skipped: [],
+    control: "规划中",
+    log: [],
+  };
+  const splits = clone(draft.splits || []);
+  // Stage everything before the single synchronous commit; failures leave no partial objects.
+  const staged = draftOnly
+    ? []
+    : splits.map((s, index) => {
+        const old = db.batches.find((b) => b.id === s.id && b.planId === p.id);
+        const changed = impact.find((i) => i.id === old?.id)?.changed;
+        return {
+          ...old,
+          id: old?.id || seq++,
+          name: s.name,
+          platform: s.platform,
+          planId: p.id,
+          targets: clone(s.targets),
+          categories: s.targets
+            .filter((t) => t.count > 0)
+            .map((t) => t.category),
+          groupOrder: draft.platformOrder.indexOf(s.platform),
+          batchOrder: index,
+          candidates: old?.candidates || [],
+          phase: old?.phase || "待资源配置",
+          control: old?.control || "待配置",
+          needsPreflight: !!changed,
+        };
+      });
+  Object.assign(p, {
+    name: draft.name,
+    targets: clone(draft.targets),
+    splits,
+    platformOrder: clone(draft.platformOrder),
+    confirmKey: draft.confirmKey,
+    confirmed: !draftOnly,
+    revision: (existing?.revision || 0) + 1,
+  });
+  if (!draftOnly) {
+    const ids = new Set(staged.map((b) => b.id));
+    db.batches = db.batches.filter((b) => b.planId !== p.id || ids.has(b.id));
+    for (const b of staged) {
+      const i = db.batches.findIndex((x) => x.id === b.id);
+      if (i < 0) db.batches.push(b);
+      else db.batches[i] = b;
+    }
+    p.items = staged.map((b) => ({ kind: "batch", id: b.id }));
+  }
+  if (!existing) db.plans.push(p);
+  return p;
 }
 export function validateBatch(db, platform, rows) {
   const errors = [];
@@ -87,148 +214,354 @@ export function validateBatch(db, platform, rows) {
 }
 export function createPublication(
   db,
-  { platform, rows, name, planId = null, quick = false },
+  {
+    platform,
+    rows,
+    name,
+    planId = null,
+    batchId = null,
+    quick = false,
+    targets = null,
+    partial = false,
+    creationKey = null,
+  },
 ) {
+  const old = batchId ? db.batches.find((b) => b.id === batchId) : null;
+  if (old && batchTasks(db, old).length)
+    return { batch: old, tasks: batchTasks(db, old) };
+  if (creationKey) {
+    const done = db.tasks.filter((t) => t.creationKey === creationKey);
+    if (done.length)
+      return {
+        batch: db.batches.find((b) => b.id === done[0].batchId) || null,
+        tasks: done,
+      };
+  }
   const errors = validateBatch(db, platform, rows);
-  if (quick && rows.length !== 1) errors.push("快速发布只能创建一条独立任务");
+  if (quick && (rows.length !== 1 || planId || batchId))
+    errors.push("快速发布只能创建一条计划外独立任务");
   if (!quick && !name?.trim()) errors.push("请填写批次名称");
-  const plan = db.plans.find((p) => p.id === planId);
-  if (planId && !plan) errors.push("关联计划不存在");
+  if (planId && (!old || old.planId !== planId))
+    errors.push("计划只能配置已确认的批次骨架");
+  const derived = [...new Set(rows.map((r) => r.category))].map((category) => ({
+    category,
+    count: rows.filter((r) => r.category === category).length,
+  }));
+  const target = quick ? derived : old?.targets || targets || derived;
   if (
-    plan &&
-    rows.some(
-      (r) =>
-        !plan.targets.some(
-          (t) => t.platform === r.platform && t.category === r.category,
-        ),
+    target.some(
+      (t) => !Number.isInteger(Number(t.count)) || Number(t.count) < 0,
     )
   )
-    errors.push("内容不符合计划目标");
-  if (errors.length) throw Error(errors.join("；"));
-  const ids = ["tasks", "batches", "plans", "images", "templates"].flatMap(
-    (key) => db[key].map((r) => r.id),
-  );
-  let nextId = Math.max(1000, ...ids) + 1;
-  const batch = quick
-    ? null
-    : {
-        id: nextId++,
-        name: name.trim(),
-        platform,
-        categories: [...new Set(rows.map((r) => r.category))],
-        control: "待执行",
-      };
-  const tasks = rows.map((r) => ({
-    ...JSON.parse(JSON.stringify(r)),
-    id: nextId++,
-    batchId: batch?.id || null,
-    status: "待执行",
-    result: "未提交",
-    attempts: 0,
-    log: [],
-    created: new Date().toLocaleString("zh-CN"),
-  }));
-  if (batch) db.batches.push(batch);
-  db.tasks.push(...tasks);
-  if (plan)
-    linkItem(db, plan, {
-      kind: batch ? "batch" : "task",
-      id: batch?.id || tasks[0].id,
-    });
-  return { batch, tasks };
-}
-export function queueTask(db, task) {
-  if (task.status !== "待执行") return false;
-  if (validate(task, db, task.id).length) return false;
-  task.status = "排队中";
-  task.result = "未提交";
-  task.attempts++;
-  task.attemptHistory ||= [];
-  task.attemptHistory.push({
-    number: task.attempts,
-    started: new Date().toLocaleString("zh-CN"),
-    status: "排队中",
+    errors.push("目标须为非负整数");
+  if (old?.platform !== undefined && old.platform !== platform)
+    errors.push("继承平台不可修改");
+  for (const r of rows)
+    if (!target.some((t) => t.category === r.category && t.count > 0))
+      errors.push("候选超出批次目标类目");
+  for (const t of target) {
+    const n = rows.filter((r) => r.category === t.category).length;
+    if (n > Number(t.count)) errors.push("候选超过类目目标");
+    if (n < Number(t.count) && !partial)
+      errors.push("创建不足目标，须明确确认部分创建");
+  }
+  if (errors.length) throw Error([...new Set(errors)].join("；"));
+  let seq = nextId(db);
+  const b = quick ? null : old || { id: seq++, planId: null };
+  const tasks = rows.map((r) => {
+    const { planId: ignored, ...content } = clone(r);
+    return {
+      ...content,
+      id: seq++,
+      batchId: b?.id || null,
+      creationKey,
+      status: "待执行",
+      result: "未提交",
+      attempts: 0,
+      attemptHistory: [],
+      log: [],
+      version: r.version || 1,
+      created: new Date().toISOString(),
+      snapshot: clone(content),
+    };
   });
-  task.log ||= [];
-  task.log.push({
-    time: new Date().toLocaleTimeString("zh-CN"),
-    text: "本地演示入队",
+  if (b) {
+    Object.assign(b, {
+      name: name.trim(),
+      platform,
+      targets: clone(target),
+      categories: target.filter((t) => t.count > 0).map((t) => t.category),
+      phase: "内容预检通过",
+      control: "待执行",
+      partialConfirmed: partial,
+      candidates: [],
+    });
+    if (!old) db.batches.push(b);
+  }
+  db.tasks.push(...tasks);
+  return { batch: b, tasks };
+}
+export function queueTask(db, t, { retry = false } = {}) {
+  if (!(
+    t.status === "待执行" ||
+    (retry && t.status === "执行失败" && t.result === "确认未发布")
+  ))
+    return false;
+  const errors = validate(t, db, t.id);
+  if (errors.length) throw Error(errors.join("；"));
+  t.status = "排队中";
+  t.result = "未提交";
+  t.claimed = false;
+  t.verifiedAt = null;
+  t.attempts++;
+  t.attemptHistory ||= [];
+  t.attemptHistory.push({
+    number: t.attempts,
+    started: new Date().toISOString(),
+    status: t.status,
+    snapshot: clone(t.snapshot || t),
+    version: t.version || 1,
+  });
+  t.log ||= [];
+  t.log.push({
+    time: new Date().toISOString(),
+    text: "本地演示入队 · 内容版本 " + (t.version || 1),
   });
   return true;
 }
-export function dispatchBatch(db, batch) {
-  const rows = batchTasks(db, batch);
-  if (
-    !platforms.includes(batch.platform) ||
-    rows.some((t) => t.platform !== batch.platform)
-  )
-    throw Error("批次平台与任务不一致，不能启动");
-  const pending = rows.filter((t) => t.status === "待执行");
-  if (pending.some((t) => validate(t, db, t.id).length))
-    throw Error("当前批次有任务未通过执行前检查，请编辑后重试");
-  pending.forEach((t) => queueTask(db, t));
-  batch.control = rows.some((t) =>
-    ["排队中", "执行中", "等待人工", "结果待确认"].includes(t.status),
-  )
-    ? "执行中"
-    : "执行已结束";
+function ready(db, b) {
+  if (!b || b.phase !== "内容预检通过" || !batchTasks(db, b).length)
+    throw Error("批次未就绪，请先配置资源和内容");
+  if (["已取消", "执行已结束"].includes(b.control))
+    throw Error("批次已终结，不可恢复队列");
 }
-export function dispatchPlan(db, plan) {
-  if (!plan.items.length) throw Error("请先创建或关联批次、独立任务");
-  if (plan.position >= plan.items.length)
-    throw Error("所有计划项均已结束，请关联补充批次");
-  const current = plan.items[plan.position];
+function preflightDispatch(db, b) {
+  ready(db, b);
+  for (const t of batchTasks(db, b).filter((t) => t.status === "待执行")) {
+    const errors = validate(t, db, t.id);
+    if (errors.length) throw Error(errors.join("；"));
+  }
+}
+function lock(p, owner) {
+  p.lockedAt ||= new Date().toISOString();
+  p.owner = owner;
+  p.log ||= [];
+  if (!p.log.some((l) => l.type === "首次锁定"))
+    p.log.push({ type: "首次锁定", time: p.lockedAt });
+}
+export function takeBatchControl(db, b, confirmed = false) {
+  const p = associatedPlan(db, { kind: "batch", id: b.id });
+  if (!p) return;
+  if (!confirmed) throw Error("请确认人工接管及首次启动锁定");
+  if (["已取消", "执行已结束"].includes(p.control))
+    throw Error("计划已终结，不能接管整批");
+  if (p.items[p.position]?.id !== b.id)
+    throw Error("尚未轮到此批，禁止绕过前序批次");
+  preflightDispatch(db, b);
+  lock(p, "manual");
+  p.control = "已暂停";
+  p.log.push({
+    type: "人工接管",
+    batchId: b.id,
+    time: new Date().toISOString(),
+  });
+}
+export function dispatchBatch(
+  db,
+  b,
+  { fromPlan = false, takeover = false } = {},
+) {
+  preflightDispatch(db, b);
+  const p = associatedPlan(db, { kind: "batch", id: b.id });
+  if (p) {
+    if (fromPlan) {
+      if (
+        p.control !== "执行中" ||
+        p.owner !== "plan" ||
+        p.items[p.position]?.id !== b.id
+      )
+        throw Error("无有效计划调度权");
+    } else takeBatchControl(db, b, takeover);
+  }
+  const pending = batchTasks(db, b).filter((t) => t.status === "待执行");
+  for (const t of pending) {
+    const errors = validate(t, db, t.id);
+    if (errors.length) throw Error(errors.join("；"));
+  }
+  pending.forEach((t) => queueTask(db, t));
+  b.control = "执行中";
+}
+export function dispatchPlan(db, p) {
+  if (["已取消", "执行已结束"].includes(p.control))
+    throw Error("计划已终结，补量请另行规划");
+  if (!p.confirmed || !p.items.length)
+    throw Error("请先确认计划并生成批次骨架");
+  const b = itemRecord(db, p.items[p.position]);
   if (
-    plan.items.some(
-      (i, index) =>
-        index !== plan.position &&
-        i.kind === "batch" &&
-        itemRecord(db, i)?.control === "执行中",
+    p.lockedAt &&
+    b &&
+    batchTasks(db, b).length &&
+    !batchTasks(db, b).some(unresolved)
+  ) {
+    lock(p, "plan");
+    p.control = "执行中";
+    syncPlan(db, p);
+    return;
+  }
+  preflightDispatch(db, b);
+  lock(p, "plan");
+  p.control = "执行中";
+  dispatchBatch(db, b, { fromPlan: true });
+  syncPlan(db, p);
+}
+export function decision(db, p) {
+  const b = itemRecord(db, p.items[p.position]);
+  const d = nextBatch(batchTasks(db, b));
+  return d !== "等待核实" && b?.control === "已取消" ? "等待跳过确认" : d;
+}
+export function advance(db, p, confirmed = false) {
+  if (
+    !["执行中", "等待继续确认", "等待跳过确认", "等待配置"].includes(
+      p.control,
+    ) ||
+    p.owner !== "plan"
+  )
+    throw Error("请先启动或恢复计划");
+  const d = decision(db, p);
+  if (d === "等待核实") throw Error("当前批次仍有未决任务，不能衔接");
+  if (d !== "自动继续" && !confirmed) throw Error("需要人工确认后继续");
+  const next = itemRecord(db, p.items[p.position + 1]);
+  if (next) {
+    try {
+      preflightDispatch(db, next);
+      if (batchTasks(db, next).some((t) => t.attempts > 0))
+        throw Error("下一批已有执行记录，请核查调度权，禁止重复派发");
+    } catch (e) {
+      p.control = "等待配置";
+      throw e;
+    }
+  }
+  const current = itemRecord(db, p.items[p.position]);
+  if (d === "等待跳过确认") p.skipped.push({ ...p.items[p.position] });
+  if (current.control !== "已取消") current.control = "执行已结束";
+  p.log.push({
+    type: "批次已处理",
+    batchId: current.id,
+    time: new Date().toISOString(),
+  });
+  p.position++;
+  if (p.position >= p.items.length) {
+    p.control = "执行已结束";
+    return;
+  }
+  p.control = "执行中";
+  dispatchBatch(db, next, { fromPlan: true });
+}
+export function syncPlan(db, p) {
+  if (p.control !== "执行中" || p.owner !== "plan") return;
+  const d = decision(db, p);
+  if (d === "自动继续") advance(db, p);
+  else if (d !== "等待核实") p.control = d;
+}
+export function cancellationImpact(db, b) {
+  const rows = batchTasks(db, b);
+  return {
+    pending: rows.filter(
+      (t) => ["待执行", "排队中"].includes(t.status) && !t.claimed,
+    ).length,
+    inFlight: rows.filter(
+      (t) =>
+        (t.claimed && unresolved(t)) ||
+        ["执行中", "等待人工"].includes(t.status),
+    ).length,
+    unknown: rows.filter((t) => t.status === "结果待确认").length,
+  };
+}
+export function cancelBatchSafely(db, b) {
+  b.control = "已取消";
+  for (const t of batchTasks(db, b))
+    if (["待执行", "排队中"].includes(t.status) && !t.claimed)
+      setResult(t, "已取消");
+  return cancellationImpact(db, b);
+}
+export function pausePlan(p) {
+  if (p.control !== "执行中") return;
+  p.control = "已暂停";
+  p.log.push({ type: "暂停后续调度", time: new Date().toISOString() });
+}
+export function pauseBatch(b) {
+  if (b.control !== "执行中") return;
+  b.control = "已暂停";
+  b.log ||= [];
+  b.log.push({ type: "暂停批次派发", time: new Date().toISOString() });
+}
+export function cancelPlan(p) {
+  if (p.control === "已取消") return;
+  if (p.control === "执行已结束") throw Error("计划已结束");
+  p.control = "已取消";
+  p.owner = null;
+  p.log.push({ type: "取消后续调度", time: new Date().toISOString() });
+}
+export function claimTask(db, t, now = Date.now()) {
+  if (db.platformBlocks?.[t.platform]) return false;
+  const b = db.batches.find((b) => b.id === t.batchId);
+  if (
+    t.status !== "排队中" ||
+    (b && b.control !== "执行中" && !t.manualDispatch) ||
+    (t.schedule && Date.parse(t.schedule) > now)
+  )
+    return false;
+  if (
+    db.tasks.some(
+      (x) =>
+        x.id !== t.id &&
+        x.accountId === t.accountId &&
+        ["执行中", "等待人工", "结果待确认"].includes(x.status),
     )
   )
-    throw Error("其他计划项正在独立执行，请先暂停该批次再恢复计划");
-  if (current.kind === "batch") dispatchBatch(db, itemRecord(db, current));
-  else {
-    const t = itemRecord(db, current);
-    if (t?.status === "待执行" && !queueTask(db, t))
-      throw Error("独立任务未通过执行前检查");
+    return false;
+  const account = db.accounts.find((a) => a.id === t.accountId);
+  if (!account?.enabled || account.loginValid === false) {
+    setResult(t, "等待人工", { evidence: "演示账号登录失效；原会话待处理" });
+    return false;
   }
-  plan.control = "执行中";
-  syncPlan(db, plan);
+  if (db.tasks.filter((x) => x.status === "执行中").length >= 3) return false;
+  t.claimed = true;
+  setResult(t, "执行中");
+  return true;
 }
-export function advance(db, plan, confirmed = false) {
-  if (plan.control === "已暂停" || plan.control === "规划中")
-    throw Error("请先启动或恢复计划");
-  const decision = nextBatch(itemTasks(db, plan.items[plan.position]));
-  if (decision === "等待核实") throw Error("当前项目仍有未决任务，不能衔接");
-  if (decision !== "自动继续" && !confirmed) throw Error("需要人工确认后继续");
-  if (decision === "等待跳过确认")
-    plan.skipped.push({ ...plan.items[plan.position] });
-  const current = itemRecord(db, plan.items[plan.position]);
-  if (plan.items[plan.position]?.kind === "batch" && current)
-    current.control = "执行已结束";
-  plan.position++;
-  if (plan.position >= plan.items.length) {
-    plan.control = "执行已结束";
-    return;
+export function setResult(t, status, { evidence = "", publicAt = null } = {}) {
+  t.status = status;
+  t.result =
+    status === "已发布"
+      ? "已公开"
+      : status === "平台审核中"
+        ? "平台已接收"
+        : status === "结果待确认"
+          ? "未知"
+          : status === "执行失败"
+            ? "确认未发布"
+            : "未提交";
+  if (["平台审核中", "已发布"].includes(status))
+    t.submittedAt ||= new Date().toISOString();
+  if (status === "已发布") t.publicAt = publicAt || new Date().toISOString();
+  if (evidence) t.evidence = evidence;
+  if (!unresolved(t)) t.claimed = false;
+  const a = t.attemptHistory?.at(-1);
+  if (a) {
+    a.status = status;
+    a.steps ||= [];
+    a.steps.push({ time: new Date().toISOString(), status, evidence });
+    if (evidence) a.receipt = evidence;
+    if (status === "执行失败") a.errorCode = "DEMO_CONFIRMED_REJECTED";
+    if (!unresolved(t)) a.ended = new Date().toISOString();
   }
-  dispatchPlan(db, plan);
-}
-export function syncPlan(db, plan) {
-  if (plan.control !== "执行中") return;
-  const item = plan.items[plan.position];
-  if (!item) {
-    plan.control = "执行已结束";
-    return;
-  }
-  const decision = nextBatch(itemTasks(db, item));
-  if (decision === "自动继续") advance(db, plan);
-  else if (decision === "等待继续确认" || decision === "等待跳过确认")
-    plan.control = decision;
+  t.log ||= [];
+  t.log.push({ time: new Date().toISOString(), text: "演示结果：" + status });
 }
 // Migration preserves task identity/results. Mixed old groups split only by observed platform,
 // never by invented historical creation boundaries. Plan refs expand in the same position.
-export function migrateRelationships(db) {
+function migrateLegacy(db) {
   if (db.relationshipVersion === 2) return db;
   let nextId =
     Math.max(
@@ -317,5 +650,63 @@ export function migrateRelationships(db) {
     db.publishDraft = null;
   }
   db.relationshipVersion = 2;
+  return db;
+}
+
+export function migrateRelationships(db) {
+  migrateLegacy(db);
+  if (db.workflowVersion === 3) return db;
+  for (const t of db.tasks) {
+    if (t.planId) {
+      t.legacyPlanId = t.planId;
+      delete t.planId;
+    }
+    t.version ||= 1;
+    t.snapshot ||= clone(t);
+  }
+  for (const p of db.plans) {
+    p.items = planItems(p);
+    p.confirmed = true;
+    p.platformOrder = [
+      ...new Set(
+        p.items.map((i) => itemRecord(db, i)?.platform).filter(Boolean),
+      ),
+    ];
+    p.log ||= [];
+    p.items.sort(
+      (a, b) =>
+        p.platformOrder.indexOf(itemRecord(db, a)?.platform) -
+        p.platformOrder.indexOf(itemRecord(db, b)?.platform),
+    );
+    if (p.control !== "规划中") {
+      p.lockedAt ||= new Date().toISOString();
+      p.owner = "plan";
+    }
+  }
+  for (const b of db.batches) {
+    const rows = batchTasks(db, b);
+    b.targets ||= [...new Set(rows.map((t) => t.category))].map((category) => ({
+      category,
+      count: rows.filter((t) => t.category === category).length,
+    }));
+    b.categories = b.targets.map((t) => t.category);
+    b.planId = associatedPlan(db, { kind: "batch", id: b.id })?.id || null;
+    b.phase = rows.length ? "内容预检通过" : "待资源配置";
+    b.candidates ||= [];
+  }
+  for (const p of db.plans) {
+    p.targets = p.items
+      .flatMap((i) => {
+        const b = itemRecord(db, i);
+        return (b?.targets || []).map((t) => ({ ...t, platform: b.platform }));
+      })
+      .reduce((out, t) => {
+        const prev = out.find((x) => key(x) === key(t));
+        if (prev) prev.count += t.count;
+        else out.push(t);
+        return out;
+      }, []);
+  }
+  db.workflowVersion = 3;
   return db;
 }

@@ -1,3 +1,4 @@
+import { coverSignature } from "./covers.js";
 // Offline publishing prototype. These rules do not invoke platform services.
 export const platforms = ["小红书", "B站", "百家号"];
 export const states = [
@@ -56,6 +57,8 @@ export function stats(tasks, target = 0) {
 export function defaults(platform, asset) {
   return {
     title: asset?.title || "",
+    shortTitle: "",
+    topics: "",
     description: platform === "百家号" ? asset?.title || "" : "",
     tags: platform === "B站" ? asset?.category || "" : "",
     partition: platform === "B站" ? "游戏" : "",
@@ -102,6 +105,13 @@ export function validate(row, db, ignoreId) {
     errors.push(`文案超过原型长度检查 ${limit}；百家号计数折算待核验`);
   if (!row.cover) errors.push("请选择封面");
   if (
+    row.candidateId &&
+    (!row.contentApproved ||
+      !row.coverApproved ||
+      row.coverSignature !== coverSignature(row))
+  )
+    errors.push("请审核当前版本的内容与已合成封面");
+  if (
     row.platform === "B站" &&
     row.tags?.split(/[,，、\s]+/).filter(Boolean).length > 10
   )
@@ -129,7 +139,7 @@ export function validate(row, db, ignoreId) {
   if (
     row.schedule &&
     (!Number.isFinite(Date.parse(row.schedule)) ||
-      Date.parse(row.schedule) <= Date.now())
+      (!ignoreId && Date.parse(row.schedule) <= Date.now()))
   )
     errors.push("发布时间应晚于当前时间");
   return errors;
@@ -140,6 +150,13 @@ export function picture(n, text = "游戏时刻") {
     encodeURIComponent(
       `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="900"><defs><linearGradient id="g" x2="1" y2="1"><stop stop-color="${["#152e4d", "#263359", "#0c4c4e"][n % 3]}"/><stop offset="1" stop-color="${["#538d98", "#8a6b98", "#4e9082"][n % 3]}"/></linearGradient></defs><path fill="url(#g)" d="M0 0h1200v900H0z"/><circle cx="1000" cy="80" r="360" fill="#ffffff" opacity=".08"/><path d="M0 700L460 220l740 680H0" fill="#0b1c35" opacity=".5"/><text x="80" y="700" fill="white" font-family="sans-serif" font-size="70" font-weight="bold">${text}</text><text x="85" y="770" fill="#c5d8e8" font-family="sans-serif" font-size="24">WT MEDIA · CONTENT STUDIO</text></svg>`,
     )
+  );
+}
+export function backgroundPicture(n = 0) {
+  const svg = decodeURIComponent(picture(n).split(",")[1]);
+  return (
+    "data:image/svg+xml;charset=utf-8," +
+    encodeURIComponent(svg.replace(/<text[^>]*>.*?<\/text>/g, ""))
   );
 }
 export function seed() {

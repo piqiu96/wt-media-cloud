@@ -17,6 +17,25 @@ import ResourceEmptyState from "../../../src/shared/ui/resource/ResourceEmptySta
 import ResourceDescriptions from "../../../src/shared/ui/resource/ResourceDescriptions.vue";
 import ResourceNotice from "../../../src/shared/ui/resource/ResourceNotice.vue";
 import MediaPreview from "../../../src/shared/ui/media/MediaPreview.vue";
+import { imageReferences, templateReferences, deleteImage } from "./library.js";
+import BatchWorkbench from "./BatchWorkbench.vue";
+import { addScenario } from "./scenarios.js";
+import PlanWizard from "./PlanWizard.vue";
+import PlanWorkbench from "./PlanWorkbench.vue";
+import { defaultDocument, renderDocument } from "./covers.js";
+import {
+  pausePlan,
+  pauseBatch,
+  queueTask,
+  takeBatchControl,
+  cancelBatchSafely,
+  cancellationImpact,
+  cancelPlan,
+  claimTask,
+  setResult,
+  decision,
+  targetTotal,
+} from "./relationships.js";
 import { coverSpecs, ensureCoverResults } from "./covers.js";
 import { loadPrototype, savePrototype } from "./prototypeStorage.js";
 import {
@@ -38,12 +57,13 @@ import {
 } from "./relationships.js";
 import PublishComposer from "./PublishComposer.vue";
 import { useMediaQuery } from "../../../src/shared/composables/useMediaQuery.js";
-import ResourceOverlay from "../../../src/shared/ui/resource/ResourceOverlay.vue";
+import ResourceOverlay from "./PrototypeOverlay.vue";
 import ResourcePageHeader from "../../../src/shared/ui/resource/ResourcePageHeader.vue";
 import ResourceCard from "../../../src/shared/ui/resource/ResourceCard.vue";
-import ImageEditor from "../../../src/shared/ui/media/ImageEditor.vue";
+import PrototypeEditor from "./PrototypeEditor.vue";
 import {
   platforms,
+  backgroundPicture,
   states,
   categories,
   seed,
@@ -60,11 +80,18 @@ const db = reactive(seed()),
   storageError = ref(""),
   hydrated = ref(false),
   savingSnapshot = ref(false);
+const simulateSaveFailure = ref(false);
+let saveTimer;
 let saveQueue = Promise.resolve();
 async function persistNow() {
   const snapshot = clone(db);
   savingSnapshot.value = true;
-  saveQueue = saveQueue.catch(() => {}).then(() => savePrototype(snapshot));
+  saveQueue = saveQueue
+    .catch(() => {})
+    .then(() => {
+      if (simulateSaveFailure.value) throw Error("演示：本地存储写入失败");
+      return savePrototype(snapshot);
+    });
   try {
     await saveQueue;
     storageError.value = "";
@@ -81,6 +108,44 @@ onMounted(async () => {
     const saved = await loadPrototype();
     if (saved) Object.assign(db, saved);
     migrateRelationships(db);
+    if (!db.images.some((i) => i.pureBackground))
+      db.images.push({
+        id: id(),
+        name: "通用纯净底图（演示）",
+        category: "通用",
+        uses: ["底图"],
+        enabled: true,
+        src: backgroundPicture(),
+        pureBackground: true,
+        format: "SVG",
+        width: 1200,
+        height: 900,
+        source: "内置图形（演示）",
+        version: 1,
+        updatedAt: new Date().toISOString(),
+      });
+    if (!db.templates.length) {
+      for (const [width, height] of [
+        [1200, 900],
+        [1600, 900],
+        [1080, 1440],
+      ]) {
+        const doc = defaultDocument(
+          width,
+          height,
+          db.images.find((i) => i.enabled)?.src || "",
+        );
+        db.templates.push({
+          id: id(),
+          name: `通用动态短标题 ${width}×${height}`,
+          document: doc,
+          ratio: `${width}×${height}`,
+          version: 1,
+          enabled: true,
+          preview: doc.image,
+        });
+      }
+    }
   } catch (e) {
     storageError.value = `演示记录未能恢复：${e.message}。当前显示初始示例。`;
   }
@@ -89,7 +154,10 @@ onMounted(async () => {
 watch(
   db,
   () => {
-    if (hydrated.value) persistNow();
+    if (hydrated.value) {
+      clearTimeout(saveTimer);
+      saveTimer = setTimeout(persistNow, 200);
+    }
   },
   { deep: true, flush: "post" },
 );
@@ -142,6 +210,8 @@ const query = ref(""),
   chosen = ref([]),
   batchFilter = ref(null),
   planFilter = ref(null);
+const libraryFilter = reactive({ use: "", ratio: "", source: "" });
+const referenceRows = ref(null);
 const appliedFilters = reactive({ platform: "", category: "", status: "" });
 function applyQuery() {
   applied.value = query.value;
@@ -155,6 +225,7 @@ function applyQuery() {
 }
 function resetQuery() {
   query.value = "";
+  Object.assign(libraryFilter, { use: "", ratio: "", source: "" });
   filterPlatform.value = "";
   filterCategory.value = "";
   filterStatus.value = "";
@@ -182,13 +253,24 @@ const records = computed(() => {
         db.assets.find((a) => a.id === r.assetId)?.title ||
         ""
       ).includes(applied.value) &&
+      (!["images", "templates"].includes(page.value) ||
+        ((!libraryFilter.use || r.uses?.includes(libraryFilter.use)) &&
+          (!libraryFilter.ratio ||
+            Math.abs(
+              (r.document?.width || r.width || 1200) /
+                (r.document?.height || r.height || 900) -
+                Number(libraryFilter.ratio),
+            ) < 0.01) &&
+          (!libraryFilter.source ||
+            (r.source || "种子资源").includes(libraryFilter.source)))) &&
       (!appliedFilters.platform || r.platform === appliedFilters.platform) &&
       (!appliedFilters.category ||
         r.category === appliedFilters.category ||
         r.categories?.includes(appliedFilters.category)) &&
       (!appliedFilters.status ||
         r.status === appliedFilters.status ||
-        r.control === appliedFilters.status),
+        r.control === appliedFilters.status ||
+        String(r.enabled) === appliedFilters.status),
   );
 });
 const paged = computed(() =>
@@ -232,7 +314,7 @@ const detail = ref(null),
   evidence = ref(""),
   bulkResult = ref(null);
 function view(row) {
-  if (row?.targets) planView.value = "总览";
+  if (row?.items) planView.value = "总览";
   detail.value = row;
   detailOpen.value = true;
   evidence.value = row.evidence || "";
@@ -243,74 +325,108 @@ function related(batchId, planId) {
   planFilter.value = planId;
   detailOpen.value = false;
 }
+function demoTransitions(t) {
+  return t.status === "排队中"
+    ? ["执行中"]
+    : t.status === "执行中"
+      ? ["等待人工", "结果待确认", "平台审核中", "已发布", "执行失败"]
+      : t.status === "等待人工"
+        ? ["执行中", "结果待确认"]
+        : ["结果待确认", "平台审核中"].includes(t.status)
+          ? ["已发布", "执行失败"]
+          : [];
+}
 function taskResult(t, status) {
-  const attempt = t.attemptHistory?.at(-1);
-  if (attempt) {
-    attempt.status = status;
+  try {
+    if (status === "执行中" && t.status === "等待人工") {
+      db.accounts.find((a) => a.id === t.accountId).loginValid = true;
+      t.status = "排队中";
+    }
+    if (status === "执行中") {
+      if (!claimTask(db, t))
+        throw Error("领取受阻：检查账号串行、批次暂停、定时时间或并发上限");
+      return;
+    }
     if (
-      ["已发布", "平台审核中", "执行失败", "已取消", "已放弃"].includes(status)
+      status === "已取消" &&
+      (!["待执行", "排队中"].includes(t.status) || t.claimed)
     )
-      attempt.ended = new Date().toLocaleString("zh-CN");
+      throw Error("在途或未知任务不可直接取消");
+    if (["已取消", "已放弃"].includes(t.status))
+      throw Error("已终结任务不可恢复");
+    if (
+      ["等待人工", "结果待确认", "平台审核中", "已发布", "执行失败"].includes(
+        status,
+      ) &&
+      !["执行中", "等待人工", "结果待确认", "平台审核中"].includes(t.status)
+    )
+      throw Error("请先合法领取任务再更新演示结果");
+    if (
+      ["结果待确认", "平台审核中"].includes(t.status) &&
+      ["已发布", "执行失败"].includes(status) &&
+      !t.verifiedAt
+    )
+      throw Error("先保存演示核验依据，再确认结果");
+    setResult(t, status, {
+      evidence:
+        status === "执行失败"
+          ? "本地演示明确拒绝，确认原尝试结束且未发布"
+          : t.evidence || "",
+    });
+  } catch (e) {
+    warning(e.message);
   }
-  t.status = status;
-  t.result =
-    status === "已发布"
-      ? "已公开"
-      : status === "平台审核中"
-        ? "平台已接收"
-        : status === "结果待确认"
-          ? "未知"
-          : status === "执行失败"
-            ? "确认未发布"
-            : "未提交";
-  t.log.push({
-    time: new Date().toLocaleTimeString("zh-CN"),
-    text: `演示状态：${status}`,
-  });
 }
 async function takeControl(item) {
-  const plan = associatedPlan(db, item);
-  if (["执行中", "等待继续确认", "等待跳过确认"].includes(plan?.control)) {
-    if (
-      !(await feedback.confirmWarning({
-        title: "转为独立控制？",
-        message: `此项目由计划“${plan.name}”调度。独立操作将暂停该计划后续调度，已在途任务不变。`,
-        confirmText: "暂停计划并独立操作",
-      }))
-    )
-      return false;
-    plan.control = "已暂停";
-  }
-  return true;
-}
-async function start(t, silent = false) {
+  const b = db.batches.find((b) => b.id === item.id),
+    p = associatedPlan(db, item);
+  if (!p) return true;
   if (
-    !(await takeControl({
-      kind: t.batchId ? "batch" : "task",
-      id: t.batchId || t.id,
+    !(await feedback.confirmWarning({
+      title: "人工接管计划批次？",
+      message: `将取得计划“${p.name}”当前批次调度权并永久锁定结构，暂停后续自动调度；不能跳过前序批次。`,
+      confirmText: "确认接管并锁定",
     }))
   )
     return false;
-  if (!["待执行", "执行失败"].includes(t.status)) return;
-  if (t.status === "执行失败" && !canRetry(t)) return;
-  const errors = validate(t, db, t.id);
-  if (errors.length) {
-    if (!silent) warning(errors.join("；"));
-    return false;
-  }
-  taskResult(t, "排队中");
-  t.attempts++;
-  t.attemptHistory ||= [];
-  t.attemptHistory.push({
-    number: t.attempts,
-    started: new Date().toLocaleString("zh-CN"),
-    status: "排队中",
-  });
-  if (!silent) toast("已进入本地演示队列，不会操作真实平台");
   return true;
 }
+async function start(t, silent = false) {
+  const errors = validate(t, db, t.id);
+  if (errors.length) {
+    warning(errors.join("；"));
+    return false;
+  }
+  if (t.batchId && !canRetry(t)) {
+    if (!(await takeControl({ kind: "batch", id: t.batchId }))) return false;
+    try {
+      takeBatchControl(
+        db,
+        db.batches.find((b) => b.id === t.batchId),
+        true,
+      );
+    } catch (e) {
+      warning(e.message);
+      return false;
+    }
+  }
+  try {
+    const ok = queueTask(db, t, { retry: canRetry(t) });
+    if (ok) t.manualDispatch = true;
+    if (ok && !silent) toast("已进入本地演示队列");
+    return ok;
+  } catch (e) {
+    warning(e.message);
+    return false;
+  }
+}
 async function release(t) {
-  if (!["已取消", "执行失败"].includes(t.status)) return;
+  if (
+    !["已取消", "执行失败"].includes(t.status) ||
+    t.claimed ||
+    (t.status === "执行失败" && !canRetry(t))
+  )
+    return;
   if (
     !(await feedback.confirmWarning({
       title: "放弃并释放成片？",
@@ -321,7 +437,7 @@ async function release(t) {
     }))
   )
     return;
-  taskResult(t, "已放弃");
+  setResult(t, "已放弃");
 }
 async function bulk(action) {
   const rows = chosen.value
@@ -345,36 +461,53 @@ async function bulk(action) {
   chosen.value = [];
 }
 async function batchAction(b) {
-  if (!(await takeControl({ kind: "batch", id: b.id }))) return;
   if (b.control === "执行中") {
-    b.control = "已暂停";
+    pauseBatch(b);
     return;
   }
+  if (b.phase !== "内容预检通过") {
+    composerRef.value?.openBatch(b);
+    return;
+  }
+  const p = associatedPlan(db, { kind: "batch", id: b.id });
+  if (p && !(await takeControl({ kind: "batch", id: b.id }))) return;
   try {
-    dispatchBatch(db, b);
-  } catch (error) {
-    warning(error.message);
+    dispatchBatch(db, b, { takeover: !!p });
+    toast("批次已启动本地演示队列");
+  } catch (e) {
+    warning(e.message);
   }
 }
 async function cancelBatch(b) {
-  if (!(await takeControl({ kind: "batch", id: b.id }))) return;
-  const pending = batchTasks(db, b).filter((t) =>
-    ["待执行", "排队中"].includes(t.status),
-  );
-  if (!pending.length) {
-    warning("当前没有可取消的待执行或排队任务");
-    return;
-  }
+  const i = cancellationImpact(db, b);
   if (
     !(await feedback.confirmWarning({
-      title: "取消本批次未提交任务？",
-      message: `仅取消本批次 ${pending.length} 条待执行或排队任务；在途任务保留，成片占用不释放。`,
-      confirmText: "取消未提交任务",
+      title: "取消批次并安全收口？",
+      message: `停止新派发；未领取 ${i.pending} 条将取消且保留成片占用；在途 ${i.inFlight} 条安全收尾；未知 ${i.unknown} 条继续核实。确认时重新检查领取状态。`,
+      confirmText: "确认取消批次",
     }))
   )
     return;
-  pending.forEach((t) => taskResult(t, "已取消"));
-  b.control = "已暂停";
+  cancelBatchSafely(db, b);
+  toast("已停止派发，未领取项已安全取消");
+}
+async function cancelCurrentPlan(p) {
+  const rows = planTasks(p);
+  if (
+    !(await feedback.confirmWarning({
+      title: "终止计划后续调度？",
+      message: `涉及 ${p.items.length - p.position} 个未处理批次，已有 ${rows.length} 条任务保持原状态，${rows.filter((t) => ["执行中", "等待人工", "结果待确认"].includes(t.status)).length} 条在途继续安全收尾。不撤销作品、不释放占用。`,
+      confirmText: "取消计划",
+    }))
+  )
+    return;
+  cancelPlan(p);
+  toast("计划后续调度已终止");
+}
+function configureBatch(b) {
+  detailOpen.value = false;
+  if (b.phase !== "内容预检通过") composerRef.value?.openBatch(b);
+  else view(b);
 }
 watch(
   () => db.tasks.map((t) => `${t.id}:${t.status}`).join("|"),
@@ -395,7 +528,7 @@ watch(
       try {
         syncPlan(db, p);
       } catch (error) {
-        p.control = "已暂停";
+        if (p.control !== "等待配置") p.control = "已暂停";
         warning(error.message);
       }
   },
@@ -403,7 +536,7 @@ watch(
 );
 const listColumns = computed(() => {
   const first = [
-    ...(page.value === "tasks"
+    ...(["tasks", "images"].includes(page.value)
       ? [{ colKey: "row-select", type: "multiple", width: 44 }]
       : []),
     { colKey: "id", title: "ID", width: 85 },
@@ -441,10 +574,17 @@ const listColumns = computed(() => {
                 { colKey: "category", title: "类目", width: 130 },
                 { colKey: "uses", title: "用途", minWidth: 160 },
                 { colKey: "enabled", title: "状态", width: 95 },
+                {
+                  colKey: "metadata",
+                  title: "尺寸 / 格式 / 来源 / 更新时间",
+                  minWidth: 215,
+                },
+                { colKey: "references", title: "引用 / 版本", width: 110 },
               ]
             : [
                 { colKey: "ratio", title: "画布规格", width: 140 },
                 { colKey: "layers", title: "图层", width: 100 },
+                { colKey: "references", title: "引用 / 版本", width: 110 },
                 { colKey: "enabled", title: "状态", width: 95 },
               ];
   return [
@@ -459,12 +599,23 @@ const listColumns = computed(() => {
     },
   ];
 });
-const composerRef = ref(null);
+const composerRef = ref(null),
+  planWizardRef = ref(null);
 const rowEdit = ref(null),
   rowEditOpen = ref(false),
   editingTaskId = ref(null),
   rowError = ref("");
 const rowOriginal = ref("");
+const platformTopics = computed({
+  get: () =>
+    rowEdit.value?.platform === "B站"
+      ? rowEdit.value?.tags
+      : rowEdit.value?.topics,
+  set: (v) => {
+    if (rowEdit.value)
+      rowEdit.value[rowEdit.value.platform === "B站" ? "tags" : "topics"] = v;
+  },
+});
 function newPublish(mode = "快速发布", planId = null) {
   composerRef.value?.open(mode, planId);
 }
@@ -521,6 +672,10 @@ async function closeRow() {
   rowEditOpen.value = false;
 }
 async function editRow(row, task = false) {
+  if (task && !(row.status === "待执行" || canRetry(row))) {
+    warning("当前状态不允许修改已提交快照");
+    return;
+  }
   rowEdit.value = clone(row);
   try {
     await ensureCoverResults(rowEdit.value);
@@ -533,12 +688,15 @@ async function editRow(row, task = false) {
   rowEditOpen.value = true;
 }
 async function saveRow() {
+  rowError.value = "";
   try {
     await ensureCoverResults(rowEdit.value);
   } catch (e) {
     rowError.value = e.message;
     return;
   }
+  rowEdit.value.contentApproved = true;
+  rowEdit.value.coverApproved = true;
   const errors = validate(rowEdit.value, db, editingTaskId.value);
   if (errors.length) {
     rowError.value = errors.join("；");
@@ -548,7 +706,10 @@ async function saveRow() {
     Object.assign(
       db.tasks.find((t) => t.id === editingTaskId.value),
       rowEdit.value,
-      { version: (rowEdit.value.version || 1) + 1 },
+      {
+        version: (rowEdit.value.version || 1) + 1,
+        snapshot: clone(rowEdit.value),
+      },
     );
   } else {
     composerRef.value?.updateRow(rowEdit.value);
@@ -597,7 +758,10 @@ function useImage() {
   if (!im) return;
   if (coverTarget.value === "editor") {
     imageEditorRef.value?.setBackground(im.src);
+    editorDoc.value.imageId = im.id;
   } else {
+    rowEdit.value.imageId = im.id;
+    rowEdit.value.imageVersion = im.version || 1;
     rowEdit.value.cover = im.src;
     rowEdit.value.coverSource = im.src;
     rowEdit.value.coverVariants = {};
@@ -621,6 +785,10 @@ function randomCover() {
   ensureCoverResults(rowEdit.value).catch((e) => warning(e.message));
 }
 async function removeImage(im) {
+  if (imageReferences(db, im).length) {
+    warning("图片已被引用，只能停用，历史快照保留");
+    return;
+  }
   if (
     await feedback.confirmWarning({
       title: "删除图片？",
@@ -629,8 +797,11 @@ async function removeImage(im) {
       danger: true,
     })
   )
-    db.images = db.images.filter((i) => i.id !== im.id);
+    deleteImage(db, im);
 }
+const imageOriginal = ref("");
+let imageReadToken = 0;
+const imageReading = ref(false);
 const imageForm = reactive({
     open: false,
     id: null,
@@ -666,7 +837,22 @@ function imageEdit(i) {
         },
   );
   imageForm.open = true;
+  imageOriginal.value = JSON.stringify(imageForm);
   imageError.value = "";
+}
+async function closeImage() {
+  if (
+    JSON.stringify(imageForm) !== imageOriginal.value &&
+    !(await feedback.confirmWarning({
+      title: "放弃图片修改？",
+      message: "当前未保存的名称、用途和图片将丢失。",
+      confirmText: "放弃修改",
+    }))
+  )
+    return;
+  imageReadToken++;
+  imageReading.value = false;
+  imageForm.open = false;
 }
 function readImage(e) {
   const f = e.target.files?.[0];
@@ -679,14 +865,44 @@ function readImage(e) {
       "请选择不超过 3MB 的 PNG、JPEG 或 WebP（本地演示存储限制）";
     return;
   }
+  const token = ++imageReadToken;
+  imageReading.value = true;
   const reader = new FileReader();
+  reader.onerror = () => {
+    if (token !== imageReadToken) return;
+    imageReading.value = false;
+    imageError.value = "读取失败，请重新选择图片";
+  };
   reader.onload = () => {
+    if (token !== imageReadToken) return;
     imageForm.src = reader.result;
     imageForm.name ||= f.name;
+    imageForm.format = f.type.split("/")[1].toUpperCase();
+    imageForm.size = f.size;
+    imageForm.source = "人工上传（本地演示）";
+    const im = new Image();
+    im.onload = () => {
+      if (token !== imageReadToken) return;
+      imageReading.value = false;
+      imageError.value = "";
+      imageForm.width = im.naturalWidth;
+      imageForm.height = im.naturalHeight;
+    };
+    im.onerror = () => {
+      if (token !== imageReadToken) return;
+      imageReading.value = false;
+      imageForm.src = "";
+      imageError.value = "图片损坏，请重新选择";
+    };
+    im.src = reader.result;
   };
   reader.readAsDataURL(f);
 }
 async function saveImage() {
+  if (imageReading.value) {
+    imageError.value = "正在读取图片尺寸，请稍后保存";
+    return;
+  }
   if (!imageForm.name.trim() || !imageForm.src || !imageForm.uses.length) {
     imageError.value = "请填写名称、选择图片和至少一种用途";
     return;
@@ -694,6 +910,8 @@ async function saveImage() {
   const row = clone(imageForm);
   delete row.open;
   row.id ||= id();
+  row.version = (db.images.find((i) => i.id === row.id)?.version || 0) + 1;
+  row.updatedAt = new Date().toISOString();
   const at = db.images.findIndex((i) => i.id === row.id);
   if (at < 0) db.images.push(row);
   else db.images[at] = row;
@@ -708,6 +926,8 @@ const imageEditorRef = ref(null);
 const editorOpen = ref(false),
   editorDoc = ref(null),
   editorName = ref(""),
+  editorPlatforms = ref([]),
+  editorCategories = ref([]),
   editorId = ref(null),
   editorPurpose = ref("template"),
   editorError = ref(""),
@@ -718,6 +938,7 @@ const editorOpen = ref(false),
 function editorReady(doc) {
   editorOriginal.value = JSON.stringify({
     name: editorName.value,
+    tags: [editorPlatforms.value, editorCategories.value],
     document: doc,
   });
 }
@@ -742,13 +963,18 @@ function openEditor(template = null, purpose = "template", spec = null) {
           imageFit: "meet",
           layers: [],
         }
-      : null;
+      : defaultDocument(
+          1200,
+          900,
+          (
+            db.images.find((i) => i.enabled && i.pureBackground) ||
+            db.images.find((i) => i.enabled && i.uses.includes("底图"))
+          )?.src || "",
+        );
   if (purpose === "cover" && template?.document)
     editorDoc.value.layers
       .filter((l) => l.kind === "text" && l.id === "title")
-      .forEach(
-        (l) => (l.text = rowEdit.value.title || rowEdit.value.description),
-      );
+      .forEach((l) => (l.text = rowEdit.value.shortTitle || ""));
   if (purpose === "cover") {
     const { width, height } = editorCoverSpec.value;
     const doc = editorDoc.value;
@@ -768,6 +994,8 @@ function openEditor(template = null, purpose = "template", spec = null) {
     doc.height = height;
   }
   editorName.value = template?.name || "新封面模板";
+  editorPlatforms.value = clone(template?.tags?.platforms || []);
+  editorCategories.value = clone(template?.tags?.categories || []);
   editorPreview.value = template?.preview || "";
   editorError.value = "";
   editorOpen.value = true;
@@ -775,8 +1003,11 @@ function openEditor(template = null, purpose = "template", spec = null) {
 async function cancelEditor() {
   if (editorSaving.value) return;
   if (
-    JSON.stringify({ name: editorName.value, document: editorDoc.value }) !==
-      editorOriginal.value &&
+    JSON.stringify({
+      name: editorName.value,
+      tags: [editorPlatforms.value, editorCategories.value],
+      document: editorDoc.value,
+    }) !== editorOriginal.value &&
     !(await feedback.confirmWarning({
       title: "放弃封面修改？",
       message: "尚未保存的设计将丢失，已应用的封面和其他任务不受影响。",
@@ -794,7 +1025,10 @@ async function saveEditor() {
   editorSaving.value = true;
   let rendered;
   try {
-    rendered = await imageEditorRef.value?.exportPng(false);
+    rendered = await renderDocument(editorDoc.value);
+  } catch (e) {
+    editorError.value = e.message;
+    return;
   } finally {
     editorSaving.value = false;
   }
@@ -804,7 +1038,16 @@ async function saveEditor() {
   }
   editorPreview.value = rendered;
   if (editorPurpose.value === "cover") {
-    rowEdit.value.coverSource ||= rowEdit.value.cover;
+    const template = db.templates.find((t) => t.id === editorId.value);
+    if (template) {
+      rowEdit.value.templateId = template.id;
+      rowEdit.value.templateVersion = template.version;
+      rowEdit.value.templateDocuments = {};
+    }
+    rowEdit.value.coverSource = editorDoc.value.image;
+    rowEdit.value.imageId = editorDoc.value.imageId || null;
+    rowEdit.value.imageVersion =
+      db.images.find((i) => i.id === rowEdit.value.imageId)?.version || null;
     rowEdit.value.coverVariants ||= {};
     rowEdit.value.coverVariants[editorCoverSpec.value.key] =
       editorPreview.value;
@@ -814,6 +1057,10 @@ async function saveEditor() {
     )
       rowEdit.value.cover = editorPreview.value;
     rowEdit.value.templateDocument = clone(editorDoc.value);
+    rowEdit.value.templateDocuments ||= {};
+    rowEdit.value.templateDocuments[editorCoverSpec.value.key] = clone(
+      editorDoc.value,
+    );
     rowEdit.value.coverMode = "规则生成封面";
     editorOpen.value = false;
     return;
@@ -822,7 +1069,15 @@ async function saveEditor() {
     isDefault:
       db.templates.find((t) => t.id === editorId.value)?.isDefault || false,
     id: editorId.value || id(),
+    imageId: editorDoc.value.imageId || null,
+    updatedAt: new Date().toISOString(),
     name: editorName.value,
+    tags: {
+      platforms: clone(editorPlatforms.value),
+      categories: clone(editorCategories.value),
+    },
+    version:
+      (db.templates.find((t) => t.id === editorId.value)?.version || 0) + 1,
     document: clone(editorDoc.value),
     preview: editorPreview.value,
     ratio: `${editorDoc.value.width}×${editorDoc.value.height}`,
@@ -842,170 +1097,30 @@ async function saveEditor() {
   editorOpen.value = false;
   toast("模板已保存，可重新打开编辑");
 }
-const planForm = reactive({
-    open: false,
-    id: null,
-    name: "",
-    targets: [],
-    platforms: [],
-    categories: [],
-  }),
-  planError = ref(""),
-  planView = ref("总览");
-const planOriginal = ref("");
+const planView = ref("总览");
 function editPlan(p) {
-  Object.assign(planForm, {
-    open: true,
-    id: p?.id || null,
-    name: p?.name || "",
-    targets: clone(
-      p?.targets || [{ platform: "小红书", category: "三角洲行动", count: 5 }],
-    ),
-  });
-  planForm.platforms = [...new Set(planForm.targets.map((t) => t.platform))];
-  planForm.categories = [...new Set(planForm.targets.map((t) => t.category))];
-  planOriginal.value = JSON.stringify({
-    name: planForm.name,
-    targets: planForm.targets,
-  });
-  planError.value = "";
-}
-function changePlanScope() {
-  const previous = planForm.targets;
-  planForm.targets = planForm.platforms.flatMap((platform) =>
-    planForm.categories.map(
-      (category) =>
-        previous.find(
-          (t) => t.platform === platform && t.category === category,
-        ) || { platform, category, count: 5 },
-    ),
-  );
-}
-async function closePlan() {
-  if (
-    JSON.stringify({ name: planForm.name, targets: planForm.targets }) !==
-      planOriginal.value &&
-    !(await feedback.confirmWarning({
-      title: "放弃计划修改？",
-      message: "尚未保存的目标和名称将丢失，已有批次和执行结果不受影响。",
-      confirmText: "放弃修改",
-    }))
-  )
-    return;
-  planForm.open = false;
-}
-async function savePlan() {
-  const keys = planForm.targets.map((t) => t.platform + ":" + t.category);
-  if (
-    !planForm.name.trim() ||
-    !keys.length ||
-    new Set(keys).size !== keys.length ||
-    planForm.targets.some(
-      (t) => !Number.isInteger(Number(t.count)) || Number(t.count) < 1,
-    )
-  ) {
-    planError.value = "请填写名称、正整数目标；同平台同类目只能配置一项目标";
+  if (p?.lockedAt || ["已取消", "执行已结束"].includes(p?.control)) {
+    warning("计划结构已锁定");
     return;
   }
-  const p = db.plans.find((p) => p.id === planForm.id);
-  if (
-    p &&
-    planTasks(p).some(
-      (r) =>
-        !planForm.targets.some(
-          (t) => t.platform === r.platform && t.category === r.category,
-        ),
-    )
-  ) {
-    planError.value = "现有关联任务的目标维度不能移除，请保留该平台与类目";
-    return;
-  }
-  if (p)
-    Object.assign(p, { name: planForm.name, targets: clone(planForm.targets) });
-  else {
-    planForm.id ||= id();
-    db.plans.push({
-      id: planForm.id,
-      name: planForm.name,
-      targets: clone(planForm.targets),
-      items: [],
-      skipped: [],
-      control: "规划中",
-      position: 0,
-    });
-  }
-  if (!(await persistNow())) {
-    planError.value = "计划尚未保存，请重试；当前输入已保留";
-    return;
-  }
-  planForm.open = false;
-}
-function canAttach(b, p) {
-  return canLink(db, p, { kind: "batch", id: b.id });
-}
-function attach(p, item) {
-  try {
-    linkItem(db, p, item);
-  } catch (error) {
-    warning(error.message);
-  }
+  planWizardRef.value?.open(p);
 }
 const planTasks = (p) => collectPlanTasks(db, p),
   planTarget = (p) => p.targets.reduce((sum, t) => sum + Number(t.count), 0);
-const orderRows = computed(() =>
-  detail.value?.targets
-    ? planItems(detail.value).map((item, index) => {
-        const r = itemRecord(db, item),
-          rows = itemTasks(db, item),
-          summary = stats(rows);
-        return {
-          ...item,
-          key: `${item.kind}:${item.id}`,
-          order: index + 1,
-          index,
-          name: r?.name || r?.title || "记录缺失",
-          platform: r?.platform,
-          categories: [...new Set(rows.map((t) => t.category))].join("、"),
-          control: item.kind === "batch" ? r?.control : r?.status,
-          ...summary,
-        };
-      })
-    : [],
-);
 function currentDecision(p) {
-  return nextBatch(itemTasks(db, p.items[p.position]));
-}
-function showItem(item) {
-  const record = itemRecord(db, item);
-  if (record) view(record);
+  return decision(db, p);
 }
 function returnToPlan(p) {
-  detailOpen.value = false;
   view(p);
 }
-const inventory = (p) =>
-  p.targets.map((t) => ({
-    ...t,
-    key: `${t.platform}:${t.category}`,
-    accounts: db.accounts.filter(
-      (a) =>
-        a.enabled &&
-        a.platform === t.platform &&
-        a.categories.includes(t.category),
-    ),
-    assets: db.assets.filter((a) => a.category === t.category),
-    free: db.assets.filter(
-      (a) => a.category === t.category && !resourceStatus(db, a, t.platform),
-    ).length,
-  }));
 const planStats = computed(() =>
-  detail.value?.targets
+  detail.value?.items
     ? stats(planTasks(detail.value), planTarget(detail.value))
     : null,
 );
 const planGroups = computed(() => {
   const p = detail.value;
-  if (!p?.targets) return [];
+  if (!p?.items) return [];
   const groups = new Map();
   for (const target of p.targets) {
     const key =
@@ -1073,6 +1188,7 @@ function linkEvidence() {
     return;
   }
   detail.value.evidence = evidence.value;
+  detail.value.verifiedAt = new Date().toISOString();
   toast("已保存核验依据；请用下方演示控制明确核验结果");
 }
 function cloneTask(t) {
@@ -1164,6 +1280,28 @@ function cloneTask(t) {
           value="batches"
           label="任务批次"
       /></t-tabs>
+      <details class="prototype-scenarios">
+        <summary>可复现演示场景（新增虚构数据，保留已有记录）</summary>
+        <label
+          ><input
+            type="checkbox"
+            v-model="simulateSaveFailure"
+          />模拟本地保存失败（取消后重试）</label
+        >
+        <div class="inline-bar">
+          <t-button
+            v-for="kind in ['30/28', '10%', '20%', '未知']"
+            :key="kind"
+            variant="outline"
+            @click="view(addScenario(db, kind))"
+            >载入 {{ kind }} 场景</t-button
+          >
+        </div>
+        <p>
+          仅为回归验收生成独立的示例计划、账号与成片；AI
+          和发布结果均是演示数据。
+        </p>
+      </details>
       <ResourceCard>
         <ResourceFilterBar>
           <label class="wt-filter-field wt-filter-field--wide"
@@ -1179,6 +1317,11 @@ function cloneTask(t) {
             class="wt-filter-field"
             ><span class="wt-filter-field__label">平台</span
             ><t-select
+              :popup-props="{
+                hideEmptyPopup: false,
+                attach: 'body',
+                zIndex: 5500,
+              }"
               v-model="filterPlatform"
               :options="[
                 { label: '全部平台', value: '' },
@@ -1188,12 +1331,52 @@ function cloneTask(t) {
           <label v-if="page === 'tasks'" class="wt-filter-field"
             ><span class="wt-filter-field__label">执行状态</span
             ><t-select
+              :popup-props="{
+                hideEmptyPopup: false,
+                attach: 'body',
+                zIndex: 5500,
+              }"
               v-model="filterStatus"
               :options="[
                 { label: '全部状态', value: '' },
                 ...states.map((s) => ({ label: s, value: s })),
               ]"
           /></label>
+          <label
+            v-if="['images', 'templates'].includes(page)"
+            class="wt-filter-field"
+            ><span class="wt-filter-field__label">启停</span
+            ><t-select
+              v-model="filterStatus"
+              :options="[
+                { label: '全部状态', value: '' },
+                { label: '启用', value: 'true' },
+                { label: '停用', value: 'false' },
+              ]"
+          /></label>
+          <label v-if="page === 'images'"
+            >用途<select v-model="libraryFilter.use">
+              <option value="">全部用途</option>
+              <option>现成封面</option>
+              <option>底图</option>
+            </select></label
+          >
+          <label v-if="['images', 'templates'].includes(page)"
+            >比例<select v-model="libraryFilter.ratio">
+              <option value="">全部比例</option>
+              <option :value="4 / 3">4:3</option>
+              <option :value="16 / 9">16:9</option>
+              <option :value="3 / 4">3:4</option>
+              <option value="1">1:1</option>
+            </select></label
+          >
+          <label v-if="page === 'images'"
+            >来源<select v-model="libraryFilter.source">
+              <option value="">全部来源</option>
+              <option>种子资源</option>
+              <option>人工上传</option>
+            </select></label
+          >
           <div class="wt-filter-actions">
             <t-button @click="applyQuery">查询</t-button
             ><t-button theme="default" variant="outline" @click="resetQuery"
@@ -1213,6 +1396,11 @@ function cloneTask(t) {
             <label class="wt-filter-field"
               ><span class="wt-filter-field__label">内容类目</span
               ><t-select
+                :popup-props="{
+                  hideEmptyPopup: false,
+                  attach: 'body',
+                  zIndex: 5500,
+                }"
                 v-model="filterCategory"
                 :options="[
                   { label: '全部类目', value: '' },
@@ -1245,10 +1433,41 @@ function cloneTask(t) {
             >取消未执行项</t-button
           ></ResourceSelectionToolbar
         >
+        <ResourceSelectionToolbar
+          v-if="page === 'images'"
+          :count="chosen.length"
+          unit="张图片"
+          @clear="chosen = []"
+          ><t-button
+            variant="text"
+            @click="
+              db.images
+                .filter((i) => chosen.includes(i.id))
+                .forEach((i) => (i.uses = ['现成封面', '底图']))
+            "
+            >批量标记双用途</t-button
+          ><t-button
+            variant="text"
+            @click="
+              db.images
+                .filter((i) => chosen.includes(i.id))
+                .forEach((i) => (i.enabled = true))
+            "
+            >批量启用</t-button
+          ><t-button
+            variant="text"
+            @click="
+              db.images
+                .filter((i) => chosen.includes(i.id))
+                .forEach((i) => (i.enabled = false))
+            "
+            >批量停用</t-button
+          ></ResourceSelectionToolbar
+        >
         <t-table
           class="wt-resource-table"
           row-key="id"
-          :data="records"
+          :data="paged"
           :columns="listColumns"
           :selected-row-keys="chosen"
           @select-change="(keys) => (chosen = keys)"
@@ -1351,6 +1570,35 @@ function cloneTask(t) {
           <template #gap="{ row }">{{
             stats(planTasks(row), planTarget(row)).gap
           }}</template>
+          <template #metadata="{ row }"
+            >{{ row.width || 1200 }} × {{ row.height || 900 }} ·
+            {{ row.format || "SVG 演示图"
+            }}<small class="cell-secondary"
+              >{{ row.source || "种子资源" }} ·
+              {{ row.updatedAt || "2026-11-10" }}</small
+            ></template
+          >
+          <template #references="{ row }"
+            ><t-button
+              variant="text"
+              @click="
+                referenceRows =
+                  page === 'images'
+                    ? imageReferences(db, row)
+                    : templateReferences(db, row).map((t) => ({
+                        kind: '正式任务',
+                        id: t.id,
+                        name: t.title,
+                      }))
+              "
+              >{{
+                page === "images"
+                  ? imageReferences(db, row).length
+                  : templateReferences(db, row).length
+              }}
+              次 / v{{ row.version || 1 }}</t-button
+            ></template
+          >
           <template #uses="{ row }">{{ row.uses.join("、") }}</template>
           <template #enabled="{ row }"
             ><t-tag
@@ -1360,7 +1608,21 @@ function cloneTask(t) {
             ></template
           >
           <template #layers="{ row }"
-            >{{ row.document.layers.length }} 个图层</template
+            >{{ row.document.layers.length }} 个图层<small
+              class="cell-secondary"
+              >动态槽
+              {{
+                row.document.layers.filter((l) => l.slot || l.id === "title")
+                  .length
+              }}
+              ·
+              {{
+                [
+                  ...(row.tags?.platforms || []),
+                  ...(row.tags?.categories || []),
+                ].join(" / ") || "跨平台通用"
+              }}</small
+            ></template
           >
           <template #operation="{ row }">
             <ResourceRowActions>
@@ -1391,13 +1653,27 @@ function cloneTask(t) {
               ><template v-else-if="['batches', 'plans'].includes(page)"
                 ><t-button variant="text" @click="view(row)">详情</t-button
                 ><t-button
-                  v-if="page === 'batches'"
+                  v-if="
+                    page === 'batches' &&
+                    !['已取消', '执行已结束'].includes(row.control)
+                  "
                   variant="text"
                   @click="batchAction(row)"
                   >{{
-                    row.control === "执行中" ? "暂停" : "启动 / 恢复"
+                    row.phase !== "内容预检通过"
+                      ? "配置资源 / 内容"
+                      : row.control === "执行中"
+                        ? "暂停"
+                        : "启动 / 恢复"
                   }}</t-button
-                ><t-button v-else variant="text" @click="editPlan(row)"
+                ><t-button
+                  v-else-if="
+                    page === 'plans' &&
+                    !row.lockedAt &&
+                    !['已取消', '执行已结束'].includes(row.control)
+                  "
+                  variant="text"
+                  @click="editPlan(row)"
                   >编辑目标</t-button
                 ></template
               ><template v-else-if="page === 'images'"
@@ -1408,6 +1684,7 @@ function cloneTask(t) {
                 ><t-button
                   variant="text"
                   theme="danger"
+                  :disabled="!!imageReferences(db, row).length"
                   @click="removeImage(row)"
                   >删除</t-button
                 ></template
@@ -1454,6 +1731,12 @@ function cloneTask(t) {
         </t-table>
       </ResourceCard>
     </main>
+    <PlanWizard
+      ref="planWizardRef"
+      :db="db"
+      :persist="persistNow"
+      @saved="view"
+    />
     <PublishComposer
       ref="composerRef"
       :db="db"
@@ -1549,6 +1832,11 @@ function cloneTask(t) {
         <div class="form-grid">
           <label
             >发布账号<t-select
+              :popup-props="{
+                hideEmptyPopup: false,
+                attach: 'body',
+                zIndex: 5500,
+              }"
               v-model="rowEdit.accountId"
               :disabled="!!editingTaskId"
               :options="
@@ -1586,7 +1874,12 @@ function cloneTask(t) {
         <p v-if="rowEdit.platform === '百家号'" class="muted">
           百家号声明当前仅确认“无需声明”，其他内容类型需要先核验平台选项。
         </p>
-        <h3>最终封面</h3>
+        <label class="block-field"
+          >独立封面短标题<t-input
+            v-model="rowEdit.shortTitle"
+            aria-label="独立封面短标题"
+        /></label>
+        <h3>最终封面 · 保存本条即确认当前实际输出</h3>
         <div class="cover-previews">
           <figure
             v-for="spec in coverSpecs(rowEdit.platform).length
@@ -1615,14 +1908,15 @@ function cloneTask(t) {
               @click="
                 openEditor(
                   {
-                    document: {
-                      width: spec.width,
-                      height: spec.height,
-                      background: '#172f4c',
-                      image: rowEdit.coverSource || rowEdit.cover,
-                      imageFit: 'meet',
-                      layers: [],
-                    },
+                    document: rowEdit.templateDocuments?.[spec.key] ||
+                      rowEdit.templateDocument || {
+                        width: spec.width,
+                        height: spec.height,
+                        background: '#172f4c',
+                        image: rowEdit.coverSource || rowEdit.cover,
+                        imageFit: 'meet',
+                        layers: [],
+                      },
                     name: '本条封面',
                   },
                   'cover',
@@ -1653,6 +1947,11 @@ function cloneTask(t) {
         </div>
         <label class="block-field"
           >应用封面模板<t-select
+            :popup-props="{
+              hideEmptyPopup: false,
+              attach: 'body',
+              zIndex: 5500,
+            }"
             :value="rowEdit.templateId"
             clearable
             placeholder="选择已保存模板"
@@ -1663,20 +1962,36 @@ function cloneTask(t) {
             "
             @change="
               (v) => {
-                rowEdit.templateId = v;
                 const t = db.templates.find((t) => t.id === v);
                 if (t) openEditor(t, 'cover');
+                else {
+                  rowEdit.templateId = null;
+                  rowEdit.templateVersion = null;
+                  rowEdit.templateDocument = null;
+                  rowEdit.templateDocuments = {};
+                  rowEdit.coverMode = '直接应用';
+                }
               }
             "
         /></label>
         <div class="form-grid">
           <label
             >创作声明 *<t-select
+              :popup-props="{
+                hideEmptyPopup: false,
+                attach: 'body',
+                zIndex: 5500,
+              }"
               v-model="rowEdit.declaration"
               placeholder="按实际内容选择"
               :options="declarationOptions(rowEdit.platform)" /></label
           ><label v-if="rowEdit.platform === 'B站'"
             >分区 *<t-select
+              :popup-props="{
+                hideEmptyPopup: false,
+                attach: 'body',
+                zIndex: 5500,
+              }"
               v-model="rowEdit.partition"
               :options="
                 ['游戏', '知识', '生活'].map((s) => ({ label: s, value: s }))
@@ -1684,7 +1999,7 @@ function cloneTask(t) {
           ><label
             >{{ rowEdit.platform === "B站" ? "标签 *" : "话题（选填）"
             }}<t-input
-              v-model="rowEdit.tags"
+              v-model="platformTopics"
               placeholder="仅填相关标签，多个用逗号分隔"
           /></label>
         </div>
@@ -1701,6 +2016,11 @@ function cloneTask(t) {
           <div class="form-grid">
             <label v-if="rowEdit.platform !== '百家号'"
               >可见范围<t-select
+                :popup-props="{
+                  hideEmptyPopup: false,
+                  attach: 'body',
+                  zIndex: 5500,
+                }"
                 v-model="rowEdit.visibility"
                 :options="
                   (rowEdit.platform === '小红书'
@@ -1746,6 +2066,11 @@ function cloneTask(t) {
           ><label class="wt-filter-field"
             ><span class="wt-filter-field__label">类目</span
             ><t-select
+              :popup-props="{
+                hideEmptyPopup: false,
+                attach: 'body',
+                zIndex: 5500,
+              }"
               v-model="imageDraft.category"
               :options="[
                 ...(imageContextCategory
@@ -1782,42 +2107,24 @@ function cloneTask(t) {
             coverTarget === "editor" ? "底图" : "现成封面"
           }}的图片。点击缩略图可查看完整效果。</ResourceNotice
         >
-        <t-table
-          class="wt-resource-table"
-          row-key="id"
-          :data="availableImages"
-          :columns="[
-            { colKey: 'row-select', type: 'single', width: 44 },
-            { colKey: 'image', title: '图片', minWidth: 300 },
-            { colKey: 'category', title: '类目', width: 120 },
-            { colKey: 'uses', title: '用途', minWidth: 140 },
-          ]"
-          :selected-row-keys="selectedImage ? [selectedImage] : []"
-          @select-change="(keys) => (selectedImage = keys.at(-1))"
-          :pagination="{
-            pageSize: 6,
-            total: availableImages.length,
-            showJumper: false,
-            pageSizeOptions: [],
-            showPageSize: false,
-          }"
-        >
-          <template #image="{ row }"
-            ><div class="title-cell">
-              <button
-                class="media-thumb"
-                @click="openPreview({ src: row.src, title: row.name })"
-              >
-                <img :src="row.src" :alt="row.name" /></button
-              ><span>{{ row.name }}</span>
-            </div></template
-          ><template #uses="{ row }">{{ row.uses.join("、") }}</template
-          ><template #empty
-            ><ResourceEmptyState
-              title="没有匹配的可用图片"
-              description="调整类目筛选，或返回图片库补充对应用途的图片。"
-          /></template>
-        </t-table>
+        <div class="image-picker-grid">
+          <button
+            v-for="im in availableImages"
+            :key="im.id"
+            class="image-choice"
+            :class="{ selected: selectedImage === im.id }"
+            @click="selectedImage = im.id"
+          >
+            <img :src="im.src" :alt="im.name" /><strong>{{ im.name }}</strong
+            ><small
+              >{{ im.category }} · {{ im.uses.join(" / ") }}</small
+            ></button
+          ><ResourceEmptyState
+            v-if="!availableImages.length"
+            title="没有可用图片"
+            description="到图片库补充相应用途的图片。"
+          />
+        </div>
       </div>
       <template #footer
         ><t-button
@@ -1831,7 +2138,8 @@ function cloneTask(t) {
       >
     </ResourceOverlay>
     <ResourceOverlay
-      v-model:visible="imageForm.open"
+      :visible="imageForm.open"
+      @update:visible="closeImage"
       :title="imageForm.id ? '编辑图片' : '上传图片'"
       :width="640"
       ><t-alert v-if="imageError" theme="warning" :message="imageError" />
@@ -1839,6 +2147,11 @@ function cloneTask(t) {
         <label class="full">名称 *<t-input v-model="imageForm.name" /></label
         ><label
           >内容类目<t-select
+            :popup-props="{
+              hideEmptyPopup: false,
+              attach: 'body',
+              zIndex: 5500,
+            }"
             v-model="imageForm.category"
             :options="categories.map((c) => ({ label: c, value: c }))" /></label
         ><label
@@ -1860,8 +2173,7 @@ function cloneTask(t) {
         class="image-large"
         alt="上传预览"
       /><template #footer
-        ><t-button variant="outline" @click="imageForm.open = false"
-          >取消</t-button
+        ><t-button variant="outline" @click="closeImage">取消</t-button
         ><t-button @click="saveImage">保存图片</t-button></template
       ></ResourceOverlay
     >
@@ -1875,90 +2187,44 @@ function cloneTask(t) {
       <div class="editor-heading">
         <label v-if="editorPurpose === 'template'"
           >模板名称<t-input v-model="editorName" /></label
+        ><label v-if="editorPurpose === 'template'"
+          >平台标签（可选）<select multiple v-model="editorPlatforms">
+            <option v-for="p in platforms" :key="p">{{ p }}</option>
+          </select></label
+        ><label v-if="editorPurpose === 'template'"
+          >类目标签（可选）<select multiple v-model="editorCategories">
+            <option v-for="c in categories" :key="c">{{ c }}</option>
+          </select></label
         ><t-button variant="outline" @click="openImages('editor')"
           >从图片库选底图</t-button
         >
       </div>
-      <ImageEditor
+      <PrototypeEditor
         ref="imageEditorRef"
         v-if="editorOpen"
         v-model="editorDoc"
         :fixed-size="editorPurpose === 'cover'"
-        @export="editorPreview = $event"
         @ready="editorReady"
       /><template #footer
         ><t-button variant="outline" @click="cancelEditor">取消</t-button
+        ><t-button
+          v-if="editorPurpose === 'template'"
+          variant="outline"
+          @click="
+            editorId = null;
+            editorName += ' 副本';
+            saveEditor();
+          "
+          >另存为模板</t-button
         ><t-button :loading="editorSaving" @click="saveEditor">{{
           editorPurpose === "cover" ? "应用到本条封面" : "保存模板"
         }}</t-button></template
       ></ResourceOverlay
     >
     <ResourceOverlay
-      :visible="planForm.open"
-      @update:visible="closePlan"
-      title="配置发布目标"
-      kind="drawer"
-      :width="800"
-      ><t-alert v-if="planError" theme="warning" :message="planError" /><label
-        class="block-field"
-        >计划名称 *<t-input v-model="planForm.name"
-      /></label>
-      <div class="form-grid plan-scope">
-        <label
-          >规划平台（可多选）<t-select
-            v-model="planForm.platforms"
-            multiple
-            :options="platforms.map((p) => ({ label: p, value: p }))"
-            aria-label="计划平台"
-            @change="changePlanScope"
-        /></label>
-        <label
-          >内容类目（可多选）<t-select
-            v-model="planForm.categories"
-            multiple
-            :options="
-              categories.slice(0, 2).map((c) => ({ label: c, value: c }))
-            "
-            aria-label="计划类目"
-            @change="changePlanScope"
-        /></label>
-      </div>
-      <h3>平台 × 类目目标与资源</h3>
-      <div
-        v-for="(t, i) in planForm.targets"
-        :key="t.platform + ':' + t.category"
-        class="target-row"
-      >
-        <span>{{ t.platform }}</span
-        ><span>{{ t.category }}</span>
-        <t-input-number
-          v-model="t.count"
-          :min="1"
-          :decimal-places="0"
-          :aria-label="`${t.platform}${t.category}目标`"
-        />
-        <small
-          >{{ inventory(planForm)[i].accounts.length }} 个账号 ·
-          {{ inventory(planForm)[i].free }} 条可用成片</small
-        >
-      </div>
-      <ResourceEmptyState
-        v-if="!planForm.targets.length"
-        title="先选择平台与类目"
-        description="可同时规划多个平台，保存后分别创建单平台批次。"
-      />
-      <p class="muted">
-        保存计划只保存目标，不创建批次或任务、不占用成片。同一平台可关联多个独立批次。
-      </p>
-      <template #footer
-        ><t-button variant="outline" @click="closePlan">取消</t-button
-        ><t-button @click="savePlan">保存计划</t-button></template
-      ></ResourceOverlay
-    >
-    <ResourceOverlay
       v-model:visible="detailOpen"
       :title="
-        detail?.targets ? '计划详情' : detail?.assetId ? '任务详情' : '批次详情'
+        detail?.items ? '计划详情' : detail?.assetId ? '任务详情' : '批次详情'
       "
       kind="drawer"
       :width="1040"
@@ -2019,7 +2285,15 @@ function cloneTask(t) {
             detail.status === "平台审核中" ? "· 平台已接收，尚未确认公开" : ""
           }}
         </p>
-        <p v-if="detail.evidence">{{ detail.evidence }}</p>
+        <p v-if="detail.evidence">
+          <a
+            v-if="detail.evidence.startsWith('https://')"
+            :href="detail.evidence"
+            target="_blank"
+            rel="noopener noreferrer"
+            >{{ detail.evidence }}</a
+          ><span v-else>{{ detail.evidence }}</span>
+        </p>
         <div
           v-if="['结果待确认', '平台审核中'].includes(detail.status)"
           class="inline-bar"
@@ -2050,26 +2324,34 @@ function cloneTask(t) {
         </ol>
         <p v-else class="muted">尚无本次演示执行记录</p>
         <h3>执行尝试</h3>
-        <p v-for="attempt in detail.attemptHistory || []" :key="attempt.number">
-          第 {{ attempt.number }} 次 · {{ attempt.started }} →
-          {{ attempt.ended || "尚未结束" }} · {{ attempt.status }}
-        </p>
+        <details
+          v-for="attempt in detail.attemptHistory || []"
+          :key="attempt.number"
+        >
+          <summary>
+            第 {{ attempt.number }} 次 · {{ attempt.started }} →
+            {{ attempt.ended || "尚未结束" }} · {{ attempt.status }}
+          </summary>
+          <p>
+            内容版本 {{ attempt.version }} · 发布标题
+            {{ attempt.snapshot?.title }} · 封面短标题
+            {{ attempt.snapshot?.shortTitle }} ·
+            {{ attempt.errorCode || "无错误码" }} ·
+            {{ attempt.receipt || "暂无回执" }}
+          </p>
+          <p v-for="(s, i) in attempt.steps || []" :key="i">
+            {{ s.time }} · {{ s.status }} · {{ s.evidence }}
+          </p>
+        </details>
         <p v-if="!detail.attemptHistory?.length" class="muted">
           样例仅保留尝试计数；新的演示执行会记录起止时间。
         </p>
-        <details class="demo-controls">
+        <details v-if="demoTransitions(detail).length" class="demo-controls">
           <summary>演示控制 · 手动查看执行场景</summary>
           <p>以下仅切换本地场景，不核验真实账号或作品。</p>
           <div class="inline-bar">
             <t-button
-              v-for="s in [
-                '执行中',
-                '等待人工',
-                '结果待确认',
-                '平台审核中',
-                '已发布',
-                '执行失败',
-              ]"
+              v-for="s in demoTransitions(detail)"
               :key="s"
               variant="outline"
               @click="taskResult(detail, s)"
@@ -2078,7 +2360,7 @@ function cloneTask(t) {
           </div>
         </details></template
       >
-      <template v-else-if="detail?.targets"
+      <template v-else-if="detail?.items"
         ><h2>{{ detail.name }}</h2>
         <div class="metric-grid">
           <div>
@@ -2109,197 +2391,13 @@ function cloneTask(t) {
             {{ v }}
           </button>
         </div>
-        <template v-if="planView === '总览'"
-          ><h3>资源盘点</h3>
-          <p>
-            去重账号
-            {{ new Set(planTasks(detail).map((t) => t.accountId)).size }} 个 ·
-            去重成片
-            {{ new Set(planTasks(detail).map((t) => t.assetId)).size }} 条 ·
-            已创建 {{ planStats.total }} 条任务
-          </p>
-          <p>
-            合格账号
-            {{
-              new Set(
-                inventory(detail).flatMap((r) => r.accounts.map((a) => a.id)),
-              ).size
-            }}
-            个 · 可用成片
-            {{
-              new Set(
-                detail.targets.flatMap((t) =>
-                  db.assets
-                    .filter(
-                      (a) =>
-                        a.category === t.category &&
-                        !resourceStatus(db, a, t.platform),
-                    )
-                    .map((a) => a.id),
-                ),
-              ).size
-            }}
-            条（去重）
-          </p>
-          <div class="wt-resource-page">
-            <t-table
-              class="wt-resource-table"
-              row-key="key"
-              :data="inventory(detail)"
-              :columns="[
-                { colKey: 'scope', title: '资源范围', minWidth: 200 },
-                {
-                  colKey: 'accounts',
-                  title: '合格账号 · 优质 / 普通 / 新号',
-                  minWidth: 230,
-                },
-                {
-                  colKey: 'assets',
-                  title: '匹配成片 · 优质 / 普通',
-                  minWidth: 190,
-                },
-                { colKey: 'free', title: '可安排成片', width: 120 },
-              ]"
-              ><template #scope="{ row }"
-                >{{ row.platform }} · {{ row.category }}</template
-              ><template #accounts="{ row }"
-                >{{ row.accounts.length }}（{{
-                  row.accounts.filter((a) => a.quality === "优质").length
-                }}
-                /
-                {{ row.accounts.filter((a) => a.quality === "普通").length }} /
-                {{
-                  row.accounts.filter((a) => a.quality === "新号").length
-                }}）</template
-              ><template #assets="{ row }"
-                >{{ row.assets.length }}（{{
-                  row.assets.filter((a) => a.quality === "优质").length
-                }}
-                /
-                {{
-                  row.assets.filter((a) => a.quality === "普通").length
-                }}）</template
-              ></t-table
-            >
-          </div>
-
-          <h3>执行顺序 · {{ detail.items.length }} 个独立项目</h3>
-          <p class="muted">
-            同平台多个批次分别执行与统计；前一批无未决任务且失败率不超过 10%
-            时自动衔接。
-          </p>
-          <t-table
-            class="wt-resource-table plan-order-table"
-            row-key="key"
-            :data="orderRows"
-            :columns="[
-              { colKey: 'order', title: '顺序', width: 65 },
-              { colKey: 'identity', title: '批次 / 独立任务', minWidth: 220 },
-              {
-                colKey: 'progress',
-                title: '任务 / 已公开 / 失败 / 待处理',
-                minWidth: 215,
-              },
-              { colKey: 'control', title: '调度 / 状态', width: 125 },
-              { colKey: 'operation', title: '操作', minWidth: 190 },
-            ]"
-          >
-            <template #identity="{ row }"
-              ><strong>{{ row.name }}</strong
-              ><small class="cell-secondary"
-                >{{ row.kind === "batch" ? "批次" : "独立任务" }} {{ row.id }} ·
-                {{ row.platform }} · {{ row.categories }}</small
-              ><t-tag v-if="row.index === detail.position">当前项目</t-tag
-              ><t-tag
-                v-if="
-                  detail.skipped.some(
-                    (i) => i.kind === row.kind && i.id === row.id,
-                  )
-                "
-                >调度已跳过</t-tag
-              ></template
-            >
-            <template #progress="{ row }"
-              >{{ row.total }} / {{ row.published }} / {{ row.failed }} /
-              {{ row.human + row.unknown }}</template
-            >
-            <template #operation="{ row }"
-              ><ResourceRowActions
-                ><t-button variant="text" @click="showItem(row)"
-                  >查看详情</t-button
-                ><t-button
-                  variant="text"
-                  :disabled="
-                    row.index === 0 ||
-                    (detail.control !== '规划中' &&
-                      row.index <= detail.position + 1)
-                  "
-                  @click="moveItem(detail, row.index, -1)"
-                  >上移</t-button
-                ><t-button
-                  variant="text"
-                  :disabled="
-                    row.index === detail.items.length - 1 ||
-                    (detail.control !== '规划中' &&
-                      row.index <= detail.position)
-                  "
-                  @click="moveItem(detail, row.index, 1)"
-                  >下移</t-button
-                ></ResourceRowActions
-              ></template
-            >
-            <template #empty
-              ><ResourceEmptyState
-                title="尚未安排执行项目"
-                description="从本计划创建单平台批次，或关联符合目标的现有批次、独立任务。"
-            /></template>
-          </t-table>
-          <h3>关联现有批次</h3>
-          <div class="inline-bar">
-            <t-button
-              v-for="b in db.batches.filter((b) => canAttach(b, detail))"
-              :key="b.id"
-              variant="outline"
-              @click="attach(detail, { kind: 'batch', id: b.id })"
-              >{{ b.name }} · {{ b.platform }} ＋</t-button
-            ><span
-              v-if="!db.batches.some((b) => canAttach(b, detail))"
-              class="muted"
-              >没有可关联的批次，可继续创建同平台的新批次。</span
-            >
-          </div>
-          <h3>
-            关联独立任务
-            <t-button variant="text" @click="newPublish('快速发布', detail.id)"
-              >新建独立任务</t-button
-            >
-          </h3>
-          <div class="inline-bar">
-            <t-button
-              v-for="t in db.tasks.filter(
-                (t) =>
-                  !t.batchId && canLink(db, detail, { kind: 'task', id: t.id }),
-              )"
-              :key="t.id"
-              variant="outline"
-              @click="attach(detail, { kind: 'task', id: t.id })"
-              >{{ t.title }} · {{ t.platform }} ＋</t-button
-            ><span
-              v-if="
-                !db.tasks.some(
-                  (t) =>
-                    !t.batchId &&
-                    canLink(db, detail, { kind: 'task', id: t.id }),
-                )
-              "
-              class="muted"
-              >没有符合范围且未关联计划的独立任务。</span
-            >
-          </div>
-          <p v-if="detail.items[detail.position]">
-            当前项目衔接判断：{{ currentDecision(detail) }}
-          </p></template
-        >
+        <PlanWorkbench
+          v-if="planView === '总览'"
+          :db="db"
+          :plan="detail"
+          @batch="configureBatch"
+          @edit="editPlan"
+        />
         <div v-else class="wt-resource-page">
           <t-table
             class="wt-resource-table"
@@ -2425,57 +2523,26 @@ function cloneTask(t) {
             }}</t-button
           >
         </div>
-        <h3>任务摘要</h3>
-        <div class="wt-resource-page">
-          <t-table
-            class="wt-resource-table"
-            row-key="id"
-            :data="db.tasks.filter((t) => t.batchId === detail.id)"
-            :columns="[
-              { colKey: 'id', title: '任务 ID', width: 90 },
-              {
-                colKey: 'title',
-                title: '发布内容',
-                minWidth: 200,
-                ellipsis: true,
-              },
-              { colKey: 'identity', title: '发布账号', minWidth: 170 },
-              { colKey: 'status', title: '状态', width: 120 },
-              {
-                colKey: 'op',
-                title: '操作',
-                width: 90,
-                fixed: compact ? undefined : 'right',
-              },
-            ]"
-            :pagination="{
-              pageSize: 8,
-              total: db.tasks.filter((t) => t.batchId === detail.id).length,
-              showJumper: false,
-              pageSizeOptions: [],
-              showPageSize: false,
-            }"
-            ><template #identity="{ row }"
-              >{{ row.platform }} · {{ account(row.accountId)?.name }}</template
-            ><template #status="{ row }"
-              ><t-tag :theme="stateTheme(row.status)" variant="light">{{
-                row.status
-              }}</t-tag></template
-            ><template #op="{ row }"
-              ><ResourceRowActions
-                ><t-button variant="text" @click="view(row)"
-                  >详情</t-button
-                ></ResourceRowActions
-              ></template
-            ></t-table
-          >
-        </div></template
-      >
+        <p>
+          配置阶段：{{ detail.phase }} · 目标 {{ targetTotal(detail) }} ·
+          正式创建 {{ batchSummary(db, detail).total }} · 创建缺口
+          {{ batchSummary(db, detail).creationGap }} · 执行收口
+          {{ batchSummary(db, detail).closed }} /
+          {{ batchSummary(db, detail).total }} · 公开目标
+          {{ batchSummary(db, detail).published }} / {{ targetTotal(detail) }}
+        </p>
+        <t-button
+          v-if="detail.phase !== '内容预检通过'"
+          @click="configureBatch(detail)"
+          >进入资源 / 内容配置</t-button
+        >
+        <BatchWorkbench :db="db" :batch="detail" @task="view" />
+      </template>
       <template #footer
         ><t-button
           v-if="
             detail &&
-            !detail.targets &&
+            !detail.items &&
             associatedPlan(db, {
               kind: detail.assetId
                 ? detail.batchId
@@ -2501,43 +2568,85 @@ function cloneTask(t) {
           >返回关联计划</t-button
         ><template v-if="detail?.assetId"
           ><t-button
+            v-if="detail.batchId"
+            variant="text"
+            @click="view(db.batches.find((b) => b.id === detail.batchId))"
+            >返回所属批次</t-button
+          >
+          <t-button
+            v-if="detail.status === '待执行' || canRetry(detail)"
+            variant="outline"
+            @click="editRow(detail, true)"
+            >修订安全内容</t-button
+          >
+          <t-button
+            v-if="
+              detail.status === '待执行' ||
+              (detail.status === '排队中' && !detail.claimed)
+            "
+            variant="outline"
+            @click="taskResult(detail, '已取消')"
+            >取消并保留占用</t-button
+          >
+          <t-button
+            v-if="detail.status === '已取消' || canRetry(detail)"
+            variant="outline"
+            @click="release(detail)"
+            >放弃并释放</t-button
+          >
+          <t-button
             v-if="detail.status === '待执行' || canRetry(detail)"
             @click="start(detail)"
             >启动 / 重试</t-button
           ><t-button
-            v-if="detail.status === '已取消'"
+            v-if="['已取消', '已放弃'].includes(detail.status)"
             variant="outline"
             @click="cloneTask(detail)"
-            >按此范围新建</t-button
+            >复制配置新建</t-button
           ></template
-        ><template v-else-if="detail?.targets"
-          ><t-button
-            variant="outline"
-            @click="newPublish('批量发布', detail.id)"
-            >创建关联批次</t-button
+        ><template v-else-if="detail?.items"
           ><t-button variant="outline" @click="related(null, detail.id)"
-            >查看全部任务</t-button
-          ><t-button
+            >查看所属任务</t-button
+          >
+          <t-button
             v-if="detail.control === '执行中'"
             variant="outline"
-            @click="detail.control = '已暂停'"
+            @click="pausePlan(detail)"
             >暂停后续调度</t-button
-          ><t-button v-else @click="startPlan(detail)">启动 / 恢复计划</t-button
-          ><t-button
+          >
+          <t-button
+            v-else-if="!['已取消', '执行已结束'].includes(detail.control)"
+            @click="startPlan(detail)"
+            >启动 / 恢复计划</t-button
+          >
+          <t-button
             v-if="
-              ['执行中', '等待继续确认', '等待跳过确认'].includes(
+              ['执行中', '等待继续确认', '等待跳过确认', '等待配置'].includes(
                 detail.control,
               )
             "
             :disabled="currentDecision(detail) === '等待核实'"
             @click="advancePlan(detail)"
-            >处理当前批次并衔接</t-button
-          ></template
+            >确认处理当前批次并衔接</t-button
+          >
+          <t-button
+            v-if="!['已取消', '执行已结束'].includes(detail.control)"
+            variant="outline"
+            @click="cancelCurrentPlan(detail)"
+            >取消计划</t-button
+          > </template
         ><template v-else-if="detail"
-          ><t-button variant="outline" @click="batchAction(detail)">{{
-            detail.control === "执行中" ? "暂停批次" : "启动 / 恢复批次"
-          }}</t-button
-          ><t-button variant="outline" @click="cancelBatch(detail)"
+          ><t-button
+            v-if="!['已取消', '执行已结束'].includes(detail.control)"
+            variant="outline"
+            @click="batchAction(detail)"
+            >{{
+              detail.control === "执行中" ? "暂停批次" : "启动 / 恢复批次"
+            }}</t-button
+          ><t-button
+            v-if="!['已取消', '执行已结束'].includes(detail.control)"
+            variant="outline"
+            @click="cancelBatch(detail)"
             >取消未提交任务</t-button
           ><t-button @click="related(detail.id)">查看任务</t-button></template
         ><t-button variant="outline" @click="detailOpen = false"
@@ -2545,6 +2654,18 @@ function cloneTask(t) {
         ></template
       >
     </ResourceOverlay>
+    <ResourceOverlay
+      :visible="!!referenceRows"
+      title="历史引用"
+      @update:visible="referenceRows = null"
+      ><p v-if="!referenceRows?.length">暂无正式引用；草稿不预占图片。</p>
+      <p v-for="r in referenceRows || []" :key="r.kind + r.id">
+        {{ r.kind }} #{{ r.id }} · {{ r.name }}
+      </p>
+      <template #footer
+        ><t-button @click="referenceRows = null">关闭引用</t-button></template
+      ></ResourceOverlay
+    >
     <ResourceOverlay
       :visible="!!bulkResult"
       title="批量操作结果"

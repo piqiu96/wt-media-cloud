@@ -1,13 +1,15 @@
 <script setup>
 import { computed, reactive, ref, watch } from "vue";
 import { useMediaQuery } from "../../../src/shared/composables/useMediaQuery.js";
-import ResourceOverlay from "../../../src/shared/ui/resource/ResourceOverlay.vue";
+import ResourceOverlay from "./PrototypeOverlay.vue";
 import ResourceWizardSteps from "../../../src/shared/ui/resource/ResourceWizardSteps.vue";
 import ResourceNotice from "../../../src/shared/ui/resource/ResourceNotice.vue";
 import ResourceEmptyState from "../../../src/shared/ui/resource/ResourceEmptyState.vue";
 import ResourceRowActions from "../../../src/shared/ui/resource/ResourceRowActions.vue";
 import ResourceSelectionToolbar from "../../../src/shared/ui/resource/ResourceSelectionToolbar.vue";
-import { createPublication } from "./relationships.js";
+import AIWorkspace from "./AIWorkspace.vue";
+import { initCandidate, editField } from "./content.js";
+import { createPublication, targetTotal, nextId } from "./relationships.js";
 import { ensureCoverResults } from "./covers.js";
 import { feedback } from "../../../src/shared/ui/feedback/index.js";
 import {
@@ -38,6 +40,9 @@ const state = reactive({
   rows: [],
   name: "",
   planId: null,
+  batchId: null,
+  targets: [],
+  creationKey: null,
   active: false,
   accountLimits: {},
   accountOrder: [],
@@ -49,14 +54,33 @@ if (props.db.publishDraft) {
     props.db.publishDraft.active ??
     !!(state.rows.length || state.assets.length || state.platforms.length);
 }
-watch(state, () => (props.db.publishDraft = copy(state)), { deep: true });
+watch(
+  state,
+  () => {
+    props.db.publishDraft = copy(state);
+    const b = props.db.batches.find((b) => b.id === state.batchId);
+    if (b && b.phase !== "内容预检通过") {
+      if (!b.planId) {
+        b.platform = state.platforms[0];
+        b.name = state.name;
+        b.targets = copy(state.targets);
+        b.categories = copy(state.categories);
+      }
+      b.candidates = copy(state.rows);
+      b.draft = copy(state);
+      b.phase = state.step >= 2 ? "待内容配置" : "待资源配置";
+    }
+  },
+  { deep: true },
+);
 const errors = ref([]),
   onlyErrors = ref(false),
   rowPlatform = ref("全部"),
   contentPlatform = ref("小红书"),
   search = ref(""),
   showUnavailable = ref(false),
-  assetPage = ref(1);
+  assetPage = ref(1),
+  contentPage = ref(1);
 const platformDefaults = reactive(
   Object.fromEntries(
     platforms.map((p) => [p, { declaration: "", tags: "", partition: "游戏" }]),
@@ -314,7 +338,8 @@ async function open(mode = "批量发布", planId = null, source = null) {
     }))
   )
     return;
-  const plan = props.db.plans.find((p) => p.id === planId);
+  const plan = null;
+  state.copySource = source ? copy(source) : null;
   Object.assign(state, {
     mode,
     step: 0,
@@ -332,7 +357,10 @@ async function open(mode = "批量发布", planId = null, source = null) {
     excludedAccounts: [],
     rows: [],
     name: "",
-    planId,
+    planId: null,
+    batchId: null,
+    targets: [],
+    creationKey: crypto.randomUUID(),
     active: true,
     accountLimits: {},
     accountOrder: [],
@@ -395,6 +423,45 @@ async function allocate() {
     errors.value = ["当前选择不在计划目标范围内"];
     return;
   }
+  state.rows.forEach(initCandidate);
+  if (isQuick.value && state.copySource) {
+    const source = state.copySource;
+    const r = state.rows[0];
+    for (const f of [
+      "title",
+      "shortTitle",
+      "description",
+      "tags",
+      "topics",
+      "partition",
+      "declaration",
+      "coverSource",
+      "coverMode",
+      "templateId",
+      "templateVersion",
+      "templateDocument",
+      "templateDocuments",
+      "templateSnapshots",
+    ])
+      if (source[f] !== undefined) editField(r, f, copy(source[f]));
+    r.schedule = "";
+    state.copySource = null;
+  }
+  if (!isQuick.value) {
+    state.targets = state.categories.map((category) => ({
+      category,
+      count: Number(
+        state.targets.find((t) => t.category === category)?.count || 0,
+      ),
+    }));
+    for (const t of state.targets)
+      if (
+        state.rows.filter((r) => r.category === t.category).length > t.count
+      ) {
+        errors.value = [t.category + "候选超过目标，请调整选择或目标"];
+        return;
+      }
+  }
   contentPlatform.value = state.rows[0].platform;
   rowPlatform.value = "全部";
   state.step = isQuick.value ? 2 : 1;
@@ -448,7 +515,17 @@ async function applyDefaults(overwrite = false) {
           ...(values.tags.trim() ? { tags: values.tags } : {}),
         }
       : { declaration: values.declaration };
-  state.rows = mergeContentDefaults(state.rows, p, applied, overwrite);
+  const merged = mergeContentDefaults(state.rows, p, applied, overwrite);
+  for (let i = 0; i < merged.length; i++)
+    for (const f of Object.keys(applied))
+      if (merged[i][f] !== state.rows[i][f]) {
+        merged[i].fieldVersions = {
+          ...merged[i].fieldVersions,
+          [f]: (merged[i].fieldVersions?.[f] || 0) + 1,
+        };
+        merged[i].contentApproved = false;
+      }
+  state.rows = merged;
   errors.value = [];
   appliedNotice.platform = p;
   appliedNotice.text = `已应用到 ${state.rows.filter((r) => r.platform === p).length} 条${p}候选${overwrite ? "，所选字段已覆盖" : "，单条修改已保留"}。`;
@@ -460,6 +537,7 @@ function updateRow(row) {
     overrides = new Set(old.overrides || []);
   for (const key of [
     "accountId",
+    "shortTitle",
     "title",
     "description",
     "cover",
@@ -476,6 +554,14 @@ function updateRow(row) {
   ])
     if (JSON.stringify(old[key]) !== JSON.stringify(row[key]))
       overrides.add(key);
+  row.candidateId = old.candidateId;
+  row.ai = old.ai;
+  for (const key of overrides)
+    if (JSON.stringify(old[key]) !== JSON.stringify(row[key])) {
+      row.fieldVersions ||= {};
+      row.fieldVersions[key] = (old.fieldVersions?.[key] || 0) + 1;
+    }
+  row.contentApproved = true;
   state.rows[index] = {
     ...copy(row),
     overrides: [...overrides],
@@ -485,7 +571,7 @@ function updateRow(row) {
 function removeRow(row) {
   state.rows = state.rows.filter((r) => r.key !== row.key);
 }
-function create() {
+async function create() {
   errors.value = [];
   if (!state.rows.length) {
     errors.value = ["没有可创建的任务"];
@@ -503,6 +589,19 @@ function create() {
     return;
   }
   batchNameError.value = "";
+  let partial = false;
+  if (
+    !isQuick.value &&
+    state.rows.length < state.targets.reduce((n, t) => n + Number(t.count), 0)
+  ) {
+    const target = state.targets.reduce((n, t) => n + Number(t.count), 0);
+    partial = await feedback.confirmWarning({
+      title: "明确确认部分创建",
+      message: `目标 ${target}，实际正式创建 ${state.rows.length}，创建缺口 ${target - state.rows.length}；保留目标、不补造任务、不自动补量。`,
+      confirmText: "保留缺口并创建",
+    });
+    if (!partial) return;
+  }
   let result;
   try {
     result = createPublication(props.db, {
@@ -511,6 +610,10 @@ function create() {
       name: state.name,
       planId: state.planId,
       quick: isQuick.value,
+      batchId: state.batchId,
+      targets: state.targets,
+      partial,
+      creationKey: state.creationKey,
     });
   } catch (error) {
     errors.value = [error.message];
@@ -522,8 +625,80 @@ function create() {
   state.active = false;
   emit("created", result);
 }
+function saveDraft() {
+  if (isQuick.value) {
+    props.db.publishDraft = copy(state);
+    return;
+  }
+  if (
+    !state.name.trim() ||
+    !state.platforms.length ||
+    !state.targets.some((t) => t.count > 0)
+  ) {
+    errors.value = ["请填写批次名称、平台和目标后保存草稿"];
+    return;
+  }
+  let b = props.db.batches.find((b) => b.id === state.batchId);
+  if (!b) {
+    b = {
+      id: nextId(props.db),
+      name: state.name,
+      platform: state.platforms[0],
+      planId: null,
+      targets: copy(state.targets),
+      categories: copy(state.categories),
+      phase: "待资源配置",
+      control: "待配置",
+      candidates: copy(state.rows),
+    };
+    props.db.batches.push(b);
+    state.batchId = b.id;
+  }
+  b.candidates = copy(state.rows);
+  b.draft = copy(state);
+  b.phase = state.step >= 2 ? "待内容配置" : "待资源配置";
+  feedback.toast.success("草稿已保留，不占用成片");
+}
+const softConflicts = computed(() =>
+  props.db.batches.filter(
+    (b) =>
+      b.id !== state.batchId &&
+      b.platform === selectedPlatform.value &&
+      (b.candidates || []).some((r) => state.assets.includes(r.assetId)),
+  ),
+);
+function openBatch(batch) {
+  if (batch.phase === "内容预检通过") return;
+  const saved = batch.draft;
+  contentPage.value = 1;
+  Object.assign(state, {
+    mode: "批量发布",
+    step: saved?.step || 0,
+    platforms: [batch.platform],
+    categories: batch.targets.filter((t) => t.count > 0).map((t) => t.category),
+    assets: saved?.assets || [],
+    excludedAccounts: saved?.excludedAccounts || [],
+    rows: copy(batch.candidates || []),
+    name: batch.name,
+    planId: batch.planId,
+    batchId: batch.id,
+    targets: copy(batch.targets),
+    creationKey: saved?.creationKey || crypto.randomUUID(),
+    active: true,
+    accountLimits: saved?.accountLimits || {},
+    accountOrder: saved?.accountOrder || [],
+  });
+  state.rows.forEach(initCandidate);
+  contentPlatform.value = batch.platform;
+  errors.value = batch.needsPreflight
+    ? ["计划目标已变更，兼容候选已保留，请回到资源阶段重新预检"]
+    : [];
+  if (batch.needsPreflight) state.step = 0;
+  visible.value = true;
+}
 defineExpose({
   open,
+  openBatch,
   resume: () => (visible.value = true),
   updateRow,
   hasDraft: computed(() => state.active),
@@ -549,6 +724,21 @@ defineExpose({
         :message="errors.join('；')"
         class="composer-alert"
       />
+      <t-alert
+        v-if="softConflicts.length"
+        theme="warning"
+        :message="
+          '软冲突：同平台草稿 ' +
+          softConflicts.map((b) => b.name).join('、') +
+          ' 也选择了这些成片；草稿不占用，正式创建将重查。'
+        "
+      />
+      <AIWorkspace
+        v-if="state.step === 2"
+        :rows="state.rows"
+        :db="db"
+        @preview="emit('preview', $event)"
+      />
       <template v-if="state.step === 0">
         <section class="composer-section">
           <div class="section-heading">
@@ -561,8 +751,14 @@ defineExpose({
             <div class="composer-field">
               <span>发布平台 <em>*</em></span>
               <t-select
+                :popup-props="{
+                  hideEmptyPopup: false,
+                  attach: 'body',
+                  zIndex: 5500,
+                }"
                 v-model="selectedPlatform"
                 placeholder="选择一个发布平台"
+                :disabled="!!state.planId"
                 :options="allowedPlatforms.map((p) => ({ label: p, value: p }))"
                 aria-label="批次发布平台"
               />
@@ -573,13 +769,24 @@ defineExpose({
             <label class="composer-field"
               ><span>内容类目 <em>*</em></span
               ><t-select
+                :popup-props="{
+                  hideEmptyPopup: false,
+                  attach: 'body',
+                  zIndex: 5500,
+                }"
                 v-if="isQuick"
                 v-model="selectedCategory"
                 :options="
                   allowedCategories.map((c) => ({ label: c, value: c }))
                 " /><t-select
+                :popup-props="{
+                  hideEmptyPopup: false,
+                  attach: 'body',
+                  zIndex: 5500,
+                }"
                 v-else
                 v-model="state.categories"
+                :disabled="!!state.planId"
                 multiple
                 clearable
                 placeholder="可选择多个类目"
@@ -588,6 +795,34 @@ defineExpose({
                 "
             /></label>
           </div>
+        </section>
+        <section
+          v-if="!isQuick && state.categories.length"
+          class="composer-section"
+        >
+          <h3>
+            {{
+              state.planId ? "计划继承目标（只读）" : "各类目目标（手动输入）"
+            }}
+          </h3>
+          <label v-for="c in state.categories" :key="c" class="target-row"
+            >{{ c }}
+            <t-input-number
+              :value="state.targets.find((t) => t.category === c)?.count || 0"
+              :disabled="!!state.planId"
+              :min="0"
+              :decimal-places="0"
+              :aria-label="c + '批次目标'"
+              @change="
+                (v) => {
+                  const t = state.targets.find((t) => t.category === c);
+                  if (t) t.count = v;
+                  else state.targets.push({ category: c, count: v });
+                }
+              "
+            />
+          </label>
+          <p>目标、候选、正式任务分别统计。保存配置不占用成片。</p>
         </section>
         <template v-if="state.platforms.length && state.categories.length">
           <div class="inventory-summary" aria-live="polite">
@@ -849,12 +1084,22 @@ defineExpose({
             <label class="composer-field"
               ><span>创作声明 <em>*</em></span
               ><t-select
+                :popup-props="{
+                  hideEmptyPopup: false,
+                  attach: 'body',
+                  zIndex: 5500,
+                }"
                 v-model="platformDefaults[contentPlatform].declaration"
                 placeholder="按本次实际内容确认"
                 :options="declarationOptions(contentPlatform)" /></label
             ><label v-if="contentPlatform === 'B站'" class="composer-field"
               ><span>分区 <em>*</em></span
               ><t-select
+                :popup-props="{
+                  hideEmptyPopup: false,
+                  attach: 'body',
+                  zIndex: 5500,
+                }"
                 v-model="platformDefaults[contentPlatform].partition"
                 :options="[{ label: '游戏', value: '游戏' }]" /></label
             ><label v-if="contentPlatform === 'B站'" class="composer-field"
@@ -912,9 +1157,12 @@ defineExpose({
         <t-table
           class="wt-resource-table"
           row-key="key"
-          :data="rows"
+          :data="rows.slice((contentPage - 1) * 6, contentPage * 6)"
+          :disable-data-page="true"
+          @page-change="(p) => (contentPage = p.current)"
           :columns="candidateColumns"
           :pagination="{
+            current: contentPage,
             pageSize: 6,
             total: rows.length,
             showJumper: false,
@@ -945,6 +1193,11 @@ defineExpose({
           >
           <template #account="{ row }"
             ><t-select
+              :popup-props="{
+                hideEmptyPopup: false,
+                attach: 'body',
+                zIndex: 5500,
+              }"
               v-if="state.step === 1"
               v-model="row.accountId"
               :options="accountOptions(row)"
@@ -1027,6 +1280,7 @@ defineExpose({
           ? `已选 ${selectedAssets.length} 条成片 · 预计 ${suggested.length} 条任务`
           : `${state.rows.length} 条任务 · ${readyCount} 条已就绪`
       }}</span
+      ><t-button variant="outline" @click="saveDraft">保存草稿</t-button
       ><t-button theme="default" variant="outline" @click="visible = false"
         >保留配置并关闭</t-button
       ><t-button

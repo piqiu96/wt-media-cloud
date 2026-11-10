@@ -1,0 +1,31 @@
+Cloud branch: codex/publishing-interaction-closure
+Base: 4358ce5
+Diff check: PASS
+Scope: only web/example/proto/publishing-design/
+Workspace user document SHA256: efd9f6795f8bc039372a94ad849186f50dd86ee2249e7c7b8c0b189fe32a3891 (unchanged)
+Workspace status:
+ M docs/design/publishing.md
+Cloud pre-commit status:
+ M web/example/proto/publishing-design/App.vue
+ M web/example/proto/publishing-design/PublishComposer.vue
+ M web/example/proto/publishing-design/covers.js
+ M web/example/proto/publishing-design/model.js
+ M web/example/proto/publishing-design/publishing.css
+ M web/example/proto/publishing-design/relationships.js
+ M web/example/proto/publishing-design/tests/relationships.test.js
+?? web/example/proto/publishing-design/AIWorkspace.vue
+?? web/example/proto/publishing-design/BatchWorkbench.vue
+?? web/example/proto/publishing-design/PlanWizard.vue
+?? web/example/proto/publishing-design/PlanWorkbench.vue
+?? web/example/proto/publishing-design/PrototypeEditor.vue
+?? web/example/proto/publishing-design/PrototypeOverlay.vue
+?? web/example/proto/publishing-design/content.js
+?? web/example/proto/publishing-design/evidence/
+?? web/example/proto/publishing-design/inventory.js
+?? web/example/proto/publishing-design/library.js
+?? web/example/proto/publishing-design/scenarios.js
+?? web/example/proto/publishing-design/tests/content.test.js
+?? web/example/proto/publishing-design/tests/covers.test.js
+?? web/example/proto/publishing-design/tests/libraries.test.js
+PNG dimensions/hashes: png-manifest.json
+Remote fetch: timed out; no pull/reset/stash/push/PR

@@ -1,0 +1,39 @@
+
+> wt-media-cloud-web@0.1.0 test:example
+> node --test example/preview.test.mjs example/proto/content-operations/tests/*.test.cjs
+
+✔ floating references use local documents; immutable and unrelated references remain remote (0.689375ms)
+✔ document links, anchors and images resolve; raw HTML and executable links cannot execute (25.765958ms)
+✔ HTTP reader reflects saved edits, blocks traversal/symlinks/non-documents and never proxies APIs (46.23325ms)
+✔ missing Workspace is explicit rather than silently serving a remote revision (5.509375ms)
+✔ 规模演示按当前支持平台完整载入，重复打开不重复插入 (12.091084ms)
+✔ 日期范围兼容明确的2026年旧演示日期，未知日期不命中单边范围 (1.470042ms)
+PASS: 10 video state / device / relationship checks
+PASS: 14 columns, ordering, partial retry, prepared-resource retention, role/device isolation, restore time, source preservation, selector fallback, reload recovery
+PASS: read-only download presentation; preparing/downloading batch guards; no transfer overwrite; unknown state action consistency
+PASS: applied advanced count, range grouping, collapsed context, permission-aware count, library fields and pagination
+PASS: cloud/local access, expired URL, source independence, demo boundaries, device/user isolation, missing path/file, read-only details
+✔ example/proto/content-operations/tests/mine.test.cjs (127.519792ms)
+✔ 素材来源只有抖音，成片和发布候选不包含抖音；旧账号关联保留但不可选用 (7.528084ms)
+✔ 执行记录按实际尝试分组，不补造阶段或重复完成，兼容旧记录且不修改原数据 (1.112416ms)
+✔ 没有执行日志时保留未知；明确的尝试编号优先，无记录的最新尝试不沿用旧日志 (0.663375ms)
+✔ 排除规则不受位置影响；缺失值不会被补成0或其他指标 (0.330666ms)
+✔ 多平台不乘产量；预览跳过旧任务，限额按素材计算且不改变输入 (14.817292ms)
+✔ 任务只能覆盖模板开放参数；组数和固定结构不允许更改 (0.400292ms)
+✔ 批次结束数包括失败和取消，成功数单独统计 (0.235166ms)
+✔ 距发布天数按真实日期计算；非法发布时间不能命中 (0.347958ms)
+✔ 成片按素材聚合，跨任务批次合并，保留真实来源且不混入其他素材 (0.405084ms)
+✔ 选材原因区分指标缺失和未达阈值，保留命中证据 (0.480334ms)
+✔ 选材记录保存当时标题和具体跳过原因；团队边界及限额不混淆 (1.199334ms)
+✔ 发布情况与文件状态、使用人分离；失败保持占用，取消释放，成功优先 (1.621875ms)
+✔ 创建按份数拆任务，同一次提交重放返回原ID，快照与默认值隔离 (1.794125ms)
+✔ 新请求允许明确再次制作，固定结构的越权修改被拒绝 (1.603375ms)
+✔ 提交前范围重核验失败不产生空批次或任务 (0.947125ms)
+ℹ tests 22
+ℹ suites 0
+ℹ pass 22
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 231.039416
