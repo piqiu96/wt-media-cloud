@@ -596,13 +596,6 @@ a:focus-visible {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.publishing-view-tabs {
-  margin-bottom: 20px;
-  background: transparent;
-}
-.publishing-view-tabs :deep(.t-tabs__nav) {
-  background: transparent;
-}
 .preview-publishing-details h3 {
   margin: 16px 0 12px;
   font-size: 18px;

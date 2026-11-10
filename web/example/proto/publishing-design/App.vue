@@ -196,7 +196,7 @@ window.addEventListener("hashchange", hash);
 onBeforeUnmount(() => window.removeEventListener("hashchange", hash));
 const names = {
   tasks: "发布任务",
-  batches: "发布任务",
+  batches: "发布批次",
   plans: "发布计划",
   images: "图片库",
   templates: "封面模板库",
@@ -1206,9 +1206,9 @@ function cloneTask(t) {
       <a href="/example/" class="brand">WT <span>MEDIA</span></a>
       <p>内容运营</p>
       <button
-        v-for="p in ['tasks', 'plans', 'images', 'templates']"
+        v-for="p in ['tasks', 'batches', 'plans', 'images', 'templates']"
         :key="p"
-        :class="{ active: page === p || (p === 'tasks' && page === 'batches') }"
+        :class="{ active: page === p }"
         @click="navigate(p)"
       >
         {{ names[p] }}
@@ -1236,19 +1236,12 @@ function cloneTask(t) {
           }[page]
         "
         ><template #actions
-          ><template v-if="['tasks', 'batches'].includes(page)"
-            ><t-button
-              v-if="composerRef?.hasDraft"
-              variant="outline"
-              @click="composerRef.resume()"
-              >继续未完成配置</t-button
-            ><t-button variant="outline" @click="newPublish('快速发布')"
-              >快速发布</t-button
-            ><t-button @click="newPublish('批量发布')"
-              >新建批次</t-button
-            ></template
+          ><t-button v-if="page === 'tasks'" @click="newPublish('快速发布')"
+            >快速发布</t-button
+          ><t-button v-if="page === 'batches'" @click="newPublish('批量发布')"
+            >批量发布</t-button
           ><t-button v-if="page === 'plans'" @click="editPlan()"
-            >新建计划</t-button
+            >新建发布计划</t-button
           ><t-button v-if="page === 'images'" @click="imageEdit()"
             >上传图片</t-button
           ><t-button v-if="page === 'templates'" @click="openEditor()"
@@ -1256,6 +1249,13 @@ function cloneTask(t) {
           ></template
         ></ResourcePageHeader
       >
+      <ResourceNotice
+        v-if="composerRef?.hasDraft && ((page === 'tasks' && composerRef?.draftMode === '快速发布') || (page === 'batches' && composerRef?.draftMode !== '快速发布'))"
+        tone="info"
+      >
+        有未完成的{{ page === 'tasks' ? '快速发布' : '批量发布' }}配置。
+        <t-button variant="text" @click="composerRef.resume()">继续配置</t-button>
+      </ResourceNotice>
       <t-alert
         v-if="db.legacyPublishDraft"
         theme="info"
@@ -1271,15 +1271,6 @@ function cloneTask(t) {
           ></template
         ></t-alert
       >
-      <t-tabs
-        v-if="['tasks', 'batches'].includes(page)"
-        :value="page"
-        class="publishing-view-tabs"
-        @change="navigate"
-        ><t-tab-panel value="tasks" label="任务列表" /><t-tab-panel
-          value="batches"
-          label="任务批次"
-      /></t-tabs>
       <details class="prototype-scenarios">
         <summary>可复现演示场景（新增虚构数据，保留已有记录）</summary>
         <label

@@ -780,6 +780,7 @@ defineExpose({
   resume: () => (visible.value = true),
   updateRow,
   hasDraft: computed(() => state.active),
+  draftMode: computed(() => state.mode),
 });
 </script>
 <template>
