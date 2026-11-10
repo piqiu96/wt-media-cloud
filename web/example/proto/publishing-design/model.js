@@ -304,6 +304,7 @@ export function resourceStatus(db, asset, platform, accountIds = null) {
   const candidates = db.accounts.filter(
     (a) =>
       a.enabled &&
+        a.loginValid !== false &&
       a.platform === platform &&
       a.categories.includes(asset.category) &&
       (!accountIds || accountIds.includes(a.id)),
@@ -322,6 +323,7 @@ export function resourceInventory(
       const accounts = db.accounts.filter(
         (a) =>
           a.enabled &&
+          a.loginValid !== false &&
           a.platform === platform &&
           a.categories.includes(category) &&
           (!accountIds || accountIds.includes(a.id)),
@@ -367,6 +369,7 @@ export function suggestDistribution(
           (a) =>
             accountIds.includes(a.id) &&
             a.enabled &&
+            a.loginValid !== false &&
             a.categories.includes(video.category),
         ).length
       : Infinity;
@@ -379,22 +382,22 @@ export function suggestDistribution(
       const hasCapacity = (accountId) =>
         !Number(limits[accountId]) ||
         (load.get(accountId) || 0) < Number(limits[accountId]);
-      const prior = previous.find(
-        (r) =>
-          r.platform === platform &&
-          r.assetId === assetId &&
-          accountIds.includes(r.accountId) &&
-          hasCapacity(r.accountId),
-      );
       const candidates = db.accounts.filter(
         (a) =>
           accountIds.includes(a.id) &&
           a.platform === platform &&
           a.categories.includes(video.category) &&
           a.enabled &&
+          a.loginValid !== false &&
           hasCapacity(a.id),
       );
       if (!candidates.length) return [];
+      const prior = previous.find(
+        (r) =>
+          r.platform === platform &&
+          r.assetId === assetId &&
+          candidates.some((a) => a.id === r.accountId),
+      );
       const qualityOrder =
         video.quality === "优质"
           ? ["优质", "普通", "新号"]

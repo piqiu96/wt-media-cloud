@@ -13,10 +13,11 @@ import {
 import { ensureCoverResults, coverSignature, coverSpecs } from "./covers.js";
 import { clone } from "./relationships.js";
 import { feedback } from "../../../src/shared/ui/feedback/index.js";
-const props = defineProps({ rows: Array, db: Object });
+import { declarationOptions } from "./model.js";
+const props = defineProps({ rows: Array, db: Object, single: Boolean });
 const emit = defineEmits(["preview"]);
 const scope = ref("全部"),
-  fields = ref(contentFields.slice(0, 4)),
+  fields = ref([...contentFields]),
   style = ref("实战攻略"),
   selected = ref([]),
   busy = ref(false),
@@ -200,14 +201,17 @@ function inspect(r) {
   active.value = r;
 }
 props.rows.forEach(initCandidate);
+if (props.single) active.value = props.rows[0] || null;
 </script>
 <template>
   <section class="ai-workspace">
-    <h3>AI 批量内容配置工作台</h3>
+    <div class="ai-heading"><span>CONTENT GENERATION</span><h3>{{ single ? '配置这条任务的内容与封面' : 'AI 批量内容配置工作台' }}</h3><p>{{ single ? 'AI 只为当前任务生成建议；人工确认声明、成品封面和发布时机。' : '按字段生成建议，逐条核对文案与封面后再创建任务。' }}</p></div>
     <t-alert
       theme="info"
-      message="演示生成服务 · 无真实模型调用。每行一轮生成标题、独立短标题、话题、标签；建议需明确采用。人工声明须按内容事实确认。"
+      :message="single ? '演示生成服务 · 无真实模型调用。建议不会自动覆盖人工编辑，采用后仍需检查封面并确认当前版本。' : '演示生成服务 · 无真实模型调用。每行一轮生成标题、独立短标题、话题、标签和正文；建议需明确采用。人工声明须按内容事实确认。'"
     />
+    <div v-if="single && active" class="single-ai-toolbar"><t-button :loading="busy" @click="generate([active])">为这条任务生成建议</t-button><t-button variant="outline" @click="adoptAll">采用未修改字段建议</t-button><span>生成进度 {{ done }} / {{ total }}</span></div>
+    <template v-if="!single">
     <div class="ai-tools">
       <label
         >作用范围<select v-model="scope">
@@ -340,9 +344,10 @@ props.rows.forEach(initCandidate);
         >下一页</t-button
       >
     </div>
+    </template>
     <div v-if="active" class="candidate-panel">
-      <h3>候选 {{ active.candidateId.slice(0, 8) }} · 逐字段建议与封面</h3>
-      <t-button variant="text" @click="active = null">收起本条</t-button>
+      <h3>{{ single ? '发布文案与逐字段建议' : `候选 ${active.candidateId.slice(0, 8)} · 逐字段建议与封面` }}</h3>
+      <t-button v-if="!single" variant="text" @click="active = null">收起本条</t-button>
       <div v-for="f in contentFields" :key="f" class="suggestion">
         <label
           >{{ labels[f]
@@ -377,6 +382,7 @@ props.rows.forEach(initCandidate);
           >重生{{ labels[f] }}</t-button
         >
       </div>
+      <div v-if="single" class="single-platform-fields"><h3>平台设置与发布时间</h3><div class="single-platform-grid"><label>创作声明 *<t-select :value="active.declaration" :options="declarationOptions(active.platform)" placeholder="按内容事实选择" @change="(value) => editField(active, 'declaration', value)" /></label><label v-if="active.platform === 'B站'">分区 *<t-select :value="active.partition" :options="[{ label: '游戏', value: '游戏' }]" @change="(value) => editField(active, 'partition', value)" /></label><label v-if="active.platform !== '百家号'">可见范围<t-select :value="active.visibility || '公开'" :options="[{ label: '公开', value: '公开' }, { label: '仅自己可见', value: '仅自己可见' }]" @change="(value) => editField(active, 'visibility', value)" /></label><label>指定发布时间（可选）<input type="datetime-local" :value="active.schedule || ''" @change="editField(active, 'schedule', $event.target.value)" /></label></div></div>
       <div class="ai-tools">
         <label
           >封面模式<select
@@ -435,10 +441,12 @@ props.rows.forEach(initCandidate);
           </select></label
         >
       </div>
+      <p v-if="active.coverMode !== '模板合成'" class="cover-mode-note">现成封面保留图片原有文字；AI 封面短标题不会写入图片。需要把短标题印在封面上时，请切换为“模板合成”并选择模板。</p>
       <p v-if="active.platform === '百家号'">
         百家号精确封面比例待核验，当前按模板画布或原图演示。
       </p>
       <p v-if="active.coverError">{{ active.coverError }}</p>
+      <div v-if="single" class="single-cover-check"><button @click="emit('preview', { row: active })"><img :src="active.cover" alt="当前封面" /></button><div><strong>{{ active.coverRender || '待合成' }} · {{ active.coverApproved ? '当前版本已审核' : '待审核' }}</strong><p>更换图片、模板或短标题后需要重新合成并审核。</p></div></div>
       <div class="ai-tools">
         <t-button @click="render([active])">合成当前版本</t-button
         ><t-button variant="outline" @click="emit('preview', { row: active })"
@@ -452,12 +460,29 @@ props.rows.forEach(initCandidate);
 </template>
 <style scoped>
 .ai-workspace {
-  margin: 24px 0;
+  margin: 0 0 16px;
   background: #fff;
-  border: 1px solid #e2e8f0;
-  padding: 20px;
+  border: 1px solid #e2e9f3;
+  padding: 22px;
   border-radius: 10px;
+  box-shadow:0 3px 14px #24446b0a;
 }
+.ai-heading { margin-bottom:14px; }
+.ai-heading span { color:#3976d6; font-size:10px; font-weight:700; letter-spacing:.1em; }
+.ai-heading h3 { margin:4px 0; font-size:18px; color:#20385e; }
+.ai-heading p { margin:0; font-size:12px; color:#7d8ca2; }
+.single-ai-toolbar { display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin:17px 0; }
+.single-ai-toolbar span { color:#7487a0; font-size:12px; }
+.single-platform-fields { margin:22px 0 0; padding-top:18px; border-top:1px solid #e2e9f3; }
+.cover-mode-note { margin:10px 0 14px; padding:10px 12px; border-radius:6px; background:#eef5ff; color:#54749e; font-size:12px; line-height:1.6; }
+.single-platform-fields h3 { margin:0 0 13px; color:#263d60; font-size:15px; }
+.single-platform-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:15px; }
+.single-platform-grid label { display:flex; flex-direction:column; gap:8px; min-width:0; color:#5f718e; font-size:12px; }
+.single-cover-check { display:flex; align-items:center; gap:15px; padding:12px; border:1px solid #e2e9f3; border-radius:8px; background:#fff; }
+.single-cover-check button { width:120px; flex:none; border:0; padding:0; background:none; cursor:zoom-in; }
+.single-cover-check img { display:block; width:100%; aspect-ratio:4/3; object-fit:cover; border-radius:5px; }
+.single-cover-check strong { font-size:13px; color:#31557f; }
+.single-cover-check p { margin:5px 0 0; color:#788ba3; font-size:12px; }
 .ai-tools {
   display: flex;
   gap: 12px;
@@ -465,6 +490,10 @@ props.rows.forEach(initCandidate);
   align-items: center;
   margin: 16px 0;
 }
+.ai-tools label { display:inline-flex; align-items:center; gap:7px; color:#5f718e; font-size:12px; }
+.ai-tools select { min-height:34px; background:#fff; }
+.ai-workspace > p { color:#71829a; font-size:12px; }
+.ai-workspace > .t-alert { margin:11px 0; }
 .ai-tools > .t-input__wrap {
   max-width: 320px;
 }
@@ -483,6 +512,8 @@ props.rows.forEach(initCandidate);
   min-width: 950px;
   border-collapse: collapse;
 }
+.ai-table th { background:#f7f9fd; color:#657892; font-size:12px; font-weight:600; white-space:nowrap; }
+.ai-table tr:hover td { background:#fbfdff; }
 .ai-table td,
 .ai-table th {
   padding: 12px 8px;
@@ -506,12 +537,17 @@ props.rows.forEach(initCandidate);
   max-height: 80px;
   object-fit: contain;
 }
+.cover-button { cursor:zoom-in; border-radius:5px; overflow:hidden; }
 .candidate-panel {
   border: 1px solid #d8e4fb;
   background: #f7faff;
   padding: 20px;
   margin-top: 20px;
+  border-radius:8px;
 }
+.candidate-panel h3 { margin:0 0 10px; color:#244977; font-size:16px; }
+.candidate-panel:has(.single-platform-fields) { background:#fff; border-color:#e2e9f3; border-radius:9px; }
+@media (max-width:700px) { .single-platform-grid { grid-template-columns:1fr; } }
 .suggestion {
   padding: 12px 0;
   border-bottom: 1px solid #e5e9f0;
