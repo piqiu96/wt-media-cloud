@@ -13,7 +13,8 @@
     "dev:example": "vite --config vite.config.example.js --open /example/",
     "build:example": "vite build --config vite.config.example.js",
     "preview:example": "vite preview --config vite.config.example.js",
-    "test:example": "node --test example/preview.test.mjs example/proto/content-operations/tests/*.test.cjs"
+    "test:example": "node --test example/preview.test.mjs example/proto/content-operations/tests/*.test.cjs",
+    "test:publishing-prototype": "vitest run --config vite.config.example.js example/proto/publishing-design/tests/*.test.js"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.0.0",

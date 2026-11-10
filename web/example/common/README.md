@@ -105,3 +105,14 @@
 排序复用 `ex-sort-button` 和16px的 `ex-sort-icon`，活动字段用 `is-active`、升序用 `is-ascending`；表头维护 `aria-sort`，按钮说明当前状态和下一步操作。分页复用同一个紧凑模式，选择器显示完整“20 条 / 页”，无跳页框。多选、日期控件继续遵循各自原生／官方组件行为，不由本样式接管业务数据。
 
 当前显式接入：本目录资源列表、内容运营素材库、我的素材。公共样式通过新类生效，其他原型不会自动迁移布局；运行时Vue页面须按所属工程规范另行实施，不引用离线脚本。
+
+## 共享图片编辑器
+
+`src/shared/ui/media/ImageEditor.vue` 提供与业务无关的图层编辑、背景图片填充／定位、画布规格、文字排版、坐标和拖动缩放、显隐／锁定、图层排序、撤销重做与 PNG 导出。通过 `v-model` 接收与返回设计文档；`ready` 返回初始化后的文档，便于建立未保存修改基线。`export` 返回用户主动导出的 PNG；`exportPng(false)` 可生成图片而不触发下载，`setBackground(src)` 支持资源选择器填充底图，`showPreview()` 打开成品预览，`hasOverflow` 暴露溢出状态。业务已确定输出比例时可传 `fixedSize` 固定规格。
+
+排版规则在同目录 `textLayout.js`，预览与导出共用测量结果，溢出时阻止导出。默认使用系统字体，本地图片支持 PNG／JPEG／WebP；不包含业务素材查询、发布 API 或在线图片代理。可在[发布新版原型](/example/?view=publishing#templates)中实际操作。
+
+
+`src/shared/ui/media/MediaPreview.vue` 提供共享图片预览：通过 `v-model:visible` 控制显示，`images` 接收 `{ src, label, note }` 列表，支持适应窗口、小图效果和实际尺寸；可用 `details` 插槽展示当前业务摘要。预览通过公共浮层关闭并返回上层编辑器，不要求先保存或下载。编辑器生成的 PNG 在该组件中直接检查，不用带选中框的画布替代成品。
+
+`imageOutput.js` 提供无业务含义的图片适配输出，默认完整保留源图；平台比例由调用方提供。`ResourceWizardSteps.vue` 在宽屏使用公共步骤，在窄屏显示当前步骤、进度和下一步，避免步骤标题挤成逐字换行。二者不包含发布平台字段、资源占用或任务语义。

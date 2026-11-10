@@ -31,6 +31,8 @@ function focusInside() {
 }
 function trapTab(event) {
  if(!props.visible||!isTop.value||higherModal())return
+ // Let an open TDesign dropdown consume Escape before closing its parent.
+ if(event.key==='Escape'&&(focusRoot()?.querySelector('.t-select-input--popup-visible')||[...document.querySelectorAll('.t-popup')].some(node=>node.getClientRects().length&&getComputedStyle(node).visibility!=='hidden'&&getComputedStyle(node).display!=='none')))return
  if(event.key==='Escape'){event.preventDefault();event.stopImmediatePropagation();if(!props.busy&&props.escClosable)close();return}
  if(event.key!=='Tab')return
  // TDesign dropdowns are teleported; let their own keyboard controller finish.
