@@ -1,17 +1,21 @@
 <script setup>
 import { onMounted, ref } from 'vue'
 import ComponentDemo from './common/ComponentDemo.vue'
+import PublishingDesign from './proto/publishing-design/App.vue'
+const publishing = new URLSearchParams(location.search).get('view') === 'publishing'
 const localWorkspace = ref(false)
 onMounted(async () => { try { localWorkspace.value = (await (await fetch('/__example/context')).json()).localWorkspace } catch {} })
 const prototypes = [
   ['浏览器窗口与代理', 'browser-proxy/'], ['社媒账号', 'social-accounts/'],
   ['内容运营工作台', 'content-operations/'], ['内容挖掘', 'content-mining/'],
-  ['发布管理逐页评审', 'content-operations/publishing-review.html'],
+  ['发布管理新版原型', '../?view=publishing'],
+  ['发布管理已有评审意见', 'content-operations/publishing-review.html'],
   ['内容生产评审', 'content-operations/review.html?scope=production#page-review'],
 ]
 </script>
 <template>
-  <main class="example-home wt-resource-page">
+  <PublishingDesign v-if="publishing" />
+  <main v-else class="example-home wt-resource-page">
     <h1>原型与公共组件</h1>
     <p>已有原型保留确认结果；新原型直接使用正式组件。所有业务操作均为演示。</p>
     <nav class="prototype-links" aria-label="原型入口"><a v-for="[name, url] in prototypes" :key="url" :href="`/example/proto/${url}`">{{ name }}</a></nav>

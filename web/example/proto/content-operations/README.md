@@ -7,6 +7,7 @@
 - [完整原型](index.html#materials)
 - [内容生产：产品／工程设计导航](https://github.com/piqiu96/wt-media-workspace/blob/main/docs/design/content-production.md)
 - [内容生产逐页评审](review.html?scope=production#page-review)
+- [发布管理新版原型](/example/?view=publishing)：按发布设计稿与三平台字段取舍重建，包含任务、批次、计划、图片库和模板编辑；共享图片编辑器位于 `src/shared/ui/media/`。所有执行仍为本地演示。
 - [发布管理逐页视觉评审](publishing-review.html)：以完整初版为底稿，参考社媒账号的场景目录，22 个页面与关键状态，复用 common；保留整页计划、完整选择器与任务执行区；支持本页意见保存与导出。当前为待评审视觉方案，不接真实发布。
 - [设计索引](https://github.com/piqiu96/wt-media-workspace/blob/main/docs/design/content-operations.md) · [发布管理](https://github.com/piqiu96/wt-media-workspace/blob/main/docs/design/publishing.md) · [作品管理](https://github.com/piqiu96/wt-media-workspace/blob/main/docs/design/works.md) · [互动管理](https://github.com/piqiu96/wt-media-workspace/blob/main/docs/design/interaction.md)
 - [完整评审及人工意见](review.html#page-review)
