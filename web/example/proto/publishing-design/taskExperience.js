@@ -1,10 +1,44 @@
 import { canRetry, validate } from "./model.js";
 export const displayStatus = (t) =>
-  t.status === "执行失败" ? "确认失败" : t.status;
-export const canEditTask = (t) =>
-  !t.claimed && (["待执行", "排队中"].includes(t.status) || canRetry(t));
-export const canCancelTask = (t) =>
-  !t.claimed && ["待执行", "排队中"].includes(t.status);
+  t.status === "执行失败" ? "发布失败" : t.status;
+export const canEditTask = (t) => t.status === "待执行" && !t.claimed;
+export const canCancelTask = (t) => {
+  if (
+    t.submittedAt ||
+    t.platformId ||
+    ["未知", "平台已接收", "已公开"].includes(t.result)
+  )
+    return false;
+  if (t.status === "待执行") return !t.claimed;
+  if (t.status === "排队中") return !t.claimed;
+  return (
+    ["执行中", "等待人工"].includes(t.status) &&
+    t.executorEvidence?.safeToCancel === true &&
+    t.executorEvidence?.attempt === t.attemptHistory?.at(-1)?.number &&
+    !t.submittedAt
+  );
+};
+export function allowedActions(t) {
+  const actions = ["detail"];
+  if (canEditTask(t)) actions.push("edit", "start");
+  if (canCancelTask(t)) actions.push("cancel");
+  if (t.status === "等待人工") actions.push("human");
+  if (t.status === "结果待确认") actions.push("verify");
+  if (canRetry(t)) actions.push("retry");
+  if (["执行失败", "已发布", "已取消", "已放弃"].includes(t.status))
+    actions.push("copy");
+  return actions;
+}
+export const actionLabels = {
+  detail: "详情",
+  edit: "编辑",
+  start: "执行",
+  cancel: "取消",
+  human: "去处理",
+  verify: "核实结果",
+  retry: "重试",
+  copy: "复制",
+};
 export const canReleaseTask = (t) =>
   !t.claimed &&
   !["未知", "平台已接收", "已公开"].includes(t.result) &&
@@ -18,91 +52,30 @@ export function taskChecks(t, db) {
   return [...new Set(issues)];
 }
 export function taskPresentation(t, db) {
-  const checks = taskChecks(t, db);
-  const map = {
-    待执行: [
-      "准备启动任务",
-      checks.length
-        ? `还有 ${checks.length} 项发布前检查需要处理。`
-        : "资源与内容检查通过，启动后进入执行队列。",
-      "启动任务",
-      "start",
-    ],
-    排队中: [
-      "正在等待执行",
-      t.schedule
-        ? `指定时间：${t.schedule}。到时仍需满足账号和执行条件。`
-        : "按账号顺序等待执行，当前不会重复上传。",
-      "查看排队状态",
-      "inspect",
-    ],
-    执行中: [
-      "任务正在执行",
-      "关注当前步骤与最近操作，当前尝试使用的内容版本已锁定。",
-      "查看进度",
-      "inspect",
-    ],
-    等待人工: [
-      "需要你处理",
-      t.evidence || "账号登录或平台验证需要人工完成，请回到原账号窗口继续。",
-      "去处理",
-      "human",
-    ],
-    结果待确认: [
-      "先核实提交结果",
-      "提交结果尚不明确。请检查同账号稿件，核实前保留成片占用。",
-      "核实结果",
-      "verify",
-    ],
-    平台审核中: [
-      "等待平台审核",
-      "平台已接收，尚未确认公开发布；暂不计入已发布目标。",
-      "查看审核状态",
-      "verify",
-    ],
-    执行失败: [
-      "确认失败，先检查原因",
-      canRetry(t)
-        ? "已确认未发布且上次执行已结束。修复内容并通过检查后，可在原任务安全重试。"
-        : "先核实原稿件与执行是否安全结束，当前不能重新上传。",
-      canRetry(t) ? "安全重试" : "查看失败原因",
-      canRetry(t) ? "start" : "inspect",
-    ],
-    已发布: [
-      "已公开发布",
-      "查看最终作品、发布时间与本次提交使用的内容。",
-      "查看作品",
-      "work",
-    ],
-    已取消: [
-      "任务已取消",
-      "成片占用仍保留，原任务不能恢复。确认可安全释放后，可放弃并释放。",
-      "查看记录",
-      "inspect",
-    ],
-    已放弃: [
-      "任务已放弃",
-      "旧任务已永久结束，成片占用已释放。复制内容后需重新选择和校验资源。",
-      "复制配置创建新任务",
-      "copy",
-    ],
+  const checks = taskChecks(t, db),
+    actions = allowedActions(t);
+  const action =
+    ["start", "human", "verify", "retry", "cancel"].find((a) =>
+      actions.includes(a),
+    ) || "detail";
+  const descriptions = {
+    待执行: "内容准备完成后执行，校验通过进入队列。",
+    排队中: "等待调度领取，不重复执行。",
+    执行中: "执行器正在处理，请关注实际阶段反馈。",
+    等待人工: t.evidence || "需要登录或平台验证。",
+    结果待确认: "提交结果不明，请核实原尝试。",
+    平台审核中: "平台已接收，尚未公开，不计入已发布目标。",
+    执行失败: t.evidence || "检查失败原因与执行结束证据。",
+    已发布: "已确认公开发布。",
+    已取消: "任务已安全终止，资源占用仍保留。",
+    已放弃: "原任务已终止，资源已按既有规则释放。",
   };
-  const [title, description, label, action] = map[t.status] || [
-    "查看任务",
-    "请检查当前执行记录。",
-    "查看记录",
-    "inspect",
-  ];
   return {
-    title,
-    description,
-    label,
+    title: displayStatus(t),
+    description: descriptions[t.status],
     action,
+    label: actionLabels[action],
     checks,
-    disabled:
-      action === "start" &&
-      (checks.length > 0 ||
-        t.claimed ||
-        (t.status !== "待执行" && !canRetry(t))),
+    disabled: action === "start" && checks.length > 0,
   };
 }

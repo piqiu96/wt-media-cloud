@@ -35,7 +35,7 @@ describe("task experience safety", () => {
     t.title = "";
     expect(taskPresentation(t, db).disabled).toBe(true);
     t.title = "有效标题";
-    expect(taskPresentation(t, db).label).toBe("启动任务");
+    expect(taskPresentation(t, db).label).toBe("执行");
     expect(taskPresentation(t, db).disabled).toBe(false);
     db.accounts[0].loginValid = false;
     expect(taskPresentation(t, db).disabled).toBe(true);
@@ -98,10 +98,10 @@ describe("task experience safety", () => {
     expect(canEditTask(t)).toBe(false);
     expect(canCancelTask(t)).toBe(false);
   });
-  it("reviewing is not public success and exposes verification only", () => {
+  it("reviewing is not public success and is read only", () => {
     const { db, t } = fixture("平台审核中");
     const p = taskPresentation(t, db);
-    expect(p.action).toBe("verify");
-    expect(p.description).toContain("暂不计入已发布目标");
+    expect(p.action).toBe("detail");
+    expect(p.description).toContain("不计入已发布目标");
   });
 });

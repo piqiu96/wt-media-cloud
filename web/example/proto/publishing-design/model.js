@@ -1,3 +1,4 @@
+import { accountAvailability } from "./accountAvailability.js";
 import { coverSignature } from "./covers.js";
 // Offline publishing prototype. These rules do not invoke platform services.
 export const platforms = ["小红书", "B站", "百家号"];
@@ -84,6 +85,16 @@ export function validate(row, db, ignoreId) {
     v = db.assets.find((a) => a.id === row.assetId);
   if (!a || !a.enabled || a.platform !== row.platform)
     errors.push("请选择可用的同平台账号");
+  if (a) {
+    const access = accountAvailability(
+      db,
+      a,
+      row.platform,
+      row.category || v?.category,
+      ignoreId,
+    );
+    if (access.reason) errors.push(access.reason);
+  }
   if (!v) errors.push("请选择成片");
   if (v?.ready === false)
     errors.push(v.unavailableReason || "成片尚未生成完成");
