@@ -19,7 +19,7 @@ import ResourceNotice from "../../../src/shared/ui/resource/ResourceNotice.vue";
 import MediaPreview from "../../../src/shared/ui/media/MediaPreview.vue";
 import { imageReferences, templateReferences, deleteImage } from "./library.js";
 import BatchWorkbench from "./BatchWorkbench.vue";
-import { addScenario } from "./scenarios.js";
+import { addScenario, addTaskReviewScenario } from "./scenarios.js";
 import PlanWizard from "./PlanWizard.vue";
 import PlanWorkbench from "./PlanWorkbench.vue";
 import { defaultDocument, renderDocument } from "./covers.js";
@@ -56,6 +56,16 @@ import {
   migrateRelationships,
 } from "./relationships.js";
 import PublishComposer from "./PublishComposer.vue";
+import QuickPublish from "./QuickPublish.vue";
+import TaskDetail from "./TaskDetail.vue";
+import {
+  taskPresentation,
+  canEditTask,
+  canCancelTask,
+  canReleaseTask,
+  displayStatus,
+  taskChecks,
+} from "./taskExperience.js";
 import { useMediaQuery } from "../../../src/shared/composables/useMediaQuery.js";
 import ResourceOverlay from "./PrototypeOverlay.vue";
 import ResourcePageHeader from "../../../src/shared/ui/resource/ResourcePageHeader.vue";
@@ -313,11 +323,110 @@ const detail = ref(null),
   detailOpen = ref(false),
   evidence = ref(""),
   bulkResult = ref(null);
+let listScroll = null;
 function view(row) {
+  if (!detailOpen.value)
+    listScroll = [
+      ...new Set(
+        [
+          document.scrollingElement,
+          ...document.querySelectorAll(".publish-main, .t-table__content"),
+        ].filter(Boolean),
+      ),
+    ].map((el) => ({ el, top: el.scrollTop, left: el.scrollLeft }));
   if (row?.items) planView.value = "总览";
   detail.value = row;
   detailOpen.value = true;
   evidence.value = row.evidence || "";
+}
+watch(detailOpen, async (open) => {
+  if (!open && listScroll) {
+    await nextTick();
+    setTimeout(() => {
+      for (const s of listScroll || [])
+        if (s.el.isConnected) {
+          s.el.scrollTop = s.top;
+          s.el.scrollLeft = s.left;
+        }
+    }, 420);
+  }
+});
+async function cancelTask(t) {
+  if (!canCancelTask(t)) {
+    warning("任务已被领取或状态变化，当前不能直接取消");
+    return;
+  }
+  if (
+    !(await feedback.confirmWarning({
+      title: "取消任务？",
+      message:
+        "取消后停止本任务执行，但仍保留成片在当前平台的占用。原任务不能恢复；确认安全后可放弃并释放，再复制配置创建新任务。",
+      confirmText: "取消任务",
+      danger: true,
+    }))
+  )
+    return;
+  if (!canCancelTask(t)) {
+    warning("任务已被领取，请按当前执行状态处理");
+    return;
+  }
+  setResult(t, "已取消", {
+    evidence: "运营确认取消任务；保留成片占用，原任务不可恢复",
+  });
+}
+function taskMore(t) {
+  return [
+    { content: "任务详情", value: "detail" },
+    ...(canEditTask(t) ? [{ content: "编辑发布内容", value: "edit" }] : []),
+    ...(canCancelTask(t) ? [{ content: "取消任务", value: "cancel" }] : []),
+    ...(canReleaseTask(t) ? [{ content: "放弃并释放", value: "release" }] : []),
+    ...(["已取消", "已放弃"].includes(t.status)
+      ? [{ content: "复制配置创建新任务", value: "copy" }]
+      : []),
+  ];
+}
+function taskMenu(t, value) {
+  if (value === "edit") editRow(t, true);
+  else if (value === "cancel") cancelTask(t);
+  else if (value === "release") release(t);
+  else if (value === "copy") cloneTask(t);
+  else view(t);
+}
+async function primaryTask(t) {
+  const p = taskPresentation(t, db);
+  if (p.disabled) return;
+  if (p.action === "start") return start(t);
+  if (p.action === "copy") return cloneTask(t);
+  view(t);
+  await nextTick();
+  taskDetailRef.value?.primary();
+}
+function verifyTask({ task, evidence, status }) {
+  if (!["结果待确认", "平台审核中"].includes(task.status)) {
+    warning("任务状态已变化，请重新检查");
+    return;
+  }
+  task.evidence = evidence;
+  task.verifiedAt = new Date().toISOString();
+  if (status === "执行失败") task.retrySafe = !task.platformId;
+  if (status === "结果待确认" && task.status === "平台审核中") {
+    warning("平台已接收的稿件请继续查询审核，不降为未提交");
+    return;
+  }
+  taskResult(task, status);
+}
+function resumeTask(t) {
+  if (t.status !== "等待人工") return;
+  if (
+    t.submittedAt ||
+    t.attemptHistory
+      ?.at(-1)
+      ?.steps?.some((s) =>
+        ["结果待确认", "平台审核中", "已发布"].includes(s.status),
+      )
+  )
+    taskResult(t, "结果待确认");
+  else taskResult(t, "执行中");
 }
 function related(batchId, planId) {
   navigate("tasks");
@@ -392,7 +501,7 @@ async function takeControl(item) {
   return true;
 }
 async function start(t, silent = false) {
-  const errors = validate(t, db, t.id);
+  const errors = taskChecks(t, db);
   if (errors.length) {
     warning(errors.join("；"));
     return false;
@@ -421,12 +530,7 @@ async function start(t, silent = false) {
   }
 }
 async function release(t) {
-  if (
-    !["已取消", "执行失败"].includes(t.status) ||
-    t.claimed ||
-    (t.status === "执行失败" && !canRetry(t))
-  )
-    return;
+  if (!canReleaseTask(t)) return;
   if (
     !(await feedback.confirmWarning({
       title: "放弃并释放成片？",
@@ -437,7 +541,13 @@ async function release(t) {
     }))
   )
     return;
-  setResult(t, "已放弃");
+  if (!canReleaseTask(t)) {
+    warning("状态已变化，当前不能释放");
+    return;
+  }
+  setResult(t, "已放弃", {
+    evidence: "运营确认原任务已安全终止，放弃并释放成片占用",
+  });
 }
 async function bulk(action) {
   const rows = chosen.value
@@ -594,11 +704,13 @@ const listColumns = computed(() => {
       colKey: "operation",
       title: "操作",
       width:
-        page.value === "tasks" ? 250 : page.value === "templates" ? 285 : 215,
+        page.value === "tasks" ? 180 : page.value === "templates" ? 285 : 215,
       fixed: compact.value ? undefined : "right",
     },
   ];
 });
+const quickRef = ref(null),
+  taskDetailRef = ref(null);
 const composerRef = ref(null),
   planWizardRef = ref(null);
 const rowEdit = ref(null),
@@ -617,7 +729,8 @@ const platformTopics = computed({
   },
 });
 function newPublish(mode = "快速发布", planId = null) {
-  composerRef.value?.open(mode, planId);
+  if (mode === "快速发布") quickRef.value?.open();
+  else composerRef.value?.open(mode, planId);
 }
 async function onCreated({ batch, tasks }) {
   const saved = await persistNow();
@@ -672,7 +785,7 @@ async function closeRow() {
   rowEditOpen.value = false;
 }
 async function editRow(row, task = false) {
-  if (task && !(row.status === "待执行" || canRetry(row))) {
+  if (task && !canEditTask(row)) {
     warning("当前状态不允许修改已提交快照");
     return;
   }
@@ -703,14 +816,85 @@ async function saveRow() {
     return;
   }
   if (editingTaskId.value) {
+    const current = db.tasks.find((t) => t.id === editingTaskId.value);
+    if (!current || !canEditTask(current)) {
+      rowError.value = "任务已进入不可编辑状态，修改未应用，请重新查看执行记录";
+      return;
+    }
     Object.assign(
       db.tasks.find((t) => t.id === editingTaskId.value),
-      rowEdit.value,
+      Object.fromEntries(
+        [
+          "title",
+          "description",
+          "shortTitle",
+          "topics",
+          "tags",
+          "partition",
+          "declaration",
+          "visibility",
+          "schedule",
+          "cover",
+          "coverMode",
+          "coverSource",
+          "coverVariants",
+          "coverApproved",
+          "contentApproved",
+          "coverSignature",
+          "coverRender",
+          "templateId",
+          "templateVersion",
+          "templateDocument",
+          "templateDocuments",
+          "templateSnapshots",
+          "imageId",
+          "imageVersion",
+          "fieldVersions",
+        ]
+          .filter((k) => rowEdit.value[k] !== undefined)
+          .map((k) => [k, clone(rowEdit.value[k])]),
+      ),
       {
-        version: (rowEdit.value.version || 1) + 1,
-        snapshot: clone(rowEdit.value),
+        version: (current.version || 1) + 1,
+        snapshot: Object.fromEntries(
+          [
+            "platform",
+            "accountId",
+            "assetId",
+            "category",
+            "title",
+            "description",
+            "shortTitle",
+            "topics",
+            "tags",
+            "partition",
+            "declaration",
+            "visibility",
+            "schedule",
+            "cover",
+            "coverMode",
+            "coverSource",
+            "coverVariants",
+            "templateId",
+            "templateVersion",
+            "templateDocument",
+            "templateDocuments",
+            "templateSnapshots",
+          ]
+            .filter((k) => rowEdit.value[k] !== undefined)
+            .map((k) => [k, clone(rowEdit.value[k])]),
+        ),
       },
     );
+    if (
+      current.status === "排队中" &&
+      !current.claimed &&
+      current.attemptHistory?.at(-1)?.status === "排队中"
+    ) {
+      const pendingAttempt = current.attemptHistory.at(-1);
+      pendingAttempt.snapshot = clone(current.snapshot);
+      pendingAttempt.version = current.version;
+    }
   } else {
     composerRef.value?.updateRow(rowEdit.value);
   }
@@ -1192,7 +1376,7 @@ function linkEvidence() {
   toast("已保存核验依据；请用下方演示控制明确核验结果");
 }
 function cloneTask(t) {
-  composerRef.value?.open("快速发布", null, t);
+  quickRef.value?.open(t);
   detailOpen.value = false;
 }
 </script>
@@ -1215,7 +1399,8 @@ function cloneTask(t) {
       </button>
       <div class="nav-bottom">
         <a href="/example/proto/content-operations/">内容生产工作台 ↗</a
-        ><a href="/__docs/workspace/docs/design/publishing.md">发布设计说明 ↗</a
+        ><a href="/__docs/workspace/docs/design/publishing.md"
+          >发布设计说明 ↗</a
         ><small>交互原型 · 仅本地演示<br />不会上传或发布到真实平台</small>
       </div>
     </aside>
@@ -1250,11 +1435,20 @@ function cloneTask(t) {
         ></ResourcePageHeader
       >
       <ResourceNotice
-        v-if="composerRef?.hasDraft && ((page === 'tasks' && composerRef?.draftMode === '快速发布') || (page === 'batches' && composerRef?.draftMode !== '快速发布'))"
+        v-if="
+          (page === 'tasks' && quickRef?.hasDraft) ||
+          (page === 'batches' &&
+            composerRef?.hasDraft &&
+            composerRef?.draftMode !== '快速发布')
+        "
         tone="info"
       >
-        有未完成的{{ page === 'tasks' ? '快速发布' : '批量发布' }}配置。
-        <t-button variant="text" @click="composerRef.resume()">继续配置</t-button>
+        有未完成的{{ page === "tasks" ? "快速发布" : "批量发布" }}配置。
+        <t-button
+          variant="text"
+          @click="page === 'tasks' ? quickRef.resume() : composerRef.resume()"
+          >继续配置</t-button
+        >
       </ResourceNotice>
       <t-alert
         v-if="db.legacyPublishDraft"
@@ -1280,6 +1474,16 @@ function cloneTask(t) {
           />模拟本地保存失败（取消后重试）</label
         >
         <div class="inline-bar">
+          <t-button
+            variant="outline"
+            @click="
+              addTaskReviewScenario(db);
+              navigate('tasks');
+              query = '体验验收 ·';
+              applyQuery();
+            "
+            >载入任务八状态场景</t-button
+          >
           <t-button
             v-for="kind in ['30/28', '10%', '20%', '未知']"
             :key="kind"
@@ -1497,8 +1701,14 @@ function cloneTask(t) {
               <div>
                 <t-tooltip
                   :content="row.name || row.title || asset(row.assetId)?.title"
-                  ><strong>{{
-                    row.name || row.title || asset(row.assetId)?.title
+                  ><t-button
+                    v-if="page === 'tasks'"
+                    variant="text"
+                    class="task-title-link"
+                    @click="view(row)"
+                    >{{ row.title || asset(row.assetId)?.title }}</t-button
+                  ><strong v-else>{{
+                    row.name || row.title
                   }}</strong></t-tooltip
                 ><small v-if="page === 'tasks'"
                   >成片 {{ row.assetId }} ·
@@ -1537,7 +1747,7 @@ function cloneTask(t) {
           >
           <template #status="{ row }"
             ><t-tag :theme="stateTheme(row.status)" variant="light">{{
-              row.status
+              displayStatus(row)
             }}</t-tag
             ><small class="cell-secondary">{{ row.result }}</small></template
           >
@@ -1617,30 +1827,26 @@ function cloneTask(t) {
           >
           <template #operation="{ row }">
             <ResourceRowActions>
-              <template v-if="page === 'tasks'"
-                ><t-button variant="text" @click="view(row)">详情</t-button
-                ><t-button
-                  v-if="row.status === '待执行' || canRetry(row)"
-                  variant="text"
-                  @click="start(row)"
-                  >{{ canRetry(row) ? "重试" : "启动" }}</t-button
-                ><t-button
-                  v-if="row.status === '待执行' || canRetry(row)"
-                  variant="text"
-                  @click="editRow(row, true)"
-                  >编辑</t-button
-                ><t-button
-                  v-if="['待执行', '排队中'].includes(row.status)"
-                  variant="text"
-                  @click="taskResult(row, '已取消')"
-                  >取消</t-button
-                ><t-button
-                  v-if="['已取消', '执行失败'].includes(row.status)"
-                  theme="danger"
-                  variant="text"
-                  @click="release(row)"
-                  >放弃释放</t-button
-                ></template
+              <template v-if="page === 'tasks'">
+                <t-tooltip
+                  :content="
+                    taskPresentation(row, db).disabled
+                      ? taskPresentation(row, db).checks.join('；')
+                      : taskPresentation(row, db).label
+                  "
+                  ><t-button
+                    variant="text"
+                    class="is-primary"
+                    :disabled="taskPresentation(row, db).disabled"
+                    @click="primaryTask(row)"
+                    >{{ taskPresentation(row, db).label }}</t-button
+                  ></t-tooltip
+                >
+                <t-dropdown
+                  :options="taskMore(row)"
+                  @click="({ value }) => taskMenu(row, value)"
+                  ><t-button variant="text">更多</t-button></t-dropdown
+                > </template
               ><template v-else-if="['batches', 'plans'].includes(page)"
                 ><t-button variant="text" @click="view(row)">详情</t-button
                 ><t-button
@@ -1728,6 +1934,13 @@ function cloneTask(t) {
       :persist="persistNow"
       @saved="view"
     />
+    <QuickPublish
+      ref="quickRef"
+      :db="db"
+      :persist="persistNow"
+      @preview="openPreview"
+      @created="onCreated"
+    />
     <PublishComposer
       ref="composerRef"
       :db="db"
@@ -1796,13 +2009,8 @@ function cloneTask(t) {
             theme="warning"
             :message="validate(previewRow, db, previewRow.id).join('；')"
           />
-          <t-button
-            variant="outline"
-            @click="
-              mediaPreviewOpen = false;
-              editRow(previewRow, !!previewRow.id);
-            "
-            >返回编辑本条</t-button
+          <t-button variant="outline" @click="mediaPreviewOpen = false"
+            >返回</t-button
           >
         </div>
       </template>
@@ -2220,137 +2428,23 @@ function cloneTask(t) {
       kind="drawer"
       :width="1040"
     >
-      <template v-if="detail?.assetId"
-        ><h2>{{ detail.title }}</h2>
-        <ResourceDescriptions
-          ><t-descriptions-item label="任务 ID">{{
-            detail.id
-          }}</t-descriptions-item
-          ><t-descriptions-item label="发布平台">{{
-            detail.platform
-          }}</t-descriptions-item
-          ><t-descriptions-item label="发布账号">{{
-            account(detail.accountId)?.name
-          }}</t-descriptions-item
-          ><t-descriptions-item label="成片"
-            >{{ detail.assetId }} · {{ detail.category }}</t-descriptions-item
-          ><t-descriptions-item label="当前状态"
-            >{{ detail.status }} / {{ detail.result }}</t-descriptions-item
-          ><t-descriptions-item label="所属批次">{{
-            detail.batchId
-              ? db.batches.find((b) => b.id === detail.batchId)?.name
-              : "独立任务"
-          }}</t-descriptions-item>
-          <t-descriptions-item label="关联计划">{{
-            associatedPlan(db, {
-              kind: detail.batchId ? "batch" : "task",
-              id: detail.batchId || detail.id,
-            })?.name || "未关联"
-          }}</t-descriptions-item>
-          <t-descriptions-item label="执行尝试"
-            >{{ detail.attempts }} 次</t-descriptions-item
-          ></ResourceDescriptions
-        >
-        <h3>最终内容快照</h3>
-        <div class="snapshot">
-          <button class="media-thumb" @click="openPreview({ row: detail })">
-            <img :src="detail.cover" alt="查看任务最终内容" />
-          </button>
-          <div>
-            <strong>{{ detail.title }}</strong>
-            <p>{{ detail.description || "未填写简介" }}</p>
-            <small
-              >{{ detail.tags }} · {{ detail.partition }} ·
-              {{ detail.declaration }}</small
-            >
-            <p>
-              {{ detail.visibility }} ·
-              {{ detail.schedule || "启动后尽快提交" }}
-            </p>
-          </div>
-        </div>
-        <h3>发布结果与核验依据</h3>
-        <p>
-          {{ detail.result }}
-          {{
-            detail.status === "平台审核中" ? "· 平台已接收，尚未确认公开" : ""
-          }}
-        </p>
-        <p v-if="detail.evidence">
-          <a
-            v-if="detail.evidence.startsWith('https://')"
-            :href="detail.evidence"
-            target="_blank"
-            rel="noopener noreferrer"
-            >{{ detail.evidence }}</a
-          ><span v-else>{{ detail.evidence }}</span>
-        </p>
-        <div
-          v-if="['结果待确认', '平台审核中'].includes(detail.status)"
-          class="inline-bar"
-        >
-          <t-input
-            v-model="evidence"
-            placeholder="补录 HTTPS 作品链接"
-          /><t-button variant="outline" @click="linkEvidence"
-            >保存核验依据</t-button
-          >
-        </div>
-        <t-alert
-          v-if="['执行失败', '结果待确认', '等待人工'].includes(detail.status)"
-          theme="warning"
-          :message="
-            detail.status === '等待人工'
-              ? `需核验登录或平台验证。对应窗口 ${account(detail.accountId)?.window}，处理后复核账号再继续。`
-              : detail.status === '结果待确认'
-                ? '提交结果不明确，请先查作品和核验，暂不可重试或释放。'
-                : '已确认未发布，可编辑后重试；每次重试新增执行尝试。'
-          "
-        />
-        <h3>执行时间线</h3>
-        <ol v-if="detail.log?.length">
-          <li v-for="(log, i) in detail.log" :key="i">
-            {{ log.time }} · {{ log.text }}
-          </li>
-        </ol>
-        <p v-else class="muted">尚无本次演示执行记录</p>
-        <h3>执行尝试</h3>
-        <details
-          v-for="attempt in detail.attemptHistory || []"
-          :key="attempt.number"
-        >
-          <summary>
-            第 {{ attempt.number }} 次 · {{ attempt.started }} →
-            {{ attempt.ended || "尚未结束" }} · {{ attempt.status }}
-          </summary>
-          <p>
-            内容版本 {{ attempt.version }} · 发布标题
-            {{ attempt.snapshot?.title }} · 封面短标题
-            {{ attempt.snapshot?.shortTitle }} ·
-            {{ attempt.errorCode || "无错误码" }} ·
-            {{ attempt.receipt || "暂无回执" }}
-          </p>
-          <p v-for="(s, i) in attempt.steps || []" :key="i">
-            {{ s.time }} · {{ s.status }} · {{ s.evidence }}
-          </p>
-        </details>
-        <p v-if="!detail.attemptHistory?.length" class="muted">
-          样例仅保留尝试计数；新的演示执行会记录起止时间。
-        </p>
-        <details v-if="demoTransitions(detail).length" class="demo-controls">
-          <summary>演示控制 · 手动查看执行场景</summary>
-          <p>以下仅切换本地场景，不核验真实账号或作品。</p>
-          <div class="inline-bar">
-            <t-button
-              v-for="s in demoTransitions(detail)"
-              :key="s"
-              variant="outline"
-              @click="taskResult(detail, s)"
-              >{{ s }}</t-button
-            >
-          </div>
-        </details></template
-      >
+      <TaskDetail
+        v-if="detail?.assetId"
+        ref="taskDetailRef"
+        :key="detail.id"
+        :task="detail"
+        :db="db"
+        @start="start"
+        @edit="(t) => editRow(t, true)"
+        @cancel="cancelTask"
+        @release="release"
+        @copy="cloneTask"
+        @preview="openPreview"
+        @batch="view"
+        @verify="verifyTask"
+        @resume="resumeTask"
+        @transition="taskResult"
+      />
       <template v-else-if="detail?.items"
         ><h2>{{ detail.name }}</h2>
         <div class="metric-grid">
@@ -2534,6 +2628,7 @@ function cloneTask(t) {
           v-if="
             detail &&
             !detail.items &&
+            !detail.assetId &&
             associatedPlan(db, {
               kind: detail.assetId
                 ? detail.batchId
@@ -2558,42 +2653,9 @@ function cloneTask(t) {
           "
           >返回关联计划</t-button
         ><template v-if="detail?.assetId"
-          ><t-button
-            v-if="detail.batchId"
-            variant="text"
-            @click="view(db.batches.find((b) => b.id === detail.batchId))"
-            >返回所属批次</t-button
-          >
-          <t-button
-            v-if="detail.status === '待执行' || canRetry(detail)"
-            variant="outline"
-            @click="editRow(detail, true)"
-            >修订安全内容</t-button
-          >
-          <t-button
-            v-if="
-              detail.status === '待执行' ||
-              (detail.status === '排队中' && !detail.claimed)
-            "
-            variant="outline"
-            @click="taskResult(detail, '已取消')"
-            >取消并保留占用</t-button
-          >
-          <t-button
-            v-if="detail.status === '已取消' || canRetry(detail)"
-            variant="outline"
-            @click="release(detail)"
-            >放弃并释放</t-button
-          >
-          <t-button
-            v-if="detail.status === '待执行' || canRetry(detail)"
-            @click="start(detail)"
-            >启动 / 重试</t-button
-          ><t-button
-            v-if="['已取消', '已放弃'].includes(detail.status)"
-            variant="outline"
-            @click="cloneTask(detail)"
-            >复制配置新建</t-button
+          ><span class="task-footer-hint"
+            >任务 #{{ detail.id }} · {{ displayStatus(detail) }} ·
+            关闭后返回原列表位置</span
           ></template
         ><template v-else-if="detail?.items"
           ><t-button variant="outline" @click="related(null, detail.id)"

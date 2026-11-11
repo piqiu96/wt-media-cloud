@@ -118,3 +118,123 @@ export function addScenario(db, kind) {
   );
   return p;
 }
+
+// Additive task fixtures. Explicitly fictional, independent accounts avoid cross-scenario blocking.
+export function addTaskReviewScenario(db) {
+  let seq = nextId(db) + 100;
+  const statuses = [
+    "待执行",
+    "执行中",
+    "等待人工",
+    "结果待确认",
+    "平台审核中",
+    "执行失败",
+    "已发布",
+    "已取消",
+  ];
+  const tasks = statuses.map((status, index) => {
+    const a = {
+      id: seq++,
+      title: `体验验收成片 ${index + 1}`,
+      category: "三角洲行动",
+      quality: "优质",
+      ready: true,
+      fileAvailable: true,
+      cover: backgroundPicture(index),
+      duration: "00:49",
+    };
+    const account = {
+      id: seq++,
+      name: `体验验收账号 ${index + 1}`,
+      platform: "B站",
+      categories: [a.category],
+      enabled: true,
+      loginValid: true,
+      window: `演示 ${index + 1}`,
+    };
+    db.assets.push(a);
+    db.accounts.push(account);
+    const content = {
+      platform: "B站",
+      accountId: account.id,
+      assetId: a.id,
+      category: a.category,
+      ...defaults("B站", a),
+      title: `体验验收 · ${status === "执行失败" ? "确认失败" : status}`,
+      declaration: "内容无需标注",
+      version: 1,
+    };
+    const attempted = !["待执行", "已取消"].includes(status),
+      now = new Date().toISOString();
+    const t = {
+      ...content,
+      id: seq++,
+      batchId: null,
+      status,
+      result:
+        status === "结果待确认"
+          ? "未知"
+          : status === "平台审核中"
+            ? "平台已接收"
+            : status === "已发布"
+              ? "已公开"
+              : status === "执行失败"
+                ? "确认未发布"
+                : "未提交",
+      attempts: attempted ? 1 : 0,
+      claimed: ["执行中", "等待人工", "结果待确认"].includes(status),
+      snapshot: clone(content),
+      created: now,
+      log: [],
+      attemptHistory: [],
+      evidence: "",
+    };
+    if (attempted) {
+      t.attemptHistory = [
+        {
+          number: 1,
+          version: 1,
+          started: now,
+          status,
+          snapshot: clone(content),
+          steps: [
+            { time: now, status: "执行中", evidence: "本地演示：读取资源完成" },
+          ],
+        },
+      ];
+      t.log = [
+        { time: now, text: "本地演示：账号与资源检查完成" },
+        {
+          time: now,
+          text:
+            status === "执行中" ? "上传视频，等待进度回传" : `进入${status}`,
+        },
+      ];
+    }
+    if (status === "等待人工")
+      t.evidence = "本地演示：登录验证需要人工完成，上传现场已保留";
+    if (["结果待确认", "平台审核中", "已发布"].includes(status))
+      t.submittedAt = now;
+    if (status === "结果待确认")
+      t.evidence = "本地演示：点击提交后连接中断，尚未核实平台稿件";
+    if (["平台审核中", "已发布", "执行失败"].includes(status))
+      t.attemptHistory[0].ended = now;
+    if (status === "平台审核中")
+      t.evidence = "本地演示：稿件已接收，等待平台审核";
+    if (status === "已发布") {
+      t.publicAt = now;
+      t.evidence = "本地演示：公开发布结果样例，未关联真实作品链接";
+    }
+    if (status === "执行失败") {
+      t.failedStep = "上传视频";
+      t.evidence = "本地演示：上传阶段明确失败，原执行已结束且确认未发布";
+      t.attemptHistory[0].receipt = t.evidence;
+      t.attemptHistory[0].errorCode = "DEMO_UPLOAD_FAILED";
+    }
+    if (status === "已取消")
+      t.evidence = "本地演示：运营取消排期，保留当前平台的成片占用";
+    return t;
+  });
+  db.tasks.push(...tasks);
+  return tasks;
+}

@@ -17,7 +17,11 @@ export const categories = ["三角洲行动", "火影忍者", "通用"];
 export const threshold = 0.1;
 export const occupied = (task) => task.status !== "已放弃";
 export const canRetry = (task) =>
-  task.status === "执行失败" && task.result === "确认未发布";
+  task.status === "执行失败" &&
+  task.result === "确认未发布" &&
+  !task.claimed &&
+  (!task.platformId || task.retrySafe === true) &&
+  !!(task.attemptHistory?.at(-1)?.ended || task.executionEndedAt);
 export function nextBatch(tasks) {
   if (
     tasks.some((t) =>
@@ -31,7 +35,8 @@ export function nextBatch(tasks) {
     ["已发布", "平台审核中", "执行失败"].includes(t.status),
   );
   if (!known.length) return "等待跳过确认";
-  return known.filter(canRetry).length / known.length > threshold
+  return known.filter((t) => t.status === "执行失败").length / known.length >
+    threshold
     ? "等待继续确认"
     : "自动继续";
 }
@@ -41,7 +46,7 @@ export function stats(tasks, target = 0) {
     total: tasks.length,
     published,
     reviewing: tasks.filter((t) => t.status === "平台审核中").length,
-    failed: tasks.filter(canRetry).length,
+    failed: tasks.filter((t) => t.status === "执行失败").length,
     pending: tasks.filter((t) =>
       ["待执行", "排队中", "执行中"].includes(t.status),
     ).length,
@@ -304,7 +309,7 @@ export function resourceStatus(db, asset, platform, accountIds = null) {
   const candidates = db.accounts.filter(
     (a) =>
       a.enabled &&
-        a.loginValid !== false &&
+      a.loginValid !== false &&
       a.platform === platform &&
       a.categories.includes(asset.category) &&
       (!accountIds || accountIds.includes(a.id)),

@@ -1,5 +1,5 @@
 // Offline prototype business rules. No runtime API or external platform calls.
-import { platforms, validate, nextBatch, stats } from "./model.js";
+import { platforms, validate, nextBatch, stats, canRetry } from "./model.js";
 export const clone = (x) => JSON.parse(JSON.stringify(x));
 export const batchTasks = (db, b) =>
   b ? db.tasks.filter((t) => t.batchId === b.id) : [];
@@ -302,10 +302,7 @@ export function createPublication(
   return { batch: b, tasks };
 }
 export function queueTask(db, t, { retry = false } = {}) {
-  if (!(
-    t.status === "待执行" ||
-    (retry && t.status === "执行失败" && t.result === "确认未发布")
-  ))
+  if (t.claimed || !(t.status === "待执行" || (retry && canRetry(t))))
     return false;
   const errors = validate(t, db, t.id);
   if (errors.length) throw Error(errors.join("；"));
