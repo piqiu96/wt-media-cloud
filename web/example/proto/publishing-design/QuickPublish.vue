@@ -379,6 +379,28 @@ function setCoverChoice(value) {
         ? "请选择底图后生成封面"
         : "请点击生成封面";
 }
+function setCoverMethod(value) {
+  const replacing = value === "替换图片";
+  const selectedImage = props.db.images.find(
+    (i) =>
+      i.id === row.value.imageId &&
+      i.enabled &&
+      i.uses.includes(replacing ? "现成封面" : "底图"),
+  );
+  setCoverChoice(
+    replacing
+      ? "替换图片"
+      : selectedImage
+        ? "图片库图 + 模板"
+        : "当前素材图 + 模板",
+  );
+  image(selectedImage?.id || 0);
+}
+function setCoverImage(value) {
+  if (coverChoice.value !== "替换图片")
+    setCoverChoice(value ? "图片库图 + 模板" : "当前素材图 + 模板");
+  image(value);
+}
 function image(value) {
   const img = props.db.images.find((i) => i.id === value);
   row.value.imageId = value;
@@ -681,6 +703,13 @@ defineExpose({ open, resume, edit, hasDraft });
         </div>
         <div class="quick-content-grid">
           <div class="quick-copy-fields">
+            <label v-if="platform === '百家号'" data-field="description"
+              ><RequiredLabel>作品描述</RequiredLabel
+              ><t-textarea
+                :value="row.description"
+                :autosize="{ minRows: 3, maxRows: 5 }"
+                @change="(v) => setField('description', v)"
+            /></label>
             <label v-if="platform !== '百家号'" data-field="title"
               ><span
                 ><RequiredLabel>发布标题</RequiredLabel>
@@ -692,14 +721,85 @@ defineExpose({ open, resume, edit, hasDraft });
               ><t-input
                 :value="row.title"
                 placeholder="让用户一眼看懂这条内容"
-                @change="(v) => setField('title', v)" /></label
-            ><label data-field="description"
+                @change="(v) => setField('title', v)"
+            /></label>
+            <div class="quick-cover-fields" data-field="cover" tabindex="-1">
+              <h4><RequiredLabel>发布封面</RequiredLabel></h4>
+              <t-radio-group
+                :value="coverChoice === '替换图片' ? '替换图片' : '使用模板'"
+                @change="setCoverMethod"
+                ><t-radio-button value="替换图片">替换图片</t-radio-button
+                ><t-radio-button value="使用模板"
+                  >使用模板</t-radio-button
+                ></t-radio-group
+              >
+              <div class="quick-cover-workspace">
+                <button
+                  class="quick-cover-image"
+                  @click="emit('preview', { row })"
+                >
+                  <img :src="row.cover" alt="当前发布封面" /><span
+                    >点击检查各比例效果</span
+                  >
+                </button>
+                <div class="quick-cover-controls">
+                  <label class="quick-cover-source"
+                    ><RequiredLabel :required="coverChoice !== '替换图片'">{{
+                      coverChoice === "替换图片" ? "选择图片" : "选择底图"
+                    }}</RequiredLabel
+                    ><t-select
+                      :value="row.imageId || 0"
+                      :options="[
+                        { label: '素材自有图片', value: 0 },
+                        ...db.images
+                          .filter(
+                            (i) =>
+                              i.enabled &&
+                              i.uses.includes(
+                                coverChoice === '替换图片'
+                                  ? '现成封面'
+                                  : '底图',
+                              ),
+                          )
+                          .map((i) => ({ label: i.name, value: i.id })),
+                      ]"
+                      @change="setCoverImage" /></label
+                  ><template v-if="row.coverMode !== '现成封面'"
+                    ><label
+                      ><RequiredLabel>封面短语</RequiredLabel
+                      ><t-input
+                        :value="row.shortTitle"
+                        @change="(v) => setField('shortTitle', v)" /></label
+                    ><label
+                      ><RequiredLabel>合成模板</RequiredLabel
+                      ><t-select
+                        :value="row.templateId"
+                        :options="
+                          db.templates
+                            .filter((t) => t.enabled)
+                            .map((t) => ({ label: t.name, value: t.id }))
+                        "
+                        @change="setTemplate" /></label
+                    ><t-button
+                      class="quick-generate-cover"
+                      variant="outline"
+                      :loading="rendering"
+                      @click="renderCover"
+                      >生成封面</t-button
+                    ></template
+                  >
+                  <p v-else class="quick-help">
+                    直接使用图片，无需封面短标题。
+                  </p>
+                  <small v-if="platform === '百家号'" class="quick-help"
+                    >横竖封面规格待平台核验，当前按原图预览。</small
+                  >
+                </div>
+              </div>
+            </div>
+            <label v-if="platform !== '百家号'" data-field="description"
               ><RequiredLabel :required="platform === '百家号'">{{
-                platform === "百家号"
-                  ? "作品描述"
-                  : platform === "B站"
-                    ? "简介（选填）"
-                    : "正文（选填）"
+                platform === "B站" ? "简介（选填）" : "正文（选填）"
               }}</RequiredLabel
               ><t-textarea
                 :value="row.description"
@@ -759,104 +859,6 @@ defineExpose({ open, resume, edit, hasDraft });
               </div>
             </details>
           </div>
-          <div class="quick-cover-fields" data-field="cover" tabindex="-1">
-            <h4>发布封面</h4>
-            <t-radio-group :value="coverChoice" @change="setCoverChoice"
-              ><t-radio-button value="替换图片">替换图片</t-radio-button
-              ><t-radio-button value="当前素材图 + 模板"
-                >当前素材图 + 模板</t-radio-button
-              ><t-radio-button value="图片库图 + 模板"
-                >图片库图 + 模板</t-radio-button
-              ></t-radio-group
-            ><button
-              class="quick-cover-image"
-              @click="emit('preview', { row })"
-            >
-              <img :src="row.cover" alt="当前发布封面" /><span
-                >点击检查各比例效果</span
-              ></button
-            ><label v-if="coverChoice === '替换图片'"
-              >上传替换图片<input
-                type="file"
-                accept="image/png,image/jpeg,image/webp"
-                @change="
-                  async (e) => {
-                    const f = e.target.files?.[0];
-                    if (!f) return;
-                    if (
-                      !['image/png', 'image/jpeg', 'image/webp'].includes(
-                        f.type,
-                      )
-                    ) {
-                      error = '请选择 PNG、JPEG 或 WebP 图片';
-                      return;
-                    }
-                    if (f.size > 10 * 1024 * 1024) {
-                      error = '图片过大，请选择 10MB 以内图片';
-                      return;
-                    }
-                    const reader = new FileReader();
-                    reader.onload = () => {
-                      row.coverSource = reader.result;
-                      row.cover = reader.result;
-                      row.coverVariants = {};
-                      row.imageId = null;
-                    };
-                    reader.readAsDataURL(f);
-                  }
-                " /></label
-            ><label v-if="coverChoice !== '当前素材图 + 模板'"
-              ><RequiredLabel :required="coverChoice === '图片库图 + 模板'">{{
-                row.coverMode !== "现成封面" ? "选择底图" : "封面来源"
-              }}</RequiredLabel
-              ><t-select
-                :value="
-                  row.imageId ||
-                  (coverChoice === '图片库图 + 模板' ? undefined : 0)
-                "
-                :options="[
-                  ...(coverChoice === '图片库图 + 模板'
-                    ? []
-                    : [{ label: '成片自带封面', value: 0 }]),
-                  ...db.images
-                    .filter(
-                      (i) =>
-                        i.enabled &&
-                        i.uses.includes(
-                          row.coverMode !== '现成封面' ? '底图' : '现成封面',
-                        ),
-                    )
-                    .map((i) => ({ label: i.name, value: i.id })),
-                ]"
-                @change="image" /></label
-            ><template v-if="row.coverMode !== '现成封面'"
-              ><label
-                ><RequiredLabel>封面短语</RequiredLabel
-                ><t-input
-                  :value="row.shortTitle"
-                  @change="(v) => setField('shortTitle', v)" /></label
-              ><label
-                ><RequiredLabel>合成模板</RequiredLabel
-                ><t-select
-                  :value="row.templateId"
-                  :options="
-                    db.templates
-                      .filter((t) => t.enabled)
-                      .map((t) => ({ label: t.name, value: t.id }))
-                  "
-                  @change="setTemplate" /></label
-              ><t-button
-                variant="text"
-                :loading="rendering"
-                @click="renderCover"
-                >生成封面</t-button
-              ></template
-            >
-            <p v-else class="quick-help">直接使用图片，无需封面短标题。</p>
-            <small v-if="platform === '百家号'" class="quick-help"
-              >横竖封面规格待平台核验，当前按原图预览。</small
-            >
-          </div>
         </div>
       </section>
       <t-alert v-if="error" theme="warning" :message="error" />
@@ -870,11 +872,6 @@ defineExpose({ open, resume, edit, hasDraft });
             ? "保存后更新内容版本，任务保持待执行"
             : "创建后待执行，不会立即发布"
       }}</span
-      ><t-button
-        theme="default"
-        variant="outline"
-        @click="editing ? (visible = false) : close()"
-        >{{ editing ? "取消修改" : "取消" }}</t-button
       ><t-button v-if="!editing" variant="outline" @click="save"
         >保存草稿</t-button
       ><t-button
@@ -988,14 +985,10 @@ defineExpose({ open, resume, edit, hasDraft });
   margin: 0;
 }
 .quick-block {
-  padding: 24px 0 0;
-  margin-top: 24px;
-  border-top: 1px solid var(--wt-color-border);
+  margin-top: 32px;
 }
 .quick-block[data-field="resources"] {
-  padding-top: 0;
   margin-top: 0;
-  border-top: 0;
 }
 .quick-section-heading {
   display: flex;
@@ -1013,8 +1006,14 @@ defineExpose({ open, resume, edit, hasDraft });
   margin: 0;
 }
 .quick-section-heading h3 > span {
-  font-size: 13px;
+  font-size: 12px;
   color: var(--wt-color-primary);
+  background: var(--wt-color-primary-light);
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  display: grid;
+  place-items: center;
   font-weight: 500;
 }
 .quick-section-heading > small {
@@ -1081,40 +1080,61 @@ defineExpose({ open, resume, edit, hasDraft });
   margin-top: 4px;
 }
 .quick-content-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 320px;
-  gap: 28px;
+  min-width: 0;
 }
-.quick-copy-fields,
+.quick-copy-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
 .quick-cover-fields {
   display: flex;
   flex-direction: column;
-  gap: 20px;
-}
-.quick-cover-fields {
-  padding: 16px;
-  border: 1px solid var(--wt-color-border);
-  border-radius: 4px;
   gap: 16px;
-  align-self: start;
+  min-width: 0;
 }
 .quick-cover-fields h4 {
   margin: 0;
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 500;
 }
 .quick-cover-fields :deep(.t-radio-group) {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+  width: fit-content;
+  max-width: 100%;
 }
 .quick-cover-fields :deep(.t-radio-button) {
-  width: 100%;
-  justify-content: flex-start;
+  justify-content: center;
   border: 1px solid var(--wt-color-border-control);
   border-radius: 4px;
   margin: 0;
   box-sizing: border-box;
+}
+.quick-cover-workspace {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  align-items: start;
+  gap: 24px;
+}
+.quick-cover-controls {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 20px 24px;
+  align-items: start;
+  min-width: 0;
+}
+.quick-cover-source {
+  grid-column: 1 / -1;
+}
+.quick-cover-controls .quick-help {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+.quick-generate-cover {
+  align-self: end;
+  justify-self: start;
 }
 .quick-cover-fields :deep(.t-radio-button::before),
 .quick-cover-fields :deep(.t-radio-group__bg) {
@@ -1132,11 +1152,12 @@ defineExpose({ open, resume, edit, hasDraft });
   overflow: hidden;
   background: var(--wt-color-bg-subtle);
   cursor: zoom-in;
+  width: 100%;
 }
 .quick-cover-image img {
   display: block;
   width: 100%;
-  max-height: 180px;
+  height: 165px;
   object-fit: contain;
 }
 .quick-cover-image span {
@@ -1269,18 +1290,16 @@ defineExpose({ open, resume, edit, hasDraft });
 .quick-empty p {
   font-size: 13px;
 }
-@media (max-width: 900px) {
-  .quick-content-grid {
-    grid-template-columns: minmax(0, 1fr) 280px;
-    gap: 24px;
-  }
-}
 @media (max-width: 700px) {
   .quick-resource-grid,
-  .quick-content-grid,
+  .quick-cover-workspace,
+  .quick-cover-controls,
   .quick-picker-grid,
   .quick-resource-grid.two {
     grid-template-columns: 1fr;
+  }
+  .quick-cover-image {
+    max-width: 220px;
   }
   .quick-section-heading {
     align-items: flex-start;
