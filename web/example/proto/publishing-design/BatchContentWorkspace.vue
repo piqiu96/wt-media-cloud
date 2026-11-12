@@ -181,7 +181,9 @@ function adoptBatch() {
   const rows = selected.value.length
     ? props.rows.filter((r) => selected.value.includes(r.candidateId))
     : filtered.value;
-  for (const row of rows) for (const f of fieldKeys) if (!String(row[f] || "").trim() && adopt(row, f)) n++;
+  for (const row of rows)
+    for (const f of fieldKeys)
+      if (!String(row[f] || "").trim() && adopt(row, f)) n++;
   notice.value = `已补齐 ${n} 个空白字段；已有人工内容与过期建议保持原样。请检查并确认内容。`;
 }
 function edit(row) {
@@ -778,12 +780,17 @@ defineExpose({ edit });
     :width="960"
     :busy="saving"
     ><template v-if="editing"
-      ><p class="batch-editor-context">
-        {{ editing.category }} · {{ account(editing.accountId)?.name }} · V-{{
-          editing.assetId
-        }}
-        · 账号与成片只读
-      </p>
+      ><div class="batch-editor-context">
+        <img :src="asset(editing.assetId)?.cover" alt="来源成片封面" />
+        <div>
+          <strong>{{ asset(editing.assetId)?.title }}</strong>
+          <p>
+            {{ editing.category }} · {{ account(editing.accountId)?.name }} ·
+            V-{{ editing.assetId }}
+          </p>
+        </div>
+        <t-tag variant="light">资源只读</t-tag>
+      </div>
       <t-alert
         v-if="editError"
         theme="warning"
@@ -792,45 +799,40 @@ defineExpose({ edit });
       />
       <div class="batch-editor-grid">
         <div class="batch-editor-fields">
-          <label v-for="field in fieldKeys" :key="field"
-            >{{ labels[field]
-            }}<t-textarea
-              v-if="field === 'description'"
-              :value="editing[field] || ''"
-              :autosize="{ minRows: 3, maxRows: 6 }"
-              @change="(v) => editField(editing, field, v)"
-              :aria-label="labels[field]" /><t-input
-              v-else
-              :value="editing[field] || ''"
-              @change="(v) => editField(editing, field, v)"
-              :aria-label="labels[field]"
-          /></label>
-          <div class="batch-editor-platform">
+          <h3 class="batch-edit-section-heading"><span>01</span>发布文案</h3>
+          <div class="batch-editor-copy">
             <label
-              ><span>创作声明 <em>*</em></span
-              ><t-select
-                :popup-props="{ attach: 'body', zIndex: 5500 }"
-                :value="editing.declaration"
-                :options="declarationOptions(editing.platform)"
-                placeholder="按内容事实选择"
-                @change="(v) => editField(editing, 'declaration', v)"
-                aria-label="创作声明" /></label
-            ><label v-if="editing.platform === 'B站'"
-              >分区<t-select
-                :popup-props="{ attach: 'body', zIndex: 5500 }"
-                :value="editing.partition"
-                :options="[{ label: '游戏', value: '游戏' }]"
-                @change="(v) => editField(editing, 'partition', v)" /></label
-            ><label
-              >发布时间（可选）<input
-                type="datetime-local"
-                :value="editing.schedule"
-                @change="editField(editing, 'schedule', $event.target.value)"
+              v-for="field in [
+                'title',
+                'description',
+                'shortTitle',
+                'subTitle',
+                'topics',
+                'tags',
+              ]"
+              :key="field"
+              :class="{
+                'is-wide': ['title', 'description', 'topics', 'tags'].includes(
+                  field,
+                ),
+              }"
+              >{{ labels[field]
+              }}<t-textarea
+                v-if="field === 'description'"
+                :value="editing[field] || ''"
+                :autosize="{ minRows: 3, maxRows: 6 }"
+                @change="(v) => editField(editing, field, v)"
+                :aria-label="labels[field]" /><t-input
+                v-else
+                :value="editing[field] || ''"
+                @change="(v) => editField(editing, field, v)"
+                :aria-label="labels[field]"
             /></label>
           </div>
         </div>
         <aside class="batch-editor-cover">
-          <label>实际封面</label
+          <h3 class="batch-edit-section-heading"><span>02</span>发布封面</h3>
+          <label>实际输出预览</label
           ><button
             class="batch-editor-cover-image"
             @click="emit('preview', { kind: 'cover', row: editing })"
@@ -882,6 +884,30 @@ defineExpose({ edit });
             }}
           </p>
         </aside>
+        <div class="batch-editor-platform">
+          <h3 class="batch-edit-section-heading"><span>03</span>平台设置</h3>
+          <label
+            ><span>创作声明 <em>*</em></span
+            ><t-select
+              :popup-props="{ attach: 'body', zIndex: 5500 }"
+              :value="editing.declaration"
+              :options="declarationOptions(editing.platform)"
+              placeholder="按内容事实选择"
+              @change="(v) => editField(editing, 'declaration', v)"
+              aria-label="创作声明" /></label
+          ><label v-if="editing.platform === 'B站'"
+            >分区<t-select
+              :popup-props="{ attach: 'body', zIndex: 5500 }"
+              :value="editing.partition"
+              :options="[{ label: '游戏', value: '游戏' }]"
+              @change="(v) => editField(editing, 'partition', v)" /></label
+          ><label
+            >发布时间（可选）<input
+              type="datetime-local"
+              :value="editing.schedule"
+              @change="editField(editing, 'schedule', $event.target.value)"
+          /></label>
+        </div>
       </div>
       <p class="batch-inline-note">
         保存即确认采用当前文案与实际封面。未修改字段保留；未保存输入可取消放弃。
@@ -894,3 +920,358 @@ defineExpose({ edit });
     ></ResourceOverlay
   >
 </template>
+
+<style scoped>
+/* Same 36px controls and 14/13/12 typography as quick publish and production. */
+.batch-content-workspace,
+.batch-editor-grid,
+.batch-ai-dialog {
+  --batch-line: var(--wt-color-border);
+  --batch-muted: var(--wt-color-text-secondary);
+  --batch-blue: var(--wt-color-primary);
+  color: var(--wt-color-text-primary);
+  font-size: 13px;
+}
+.batch-content-workspace {
+  margin-top: 24px;
+}
+.batch-content-heading {
+  align-items: flex-start;
+  gap: 16px;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+}
+.batch-content-heading h3 {
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 24px;
+  margin: 0;
+}
+.batch-content-heading p {
+  margin: 4px 0 0;
+  color: var(--wt-color-text-secondary);
+}
+.batch-content-heading > div:last-child {
+  flex-wrap: wrap;
+  justify-content: flex-start;
+  gap: 8px;
+}
+.batch-content-layout {
+  grid-template-columns: minmax(300px, 0.85fr) minmax(0, 1.65fr);
+  gap: 20px;
+}
+.batch-task-list,
+.batch-content-detail {
+  border-radius: 6px;
+  border-color: var(--wt-color-border);
+  background: var(--wt-color-bg-container);
+}
+.batch-list-head {
+  height: 52px;
+  padding: 0 16px;
+}
+.batch-list-head strong {
+  font-weight: 500;
+  color: var(--wt-color-text-primary);
+}
+.batch-list-toolbar {
+  padding: 12px;
+  gap: 8px;
+  flex-wrap: wrap;
+  background: var(--wt-color-bg-subtle);
+}
+.batch-list-toolbar :deep(.t-checkbox__label) {
+  color: var(--wt-color-text-secondary);
+  font-size: 12px;
+}
+.batch-list-toolbar :deep(.t-button) {
+  padding-inline: 8px;
+}
+.batch-task-item {
+  min-height: 78px;
+  padding: 12px;
+  border-bottom-color: var(--wt-color-border);
+}
+.batch-task-item.active {
+  background: var(--wt-color-primary-light);
+  border-left-color: var(--wt-color-primary);
+}
+.batch-task-button b {
+  font-weight: 500;
+  font-size: 13px;
+  line-height: 21px;
+  color: var(--wt-color-text-primary);
+}
+.batch-task-button small {
+  font-size: 12px;
+  line-height: 20px;
+  color: var(--wt-color-text-secondary);
+}
+.batch-task-button > img {
+  width: 38px;
+  height: 50px;
+  border-radius: 4px;
+}
+.batch-detail-head {
+  padding: 16px 20px;
+  background: var(--wt-color-bg-container);
+  border-bottom: 1px solid var(--wt-color-border);
+}
+.batch-detail-head h3 {
+  margin: 0;
+  font-size: 16px;
+  line-height: 26px;
+  font-weight: 500;
+  color: var(--wt-color-text-primary);
+}
+.batch-detail-head p {
+  font-size: 12px;
+  line-height: 20px;
+  margin: 4px 0 0;
+  color: var(--wt-color-text-secondary);
+}
+.batch-resource-context {
+  flex-wrap: wrap;
+  color: var(--wt-color-text-secondary);
+  border-color: var(--wt-color-border);
+}
+.batch-resource-context b {
+  color: var(--wt-color-text-primary);
+}
+.batch-resource-context > small {
+  font-size: 12px;
+  background: var(--wt-color-bg-subtle);
+  color: var(--wt-color-text-secondary);
+}
+.batch-reading-grid {
+  grid-template-columns: minmax(0, 1fr) 190px;
+  gap: 24px;
+}
+.batch-read-field {
+  margin-bottom: 20px;
+}
+.batch-read-field > label {
+  color: var(--wt-color-text-secondary);
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 20px;
+}
+.batch-read-field > p {
+  margin: 8px 0 0;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--wt-color-text-primary);
+}
+.batch-read-field > p.is-title {
+  font-size: 16px;
+  font-weight: 500;
+  line-height: 26px;
+  color: var(--wt-color-text-primary);
+}
+.batch-read-field > p.is-empty {
+  color: var(--wt-color-text-assist);
+  font-size: 13px;
+}
+.batch-current-cover {
+  padding: 16px;
+  background: var(--wt-color-bg-subtle);
+  border-radius: 6px;
+  gap: 12px;
+}
+.batch-current-cover > label,
+.batch-current-cover > small,
+.batch-current-cover > p {
+  color: var(--wt-color-text-secondary);
+  font-size: 12px;
+  line-height: 20px;
+}
+.batch-detail-actions {
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-top: 16px;
+  border-top: 1px solid var(--wt-color-border);
+}
+.batch-editor-context {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px;
+  margin: 0 0 24px;
+  background: var(--wt-color-bg-subtle);
+  border: 1px solid var(--wt-color-border);
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--wt-color-text-secondary);
+}
+.batch-editor-context > img {
+  width: 38px;
+  height: 50px;
+  object-fit: cover;
+  border-radius: 4px;
+  flex: none;
+}
+.batch-editor-context > div:not(.t-tag) {
+  min-width: 0;
+  flex: 1;
+}
+.batch-editor-context strong {
+  display: block;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 22px;
+  color: var(--wt-color-text-primary);
+  overflow-wrap: anywhere;
+}
+.batch-editor-context p {
+  margin: 4px 0 0;
+  line-height: 20px;
+}
+.batch-editor-grid {
+  grid-template-columns: minmax(0, 1fr) 260px;
+  grid-template-areas: "copy cover" "platform cover";
+  gap: 28px;
+}
+.batch-editor-fields {
+  grid-area: copy;
+  display: block;
+}
+.batch-edit-section-heading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 20px;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 24px;
+  color: var(--wt-color-text-primary);
+}
+.batch-edit-section-heading > span {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--wt-color-primary);
+  background: var(--wt-color-primary-light);
+}
+.batch-editor-copy,
+.batch-editor-platform {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 20px 24px;
+}
+.batch-editor-copy .is-wide,
+.batch-editor-platform h3 {
+  grid-column: 1/-1;
+}
+.batch-editor-platform {
+  grid-area: platform;
+  margin-top: 0;
+  padding-top: 24px;
+  border-color: var(--wt-color-border);
+}
+.batch-editor-platform h3 {
+  margin: 0;
+}
+.batch-editor-grid label,
+.batch-ai-dialog > label {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 20px;
+  color: var(--wt-color-text-primary);
+}
+.batch-editor-grid :deep(.t-input),
+.batch-ai-dialog :deep(.t-input) {
+  min-height: 36px;
+}
+.batch-editor-platform input[type="datetime-local"] {
+  color: var(--wt-color-text-primary);
+  border-color: var(--wt-color-border-control);
+  background: var(--wt-color-bg-container);
+  font-size: 14px;
+}
+.batch-editor-platform input[type="datetime-local"]:focus-visible {
+  outline: 2px solid var(--wt-color-primary);
+  outline-offset: 2px;
+}
+.batch-editor-cover {
+  grid-area: cover;
+  max-width: none;
+  gap: 16px;
+  padding-left: 24px;
+  border-left: 1px solid var(--wt-color-border);
+}
+.batch-editor-cover .batch-edit-section-heading {
+  margin: 0 0 4px;
+}
+.batch-editor-cover-image {
+  border: 1px solid var(--wt-color-border);
+  border-radius: 6px;
+  background: var(--wt-color-bg-subtle);
+}
+.batch-editor-cover-image img {
+  max-height: 260px;
+  border-radius: 6px;
+}
+.batch-editor-cover > small,
+.batch-editor-cover > p,
+.batch-inline-note {
+  font-size: 12px;
+  line-height: 20px;
+  color: var(--wt-color-text-secondary);
+}
+@media (max-width: 1100px) {
+  .batch-content-layout {
+    grid-template-columns: 300px minmax(0, 1fr);
+  }
+  .batch-reading-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .batch-current-cover {
+    max-width: 260px;
+  }
+}
+@media (max-width: 800px) {
+  .batch-content-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .batch-task-scroll {
+    max-height: 330px;
+  }
+  .batch-editor-grid {
+    grid-template-areas: "copy" "cover" "platform";
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .batch-editor-cover {
+    padding: 24px 0 0;
+    border-left: 0;
+    border-top: 1px solid var(--wt-color-border);
+    max-width: none;
+  }
+  .batch-editor-cover-image {
+    max-width: 320px;
+    align-self: start;
+  }
+  .batch-editor-cover-image img {
+    max-height: 240px;
+  }
+}
+@media (max-width: 540px) {
+  .batch-editor-copy,
+  .batch-editor-platform {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .batch-editor-context {
+    flex-wrap: wrap;
+  }
+  .batch-content-heading > div:last-child > span:last-child {
+    display: none;
+  }
+}
+</style>

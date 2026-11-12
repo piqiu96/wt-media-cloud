@@ -1,5 +1,6 @@
 <script setup>
 import { computed, ref, nextTick, onMounted, onBeforeUnmount } from "vue";
+import { useMediaQuery } from "../../../src/shared/composables/useMediaQuery.js";
 import ResourceCard from "../../../src/shared/ui/resource/ResourceCard.vue";
 import ResourceFilterBar from "../../../src/shared/ui/resource/ResourceFilterBar.vue";
 import ResourceRowActions from "../../../src/shared/ui/resource/ResourceRowActions.vue";
@@ -22,6 +23,7 @@ import {
 import { batchCommand } from "./batchApi.js";
 const props = defineProps({ db: Object, persist: Function, active: Boolean });
 const emit = defineEmits(["configure", "task", "preview"]);
+const narrow = useMediaQuery("(max-width: 900px)");
 const query = ref(""),
   search = ref(""),
   stateFilter = ref(""),
@@ -116,22 +118,34 @@ const asset = (id) =>
   props.db.assets.find((a) => a.id === id)?.title || "原成片不存在";
 const date = (v) =>
   v ? new Date(v).toLocaleString("zh-CN", { hour12: false }) : "暂无更新";
-const columns = [
-  { colKey: "identity", title: "批次名称 / 编号", width: 185 },
-  { colKey: "plan", title: "所属计划", width: 110 },
-  { colKey: "target", title: "发布目标", width: 110 },
-  { colKey: "progress", title: "执行进度", width: 155 },
-  { colKey: "state", title: "批次状态", width: 100 },
-  { colKey: "pending", title: "待处理", width: 75 },
-  { colKey: "updated", title: "最近更新", width: 135 },
-  { colKey: "operation", title: "操作", width: 240, fixed: "right" },
-];
+const dateParts = (v) =>
+  v
+    ? [
+        new Date(v).toLocaleDateString("zh-CN"),
+        new Date(v).toLocaleTimeString("zh-CN", { hour12: false }),
+      ]
+    : ["暂无更新", ""];
+const columns = computed(() => [
+  { colKey: "identity", title: "批次名称 / 编号", width: 220 },
+  { colKey: "plan", title: "所属计划", width: 125 },
+  { colKey: "target", title: "发布目标", width: 125 },
+  { colKey: "progress", title: "执行进度", width: 172 },
+  { colKey: "state", title: "批次状态", width: 108 },
+  { colKey: "pending", title: "待处理", width: 72 },
+  { colKey: "updated", title: "最近更新", width: 132 },
+  {
+    colKey: "operation",
+    title: "操作",
+    width: 216,
+    ...(narrow.value ? {} : { fixed: "right" }),
+  },
+]);
 const taskColumns = [
   { colKey: "identity", title: "任务 / 发布内容", minWidth: 220 },
   { colKey: "resource", title: "账号 / 成片", minWidth: 175 },
   { colKey: "status", title: "任务状态", width: 115 },
   { colKey: "issue", title: "异常原因", minWidth: 200 },
-  { colKey: "operation", title: "操作", minWidth: 210 },
+  { colKey: "operation", title: "操作", minWidth: 280 },
 ];
 function open(b, process = false) {
   current.value = b.id;
@@ -307,6 +321,7 @@ defineExpose({ open, action, edit, directURL });
       <h2>
         全部批次 <span>{{ db.batches.length }}</span>
       </h2>
+      <span class="batch-list-caption">按批次跟进配置、执行与处理结果</span>
     </div>
     <ResourceFilterBar>
       <label class="wt-filter-field wt-filter-field--wide"
@@ -336,18 +351,20 @@ defineExpose({ open, action, edit, directURL });
           placeholder="全部状态"
           :options="states.map((x) => ({ label: x, value: x }))"
       /></label>
-      <t-button @click="search = query">查询</t-button
-      ><t-button
-        variant="outline"
-        theme="default"
-        @click="
-          query = '';
-          search = '';
-          stateFilter = '';
-          platform = '';
-        "
-        >重置</t-button
-      >
+      <div class="wt-filter-actions">
+        <t-button @click="search = query">查询</t-button
+        ><t-button
+          variant="outline"
+          theme="default"
+          @click="
+            query = '';
+            search = '';
+            stateFilter = '';
+            platform = '';
+          "
+          >重置</t-button
+        >
+      </div>
     </ResourceFilterBar>
     <t-table
       row-key="id"
@@ -359,22 +376,31 @@ defineExpose({ open, action, edit, directURL });
         defaultPageSize: 8,
         pageSizeOptions: [8, 16, 32],
         total: records.length,
+        showJumper: false,
       }"
       :hover="true"
     >
       <template #identity="{ row }"
-        ><button class="batch-link" @click="open(row)">{{ row.name }}</button
+        ><button
+          class="batch-link batch-name"
+          :title="row.name"
+          @click="open(row)"
+        >
+          {{ row.name }}</button
         ><small>B-{{ row.id }} · {{ row.platform }}</small></template
       >
       <template #plan="{ row }"
-        ><span>{{ plan(row)?.name || "独立批次" }}</span
+        ><span class="batch-cell-text" :title="plan(row)?.name || '独立批次'">{{
+          plan(row)?.name || "独立批次"
+        }}</span
         ><small v-if="row.sourceBatchId"
           >复制自 B-{{ row.sourceBatchId }}</small
         ></template
       >
       <template #target="{ row }"
-        ><b>{{ batchMetrics(db, row).target }} 条</b
-        ><small>{{
+        ><strong class="batch-target-value"
+          >{{ batchMetrics(db, row).target }} <span>条</span></strong
+        ><small class="batch-cell-text">{{
           (row.targets || [])
             .map((t) => `${t.category} ${t.count}`)
             .join(" · ") || "待配置目标"
@@ -391,6 +417,7 @@ defineExpose({ open, action, edit, directURL });
             }}<span>{{ batchMetrics(db, row).progress }}%</span>
           </div>
           <t-progress
+            color="var(--wt-color-primary)"
             :percentage="batchMetrics(db, row).progress"
             :label="false"
             size="small"
@@ -426,7 +453,12 @@ defineExpose({ open, action, edit, directURL });
         ><span v-else>—</span></template
       >
       <template #updated="{ row }"
-        ><small>{{ date(row.updatedAt || row.created) }}</small></template
+        ><span class="batch-date">{{
+          dateParts(row.updatedAt || row.created)[0]
+        }}</span
+        ><small class="batch-date">{{
+          dateParts(row.updatedAt || row.created)[1]
+        }}</small></template
       >
       <template #operation="{ row }"
         ><ResourceRowActions
@@ -434,7 +466,10 @@ defineExpose({ open, action, edit, directURL });
             v-for="(a, i) in batchActions(db, row)"
             :key="a"
             variant="text"
-            :class="{ 'is-primary': i === 0 }"
+            :class="{
+              'is-primary': i === 0,
+              'is-danger': ['cancel', 'stop'].includes(a),
+            }"
             @click="action(row, a)"
             >{{ labels[a] }}</t-button
           ></ResourceRowActions
@@ -446,6 +481,9 @@ defineExpose({ open, action, edit, directURL });
           description="调整搜索条件，或使用右上角“批量发布”创建批次。"
       /></template>
     </t-table>
+    <p v-if="narrow" class="batch-scroll-note">
+      左右滑动表格，查看完整进度与操作。
+    </p>
   </ResourceCard>
   <Overlay
     v-model:visible="detailOpen"
@@ -465,7 +503,10 @@ defineExpose({ open, action, edit, directURL });
               )"
               :key="a"
               variant="text"
-              :class="{ 'is-primary': i === 0 }"
+              :class="{
+                'is-primary': i === 0,
+                'is-danger': ['cancel', 'stop'].includes(a),
+              }"
               @click="action(batch, a)"
               >{{ labels[a] }}</t-button
             ></ResourceRowActions
@@ -521,6 +562,7 @@ defineExpose({ open, action, edit, directURL });
             </div>
             <t-progress
               :percentage="metrics.progress"
+              color="var(--wt-color-primary)"
               :label="false"
               size="small"
             />
@@ -548,7 +590,7 @@ defineExpose({ open, action, edit, directURL });
         <t-alert
           v-if="batch.firstStartedAt"
           theme="info"
-          message="首次执行请求已被接受，全部发布配置永久只读。资源异常只能恢复原资源；永久不可用请取消或放弃任务，由新批次补足目标。"
+          message="首次执行后，全部发布配置永久只读。资源异常仅可恢复原资源；永久不可用请取消或放弃任务，再用新批次补足。"
         />
         <ResourceFilterBar
           ><label class="wt-filter-field wt-filter-field--wide"
@@ -587,14 +629,33 @@ defineExpose({ open, action, edit, directURL });
           :columns="taskColumns"
           :pagination="
             tasks.length > 8
-              ? { defaultCurrent: 1, defaultPageSize: 8, total: tasks.length }
+              ? {
+                  defaultCurrent: 1,
+                  defaultPageSize: 8,
+                  total: tasks.length,
+                  showJumper: false,
+                }
               : undefined
           "
         >
           <template #identity="{ row }"
-            ><button class="batch-link" @click="emit('task', row)">
-              {{ row.title || "未配置标题" }}</button
-            ><small>T-{{ row.id }} · {{ row.category }}</small></template
+            ><div class="batch-task-identity">
+              <img
+                v-if="db.assets.find((v) => v.id === row.assetId)?.cover"
+                :src="db.assets.find((v) => v.id === row.assetId).cover"
+                alt="成片封面"
+              />
+              <div>
+                <button
+                  class="batch-link batch-name"
+                  :title="row.title"
+                  @click="emit('task', row)"
+                >
+                  {{ row.title || "未配置标题" }}</button><small
+                  >T-{{ row.id }} · {{ row.category }}</small
+                >
+              </div>
+            </div></template
           >
           <template #resource="{ row }"
             >{{ account(row.accountId)
@@ -758,7 +819,12 @@ defineExpose({ open, action, edit, directURL });
           ]"
           :pagination="
             history.length > 8
-              ? { defaultCurrent: 1, defaultPageSize: 8, total: history.length }
+              ? {
+                  defaultCurrent: 1,
+                  defaultPageSize: 8,
+                  total: history.length,
+                  showJumper: false,
+                }
               : undefined
           "
           ><template #time="{ row }">{{ date(row.time) }}</template
@@ -946,11 +1012,11 @@ defineExpose({ open, action, edit, directURL });
             · 目标 {{ metrics.target }} 条</small
           >
         </div>
-        <t-tag variant="light">账号与成片映射只读</t-tag>
+        <t-tag variant="light">仅编辑内容</t-tag>
       </div>
       <t-alert
         theme="info"
-        message="仅允许修改发布标题、简介、标签、封面等内容配置。批次名称、目标、类目及资源映射不可修改；首次执行请求成功接受后永久锁定。" /><t-alert
+        message="可编辑文案与封面；批次目标和资源映射已锁定。首次执行后全部内容永久只读。" /><t-alert
         v-if="error"
         theme="warning"
         :message="error" /><BatchContentWorkspace
@@ -977,29 +1043,69 @@ defineExpose({ open, action, edit, directURL });
 </template>
 <style scoped>
 .batch-v12-list-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
   padding: 20px 24px 0;
 }
 .batch-v12-list-heading h2 {
   margin: 0;
   font-size: 16px;
+  font-weight: 500;
+  line-height: 24px;
 }
 .batch-v12-list-heading h2 span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  height: 22px;
+  padding: 0 6px;
   margin-left: 8px;
-  font-size: 13px;
-  color: var(--wt-text-secondary);
+  border-radius: 4px;
+  background: var(--wt-color-bg-subtle);
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--wt-color-text-secondary);
+}
+.batch-list-caption,
+.batch-scroll-note {
+  font-size: 12px;
+  line-height: 20px;
+  color: var(--wt-color-text-secondary);
+}
+.batch-scroll-note {
+  margin: 8px 20px 0;
 }
 .batch-v12-list :deep(.t-table) {
   font-size: 13px;
+  line-height: 1.6;
+}
+.batch-v12-list :deep(.t-table__content table) {
+  min-width: 1170px;
+}
+.batch-v12-list :deep(.t-table th) {
+  height: 44px;
+  padding: 10px 16px;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--wt-color-text-secondary);
+  background: var(--wt-color-bg-subtle);
 }
 .batch-v12-list :deep(.t-table td) {
-  padding-top: 18px;
-  padding-bottom: 18px;
+  padding: 12px 16px;
+  height: 78px;
+  box-sizing: border-box;
+  vertical-align: middle;
 }
 small {
   display: block;
-  color: var(--wt-text-secondary);
+  color: var(--wt-color-text-secondary);
   font-size: 12px;
-  line-height: 1.7;
+  font-weight: 400;
+  line-height: 20px;
   margin-top: 4px;
 }
 .batch-link {
@@ -1007,7 +1113,7 @@ small {
   border: 0;
   background: none;
   text-align: left;
-  color: var(--wt-primary);
+  color: var(--wt-color-primary);
   font: inherit;
   cursor: pointer;
   line-height: 1.6;
@@ -1015,8 +1121,40 @@ small {
 .batch-link:hover {
   text-decoration: underline;
 }
-.batch-v12-list :deep(th) {
+.batch-link:focus-visible,
+.batch-cover:focus-visible {
+  outline: 2px solid var(--wt-color-primary);
+  outline-offset: 3px;
+  border-radius: 4px;
+}
+.batch-name,
+.batch-cell-text {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+.batch-name {
+  font-weight: 500;
+}
+.batch-date {
+  display: block;
   white-space: nowrap;
+  font-size: 12px;
+  line-height: 20px;
+}
+.batch-date + small {
+  margin-top: 0;
+}
+.batch-target-value {
+  font-size: 16px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+.batch-target-value > span {
+  font-size: 12px;
+  font-weight: 400;
 }
 .batch-v12-list .batch-progress-title,
 .batch-v12-list .batch-progress-title + .t-progress + small {
@@ -1025,45 +1163,62 @@ small {
 .batch-progress-title {
   display: flex;
   justify-content: space-between;
-  gap: 14px;
+  align-items: center;
+  gap: 12px;
   font-size: 12px;
-  margin: 8px 0;
+  line-height: 20px;
+  margin: 0 0 6px;
+  font-variant-numeric: tabular-nums;
 }
 .batch-progress-title span {
   white-space: nowrap;
-  color: var(--wt-text-secondary);
+  color: var(--wt-color-text-secondary);
 }
 .batch-v12-detail {
   display: flex;
   flex-direction: column;
   gap: 28px;
+  max-width: 1120px;
+  margin-inline: auto;
+  color: var(--wt-color-text-primary);
+  font-size: 13px;
 }
-.batch-v12-detail section {
-  border: 1px solid var(--wt-color-border);
-  border-radius: 8px;
-  padding: 20px 24px;
-  background: var(--wt-color-bg-container);
+.batch-v12-detail > section {
+  padding: 0 0 28px;
+  border-bottom: 1px solid var(--wt-color-border);
+  min-width: 0;
+}
+.batch-v12-detail > section:last-child {
+  padding-bottom: 0;
+  border: 0;
 }
 .batch-section-title {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
+  flex-wrap: wrap;
+  gap: 12px;
   margin-bottom: 20px;
 }
 .batch-section-title h2 {
   margin: 0;
-  font-size: 16px;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 24px;
   display: flex;
   align-items: center;
   gap: 10px;
 }
 .batch-section-title h2 > span {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
   font-size: 12px;
-  color: var(--wt-primary);
-  padding: 3px 6px;
+  font-weight: 500;
   border-radius: 4px;
-  background: var(--wt-info-bg);
+  color: var(--wt-color-primary);
+  background: var(--wt-color-primary-light);
 }
 .batch-section-title h2 small {
   display: inline;
@@ -1071,34 +1226,82 @@ small {
 }
 .batch-overview {
   display: grid;
-  grid-template-columns: 1fr 380px;
-  gap: 36px;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  gap: 32px;
 }
 .batch-overview h3 {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
   margin: 0 0 12px;
   font-size: 18px;
+  font-weight: 500;
+  line-height: 28px;
+  overflow-wrap: anywhere;
 }
 .batch-overview p {
-  line-height: 1.8;
+  line-height: 1.7;
   font-size: 13px;
-  color: var(--wt-text-secondary);
+  color: var(--wt-color-text-secondary);
   margin: 8px 0;
 }
+.batch-overview > div {
+  min-width: 0;
+}
 .batch-progress-panel {
-  padding-left: 28px;
-  border-left: 1px solid var(--wt-color-border);
+  padding: 16px 20px;
+  background: var(--wt-color-bg-subtle);
+  border: 1px solid var(--wt-color-border);
+  border-radius: 6px;
+}
+.batch-progress-panel > .batch-progress-title:not(:first-child) {
+  margin-top: 14px;
 }
 .batch-counts,
 .batch-dialog-counts {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 16px;
-  margin-bottom: 20px;
+  margin-bottom: 18px;
 }
 .batch-counts strong,
 .batch-dialog-counts strong {
-  font-size: 26px;
-  font-weight: 600;
+  font-size: 24px;
+  line-height: 32px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+.batch-v12-detail :deep(.t-table) {
+  font-size: 13px;
+  line-height: 1.7;
+}
+.batch-v12-detail :deep(.t-table td) {
+  padding: 12px 16px;
+  vertical-align: middle;
+}
+.batch-v12-detail :deep(.t-table th) {
+  background: var(--wt-color-bg-subtle);
+  font-weight: 400;
+  color: var(--wt-color-text-secondary);
+  white-space: nowrap;
+}
+.batch-task-identity {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+.batch-task-identity > img {
+  width: 38px;
+  height: 50px;
+  object-fit: cover;
+  flex: none;
+  border-radius: 4px;
+  background: var(--wt-color-bg-subtle);
+}
+.batch-task-identity > div {
+  min-width: 0;
 }
 .batch-snapshot-meta {
   display: grid;
@@ -1106,18 +1309,25 @@ small {
   gap: 20px;
   margin-bottom: 20px;
   font-size: 13px;
+  padding: 16px 20px;
+  background: var(--wt-color-bg-subtle);
+  border-radius: 6px;
 }
 .batch-frozen-row {
   padding: 16px 0;
   border-bottom: 1px solid var(--wt-color-border);
   font-size: 13px;
+  line-height: 1.7;
+}
+.batch-frozen-row b {
+  font-weight: 500;
 }
 .batch-cover {
   border: 0;
   background: none;
   padding: 0;
   margin-top: 10px;
-  cursor: pointer;
+  cursor: zoom-in;
 }
 .batch-cover img {
   width: 140px;
@@ -1128,13 +1338,16 @@ small {
 .batch-form-field {
   display: grid;
   gap: 8px;
-  margin: 18px 0;
-  font-size: 14px;
+  margin: 20px 0;
+  font-size: 13px;
+  font-weight: 500;
 }
 .batch-blocked {
   max-height: 200px;
   overflow: auto;
-  background: var(--wt-warning-bg);
+  border: 1px solid var(--wt-color-border);
+  border-radius: 4px;
+  background: var(--wt-color-bg-subtle);
   padding: 12px 12px 12px 30px;
   font-size: 13px;
   line-height: 1.8;
@@ -1146,42 +1359,64 @@ small {
 }
 .batch-dialog-identity h3 {
   margin: 0;
+  font-size: 16px;
+  font-weight: 500;
+  line-height: 26px;
 }
 .batch-dialog-counts {
-  padding: 18px;
-  background: var(--wt-color-bg-page);
-  border-radius: 8px;
+  padding: 16px 20px;
+  background: var(--wt-color-bg-subtle);
+  border: 1px solid var(--wt-color-border);
+  border-radius: 6px;
 }
 .batch-editor-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
   margin-bottom: 20px;
 }
 .batch-editor-header h2 {
   font-size: 18px;
+  font-weight: 500;
+  line-height: 28px;
   margin: 0;
 }
 .batch-v12-detail :deep(.t-alert) {
-  margin-bottom: 16px;
+  margin-bottom: 20px;
+  font-size: 13px;
+  line-height: 1.7;
 }
 @media (max-width: 900px) {
   .batch-overview {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
     gap: 20px;
   }
-  .batch-progress-panel {
-    border: 0;
-    padding: 0;
-  }
   .batch-snapshot-meta {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 16px;
   }
-  .batch-v12-detail section {
+  .batch-list-caption {
+    display: none;
+  }
+  .batch-v12-detail {
+    gap: 24px;
+  }
+  .batch-v12-detail > section {
+    padding-bottom: 24px;
+  }
+}
+@media (max-width: 540px) {
+  .batch-v12-list-heading {
+    padding: 16px 20px 0;
+  }
+  .batch-progress-panel {
     padding: 16px;
   }
-  .batch-section-title {
-    flex-wrap: wrap;
+  .batch-counts,
+  .batch-dialog-counts {
+    gap: 12px;
   }
 }
 </style>
