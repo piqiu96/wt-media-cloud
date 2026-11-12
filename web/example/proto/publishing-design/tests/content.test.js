@@ -97,3 +97,15 @@ it("D01 Shanghai publication day uses public timestamp, unknown shared capacity 
   expect(inv.publishAccounts).toBe(1);
   expect(inv.capacity).toBeNull();
 });
+it("editing a template subtitle invalidates the rendered cover and approval", () => {
+  const row = initCandidate({
+    subTitle: "旧副标题",
+    coverApproved: true,
+    coverVariants: { source: "old" },
+    coverSignature: "old",
+  });
+  editField(row, "subTitle", "新副标题");
+  expect(row.coverApproved).toBe(false);
+  expect(row.coverVariants).toEqual({});
+  expect(row.coverSignature).toBeNull();
+});

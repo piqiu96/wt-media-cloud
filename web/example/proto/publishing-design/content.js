@@ -33,6 +33,7 @@ export function editField(r, field, value) {
   if (
     [
       "shortTitle",
+      "subTitle",
       "coverSource",
       "templateId",
       "templateDocument",

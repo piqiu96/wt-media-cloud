@@ -4,6 +4,7 @@ import Overlay from "./PrototypeOverlay.vue";
 import RequiredLabel from "./RequiredLabel.vue";
 import { accountAvailability } from "./accountAvailability.js";
 import AccountPicker from "./AccountPicker.vue";
+import { defaultPublishingResources } from "./quickPublishSelection.js";
 import { canEditTask } from "./taskExperience.js";
 import { feedback } from "../../../src/shared/ui/feedback/index.js";
 import {
@@ -14,7 +15,12 @@ import {
   validate,
 } from "./model.js";
 import { initCandidate, editField } from "./content.js";
-import { ensureCoverResults, coverSpecs, coverSignature } from "./covers.js";
+import {
+  ensureCoverResults,
+  coverSpecs,
+  coverSignature,
+  coverTextFields,
+} from "./covers.js";
 import { createPublication, clone } from "./relationships.js";
 const props = defineProps({ db: Object, persist: Function });
 const emit = defineEmits(["created", "preview"]);
@@ -123,11 +129,15 @@ const hasDraft = computed(
     (props.db.publishDraft?.active &&
       props.db.publishDraft?.mode === "快速发布"),
 );
+const templateFields = computed(() =>
+  coverTextFields(row.value?.templateDocument),
+);
 const manual = computed(() => row.value?.manualFields || []);
 const labels = {
   title: "发布标题",
   description: "正文 / 简介",
-  shortTitle: "封面短标题",
+  shortTitle: "封面主标题",
+  subTitle: "封面副标题",
   topics: "话题",
   tags: "标签",
 };
@@ -144,7 +154,7 @@ function draft() {
 watch(
   [row, platform, accountId, category],
   () => {
-    if (visible.value && !editing.value) {
+    if (visible.value && !editing.value && !busy.value) {
       checked.value = false;
       props.db.quickDraft = draft();
     }
@@ -182,6 +192,7 @@ async function open(source = null) {
       "title",
       "description",
       "shortTitle",
+      "subTitle",
       "tags",
       "topics",
       "declaration",
@@ -192,6 +203,7 @@ async function open(source = null) {
       "coverSource",
       "coverMode",
       "coverTreatment",
+      "imageId",
       "templateId",
       "templateVersion",
       "templateDocument",
@@ -216,6 +228,7 @@ async function open(source = null) {
       : "";
   checked.value = false;
   visible.value = true;
+  if (!row.value) await selectDefaultResources();
 }
 async function resume() {
   editing.value = null;
@@ -234,6 +247,7 @@ async function resume() {
   checked.value = false;
   coverChoice.value = row.value?.coverTreatment || "替换图片";
   visible.value = true;
+  if (!row.value) await selectDefaultResources();
   savedDraft.value = JSON.stringify(draft());
   if (props.db.publishDraft?.mode === "快速发布")
     props.db.publishDraft.active = false;
@@ -254,7 +268,8 @@ async function changeResource(field, value) {
   if (field === "platform") {
     platform.value = value;
     accountId.value = null;
-    category.value = "";
+    category.value =
+      categoryOptions.value.length === 1 ? categoryOptions.value[0] : "";
   }
   if (field === "account") {
     accountId.value = value;
@@ -264,8 +279,18 @@ async function changeResource(field, value) {
   if (field === "category") {
     category.value = value;
     accountId.value = null;
-    notice.value = "类目已变更，请重新选择匹配账号。";
   }
+  await selectDefaultResources();
+}
+async function selectDefaultResources() {
+  const selected = defaultPublishingResources(
+    props.db,
+    platform.value,
+    category.value,
+    accountId.value,
+  );
+  accountId.value = selected.account?.id || null;
+  if (selected.asset) await chooseAsset(selected.asset);
 }
 async function chooseAsset(a) {
   if (a.reason) return;
@@ -283,10 +308,13 @@ async function chooseAsset(a) {
       "title",
       "description",
       "shortTitle",
+      "subTitle",
       "tags",
       "topics",
       "declaration",
       "coverMode",
+      "coverTreatment",
+      "imageId",
       "coverSource",
       "templateId",
       "templateVersion",
@@ -348,10 +376,19 @@ function setTemplate(value) {
   row.value.templateDocuments = {};
   for (const spec of coverSpecs(platform.value)) {
     const matching = [t, ...props.db.templates].find(
-      (t) =>
-        t?.enabled &&
+      (candidate) =>
+        candidate?.enabled &&
+        coverTextFields(candidate.document)
+          .map((f) => f.key)
+          .sort()
+          .join() ===
+          coverTextFields(t?.document)
+            .map((f) => f.key)
+            .sort()
+            .join() &&
         Math.abs(
-          t.document.width / t.document.height - spec.width / spec.height,
+          candidate.document.width / candidate.document.height -
+            spec.width / spec.height,
         ) < 0.01,
     );
     if (matching)
@@ -520,6 +557,7 @@ async function create() {
         "title",
         "description",
         "shortTitle",
+        "subTitle",
         "tags",
         "topics",
         "declaration",
@@ -662,6 +700,12 @@ defineExpose({ open, resume, edit, hasDraft });
         <p v-if="platform && !accountOptions.length" class="quick-warning">
           当前平台没有可用账号，请先补充账号或处理登录状态。
         </p>
+        <p
+          v-if="platform && category && !selectedAccount"
+          class="quick-warning"
+        >
+          当前平台与类目没有可用账号，请更换类目或处理账号状态。
+        </p>
         <div class="quick-selected-asset">
           <img v-if="selectedAsset" :src="selectedAsset.cover" alt="已选成片" />
           <div>
@@ -669,7 +713,9 @@ defineExpose({ open, resume, edit, hasDraft });
             ><small>{{
               selectedAsset
                 ? `成片 ${selectedAsset.id} · ${selectedAsset.duration} · ${selectedAsset.category}`
-                : "只安排当前账号支持、同平台未占用的成片。"
+                : category && selectedAccount
+                  ? "当前类目没有可用成片，请更换类目或补充成片。"
+                  : "只安排当前账号支持、同平台未占用的成片。"
             }}</small>
           </div>
           <t-button
@@ -743,14 +789,39 @@ defineExpose({ open, resume, edit, hasDraft });
                   >
                 </button>
                 <div class="quick-cover-controls">
+                  <label
+                    v-if="coverChoice !== '替换图片'"
+                    class="quick-cover-source"
+                    ><RequiredLabel>封面模板</RequiredLabel
+                    ><t-select
+                      :value="row.templateId"
+                      placeholder="选择封面模板"
+                      :options="
+                        db.templates
+                          .filter((t) => t.enabled)
+                          .map((t) => ({ label: t.name, value: t.id }))
+                      "
+                      @change="setTemplate"
+                  /></label>
                   <label class="quick-cover-source"
-                    ><RequiredLabel :required="coverChoice !== '替换图片'">{{
-                      coverChoice === "替换图片" ? "选择图片" : "选择底图"
+                    ><RequiredLabel :required="false">{{
+                      coverChoice === "替换图片" ? "选择图片" : "底图（选填）"
                     }}</RequiredLabel
                     ><t-select
-                      :value="row.imageId || 0"
+                      :value="
+                        row.imageId ||
+                        (coverChoice === '替换图片' ? 0 : undefined)
+                      "
+                      :clearable="coverChoice !== '替换图片'"
+                      placeholder="使用素材默认图片"
                       :options="[
-                        { label: '素材自有图片', value: 0 },
+                        {
+                          label:
+                            coverChoice === '替换图片'
+                              ? '素材自有图片'
+                              : '使用素材默认图片',
+                          value: 0,
+                        },
                         ...db.images
                           .filter(
                             (i) =>
@@ -763,33 +834,27 @@ defineExpose({ open, resume, edit, hasDraft });
                           )
                           .map((i) => ({ label: i.name, value: i.id })),
                       ]"
-                      @change="setCoverImage" /></label
-                  ><template v-if="row.coverMode !== '现成封面'"
-                    ><label
-                      ><RequiredLabel>封面短语</RequiredLabel
-                      ><t-input
-                        :value="row.shortTitle"
-                        @change="(v) => setField('shortTitle', v)" /></label
-                    ><label
-                      ><RequiredLabel>合成模板</RequiredLabel
-                      ><t-select
-                        :value="row.templateId"
-                        :options="
-                          db.templates
-                            .filter((t) => t.enabled)
-                            .map((t) => ({ label: t.name, value: t.id }))
-                        "
-                        @change="setTemplate" /></label
-                    ><t-button
+                      @change="setCoverImage"
+                  /></label>
+                  <template v-if="row.coverMode !== '现成封面'">
+                    <label v-for="field in templateFields" :key="field.key">
+                      <RequiredLabel>{{ field.label }}</RequiredLabel>
+                      <t-input
+                        :value="row[field.key]"
+                        :placeholder="`输入${field.label}`"
+                        @change="(v) => setField(field.key, v)"
+                      />
+                    </label>
+                    <t-button
                       class="quick-generate-cover"
                       variant="outline"
                       :loading="rendering"
                       @click="renderCover"
                       >生成封面</t-button
-                    ></template
-                  >
+                    >
+                  </template>
                   <p v-else class="quick-help">
-                    直接使用图片，无需封面短标题。
+                    直接使用图片，无需填写封面文字。
                   </p>
                   <small v-if="platform === '百家号'" class="quick-help"
                     >横竖封面规格待平台核验，当前按原图预览。</small

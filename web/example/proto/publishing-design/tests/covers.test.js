@@ -2,6 +2,8 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { fitImage } from "../../../../src/shared/ui/media/imageOutput.js";
 import {
   coverSpecs,
+  coverTextFields,
+  coverTextErrors,
   defaultDocument,
   ensureCoverResults,
   renderDocument,
@@ -105,4 +107,64 @@ it("discards an in-flight cover if the input changes before completion", async (
   await expect(work).rejects.toThrow("输入已改变");
   expect(row.coverApproved).toBe(false);
   expect(row.coverVariants).toBeUndefined();
+});
+
+it("derives required fields from visible template slots and renders both entered titles", async () => {
+  const doc = defaultDocument(1080, 1440, "image");
+  doc.layers.push({
+    ...doc.layers[0],
+    id: "subtitle",
+    slot: "sub_title",
+    name: "副标题",
+    y: 300,
+  });
+  const row = {
+    platform: "小红书",
+    coverMode: "模板合成",
+    coverSource: "image",
+    shortTitle: "主标题输入",
+    templateDocument: doc,
+  };
+  await expect(ensureCoverResults(row)).rejects.toThrow("请填写封面副标题");
+  row.subTitle = "副标题输入";
+  await ensureCoverResults(row);
+  const svg = decodeURIComponent(fitImage.mock.calls[0][0]);
+  expect(svg).toContain("主标题输入");
+  expect(svg).toContain("副标题输入");
+});
+it("does not require a title for hidden or fixed text layers", async () => {
+  const doc = defaultDocument(1080, 1440, "image");
+  doc.layers[0].slot = "";
+  doc.layers.push({
+    ...doc.layers[0],
+    id: "subtitle",
+    slot: "sub_title",
+    visible: false,
+  });
+  await ensureCoverResults({
+    platform: "小红书",
+    coverMode: "模板合成",
+    coverSource: "image",
+    templateDocument: doc,
+  });
+  expect(decodeURIComponent(fitImage.mock.calls[0][0])).toContain(
+    "精彩实战指南",
+  );
+});
+
+it("orders main then subtitle independently of layer painting order, and ignores duplicate slots", () => {
+  const main = defaultDocument().layers[0];
+  const sub = { ...main, id: "subtitle", slot: "sub_title" };
+  const doc = { layers: [sub, main, { ...main, id: "main-again" }] };
+  expect(coverTextFields(doc).map((f) => f.key)).toEqual([
+    "shortTitle",
+    "subTitle",
+  ]);
+  expect(
+    coverTextErrors({
+      coverMode: "模板合成",
+      templateDocument: { layers: [sub] },
+      subTitle: "只需副标题",
+    }),
+  ).toEqual([]);
 });

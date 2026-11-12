@@ -2,6 +2,7 @@
 import { computed } from "vue";
 import { displayStatus } from "./taskExperience.js";
 import { publicWork } from "./taskActions.js";
+import { coverTextFields } from "./covers.js";
 const props = defineProps({ task: Object, db: Object });
 const emit = defineEmits(["batch", "preview"]);
 const account = computed(() =>
@@ -18,6 +19,12 @@ const content = computed(() =>
   props.task.status === "待执行"
     ? props.task
     : latest.value?.snapshot || props.task.snapshot || props.task,
+);
+const coverFields = computed(() =>
+  (content.value.templateDocument
+    ? coverTextFields(content.value.templateDocument)
+    : [{ key: "shortTitle", label: "封面主标题" }]
+  ).filter((field) => content.value[field.key]),
 );
 const work = computed(() => {
   try {
@@ -204,9 +211,9 @@ const progress = computed(() => {
               {{ content.coverTreatment || content.coverMode || "素材原封面" }}
             </dd>
           </div>
-          <div v-if="content.shortTitle">
-            <dt>封面短语</dt>
-            <dd>{{ content.shortTitle }}</dd>
+          <div v-for="field in coverFields" :key="field.key">
+            <dt>{{ field.label }}</dt>
+            <dd>{{ content[field.key] }}</dd>
           </div>
           <div>
             <dt>{{ task.platform === "B站" ? "标签" : "话题" }}</dt>

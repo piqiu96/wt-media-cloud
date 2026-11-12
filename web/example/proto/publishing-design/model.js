@@ -1,5 +1,5 @@
 import { accountAvailability } from "./accountAvailability.js";
-import { coverSignature } from "./covers.js";
+import { coverSignature, coverTextErrors } from "./covers.js";
 // Offline publishing prototype. These rules do not invoke platform services.
 export const platforms = ["小红书", "B站", "百家号"];
 export const states = [
@@ -64,6 +64,7 @@ export function defaults(platform, asset) {
   return {
     title: asset?.title || "",
     shortTitle: "",
+    subTitle: "",
     topics: "",
     description: platform === "百家号" ? asset?.title || "" : "",
     tags: platform === "B站" ? asset?.category || "" : "",
@@ -120,6 +121,7 @@ export function validate(row, db, ignoreId) {
   if (Array.from(title || "").length > limit)
     errors.push(`文案超过当前长度上限 ${limit}，请精简后重试`);
   if (!row.cover) errors.push("请选择封面");
+  errors.push(...coverTextErrors(row));
   if (
     row.coverTreatment === "图片库图 + 模板" &&
     !db.images?.some(

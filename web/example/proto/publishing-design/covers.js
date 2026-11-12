@@ -1,6 +1,33 @@
 import { fitImage } from "../../../src/shared/ui/media/imageOutput.js";
 import { layoutText } from "../../../src/shared/ui/media/textLayout.js";
 import { clone } from "./relationships.js";
+const templateSlots = {
+  main_title: { key: "shortTitle", label: "封面主标题" },
+  sub_title: { key: "subTitle", label: "封面副标题" },
+};
+function textSlot(layer) {
+  if (layer.visible === false || (layer.kind && layer.kind !== "text"))
+    return null;
+  return templateSlots[
+    layer.slot ?? (layer.id === "title" ? "main_title" : "")
+  ];
+}
+export function coverTextFields(doc) {
+  const keys = new Set(
+    (doc?.layers || [])
+      .map(textSlot)
+      .filter(Boolean)
+      .map((field) => field.key),
+  );
+  return Object.values(templateSlots).filter((field) => keys.has(field.key));
+}
+export function coverTextErrors(row) {
+  if (!["模板合成", "规则生成封面"].includes(row.coverMode)) return [];
+  if (!row.templateDocument) return ["请选择封面模板"];
+  return coverTextFields(row.templateDocument)
+    .filter((field) => !row[field.key]?.trim())
+    .map((field) => `请填写${field.label}`);
+}
 export const coverSpecs = (p) =>
   p === "B站"
     ? [
@@ -107,7 +134,7 @@ export async function renderDocument(
   doc,
   {
     shortTitle = null,
-    subTitle = "",
+    subTitle = null,
     width = doc.width,
     height = doc.height,
   } = {},
@@ -122,9 +149,9 @@ export async function renderDocument(
   for (const layer of doc.layers || []) {
     if (layer.visible === false) continue;
     const l = { ...layer };
-    if (l.slot === "main_title" || l.id === "title")
-      l.text = shortTitle ?? l.text;
-    if (l.slot === "sub_title") l.text = subTitle || l.text;
+    const field = textSlot(l);
+    if (field?.key === "shortTitle") l.text = shortTitle ?? l.text;
+    if (field?.key === "subTitle") l.text = subTitle ?? l.text;
     const safe = doc.safe ?? 16;
     if (
       l.x < safe ||
@@ -183,8 +210,8 @@ export async function ensureCoverResults(row) {
   const outputs = {};
   try {
     if (row.coverMode === "模板合成" || row.coverMode === "规则生成封面") {
-      if (!row.shortTitle) throw Error("封面短标题缺失");
-      if (!row.templateDocument) throw Error("请选择封面模板");
+      const errors = coverTextErrors(row);
+      if (errors.length) throw Error(errors.join("；"));
       const doc = clone(row.templateDocument);
       doc.image = row.coverSource;
       const targets = specs.length
@@ -197,6 +224,7 @@ export async function ensureCoverResults(row) {
             { ...matching, image: row.coverSource },
             {
               shortTitle: row.shortTitle,
+              subTitle: row.subTitle,
               width: spec.width,
               height: spec.height,
             },
