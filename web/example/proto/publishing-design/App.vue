@@ -511,6 +511,21 @@ async function start(t, silent = false) {
   }
 }
 
+async function batchAction(b) {
+  if (b.phase !== "内容预检通过") return configureBatch(b);
+  try {
+    if (b.control === "执行中") {
+      pauseBatch(b);
+      toast("已暂停批次后续派发");
+    } else {
+      if (!(await takeControl({ kind: "batch", id: b.id }))) return;
+      dispatchBatch(db, b, { takeover: true });
+      toast("批次已进入演示执行队列");
+    }
+  } catch (error) {
+    warning(error.message || "批次操作失败，请检查任务预检结果后重试");
+  }
+}
 function configureBatch(b) {
   detailOpen.value = false;
   if (b.phase !== "内容预检通过") composerRef.value?.openBatch(b);
@@ -1973,6 +1988,7 @@ function cloneTask(t) {
     <PublishComposer
       ref="composerRef"
       :db="db"
+      :persist="persistNow"
       @edit="editRow"
       @preview="openPreview"
       @created="onCreated"

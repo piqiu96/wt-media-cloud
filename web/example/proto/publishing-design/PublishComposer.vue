@@ -1,15 +1,15 @@
 <script setup>
-import { computed, reactive, ref, watch } from "vue";
-import { useMediaQuery } from "../../../src/shared/composables/useMediaQuery.js";
+import { computed, reactive, ref, watch, nextTick } from "vue";
+import {
+  ArrowLeftIcon,
+  ArrowRightIcon,
+  CheckIcon,
+  RefreshIcon,
+} from "tdesign-icons-vue-next";
 import ResourceOverlay from "./PrototypeOverlay.vue";
-import ResourceWizardSteps from "../../../src/shared/ui/resource/ResourceWizardSteps.vue";
-import ResourceNotice from "../../../src/shared/ui/resource/ResourceNotice.vue";
-import ResourceEmptyState from "../../../src/shared/ui/resource/ResourceEmptyState.vue";
-import ResourceRowActions from "../../../src/shared/ui/resource/ResourceRowActions.vue";
-import ResourceSelectionToolbar from "../../../src/shared/ui/resource/ResourceSelectionToolbar.vue";
-import AIWorkspace from "./AIWorkspace.vue";
-import { initCandidate, editField } from "./content.js";
-import { createPublication, targetTotal, nextId } from "./relationships.js";
+import BatchContentWorkspace from "./BatchContentWorkspace.vue";
+import { initCandidate } from "./content.js";
+import { createPublication, nextId } from "./relationships.js";
 import { ensureCoverResults } from "./covers.js";
 import { feedback } from "../../../src/shared/ui/feedback/index.js";
 import {
@@ -19,18 +19,29 @@ import {
   resourceStatus,
   resourceInventory,
   suggestDistribution,
-  mergeContentDefaults,
-  declarationOptions,
 } from "./model.js";
-const props = defineProps({ db: { type: Object, required: true } });
+import "./batchCreation.css";
+const props = defineProps({
+  db: { type: Object, required: true },
+  persist: { type: Function, default: async () => true },
+});
 const emit = defineEmits(["edit", "preview", "created"]);
-const compact = useMediaQuery("(max-width:700px)");
-const copy = (v) => JSON.parse(JSON.stringify(v));
+const copy = (value) => JSON.parse(JSON.stringify(value));
 const visible = ref(false),
-  closing = ref(false),
-  preparing = ref(false),
-  batchNameInput = ref(null),
-  batchNameError = ref("");
+  busy = ref(false),
+  contentBusy = ref(false),
+  resultSaved = ref(false),
+  errors = ref([]),
+  resourcePane = ref(0),
+  activeCategory = ref(""),
+  contentRef = ref(null);
+const inventoryExpanded = ref(false),
+  root = ref(null),
+  createdResult = ref(null);
+const lockOpen = ref(false),
+  replaceRow = ref(null),
+  replacement = ref(null),
+  replaceSearch = ref("");
 const state = reactive({
   mode: "批量发布",
   step: 0,
@@ -47,153 +58,85 @@ const state = reactive({
   active: false,
   accountLimits: {},
   accountOrder: [],
+  resourcesLocked: false,
 });
-const appliedNotice = reactive({ platform: "", text: "" });
-if (props.db.publishDraft) {
-  Object.assign(state, copy(props.db.publishDraft));
-  state.active =
-    props.db.publishDraft.active ??
-    !!(state.rows.length || state.assets.length || state.platforms.length);
-}
+if (props.db.publishDraft) Object.assign(state, copy(props.db.publishDraft));
+watch(
+  () => [state.step, resourcePane.value],
+  async () => {
+    await nextTick();
+    root.value?.closest(".t-drawer__body")?.scrollTo({ top: 0 });
+  },
+);
+
 watch(
   state,
   () => {
     props.db.publishDraft = copy(state);
-    const b = props.db.batches.find((b) => b.id === state.batchId);
-    if (b && b.phase !== "内容预检通过") {
-      if (!b.planId) {
-        b.platform = state.platforms[0];
-        b.name = state.name;
-        b.targets = copy(state.targets);
-        b.categories = copy(state.categories);
-      }
-      b.candidates = copy(state.rows);
-      b.draft = copy(state);
-      b.phase = state.step >= 2 ? "待内容配置" : "待资源配置";
+    const batch = props.db.batches.find((b) => b.id === state.batchId);
+    if (batch && batch.phase !== "内容预检通过") {
+      if (!batch.planId)
+        Object.assign(batch, {
+          platform: state.platforms[0],
+          name: state.name,
+          targets: copy(state.targets),
+          categories: copy(state.categories),
+        });
+      batch.candidates = copy(state.rows);
+      batch.draft = copy(state);
+      batch.phase = state.step >= 2 ? "待内容配置" : "待资源配置";
     }
   },
   { deep: true },
 );
-const errors = ref([]),
-  onlyErrors = ref(false),
-  rowPlatform = ref("全部"),
-  contentPlatform = ref("小红书"),
-  search = ref(""),
-  showUnavailable = ref(false),
-  assetPage = ref(1),
-  contentPage = ref(1);
-const platformDefaults = reactive(
-  Object.fromEntries(
-    platforms.map((p) => [p, { declaration: "", tags: "", partition: "游戏" }]),
-  ),
+const platform = computed(() => state.platforms[0]);
+const plan = computed(() => props.db.plans.find((p) => p.id === state.planId));
+const allowedPlatforms = computed(() =>
+  plan.value
+    ? [...new Set(plan.value.targets.map((t) => t.platform))]
+    : platforms,
 );
-const steps = computed(() => [
-  { title: "范围与资源", value: 0 },
-  { title: "检查分配", value: 1 },
-  { title: "配置内容", value: 2 },
-  { title: "最终检查", value: 3 },
-]);
-const activeStep = computed(() =>
-  steps.value.findIndex((s) => s.value === state.step),
-);
-const selectedPlatform = computed({
-  get: () => state.platforms[0],
-  set: (v) => {
-    changePlatform(v);
-  },
-});
-async function changePlatform(value) {
-  if (value === state.platforms[0]) return;
-  if (
-    (state.assets.length || state.rows.length) &&
-    !(await feedback.confirmWarning({
-      title: "切换发布平台？",
-      message: "当前成片选择、账号分配和内容配置将清空；类目和批次名称保留。",
-      confirmText: "清空配置并切换",
-    }))
-  )
-    return;
-  state.platforms = value ? [value] : [];
-  state.assets = [];
-  state.rows = [];
-  state.excludedAccounts = [];
-  state.accountLimits = {};
-  state.accountOrder = [];
-  for (const p of platforms)
-    Object.assign(platformDefaults[p], {
-      declaration: "",
-      tags: "",
-      partition: "游戏",
-    });
-  errors.value = [];
-  rowPlatform.value = "全部";
-  assetPage.value = 1;
-  appliedNotice.platform = "";
-  if (state.planId) {
-    const plan = props.db.plans.find((p) => p.id === state.planId);
-    state.categories = state.categories.filter((c) =>
-      plan?.targets.some((t) => t.platform === value && t.category === c),
-    );
-  }
-}
-const allowedPlatforms = computed(() => {
-  const p = props.db.plans.find((p) => p.id === state.planId);
-  return p ? [...new Set(p.targets.map((t) => t.platform))] : platforms;
-});
-const allowedCategories = computed(() => {
-  const p = props.db.plans.find((p) => p.id === state.planId);
-  return p
+const allowedCategories = computed(() =>
+  plan.value
     ? [
         ...new Set(
-          p.targets
-            .filter((t) => t.platform === selectedPlatform.value)
+          plan.value.targets
+            .filter((t) => t.platform === platform.value)
             .map((t) => t.category),
         ),
       ]
-    : categories;
-});
+    : categories,
+);
+const asset = (id) => props.db.assets.find((v) => v.id === id);
+const account = (id) => props.db.accounts.find((a) => a.id === id);
 const eligibleAccounts = computed(() =>
-  props.db.accounts.filter(
-    (a) =>
-      a.enabled &&
-      a.loginValid !== false &&
-      state.platforms.includes(a.platform) &&
-      a.categories.some((c) => state.categories.includes(c)),
-  ),
+  props.db.accounts
+    .filter(
+      (a) =>
+        a.enabled &&
+        a.loginValid !== false &&
+        a.platform === platform.value &&
+        a.categories.some((c) => state.categories.includes(c)),
+    )
+    .sort((a, b) => {
+      const order = state.accountOrder;
+      return (
+        (order.indexOf(a.id) < 0 ? 999 : order.indexOf(a.id)) -
+        (order.indexOf(b.id) < 0 ? 999 : order.indexOf(b.id))
+      );
+    }),
 );
 const accountIds = computed(() =>
   eligibleAccounts.value
     .filter((a) => !state.excludedAccounts.includes(a.id))
-    .map((a) => a.id)
-    .sort((a, b) => {
-      const order = state.accountOrder.length
-        ? state.accountOrder
-        : eligibleAccounts.value.map((a) => a.id);
-      return order.indexOf(a) - order.indexOf(b);
-    }),
+    .map((a) => a.id),
 );
-const scopeAssets = computed(() =>
-  props.db.assets.filter((v) => state.categories.includes(v.category)),
-);
-const availability = (v) =>
-  state.platforms.map((platform) => ({
-    platform,
-    reason: resourceStatus(props.db, v, platform, accountIds.value),
-  }));
 const availableAssets = computed(() =>
-  scopeAssets.value.filter((v) => availability(v).some((p) => !p.reason)),
-);
-const visibleAssets = computed(() =>
-  (showUnavailable.value
-    ? scopeAssets.value.filter((v) => availability(v).every((p) => p.reason))
-    : availableAssets.value
-  ).filter((v) => `${v.id} ${v.title}`.includes(search.value)),
-);
-const selectedAssets = computed(() =>
-  state.assets.filter((id) => scopeAssets.value.some((v) => v.id === id)),
-);
-const unavailableCount = computed(
-  () => scopeAssets.value.length - availableAssets.value.length,
+  props.db.assets.filter(
+    (v) =>
+      state.categories.includes(v.category) &&
+      !resourceStatus(props.db, v, platform.value, accountIds.value),
+  ),
 );
 const inventory = computed(() =>
   resourceInventory(
@@ -203,219 +146,187 @@ const inventory = computed(() =>
     accountIds.value,
   ),
 );
+const missingResources = computed(() =>
+  categoryRows.value
+    .filter((r) => !r.accounts || !r.available)
+    .map(
+      (r) =>
+        `${r.category}：${!r.accounts ? "没有符合类目资格的可用账号" : ""}${!r.accounts && !r.available ? "，" : ""}${!r.available ? "没有可分配成片" : ""}`,
+    )
+    .join("；"),
+);
+const target = computed(() =>
+  state.targets
+    .filter((t) => state.categories.includes(t.category))
+    .reduce((n, t) => n + Number(t.count || 0), 0),
+);
 const suggested = computed(() =>
   suggestDistribution(
     props.db,
     state.platforms,
-    selectedAssets.value,
+    state.assets,
     accountIds.value,
     state.rows,
     state.accountLimits,
+    state.categories,
   ),
 );
-const batchTarget = computed(() =>
-  state.targets.reduce((sum, target) => sum + Number(target.count || 0), 0),
+const allocated = computed(() =>
+  state.step === 0 ? suggested.value : state.rows,
 );
-const resourceRows = computed(() =>
-  state.categories.map((category) => {
-    const target = Number(
-      state.targets.find((t) => t.category === category)?.count || 0,
-    );
-    const available = availableAssets.value.filter(
-      (asset) => asset.category === category,
-    ).length;
-    const allocated = suggested.value.filter(
-      (row) => row.category === category,
-    ).length;
-    return {
-      category,
-      target,
-      available,
-      allocated,
-      gap: Math.max(0, target - allocated),
-    };
-  }),
-);
-function recommendAssets() {
-  const selected = [];
-  for (const { category, target } of resourceRows.value) {
-    selected.push(
-      ...availableAssets.value
-        .filter((asset) => asset.category === category)
-        .sort(
-          (a, b) =>
-            Number(b.quality === "优质") - Number(a.quality === "优质") ||
-            a.id - b.id,
-        )
-        .slice(0, target)
-        .map((asset) => asset.id),
-    );
-  }
-  state.assets = selected;
-  state.rows = state.rows.filter((row) => selected.includes(row.assetId));
-}
-const resourceScopeKey = computed(() =>
-  [
-    state.mode,
-    state.platforms.join("/"),
-    state.categories.join("/"),
-    state.targets
-      .map((target) => `${target.category}:${target.count}`)
-      .join("/"),
-  ].join("|"),
-);
-watch(
-  resourceScopeKey,
-  () => {
-    if (state.step === 0 && (!state.batchId || !state.assets.length))
-      recommendAssets();
-  },
-  { flush: "post" },
-);
-function resourceProblems(row) {
-  const video = asset(row.assetId),
-    selectedAccount = account(row.accountId);
-  const problems = [];
-  if (!video) problems.push("成片不存在");
-  if (
-    !selectedAccount?.enabled ||
-    selectedAccount.platform !== row.platform ||
-    !selectedAccount.categories.includes(row.category)
-  )
-    problems.push("账号不支持当前平台或类目");
-  if (video) {
-    const reason = resourceStatus(props.db, video, row.platform, [
-      row.accountId,
-    ]);
-    if (reason) problems.push(reason);
-  }
-  return problems;
-}
-const resourceErrors = computed(() =>
-  state.rows.flatMap((row) =>
-    resourceProblems(row).map(
-      (problem) => `${asset(row.assetId)?.title || row.assetId}：${problem}`,
-    ),
-  ),
-);
-const invalidSelections = computed(() =>
-  selectedAssets.value.filter(
-    (id) => !availableAssets.value.some((v) => v.id === id),
-  ),
-);
-const rows = computed(() =>
-  state.rows.filter(
-    (r) =>
-      (rowPlatform.value === "全部" || r.platform === rowPlatform.value) &&
-      (!(state.step > 1 && onlyErrors.value) || validate(r, props.db).length),
-  ),
-);
+const gap = computed(() => Math.max(0, target.value - allocated.value.length));
 const issues = computed(() =>
   state.rows.filter((r) => validate(r, props.db).length),
 );
-const unassigned = computed(() =>
-  state.platforms.flatMap((platform) =>
-    selectedAssets.value.flatMap((id) => {
-      const video = asset(id);
-      if (
-        !video ||
-        resourceStatus(props.db, video, platform, accountIds.value) ||
-        suggested.value.some((r) => r.platform === platform && r.assetId === id)
-      )
-        return [];
-      return [
-        {
-          key: `${platform}:${id}`,
-          platform,
-          title: video.title,
-          reason: "参与账号已达到本批次安排上限",
-        },
-      ];
-    }),
+const ready = computed(() => state.rows.length - issues.value.length);
+const stage = computed(() => (state.step < 2 ? 0 : state.step - 1));
+const stages = [
+  ["资源配置", "选择范围 · 数量 · 匹配"],
+  ["内容配置", "批量生成与精修内容"],
+  ["结果总览", "预览实际内容 · 确认创建"],
+];
+const categoryRows = computed(() =>
+  state.categories.map((category) => ({
+    category,
+    target: Number(
+      state.targets.find((t) => t.category === category)?.count || 0,
+    ),
+    available: availableAssets.value.filter((v) => v.category === category)
+      .length,
+    accounts: eligibleAccounts.value.filter(
+      (a) => accountIds.value.includes(a.id) && a.categories.includes(category),
+    ).length,
+    allocated: allocated.value.filter((r) => r.category === category).length,
+  })),
+);
+const matchingRows = computed(() =>
+  state.rows.filter(
+    (r) => r.category === (activeCategory.value || state.categories[0]),
   ),
 );
-function reorderAccount(id, delta) {
-  const ids = state.accountOrder.length
-    ? [...state.accountOrder]
-    : eligibleAccounts.value.map((a) => a.id);
-  const from = ids.indexOf(id),
-    to = from + delta;
-  if (to < 0 || to >= ids.length) return;
-  [ids[from], ids[to]] = [ids[to], ids[from]];
-  state.accountOrder = ids;
-}
-const orderedAccounts = computed(() =>
-  [...eligibleAccounts.value].sort((a, b) => {
-    const order = state.accountOrder.length
-      ? state.accountOrder
-      : eligibleAccounts.value.map((a) => a.id);
-    return order.indexOf(a.id) - order.indexOf(b.id);
-  }),
+const resourceProblems = (row) => {
+  const problems = [];
+  const a = account(row.accountId),
+    v = asset(row.assetId);
+  if (
+    !a?.enabled ||
+    a.loginValid === false ||
+    a.platform !== row.platform ||
+    !a.categories.includes(row.category) ||
+    !accountIds.value.includes(a.id)
+  )
+    problems.push("账号不可用或不符合类目，请更换账号");
+  if (!v) problems.push("成片不存在，请更换成片");
+  else {
+    const reason = resourceStatus(props.db, v, row.platform, [row.accountId]);
+    if (reason) problems.push(reason);
+  }
+  if (
+    state.rows.filter(
+      (r) => r.assetId === row.assetId && r.platform === row.platform,
+    ).length > 1
+  )
+    problems.push("同一成片重复分配，请更换成片");
+  if (
+    state.accountLimits[row.accountId] &&
+    state.rows.filter((r) => r.accountId === row.accountId).length >
+      state.accountLimits[row.accountId]
+  )
+    problems.push("超过账号本批次上限，请调整账号或上限");
+  return problems;
+};
+const resourceErrors = computed(() =>
+  state.rows.flatMap((r) =>
+    resourceProblems(r).map((p) => `${asset(r.assetId)?.title}：${p}`),
+  ),
 );
-const uniqueVideos = computed(
-  () => new Set(state.rows.map((r) => r.assetId)).size,
+const softConflicts = computed(() =>
+  props.db.batches.filter(
+    (b) =>
+      b.id !== state.batchId &&
+      b.platform === platform.value &&
+      (b.candidates || []).some((r) => state.assets.includes(r.assetId)),
+  ),
 );
-const readyCount = computed(() => state.rows.length - issues.value.length);
-const asset = (id) => props.db.assets.find((v) => v.id === id);
-const account = (id) => props.db.accounts.find((a) => a.id === id);
-const accountOptions = (row) =>
-  eligibleAccounts.value
-    .filter(
-      (a) =>
-        a.platform === row.platform &&
-        a.categories.includes(row.category) &&
-        accountIds.value.includes(a.id),
-    )
-    .map((a) => ({ label: `${a.name} · ${a.quality}`, value: a.id }));
-const assetColumns = [
-  { colKey: "row-select", type: "multiple", width: 44 },
-  { colKey: "asset", title: "可用成片", minWidth: 270 },
-  { colKey: "category", title: "类目", width: 120 },
-  { colKey: "quality", title: "质量", width: 85 },
-  { colKey: "availability", title: "平台可用性", minWidth: 230 },
-];
-const candidateColumns = computed(() =>
-  state.step === 1
-    ? [
-        { colKey: "asset", title: "推荐成片", minWidth: 260 },
-        { colKey: "platform", title: "平台 / 类目", width: 150 },
-        { colKey: "account", title: "推荐账号（可调整）", minWidth: 245 },
-        { colKey: "check", title: "资源检查", width: 130 },
-        { colKey: "op", title: "调整", width: 110 },
-      ]
-    : [
-        { colKey: "asset", title: "成片", minWidth: 210 },
-        { colKey: "platform", title: "平台 / 类目", width: 135 },
-        { colKey: "account", title: "发布账号", minWidth: 205 },
-        { colKey: "content", title: "发布内容", minWidth: 245 },
-        { colKey: "check", title: "内容检查", width: 95 },
-        {
-          colKey: "op",
-          title: "操作",
-          width: 180,
-          fixed: compact.value ? undefined : "right",
-        },
-      ],
+watch(
+  () => state.categories.slice(),
+  (list) => {
+    state.targets = state.targets.filter((t) => list.includes(t.category));
+    for (const c of list)
+      if (!state.targets.some((t) => t.category === c))
+        state.targets.push({ category: c, count: 0 });
+    if (!list.includes(activeCategory.value))
+      activeCategory.value = list[0] || "";
+  },
 );
-function selectAssets(ids) {
-  const unavailableIds = props.db.assets
-    .filter((v) => !availableAssets.value.includes(v))
-    .map((v) => v.id);
-  state.assets = ids.filter((id) => !unavailableIds.includes(id));
+async function changePlatform(value) {
+  if (value === platform.value) return;
+  if (
+    state.assets.length &&
+    !(await feedback.confirmWarning({
+      title: "切换发布平台？",
+      message: "成片与账号分配将清空，批次名称和类目保留。",
+      confirmText: "切换平台",
+    }))
+  )
+    return;
+  state.platforms = value ? [value] : [];
+  state.assets = [];
+  state.rows = [];
+  state.excludedAccounts = [];
+  state.accountLimits = {};
+  state.accountOrder = [];
   errors.value = [];
 }
-function toggleAccount(ids) {
-  state.excludedAccounts = eligibleAccounts.value
-    .filter((a) => !ids.includes(a.id))
-    .map((a) => a.id);
+function setTarget(category, value) {
+  const t = state.targets.find((t) => t.category === category);
+  if (t) t.count = Math.max(0, Math.floor(Number(value) || 0));
 }
-async function open(mode = "批量发布", planId = null) {
+function recommendTargets() {
+  for (const c of categoryRows.value)
+    setTarget(c.category, Math.min(c.available, 3));
+  recommendAssets();
+}
+function recommendAssets() {
+  const ids = [];
+  for (const c of categoryRows.value) {
+    const pinned = state.rows
+      .filter(
+        (r) =>
+          r.category === c.category &&
+          r.overrides?.includes("assetId") &&
+          availableAssets.value.some((v) => v.id === r.assetId),
+      )
+      .map((r) => r.assetId);
+    const pool = availableAssets.value
+      .filter((v) => v.category === c.category && !pinned.includes(v.id))
+      .sort(
+        (a, b) =>
+          Number(b.quality === "优质") - Number(a.quality === "优质") ||
+          a.id - b.id,
+      )
+      .map((v) => v.id);
+    ids.push(...[...pinned, ...pool].slice(0, c.target));
+  }
+  state.assets = ids;
+}
+function moveCategory(index, delta) {
+  const list = [...state.categories];
+  [list[index], list[index + delta]] = [list[index + delta], list[index]];
+  state.categories = list;
+}
+function moveAccount(index, delta) {
+  const list = accountIds.value.slice();
+  [list[index], list[index + delta]] = [list[index + delta], list[index]];
+  state.accountOrder = list;
+}
+async function open() {
   if (
     state.active &&
-    (state.assets.length || state.rows.length) &&
+    (state.rows.length || state.assets.length) &&
     !(await feedback.confirmWarning({
-      title: "开始新的发布配置？",
-      message: "当前未创建的配置将被替换，也可以取消后继续原来的配置。",
+      title: "开始新的批次配置？",
+      message: "可取消后继续上次配置；开始新配置会替换尚未保存的输入。",
       confirmText: "开始新配置",
     }))
   )
@@ -436,298 +347,21 @@ async function open(mode = "批量发布", planId = null) {
     active: true,
     accountLimits: {},
     accountOrder: [],
+    resourcesLocked: false,
   });
-  for (const p of platforms)
-    Object.assign(platformDefaults[p], {
-      declaration: "",
-      tags: "",
-      partition: "游戏",
-    });
-  onlyErrors.value = false;
-  rowPlatform.value = "全部";
-  search.value = "";
-  showUnavailable.value = false;
+  resourcePane.value = 0;
   errors.value = [];
-  assetPage.value = 1;
-  closing.value = false;
   visible.value = true;
 }
-async function allocate() {
-  errors.value = [];
-  if (state.platforms.length !== 1 || !state.categories.length) {
-    errors.value = ["请选择一个发布平台和至少一个内容类目"];
-    return;
-  }
-  if (!batchTarget.value) {
-    errors.value = ["请先设置至少一个类目的批次目标"];
-    return;
-  }
-  if (!selectedAssets.value.length) {
-    errors.value = ["当前目标尚未分配成片，请检查可用资源或手动调整"];
-    return;
-  }
-  if (invalidSelections.value.length) {
-    errors.value = ["部分已选成片当前不可安排，请移除或调整账号范围"];
-    return;
-  }
-  if (!suggested.value.length) {
-    errors.value = ["当前选择没有可分配的任务，请调整账号或资源范围"];
-    return;
-  }
-  const removed = state.rows.filter(
-    (r) => r.overrides?.length && !suggested.value.some((s) => s.key === r.key),
-  );
-  if (
-    removed.length &&
-    !(await feedback.confirmWarning({
-      title: "移出不再符合范围的任务？",
-      message: `重新分配将移出 ${removed.length} 条有人工修改的候选。其余兼容任务的修改会保留。`,
-      confirmText: "调整并继续",
-    }))
-  )
-    return;
-  const plan = props.db.plans.find((p) => p.id === state.planId);
-  state.rows = copy(
-    suggested.value.filter(
-      (r) =>
-        !plan ||
-        plan.targets.some(
-          (t) => t.platform === r.platform && t.category === r.category,
-        ),
-    ),
-  );
-  if (!state.rows.length) {
-    errors.value = ["当前选择不在计划目标范围内"];
-    return;
-  }
-  state.rows.forEach(initCandidate);
-  {
-    state.targets = state.categories.map((category) => ({
-      category,
-      count: Number(
-        state.targets.find((t) => t.category === category)?.count || 0,
-      ),
-    }));
-    for (const t of state.targets)
-      if (
-        state.rows.filter((r) => r.category === t.category).length > t.count
-      ) {
-        errors.value = [t.category + "候选超过目标，请调整选择或目标"];
-        return;
-      }
-  }
-  contentPlatform.value = state.rows[0].platform;
-  rowPlatform.value = "全部";
-  state.step = 1;
-}
-async function next() {
-  errors.value = [];
-  if (state.step === 0) {
-    await allocate();
-    return;
-  }
-  if (state.step === 1) {
-    if (resourceErrors.value.length) {
-      errors.value = resourceErrors.value;
-      return;
-    }
-    state.step = 2;
-    return;
-  }
-  preparing.value = true;
-  try {
-    await Promise.all(state.rows.map(ensureCoverResults));
-    state.step = 3;
-  } catch (e) {
-    errors.value = [e.message || "部分封面未能生成，请检查并重试"];
-  } finally {
-    preparing.value = false;
-  }
-}
-function back() {
-  errors.value = [];
-  state.step = steps.value[activeStep.value - 1].value;
-}
-async function applyDefaults(overwrite = false) {
-  const p = contentPlatform.value,
-    values = platformDefaults[p];
-  if (!values.declaration) {
-    errors.value = ["请先按实际内容确认创作声明"];
-    return;
-  }
-  if (
-    overwrite &&
-    !(await feedback.confirmWarning({
-      title: "覆盖当前平台的人工修改？",
-      message: `将更新 ${state.rows.filter((r) => r.platform === p).length} 条 ${p} 任务的声明${p === "B站" ? "、标签与分区" : ""}。标题与封面不受影响。`,
-      confirmText: "覆盖并应用",
-    }))
-  )
-    return;
-  const applied =
-    p === "B站"
-      ? {
-          declaration: values.declaration,
-          partition: values.partition,
-          ...(values.tags.trim() ? { tags: values.tags } : {}),
-        }
-      : { declaration: values.declaration };
-  const merged = mergeContentDefaults(state.rows, p, applied, overwrite);
-  for (let i = 0; i < merged.length; i++)
-    for (const f of Object.keys(applied))
-      if (merged[i][f] !== state.rows[i][f]) {
-        merged[i].fieldVersions = {
-          ...merged[i].fieldVersions,
-          [f]: (merged[i].fieldVersions?.[f] || 0) + 1,
-        };
-        merged[i].contentApproved = false;
-      }
-  state.rows = merged;
-  errors.value = [];
-  appliedNotice.platform = p;
-  appliedNotice.text = `已应用到 ${state.rows.filter((r) => r.platform === p).length} 条${p}候选${overwrite ? "，所选字段已覆盖" : "，单条修改已保留"}。`;
-}
-function updateRow(row) {
-  const index = state.rows.findIndex((r) => r.key === row.key);
-  if (index < 0) return;
-  const old = state.rows[index],
-    overrides = new Set(old.overrides || []);
-  for (const key of [
-    "accountId",
-    "shortTitle",
-    "title",
-    "description",
-    "cover",
-    "coverSource",
-    "coverVariants",
-    "declaration",
-    "tags",
-    "partition",
-    "visibility",
-    "schedule",
-    "watermark",
-    "templateId",
-    "templateDocument",
-  ])
-    if (JSON.stringify(old[key]) !== JSON.stringify(row[key]))
-      overrides.add(key);
-  row.candidateId = old.candidateId;
-  row.ai = old.ai;
-  for (const key of overrides)
-    if (JSON.stringify(old[key]) !== JSON.stringify(row[key])) {
-      row.fieldVersions ||= {};
-      row.fieldVersions[key] = (old.fieldVersions?.[key] || 0) + 1;
-    }
-  row.contentApproved = true;
-  state.rows[index] = {
-    ...copy(row),
-    overrides: [...overrides],
-    modified: overrides.size > 0,
-  };
-}
-function removeRow(row) {
-  state.rows = state.rows.filter((r) => r.key !== row.key);
-}
-async function create() {
-  errors.value = [];
-  if (!state.rows.length) {
-    errors.value = ["没有可创建的任务"];
-    return;
-  }
-  if (issues.value.length) {
-    errors.value = [
-      `还有 ${issues.value.length} 条任务需要处理，请补齐内容或明确移出本批次。`,
-    ];
-    return;
-  }
-  if (!state.name.trim()) {
-    batchNameError.value = "请填写批次名称";
-    batchNameInput.value?.focus();
-    return;
-  }
-  batchNameError.value = "";
-  let partial = false;
-  if (
-    state.rows.length < state.targets.reduce((n, t) => n + Number(t.count), 0)
-  ) {
-    const target = state.targets.reduce((n, t) => n + Number(t.count), 0);
-    partial = await feedback.confirmWarning({
-      title: "明确确认部分创建",
-      message: `目标 ${target}，实际正式创建 ${state.rows.length}，创建缺口 ${target - state.rows.length}；保留目标、不补造任务、不自动补量。`,
-      confirmText: "保留缺口并创建",
-    });
-    if (!partial) return;
-  }
-  let result;
-  try {
-    result = createPublication(props.db, {
-      platform: selectedPlatform.value,
-      rows: state.rows,
-      name: state.name,
-      planId: state.planId,
-      quick: false,
-      batchId: state.batchId,
-      targets: state.targets,
-      partial,
-      creationKey: state.creationKey,
-    });
-  } catch (error) {
-    errors.value = [error.message];
-    return;
-  }
-  closing.value = true;
-  visible.value = false;
-  state.active = false;
-  emit("created", result);
-}
-function saveDraft() {
-  if (
-    !state.name.trim() ||
-    !state.platforms.length ||
-    !state.targets.some((t) => t.count > 0)
-  ) {
-    errors.value = ["请填写批次名称、平台和目标后保存草稿"];
-    return;
-  }
-  let b = props.db.batches.find((b) => b.id === state.batchId);
-  if (!b) {
-    b = {
-      id: nextId(props.db),
-      name: state.name,
-      platform: state.platforms[0],
-      planId: null,
-      targets: copy(state.targets),
-      categories: copy(state.categories),
-      phase: "待资源配置",
-      control: "待配置",
-      candidates: copy(state.rows),
-    };
-    props.db.batches.push(b);
-    state.batchId = b.id;
-  }
-  b.candidates = copy(state.rows);
-  b.draft = copy(state);
-  b.phase = state.step >= 2 ? "待内容配置" : "待资源配置";
-  feedback.toast.success("草稿已保留，不占用成片");
-}
-const softConflicts = computed(() =>
-  props.db.batches.filter(
-    (b) =>
-      b.id !== state.batchId &&
-      b.platform === selectedPlatform.value &&
-      (b.candidates || []).some((r) => state.assets.includes(r.assetId)),
-  ),
-);
 function openBatch(batch) {
   if (batch.phase === "内容预检通过") return;
   const saved = batch.draft;
-  contentPage.value = 1;
   Object.assign(state, {
     mode: "批量发布",
     step: saved?.step || 0,
     platforms: [batch.platform],
     categories: batch.targets.filter((t) => t.count > 0).map((t) => t.category),
-    assets: saved?.assets || [],
+    assets: saved?.assets || batch.candidates?.map((r) => r.assetId) || [],
     excludedAccounts: saved?.excludedAccounts || [],
     rows: copy(batch.candidates || []),
     name: batch.name,
@@ -738,16 +372,282 @@ function openBatch(batch) {
     active: true,
     accountLimits: saved?.accountLimits || {},
     accountOrder: saved?.accountOrder || [],
+    resourcesLocked: saved?.resourcesLocked || saved?.step >= 2,
   });
   state.rows.forEach(initCandidate);
-  contentPlatform.value = batch.platform;
-  errors.value = batch.needsPreflight
-    ? ["计划目标已变更，兼容候选已保留，请回到资源阶段重新预检"]
-    : [];
-  if (batch.needsPreflight) state.step = 0;
-  if (state.step === 0 && !state.assets.length) recommendAssets();
-  closing.value = false;
+  if (batch.needsPreflight) {
+    state.step = 0;
+    state.resourcesLocked = false;
+  }
+  resourcePane.value = state.categories.length ? 1 : 0;
+  activeCategory.value = state.categories[0] || "";
+  errors.value = [];
   visible.value = true;
+}
+async function saveDraft(silent = false) {
+  if (contentBusy.value || busy.value) return false;
+  if (!platform.value || !target.value) {
+    errors.value = ["请选择平台，并设置至少一个类目的目标数量后保存。"];
+    return false;
+  }
+  if (!state.name.trim())
+    state.name = `${platform.value}发布批次 · ${new Date().toLocaleDateString("zh-CN")}`;
+  let batch = props.db.batches.find((b) => b.id === state.batchId);
+  if (!batch) {
+    batch = {
+      id: nextId(props.db),
+      name: state.name,
+      platform: platform.value,
+      planId: state.planId,
+      targets: copy(state.targets),
+      categories: copy(state.categories),
+      phase: "待资源配置",
+      control: "待配置",
+      candidates: [],
+    };
+    props.db.batches.push(batch);
+    state.batchId = batch.id;
+  }
+  Object.assign(batch, {
+    candidates: copy(state.rows),
+    draft: copy(state),
+    phase: state.step >= 2 ? "待内容配置" : "待资源配置",
+  });
+  busy.value = true;
+  await nextTick();
+  const saved = await props.persist();
+  busy.value = false;
+  if (!saved) {
+    errors.value = [
+      "草稿尚未保存，当前输入已保留，请重试。保存成功前请勿刷新。",
+    ];
+    return false;
+  }
+  if (!silent) feedback.toast.success("草稿已保存，尚未创建任务或占用成片");
+  return true;
+}
+async function duplicateForResources() {
+  if (!(await saveDraft(true))) return;
+  const draft = copy(state);
+  Object.assign(state, {
+    ...draft,
+    batchId: null,
+    planId: null,
+    creationKey: crypto.randomUUID(),
+    name: `${draft.name} · 副本`,
+    step: 0,
+    resourcesLocked: false,
+    rows: [],
+  });
+  resourcePane.value = 1;
+  errors.value = [];
+  feedback.toast.success("原草稿已保留，正在调整副本的资源");
+}
+async function next() {
+  errors.value = [];
+  if (state.step === 0) {
+    if (!platform.value || !state.categories.length) {
+      errors.value = ["请选择一个平台和至少一个内容类目。"];
+      return;
+    }
+    if (resourcePane.value === 0) {
+      resourcePane.value = 1;
+      if (!target.value) recommendTargets();
+      return;
+    }
+    if (!target.value) {
+      errors.value = ["请设置至少一条任务目标。"];
+      return;
+    }
+    recommendAssets();
+    if (!suggested.value.length) {
+      errors.value = [
+        "当前没有可匹配的账号与成片。请查看资源缺口，调整账号池或补充成片。",
+      ];
+      return;
+    }
+    state.rows = copy(suggested.value);
+    state.rows.forEach(initCandidate);
+    activeCategory.value = state.categories[0];
+    state.step = 1;
+    return;
+  }
+  if (state.step === 1) {
+    if (resourceErrors.value.length) {
+      errors.value = resourceErrors.value;
+      return;
+    }
+    lockOpen.value = true;
+    return;
+  }
+  if (state.step === 2) {
+    busy.value = true;
+    try {
+      for (const r of state.rows) await ensureCoverResults(r);
+      state.step = 3;
+    } catch (e) {
+      errors.value = [e.message || "封面生成失败，请返回内容配置重试。"];
+    } finally {
+      busy.value = false;
+    }
+  }
+}
+async function confirmResources() {
+  if (resourceErrors.value.length) {
+    lockOpen.value = false;
+    errors.value = resourceErrors.value;
+    return;
+  }
+  state.resourcesLocked = true;
+  state.step = 2;
+  lockOpen.value = false;
+  busy.value = true;
+  try {
+    for (const r of state.rows) await ensureCoverResults(r);
+  } catch (e) {
+    errors.value = [`资源已确认；${e.message}。可在内容页修复封面。`];
+  } finally {
+    busy.value = false;
+  }
+}
+function back() {
+  errors.value = [];
+  if (state.step === 3) state.step = 2;
+  else if (state.step === 1) {
+    state.step = 0;
+    resourcePane.value = 1;
+  } else resourcePane.value = 0;
+}
+function rematch() {
+  recommendAssets();
+  state.rows = copy(suggested.value);
+  state.rows.forEach(initCandidate);
+  errors.value = [];
+  feedback.toast.success("已重新匹配，兼容的人工分配与内容已保留");
+}
+function checkResources() {
+  errors.value = resourceErrors.value;
+  if (!errors.value.length)
+    feedback.toast.success(
+      `${state.rows.length} 条资源组合有效，内容将在下一阶段配置`,
+    );
+}
+function updateRow(row) {
+  const i = state.rows.findIndex((r) => r.key === row.key);
+  if (i >= 0) state.rows[i] = copy(row);
+}
+function openReplace(row) {
+  replaceRow.value = row;
+  replacement.value = row.assetId;
+  replaceSearch.value = "";
+}
+const replacementOptions = computed(() =>
+  availableAssets.value.filter(
+    (v) =>
+      v.category === replaceRow.value?.category &&
+      (!state.rows.some((r) => r.assetId === v.id) ||
+        v.id === replaceRow.value?.assetId) &&
+      `${v.title} ${v.id}`.includes(replaceSearch.value),
+  ),
+);
+function applyReplacement() {
+  const old = replaceRow.value,
+    v = asset(replacement.value);
+  if (!old || !v) return;
+  if (v.id !== old.assetId) {
+    const replacementRow = suggestDistribution(
+      props.db,
+      [platform.value],
+      [v.id],
+      [old.accountId],
+    )[0];
+    if (!replacementRow) {
+      errors.value = ["所选账号无法承接该成片，请先更换账号。"];
+      return;
+    }
+    const i = state.rows.indexOf(old);
+    initCandidate(replacementRow);
+    replacementRow.overrides = ["assetId"];
+    state.rows[i] = replacementRow;
+    state.assets = state.rows.map((r) => r.assetId);
+  }
+  replaceRow.value = null;
+}
+async function create() {
+  errors.value = [];
+  if (!state.rows.length || issues.value.length) {
+    errors.value = [
+      `还有 ${issues.value.length} 条任务需处理，请返回内容配置修复，或明确移出问题项。`,
+    ];
+    return;
+  }
+  if (!state.name.trim()) {
+    errors.value = ["请填写批次名称。"];
+    return;
+  }
+  let partial = false;
+  if (gap.value) {
+    partial = await feedback.confirmWarning({
+      title: "确认部分创建",
+      message: `原始目标 ${target.value} 条，实际创建 ${state.rows.length} 条，缺口 ${gap.value} 条。目标保持不变，不自动补量。`,
+      confirmText: `保留缺口并创建 ${state.rows.length} 条`,
+    });
+    if (!partial) return;
+  }
+  busy.value = true;
+  try {
+    const result = createPublication(props.db, {
+      platform: platform.value,
+      rows: state.rows,
+      name: state.name,
+      planId: state.planId,
+      quick: false,
+      batchId: state.batchId,
+      targets: state.targets,
+      partial,
+      creationKey: state.creationKey,
+    });
+    state.active = false;
+    createdResult.value = result;
+    resultSaved.value = false;
+    state.step = 4;
+    await nextTick();
+    resultSaved.value = await props.persist();
+    if (!resultSaved.value)
+      errors.value = [
+        "任务已生成，但创建结果尚未保存。请重试保存，不要刷新或重复创建。",
+      ];
+  } catch (e) {
+    errors.value = [e.message];
+  } finally {
+    busy.value = false;
+  }
+}
+async function removeRow(row) {
+  if (
+    await feedback.confirmWarning({
+      title: "移出这条候选任务？",
+      message: `不会创建此任务；原类目目标保留，缺口将增加 1 条。`,
+      confirmText: "移出并保留缺口",
+    })
+  )
+    state.rows = state.rows.filter((r) => r.key !== row.key);
+}
+async function editContent(row) {
+  state.step = 2;
+  await nextTick();
+  contentRef.value?.edit(row);
+}
+async function retrySaveCreated() {
+  busy.value = true;
+  resultSaved.value = await props.persist();
+  busy.value = false;
+  if (resultSaved.value) errors.value = [];
+}
+function finish() {
+  if (!resultSaved.value) return;
+  visible.value = false;
+  emit("created", createdResult.value);
 }
 defineExpose({
   open,
@@ -758,1314 +658,858 @@ defineExpose({
   draftMode: computed(() => state.mode),
 });
 </script>
+
 <template>
   <ResourceOverlay
-    v-if="!closing"
     v-model:visible="visible"
-    title="创建发布批次"
+    title="新建发布批次"
     workspace
     kind="drawer"
-    :width="1280"
-    :busy="preparing"
+    :width="1440"
+    class="batch-v2-overlay"
+    :busy="busy || contentBusy"
   >
-    <div class="composer wt-resource-page resource-visual-approved">
-      <ResourceWizardSteps
-        :current="activeStep"
-        :steps="steps"
-        class="composer-steps"
-      />
+    <div ref="root" class="batch-create">
+      <header v-if="state.step < 4" class="batch-create-intro">
+        <div>
+          <h2>
+            {{ state.name || "新建批量发布" }}
+            <t-tag size="small" variant="light">草稿</t-tag>
+          </h2>
+          <p>
+            {{ platform || "选择一个发布平台"
+            }}<template v-if="state.categories.length">
+              · {{ state.categories.join(" / ") }}</template
+            >
+            · {{ state.planId ? "目标继承自发布计划" : "批次资源准备" }}
+          </p>
+        </div>
+        <t-button
+          v-if="state.resourcesLocked"
+          variant="text"
+          @click="duplicateForResources"
+          >复制为新草稿调整资源</t-button
+        >
+      </header>
+      <ol
+        v-if="state.step < 4"
+        class="batch-stagebar"
+        aria-label="批次创建阶段"
+      >
+        <li
+          v-for="(s, i) in stages"
+          :key="s[0]"
+          :class="{ active: stage === i, finished: stage > i }"
+          :aria-current="stage === i ? 'step' : undefined"
+        >
+          <span class="batch-stage-index"
+            ><CheckIcon v-if="stage > i" /><template v-else>{{
+              i + 1
+            }}</template></span
+          >
+          <div>
+            <strong>{{ s[0] }}</strong
+            ><small>{{ s[1] }}</small>
+          </div>
+        </li>
+      </ol>
       <t-alert
         v-if="errors.length"
         theme="warning"
         :message="errors.join('；')"
-        class="composer-alert"
+        close-btn
+        @close="errors = []"
+        class="batch-message"
       />
       <t-alert
         v-if="softConflicts.length"
         theme="warning"
-        :message="
-          '软冲突：同平台草稿 ' +
-          softConflicts.map((b) => b.name).join('、') +
-          ' 也选择了这些成片；草稿不占用，正式创建将重查。'
-        "
+        :message="`同平台草稿「${softConflicts.map((b) => b.name).join('、')}」也选择了这些成片。草稿不占用，最终创建会重新检查。`"
+        class="batch-message"
       />
-      <div class="composer-workspace-grid">
-        <div class="composer-workspace-main">
-          <AIWorkspace
-            v-if="state.step === 2"
-            :rows="state.rows"
-            :db="db"
-            @preview="emit('preview', $event)"
-          />
-          <template v-if="state.step === 0">
-            <div class="batch-resource-overview" aria-live="polite">
-              <div>
-                <small>本批次目标</small><strong>{{ batchTarget }}</strong
-                ><span>各类目目标合计</span>
-              </div>
-              <div>
-                <small>范围内可用成片</small
-                ><strong>{{ availableAssets.length }}</strong
-                ><span>已排除同平台占用</span>
-              </div>
-              <div>
-                <small>系统建议分配</small
-                ><strong>{{ suggested.length }}</strong
-                ><span>按账号与成片质量匹配</span>
-              </div>
-              <div
-                :class="{
-                  'has-gap': Math.max(0, batchTarget - suggested.length),
-                }"
-              >
-                <small>当前分配缺口</small
-                ><strong>{{
-                  Math.max(0, batchTarget - suggested.length)
-                }}</strong
-                ><span>目标保持不变</span>
-              </div>
+      <template v-if="state.step === 0">
+        <section
+          class="batch-section"
+          :class="{ emphasis: resourcePane === 0 }"
+        >
+          <header class="batch-section-head">
+            <div>
+              <span class="batch-number">01</span>
+              <h3>选择发布范围</h3>
+              <p v-if="resourcePane === 1">
+                {{ platform }} · {{ state.categories.join(" / ") }}
+              </p>
+              <p v-else>确定单个平台与参与分配的类目</p>
             </div>
-            <section class="composer-section">
-              <div class="section-heading">
-                <div>
-                  <h3>
-                    {{ state.planId ? "计划批次目标" : "设定单平台批次目标" }}
-                  </h3>
-                  <p>
-                    {{
-                      state.planId
-                        ? "平台、类目和目标来自计划，当前只配置账号与成片。"
-                        : "先设定单平台和各类目目标，系统会按资源资格自动推荐。"
-                    }}
-                  </p>
-                </div>
-              </div>
-              <div class="scope-grid">
-                <div class="composer-field">
-                  <span>发布平台 <em>*</em></span>
-                  <t-select
-                    :popup-props="{
-                      hideEmptyPopup: false,
-                      attach: 'body',
-                      zIndex: 5500,
-                    }"
-                    v-model="selectedPlatform"
-                    placeholder="选择一个发布平台"
-                    :disabled="!!state.planId"
-                    :options="
-                      allowedPlatforms.map((p) => ({ label: p, value: p }))
-                    "
-                    aria-label="批次发布平台"
-                  />
-                  <small class="muted"
-                    >一个批次只发布到一个平台；多个平台在计划中分别创建批次。</small
-                  >
-                </div>
-                <label class="composer-field"
-                  ><span>内容类目 <em>*</em></span
-                  ><t-select
-                    :popup-props="{
-                      hideEmptyPopup: false,
-                      attach: 'body',
-                      zIndex: 5500,
-                    }"
-                    v-model="state.categories"
-                    :disabled="!!state.planId"
-                    multiple
-                    clearable
-                    placeholder="可选择多个类目"
-                    :options="
-                      allowedCategories.map((c) => ({ label: c, value: c }))
-                    "
-                /></label>
-              </div>
-            </section>
-            <section v-if="state.categories.length" class="composer-section">
-              <h3>
-                {{
-                  state.planId
-                    ? "计划继承目标（只读）"
-                    : "各类目目标（手动输入）"
-                }}
-              </h3>
-              <label v-for="c in state.categories" :key="c" class="target-row"
-                >{{ c }}
-                <t-input-number
-                  :value="
-                    state.targets.find((t) => t.category === c)?.count || 0
+            <t-button
+              v-if="resourcePane === 1"
+              variant="text"
+              @click="resourcePane = 0"
+              >调整范围</t-button
+            >
+          </header>
+          <div v-if="resourcePane === 0" class="batch-section-body">
+            <div class="batch-form-grid">
+              <label
+                >批次名称<t-input
+                  v-model="state.name"
+                  placeholder="例如：游戏内容 · 首轮发布（可稍后命名）"
+                  :maxlength="60" /></label
+              ><label
+                ><span>发布平台 <em>*</em></span
+                ><t-select
+                  :popup-props="{ attach: 'body', zIndex: 5500 }"
+                  :value="platform"
+                  :options="
+                    allowedPlatforms.map((p) => ({ label: p, value: p }))
                   "
+                  placeholder="选择一个平台"
                   :disabled="!!state.planId"
-                  :min="0"
-                  :decimal-places="0"
-                  :aria-label="c + '批次目标'"
-                  @change="
-                    (v) => {
-                      const t = state.targets.find((t) => t.category === c);
-                      if (t) t.count = v;
-                      else state.targets.push({ category: c, count: v });
-                    }
-                  "
-                />
-              </label>
-              <p>目标、候选、正式任务分别统计。保存配置不占用成片。</p>
-            </section>
-            <template v-if="state.platforms.length && state.categories.length">
-              <section class="composer-section batch-category-overview">
-                <div class="section-heading">
-                  <div>
-                    <h3>各类目资源与分配</h3>
-                    <p>目标不随候选数量变化；缺口会保留到最终确认。</p>
-                  </div>
-                </div>
-                <div class="batch-category-grid">
-                  <div v-for="row in resourceRows" :key="row.category">
-                    <strong>{{ row.category }}</strong
-                    ><span
-                      >目标 {{ row.target }} · 可用 {{ row.available }}</span
-                    ><span
-                      >建议分配 {{ row.allocated }} · 缺口
-                      <b :class="{ 'has-gap': row.gap }">{{ row.gap }}</b></span
-                    >
-                  </div>
-                </div>
-                <ResourceNotice
-                  v-if="resourceRows.some((row) => row.gap)"
-                  tone="warning"
-                  >部分目标尚无可分配资源。可调整账号池、成片池或批次上限；也可以保留缺口进入内容配置，最终创建时需要明确确认部分创建。</ResourceNotice
-                >
-              </section>
-              <details class="inventory-details">
-                <summary>
-                  平台与类目盘点
-                  <span>仅盘点当前平台；其他平台可在计划中单独安排</span>
-                </summary>
-                <t-table
-                  row-key="key"
-                  :data="inventory"
-                  size="small"
-                  :columns="[
-                    { colKey: 'platform', title: '平台', width: 110 },
-                    { colKey: 'category', title: '内容类目', minWidth: 140 },
-                    { colKey: 'accounts', title: '合格账号', width: 110 },
-                    { colKey: 'available', title: '可用成片', width: 110 },
-                    { colKey: 'occupied', title: '已占用', width: 110 },
-                    { colKey: 'unavailable', title: '其他不可用', width: 130 },
-                  ]"
-                />
-              </details>
-              <section class="composer-section">
-                <div class="section-heading">
-                  <div>
-                    <h3>系统推荐的成片池</h3>
-                    <p>已按类目目标和视频质量自动选择；需要时可人工增减。</p>
-                  </div>
-                  <t-button
-                    variant="outline"
-                    :disabled="!availableAssets.length || !batchTarget"
-                    @click="recommendAssets"
-                    >重新按目标推荐</t-button
-                  >
-                </div>
-                <div class="composer-table-tools">
-                  <t-input
-                    v-model="search"
-                    clearable
-                    placeholder="搜索成片名称或 ID"
-                    aria-label="搜索成片"
-                  /><t-radio-group
-                    v-model="showUnavailable"
-                    variant="default-filled"
-                    ><t-radio-button :value="false"
-                      >可用 {{ availableAssets.length }}</t-radio-button
-                    ><t-radio-button :value="true"
-                      >不可用 {{ unavailableCount }}</t-radio-button
-                    ></t-radio-group
-                  >
-                </div>
-                <ResourceSelectionToolbar
-                  :count="state.assets.length"
-                  unit="条成片"
-                  @clear="state.assets = []"
-                  ><span
-                    >建议分配 {{ suggested.length }} / 目标
-                    {{ batchTarget }}；下一步可逐条调整账号</span
-                  ></ResourceSelectionToolbar
-                >
-                <t-alert
-                  v-if="invalidSelections.length"
-                  theme="warning"
-                  :message="`${invalidSelections.length} 条已选成片已不可安排，请恢复资源条件或移除。`"
-                  ><template #operation
-                    ><t-button
-                      variant="text"
-                      @click="
-                        state.assets = state.assets.filter(
-                          (id) => !invalidSelections.includes(id),
-                        )
-                      "
-                      >移除失效项</t-button
-                    ></template
-                  ></t-alert
-                >
-                <t-table
-                  class="wt-resource-table"
-                  row-key="id"
-                  :data="visibleAssets"
-                  :columns="
-                    showUnavailable
-                      ? assetColumns.filter((c) => c.type !== 'multiple')
-                      : assetColumns
-                  "
-                  :selected-row-keys="state.assets"
-                  @select-change="selectAssets"
-                  :pagination="{
-                    current: assetPage,
-                    pageSize: 6,
-                    total: visibleAssets.length,
-                    showJumper: false,
-                    pageSizeOptions: [],
-                    showPageSize: false,
-                  }"
-                  @page-change="(p) => (assetPage = p.current)"
-                  :select-on-row-click="false"
-                >
-                  <template #asset="{ row }"
-                    ><div class="title-cell">
-                      <button
-                        class="media-thumb"
-                        @click="
-                          emit('preview', { src: row.cover, title: row.title })
-                        "
-                      >
-                        <img :src="row.cover" :alt="`预览${row.title}`" />
-                      </button>
-                      <div>
-                        <strong>{{ row.title }}</strong
-                        ><small>成片 {{ row.id }} · {{ row.duration }}</small>
-                      </div>
-                    </div></template
-                  >
-                  <template #availability="{ row }"
-                    ><div class="availability-list">
-                      <span
-                        v-for="p in availability(row)"
-                        :key="p.platform"
-                        :class="{ 'is-unavailable': p.reason }"
-                        ><i :class="{ 'is-unavailable': p.reason }" />{{
-                          p.platform
-                        }}<small v-if="p.reason">{{ p.reason }}</small></span
-                      >
-                    </div></template
-                  >
-                  <template #empty
-                    ><ResourceEmptyState
-                      :title="
-                        showUnavailable
-                          ? '没有不可用成片'
-                          : '当前范围没有可用成片'
-                      "
-                      :description="
-                        showUnavailable
-                          ? '所有匹配成片均可安排。'
-                          : '调整平台、类目或账号范围，也可以补充成片后继续。'
-                      "
-                  /></template>
-                </t-table>
-              </section>
-              <details class="account-scope">
-                <summary>
-                  参与分配的账号
-                  <span
-                    >{{ accountIds.length }} / {{ eligibleAccounts.length }} 个
-                    · 默认使用全部合格账号</span
-                  >
-                </summary>
-                <t-checkbox-group :value="accountIds" @change="toggleAccount"
-                  ><t-checkbox
-                    v-for="a in eligibleAccounts"
-                    :key="a.id"
-                    :value="a.id"
-                    >{{ a.platform }} · {{ a.name }}
-                    <span class="muted">{{ a.quality }}</span></t-checkbox
-                  ></t-checkbox-group
-                >
-                <div class="account-allocation-settings">
-                  <div v-for="(a, i) in orderedAccounts" :key="a.id">
-                    <span>{{ a.platform }} · {{ a.name }}</span
-                    ><label
-                      >本批次上限<t-input-number
-                        v-model="state.accountLimits[a.id]"
-                        :min="1"
-                        :decimal-places="0"
-                        allow-input-over-limit
-                        placeholder="不限制"
-                        clearable /></label
-                    ><ResourceRowActions
-                      ><t-button
-                        variant="text"
-                        :disabled="i === 0"
-                        @click="reorderAccount(a.id, -1)"
-                        >上移</t-button
-                      ><t-button
-                        variant="text"
-                        :disabled="i === orderedAccounts.length - 1"
-                        @click="reorderAccount(a.id, 1)"
-                        >下移</t-button
-                      ></ResourceRowActions
-                    >
-                  </div>
-                </div>
-                <ResourceNotice
-                  >账号按类目和质量匹配；未配置每日容量，不推算账号日额度。同一账号的任务依次执行。</ResourceNotice
-                >
-              </details>
-            </template>
-            <ResourceEmptyState
-              v-else
-              title="先选择平台与类目"
-              description="资源盘点、可用成片和分配建议会随选择自动出现。"
-            />
-          </template>
-          <template v-else>
-            <div class="composer-context">
-              <div>
-                <strong>{{ state.platforms.join(" / ") }}</strong
-                ><span
-                  >{{ state.categories.join("、") }} · {{ uniqueVideos }} 条成片
-                  · {{ state.rows.length }} 条任务</span
-                >
-              </div>
-              <t-button variant="text" @click="state.step = 0"
-                >调整资源范围</t-button
+                  @change="changePlatform"
+                  aria-label="批次发布平台"
+              /></label>
+            </div>
+            <div class="batch-category-field">
+              <label
+                ><span>发布类目 <em>*</em></span></label
+              ><t-checkbox-group
+                v-model="state.categories"
+                :disabled="!!state.planId"
+                ><t-checkbox
+                  v-for="c in allowedCategories"
+                  :key="c"
+                  :value="c"
+                  class="batch-category-chip"
+                  >{{ c }}</t-checkbox
+                ></t-checkbox-group
               >
             </div>
-            <ResourceNotice v-if="unassigned.length" tone="warning"
-              >有
-              {{ unassigned.length }} 个可用的平台分发组合因本批次上限未安排。
-              <details>
-                <summary>查看未安排内容</summary>
-                <p v-for="item in unassigned" :key="item.key">
-                  {{ item.platform }} · {{ item.title }} · {{ item.reason }}
-                </p>
-              </details>
-              本次只创建下表中已安排的
-              {{ state.rows.length }}
-              条任务；可返回提高上限或调整账号。</ResourceNotice
-            >
-            <template v-if="state.step === 1"
-              ><div class="section-heading">
-                <div>
-                  <h3>确认资源分配</h3>
-                  <p>
-                    系统已按质量、类目资格和账号顺序推荐。这里只检查账号与成片；标题和封面在下一阶段配置。
-                  </p>
-                </div>
+          </div>
+        </section>
+        <section
+          v-if="platform && state.categories.length"
+          class="batch-section"
+        >
+          <header class="batch-section-head">
+            <div>
+              <span class="batch-number">{{
+                resourcePane === 0 ? "02" : "资源"
+              }}</span>
+              <h3>资源自动盘点</h3>
+              <p>
+                {{
+                  resourcePane === 0
+                    ? "按所选平台和类目实时计算"
+                    : `${accountIds.length} 个账号 · ${availableAssets.length} 条可用成片`
+                }}
+              </p>
+            </div>
+            <t-button
+              v-if="resourcePane === 1"
+              variant="text"
+              @click="inventoryExpanded = !inventoryExpanded"
+              >{{ inventoryExpanded ? "收起盘点" : "查看盘点" }}</t-button
+            ><t-tag v-else theme="success" variant="light">盘点完成</t-tag>
+          </header>
+          <div
+            v-if="resourcePane === 0 || inventoryExpanded"
+            class="batch-section-body"
+          >
+            <div class="batch-metrics">
+              <div>
+                <small>可参与账号</small
+                ><strong>{{ accountIds.length }}<span>个账号</span></strong>
+                <p>已排除停用与登录失效账号</p>
               </div>
-              <div class="batch-resource-overview compact">
-                <div>
-                  <small>批次目标</small><strong>{{ batchTarget }}</strong>
-                </div>
-                <div>
-                  <small>已分配候选</small
-                  ><strong>{{ state.rows.length }}</strong>
-                </div>
-                <div
-                  :class="{
-                    'has-gap': Math.max(0, batchTarget - state.rows.length),
-                  }"
+              <div>
+                <small>合格可用成片</small
+                ><strong
+                  >{{ availableAssets.length }}<span>条成片</span></strong
                 >
-                  <small>剩余缺口</small
-                  ><strong>{{
-                    Math.max(0, batchTarget - state.rows.length)
-                  }}</strong>
-                </div>
+                <p>已排除同平台占用与缺失文件</p>
               </div>
-              <ResourceNotice
-                v-if="Math.max(0, batchTarget - state.rows.length)"
-                tone="warning"
-                >当前分配仍有缺口。可以返回资源范围补选；保留缺口继续配置内容时，最终创建必须明确确认部分创建。</ResourceNotice
-              ></template
+              <div>
+                <small>当前目标</small
+                ><strong>{{ target }}<span>条任务</span></strong>
+                <p>各类目目标合计</p>
+              </div>
+              <div :class="{ warning: gap }">
+                <small>{{
+                  resourcePane === 0 ? "建议本次目标" : "可匹配 / 目标缺口"
+                }}</small
+                ><strong
+                  >{{
+                    resourcePane === 0
+                      ? categoryRows.reduce(
+                          (n, r) => n + Math.min(r.available, 3),
+                          0,
+                        )
+                      : suggested.length
+                  }}<span>{{
+                    resourcePane === 0 ? "条任务" : `/ 缺口 ${gap} 条`
+                  }}</span></strong
+                >
+                <p>
+                  {{
+                    resourcePane === 0
+                      ? "按可用成片建议，下一步可调整"
+                      : "按本批次账号上限计算"
+                  }}
+                </p>
+              </div>
+            </div>
+            <table class="batch-table">
+              <thead>
+                <tr>
+                  <th>参与类目</th>
+                  <th>适配账号</th>
+                  <th>可用成片</th>
+                  <th>同平台占用</th>
+                  <th>其他不可用</th>
+                  <th>资源情况</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="r in inventory" :key="r.key">
+                  <td>
+                    <b>{{ r.category }}</b>
+                  </td>
+                  <td>{{ r.accounts }} 个</td>
+                  <td>{{ r.available }} 条</td>
+                  <td>{{ r.occupied }} 条</td>
+                  <td>{{ r.unavailable }} 条</td>
+                  <td>
+                    <t-tag
+                      :theme="r.available ? 'success' : 'warning'"
+                      variant="light"
+                      >{{ r.available ? "可安排" : "需补充资源" }}</t-tag
+                    >
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+            <p class="batch-inline-note">
+              每日发布额度未配置，本页按可用成片与本批次账号上限匹配，不推算平台日额度。跨类目账号会共享本批次上限。
+            </p>
+          </div>
+        </section>
+        <div
+          v-if="resourcePane === 1 && missingResources"
+          class="batch-shortage"
+        >
+          <span
+            >{{
+              missingResources
+            }}。请调整发布范围，或在对应资源库补充后重新盘点。</span
+          >
+          <t-button variant="text" @click="resourcePane = 0"
+            >调整发布范围</t-button
+          >
+        </div>
+        <section v-if="resourcePane === 1" class="batch-section emphasis">
+          <header class="batch-section-head">
+            <div>
+              <span class="batch-number">02</span>
+              <h3>类目数量与优先级</h3>
+              <p>系统推荐数量，人工可调整；上方类目优先匹配</p>
+            </div>
+            <t-button
+              variant="outline"
+              :disabled="!!state.planId"
+              @click="recommendTargets"
+              ><template #icon><RefreshIcon /></template>采用系统推荐</t-button
             >
-            <section v-if="state.step === 2" class="platform-defaults">
-              <div class="section-heading">
-                <div>
-                  <h3>配置当前平台内容</h3>
-                  <p>
-                    按平台统一设置创作声明；单条文案与封面在上方工作区编辑。
-                  </p>
-                </div>
+          </header>
+          <div class="batch-section-body">
+            <div class="batch-total-line">
+              <div>
+                <small>本次目标任务数</small
+                ><strong>{{ target }} <span>条任务</span></strong>
               </div>
               <p>
-                <strong>{{ selectedPlatform }}</strong> ·
-                {{ state.rows.length }} 条任务
+                总目标由各类目数量自动合计{{
+                  state.planId ? "，目标来自计划，只读" : ""
+                }}
               </p>
-              <div class="defaults-fields">
-                <label class="composer-field"
-                  ><span>创作声明 <em>*</em></span
-                  ><t-select
-                    :popup-props="{
-                      hideEmptyPopup: false,
-                      attach: 'body',
-                      zIndex: 5500,
-                    }"
-                    v-model="platformDefaults[contentPlatform].declaration"
-                    placeholder="按本次实际内容确认"
-                    :options="declarationOptions(contentPlatform)" /></label
-                ><label v-if="contentPlatform === 'B站'" class="composer-field"
-                  ><span>分区 <em>*</em></span
-                  ><t-select
-                    :popup-props="{
-                      hideEmptyPopup: false,
-                      attach: 'body',
-                      zIndex: 5500,
-                    }"
-                    v-model="platformDefaults[contentPlatform].partition"
-                    :options="[{ label: '游戏', value: '游戏' }]" /></label
-                ><label v-if="contentPlatform === 'B站'" class="composer-field"
-                  ><span>标签</span
-                  ><t-input
-                    v-model="platformDefaults[contentPlatform].tags"
-                    placeholder="留空沿用各成片类目" /></label
-                ><t-button variant="outline" @click="applyDefaults(false)"
-                  >应用并保留单条修改</t-button
-                ><t-button variant="text" @click="applyDefaults(true)"
-                  >覆盖这些字段</t-button
+            </div>
+            <table class="batch-table batch-target-table">
+              <thead>
+                <tr>
+                  <th>优先级</th>
+                  <th>内容类目</th>
+                  <th>可用成片</th>
+                  <th>本批次目标</th>
+                  <th>预计分配</th>
+                  <th>缺口</th>
+                  <th>排序</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="(r, i) in categoryRows" :key="r.category">
+                  <td>
+                    <span class="batch-priority">P{{ i + 1 }}</span>
+                  </td>
+                  <td>
+                    <b>{{ r.category }}</b>
+                  </td>
+                  <td>{{ r.available }} 条</td>
+                  <td>
+                    <t-input-number
+                      :value="r.target"
+                      :min="0"
+                      :max="9999"
+                      :decimal-places="0"
+                      :disabled="!!state.planId"
+                      :aria-label="r.category + '批次目标'"
+                      @change="
+                        (v) => {
+                          setTarget(r.category, v);
+                          recommendAssets();
+                        }
+                      "
+                    />
+                  </td>
+                  <td>{{ r.allocated }} 条</td>
+                  <td :class="{ 'batch-warning-text': r.target > r.allocated }">
+                    {{ Math.max(0, r.target - r.allocated) }} 条
+                  </td>
+                  <td>
+                    <t-button
+                      variant="text"
+                      :disabled="i === 0 || !!state.planId"
+                      @click="moveCategory(i, -1)"
+                      >上移</t-button
+                    ><t-button
+                      variant="text"
+                      :disabled="
+                        i === categoryRows.length - 1 || !!state.planId
+                      "
+                      @click="moveCategory(i, 1)"
+                      >下移</t-button
+                    >
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+            <t-alert
+              v-if="gap"
+              theme="warning"
+              :message="`目标 ${target} 条，当前可匹配 ${suggested.length} 条，缺口 ${gap} 条。可调整账号池与数量；保留缺口继续时，最终创建需要明确确认。`"
+            />
+            <details class="batch-account-pool">
+              <summary>
+                调整参与账号与本批次上限
+                <span
+                  >{{ accountIds.length }} 个账号参与 ·
+                  默认使用全部合格账号</span
                 >
-              </div>
-              <ResourceNotice
-                v-if="appliedNotice.platform === contentPlatform"
-                >{{ appliedNotice.text }}</ResourceNotice
-              ><ResourceNotice v-if="contentPlatform === '百家号'"
-                >截图只确认了“无需声明”；其他内容类型待核验。挂载关闭、地点和活动不选、水印不添加。</ResourceNotice
+              </summary>
+              <div
+                v-for="(a, i) in eligibleAccounts"
+                :key="a.id"
+                class="batch-account-setting"
               >
-            </section>
-            <template v-if="state.step === 3">
-              <div class="final-summary">
-                <div>
-                  <h3>检查最终发布内容</h3>
-                  <p>
-                    {{ readyCount }} 条内容已就绪<span v-if="issues.length"
-                      >，还有 {{ issues.length }} 条需要处理</span
-                    >。创建后处于待执行，不会立即发布。
-                  </p>
-                </div>
-                <t-tag
-                  :theme="issues.length ? 'warning' : 'success'"
-                  variant="light"
-                  >{{ issues.length ? "有待处理项" : "可以创建" }}</t-tag
+                <t-checkbox
+                  :checked="accountIds.includes(a.id)"
+                  @change="
+                    (checked) => {
+                      state.excludedAccounts = checked
+                        ? state.excludedAccounts.filter((id) => id !== a.id)
+                        : [...state.excludedAccounts, a.id];
+                    }
+                  "
+                  >{{ a.name }}</t-checkbox
+                ><span>{{ a.quality }} · {{ a.categories.join(" / ") }}</span
+                ><label
+                  >本批次上限<t-input-number
+                    v-model="state.accountLimits[a.id]"
+                    :min="1"
+                    :decimal-places="0"
+                    clearable
+                    placeholder="不限制" /></label
+                ><t-button
+                  variant="text"
+                  :disabled="
+                    !accountIds.includes(a.id) || accountIds.indexOf(a.id) === 0
+                  "
+                  @click="moveAccount(accountIds.indexOf(a.id), -1)"
+                  >上移</t-button
+                ><t-button
+                  variant="text"
+                  :disabled="
+                    !accountIds.includes(a.id) ||
+                    accountIds.indexOf(a.id) === accountIds.length - 1
+                  "
+                  @click="moveAccount(accountIds.indexOf(a.id), 1)"
+                  >下移</t-button
                 >
               </div>
-              <label class="composer-field batch-name"
-                ><span>批次名称 <em>*</em></span
-                ><t-input
-                  ref="batchNameInput"
-                  v-model="state.name"
-                  :status="batchNameError ? 'error' : 'default'"
-                  :tips="batchNameError"
-                  @change="batchNameError = ''"
-                  placeholder="例如：百度批次 A · 首轮发布"
-                  :maxlength="60"
-              /></label>
-            </template>
-            <div v-if="state.step !== 2" class="composer-table-tools">
-              <span
-                >{{ selectedPlatform }} · {{ state.rows.length }} 条任务</span
-              ><t-checkbox v-if="state.step > 1" v-model="onlyErrors"
-                >只看待处理 {{ issues.length }}</t-checkbox
+            </details>
+          </div>
+        </section>
+      </template>
+      <template v-else-if="state.step === 1">
+        <section class="batch-section">
+          <header class="batch-section-head">
+            <div>
+              <span class="batch-number">01</span>
+              <h3>发布范围</h3>
+              <p>{{ platform }} · {{ state.categories.join(" / ") }}</p>
+            </div>
+            <t-button
+              variant="text"
+              @click="
+                state.step = 0;
+                resourcePane = 0;
+              "
+              >调整范围</t-button
+            >
+          </header>
+        </section>
+        <section class="batch-section">
+          <header class="batch-section-head">
+            <div>
+              <span class="batch-number">02</span>
+              <h3>类目数量与优先级</h3>
+              <p>
+                目标 {{ target }} 条 ·
+                {{
+                  categoryRows
+                    .map((r) => `${r.category} ${r.target}`)
+                    .join(" / ")
+                }}
+              </p>
+            </div>
+            <t-button variant="text" @click="back">调整数量</t-button>
+          </header>
+        </section>
+        <section class="batch-section emphasis">
+          <header class="batch-section-head">
+            <div>
+              <span class="batch-number">03</span>
+              <h3>账号与成片匹配</h3>
+              <p>系统自动匹配，人工调整后确认资源</p>
+            </div>
+            <div class="batch-head-actions">
+              <t-button variant="outline" @click="rematch"
+                ><template #icon><RefreshIcon /></template
+                >重新自动匹配</t-button
+              ><t-button variant="outline" @click="checkResources"
+                >检查资源冲突</t-button
               >
             </div>
-            <t-table
-              v-if="state.step !== 2"
-              class="wt-resource-table"
-              row-key="key"
-              :data="rows.slice((contentPage - 1) * 6, contentPage * 6)"
-              :disable-data-page="true"
-              @page-change="(p) => (contentPage = p.current)"
-              :columns="candidateColumns"
-              :pagination="{
-                current: contentPage,
-                pageSize: 6,
-                total: rows.length,
-                showJumper: false,
-                pageSizeOptions: [],
-                showPageSize: false,
-              }"
-            >
-              <template #asset="{ row }"
-                ><div class="candidate-asset">
-                  <button
-                    class="media-thumb"
-                    @click="
-                      emit('preview', { src: row.cover, title: row.title })
-                    "
-                  >
-                    <img :src="row.cover" alt="预览最终封面" />
-                  </button>
-                  <div>
-                    {{ asset(row.assetId)?.title
-                    }}<small
-                      >成片 {{ row.assetId }} ·
-                      {{ asset(row.assetId)?.quality }}</small
-                    >
-                  </div>
-                </div></template
+          </header>
+          <div class="batch-section-body">
+            <div class="batch-match-summary">
+              <t-tag :theme="gap ? 'warning' : 'success'" variant="light"
+                >已匹配 {{ state.rows.length }} / {{ target }}</t-tag
+              ><span
+                >账号 {{ new Set(state.rows.map((r) => r.accountId)).size }} 个
+                · 成片 {{ state.rows.length }} 条</span
+              ><span v-if="gap" class="batch-warning-text"
+                >目标缺口 {{ gap }} 条</span
               >
-              <template #platform="{ row }"
-                >{{ row.platform
-                }}<small class="cell-secondary">{{
-                  row.category
-                }}</small></template
-              >
-              <template #account="{ row }"
-                ><t-select
-                  :popup-props="{
-                    hideEmptyPopup: false,
-                    attach: 'body',
-                    zIndex: 5500,
-                  }"
-                  v-if="state.step === 1"
-                  v-model="row.accountId"
-                  :options="accountOptions(row)"
-                  @change="
-                    row.overrides = [
-                      ...new Set([...(row.overrides || []), 'accountId']),
-                    ]
-                  "
-                /><template v-else
-                  >{{ account(row.accountId)?.name
-                  }}<small class="cell-secondary"
-                    >{{ account(row.accountId)?.quality }} · 窗口
-                    {{ account(row.accountId)?.window }}</small
-                  ></template
-                ></template
-              >
-              <template #content="{ row }"
-                ><div class="candidate-content">
-                  {{ row.platform === "百家号" ? row.description : row.title
-                  }}<small>{{ row.declaration || "创作声明待确认" }}</small
-                  ><small v-if="row.platform === 'B站'"
-                    >{{ row.partition }} · {{ row.tags }}</small
-                  ><small
-                    >{{ row.schedule || "启动后尽快提交"
-                    }}<span v-if="row.platform !== '百家号'">
-                      · {{ row.visibility }}</span
-                    ></small
-                  ><t-tag
-                    v-if="row.overrides?.length"
-                    size="small"
-                    variant="outline"
-                    >有单条修改</t-tag
-                  >
-                </div></template
-              >
-              <template #check="{ row }"
-                ><t-tag
-                  :theme="
-                    (state.step === 1
-                      ? resourceProblems(row)
-                      : validate(row, db)
-                    ).length
-                      ? 'warning'
-                      : 'success'
-                  "
-                  variant="light"
-                  >{{
-                    (state.step === 1
-                      ? resourceProblems(row)
-                      : validate(row, db)
-                    ).length
-                      ? "待处理"
-                      : "已就绪"
-                  }}</t-tag
-                ><t-tooltip
-                  v-if="
-                    (state.step === 1
-                      ? resourceProblems(row)
-                      : validate(row, db)
-                    ).length
-                  "
-                  :content="
-                    (state.step === 1
-                      ? resourceProblems(row)
-                      : validate(row, db)
-                    ).join('；')
-                  "
-                  ><t-button
-                    class="issue-count"
-                    variant="text"
-                    @click="
-                      state.step === 1 ? (state.step = 0) : emit('edit', row)
-                    "
-                    >{{
-                      (state.step === 1
-                        ? resourceProblems(row)
-                        : validate(row, db)
-                      ).length
-                    }}
-                    项问题</t-button
-                  ></t-tooltip
-                ></template
-              >
-              <template #op="{ row }"
-                ><ResourceRowActions
-                  ><t-button variant="text" @click="emit('preview', { row })"
-                    >预览</t-button
-                  ><t-button
-                    v-if="state.step !== 1"
-                    variant="text"
-                    @click="emit('edit', row)"
-                    >编辑</t-button
-                  ><t-button
-                    variant="text"
-                    class="is-danger"
-                    @click="removeRow(row)"
-                    >移出</t-button
-                  ></ResourceRowActions
-                ></template
-              >
-              <template #empty
-                ><ResourceEmptyState
-                  :title="
-                    onlyErrors ? '当前筛选下没有待处理项' : '没有任务候选'
-                  "
-                  description="返回调整当前平台的资源范围，或取消仅看待处理。"
-              /></template>
-            </t-table>
-            <ResourceNotice v-if="state.step === 3"
-              >最终检查包含账号、文案、封面和平台设置。点击“预览”检查完整内容；创建前会再次校验资源占用。</ResourceNotice
-            >
-          </template>
+            </div>
+            <t-tabs v-model="activeCategory"
+              ><t-tab-panel
+                v-for="c in state.categories"
+                :key="c"
+                :value="c"
+                :label="`${c}（${state.rows.filter((r) => r.category === c).length}）`"
+            /></t-tabs>
+            <div class="batch-table-scroll">
+              <table class="batch-table batch-matching-table">
+                <thead>
+                  <tr>
+                    <th>序号</th>
+                    <th>发布账号</th>
+                    <th>成片资源</th>
+                    <th>匹配来源</th>
+                    <th>资源检查</th>
+                    <th>操作</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="(r, i) in matchingRows" :key="r.key">
+                    <td>{{ i + 1 }}</td>
+                    <td>
+                      <t-select
+                        :popup-props="{ attach: 'body', zIndex: 5500 }"
+                        v-model="r.accountId"
+                        :options="
+                          eligibleAccounts
+                            .filter(
+                              (a) =>
+                                accountIds.includes(a.id) &&
+                                a.categories.includes(r.category),
+                            )
+                            .map((a) => ({
+                              label: `${a.name} · ${a.quality}`,
+                              value: a.id,
+                            }))
+                        "
+                        :aria-label="`第${i + 1}条发布账号`"
+                        @change="
+                          r.overrides = [
+                            ...new Set([...(r.overrides || []), 'accountId']),
+                          ]
+                        "
+                      />
+                    </td>
+                    <td>
+                      <div class="batch-video-cell">
+                        <img :src="asset(r.assetId)?.cover" alt="成片封面" />
+                        <div>
+                          <b>{{ asset(r.assetId)?.title }}</b
+                          ><small
+                            >V-{{ r.assetId }} ·
+                            {{ asset(r.assetId)?.duration }} ·
+                            {{ asset(r.assetId)?.quality }}</small
+                          >
+                        </div>
+                      </div>
+                    </td>
+                    <td>
+                      <t-tag
+                        variant="light"
+                        :theme="r.overrides?.length ? 'primary' : 'default'"
+                        >{{
+                          r.overrides?.length ? "人工指定" : "系统匹配"
+                        }}</t-tag
+                      >
+                    </td>
+                    <td>
+                      <t-tooltip
+                        v-if="resourceProblems(r).length"
+                        :content="resourceProblems(r).join('；')"
+                        ><t-tag theme="warning" variant="light"
+                          >需调整</t-tag
+                        ></t-tooltip
+                      ><t-tag v-else theme="success" variant="light"
+                        >有效</t-tag
+                      >
+                    </td>
+                    <td>
+                      <t-button variant="text" @click="openReplace(r)"
+                        >更换成片</t-button
+                      ><t-button
+                        variant="text"
+                        theme="danger"
+                        @click="removeRow(r)"
+                        >移出</t-button
+                      >
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <p v-if="!matchingRows.length" class="batch-empty">
+              此类目尚无可分配资源。可返回调整账号与目标，或保留缺口继续。
+            </p>
+            <p class="batch-inline-note">
+              这里只检查资源组合。标题、创作声明和封面问题在内容阶段处理；资源确认前不创建正式任务。
+            </p>
+          </div>
+        </section>
+      </template>
+      <BatchContentWorkspace
+        v-else-if="state.step === 2"
+        ref="contentRef"
+        :rows="state.rows"
+        :db="db"
+        @preview="emit('preview', $event)"
+        @working="contentBusy = $event"
+      />
+      <template v-else-if="state.step === 3">
+        <div class="batch-content-heading">
+          <div>
+            <h3>结果总览</h3>
+            <p>按类目检查每条任务的实际内容与封面，确认后创建待执行任务。</p>
+          </div>
+          <t-tag :theme="issues.length ? 'warning' : 'success'" variant="light"
+            >{{ ready }} / {{ state.rows.length }} 条已就绪</t-tag
+          >
         </div>
-        <aside class="composer-workspace-rail">
-          <section class="composer-rail-card">
-            <span class="rail-kicker">SCOPE & PROGRESS</span>
-            <h3>本次配置</h3>
-            <dl>
-              <div>
-                <dt>创建方式</dt>
-                <dd>{{ state.planId ? "计划内批次" : "独立批次" }}</dd>
-              </div>
-              <div>
-                <dt>发布平台</dt>
-                <dd>{{ selectedPlatform || "待选择" }}</dd>
-              </div>
-              <div>
-                <dt>内容类目</dt>
-                <dd>{{ state.categories.join("、") || "待选择" }}</dd>
-              </div>
-              <div>
-                <dt>已选成片</dt>
-                <dd>{{ selectedAssets.length }} 条</dd>
-              </div>
-              <div>
-                <dt>候选任务</dt>
-                <dd>{{ state.rows.length || suggested.length }} 条</dd>
-              </div>
-            </dl>
-          </section>
-          <section class="composer-rail-card">
-            <span class="rail-kicker">READINESS</span>
-            <h3>{{ state.step <= 1 ? "资源检查" : "内容检查" }}</h3>
-            <ul>
-              <li :class="{ done: !!selectedPlatform }">选择单一发布平台</li>
-              <li :class="{ done: !!state.categories.length }">确认内容类目</li>
-              <li :class="{ done: !!selectedAssets.length }">选择可用成片</li>
-              <li
-                :class="{
-                  done:
-                    state.step <= 1
-                      ? !!state.rows.length && !resourceErrors.length
-                      : !issues.length,
-                }"
-              >
-                {{
-                  state.step <= 1 ? "确认账号与成片分配" : "完成内容与封面预检"
-                }}
-              </li>
-            </ul>
-            <p
-              v-if="state.step === 1 && resourceErrors.length"
-              class="rail-warning"
-            >
-              {{ resourceErrors.length }} 项资源问题仍需处理
-            </p>
-            <p v-else-if="state.step === 1" class="rail-success">
-              {{ state.rows.length }} 条资源分配成立，可进入内容配置
-            </p>
-            <p v-else-if="state.step > 1 && issues.length" class="rail-warning">
-              {{ issues.length }} 项内容仍需处理
-            </p>
-            <p v-else-if="state.step > 1" class="rail-success">
-              {{ readyCount }} 条内容已就绪
-            </p>
-          </section>
-          <section class="composer-rail-card rail-note">
-            <strong>创建后会怎样？</strong>
-            <p>创建后进入待执行，确认内容后再启动任务。</p>
-          </section>
-        </aside>
-      </div>
+        <section class="batch-section">
+          <div class="batch-section-body batch-overview-top">
+            <label
+              ><span>批次名称 <em>*</em></span
+              ><t-input
+                v-model="state.name"
+                placeholder="为本次发布命名"
+                :maxlength="60"
+            /></label>
+            <div>
+              <small>批次目标</small><strong>{{ target }}</strong>
+            </div>
+            <div>
+              <small>正式创建</small><strong>{{ state.rows.length }}</strong>
+            </div>
+            <div :class="{ 'batch-warning-text': gap }">
+              <small>目标缺口</small><strong>{{ gap }}</strong>
+            </div>
+          </div>
+        </section>
+        <t-alert
+          v-if="issues.length"
+          theme="warning"
+          :message="`${issues.length} 条任务尚未通过预检。展开类目查看具体原因，点击“修复内容”处理。`"
+          class="batch-message"
+        />
+        <section v-for="c in state.categories" :key="c" class="batch-section">
+          <header class="batch-section-head">
+            <div>
+              <h3>{{ c }}</h3>
+              <p>
+                目标
+                {{ state.targets.find((t) => t.category === c)?.count || 0 }} ·
+                候选 {{ state.rows.filter((r) => r.category === c).length }}
+              </p>
+            </div>
+          </header>
+          <div class="batch-table-scroll">
+            <table class="batch-table batch-results-table">
+              <thead>
+                <tr>
+                  <th>账号 / 成片</th>
+                  <th>实际发布内容</th>
+                  <th>实际封面</th>
+                  <th>最终预检</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr
+                  v-for="r in state.rows.filter((r) => r.category === c)"
+                  :key="r.key"
+                >
+                  <td>
+                    <b>{{ account(r.accountId)?.name }}</b
+                    ><small
+                      >V-{{ r.assetId }} · {{ asset(r.assetId)?.title }}</small
+                    >
+                  </td>
+                  <td>
+                    <b>{{ r.title }}</b>
+                    <p>{{ r.description || "未填写简介" }}</p>
+                    <small>{{ r.topics }} {{ r.tags }}</small
+                    ><small
+                      >封面短标题：{{ r.shortTitle || "未设置" }} · 短标语：{{
+                        r.subTitle || "未设置"
+                      }}</small
+                    ><small
+                      >{{ r.declaration || "声明待确认" }} ·
+                      {{ r.schedule || "启动后尽快发布" }}</small
+                    >
+                  </td>
+                  <td>
+                    <button
+                      class="batch-cover-preview"
+                      @click="emit('preview', { kind: 'cover', row: r })"
+                    >
+                      <img :src="r.cover" alt="实际封面" />
+                    </button>
+                  </td>
+                  <td>
+                    <t-tag
+                      :theme="validate(r, db).length ? 'warning' : 'success'"
+                      variant="light"
+                      >{{ validate(r, db).length ? "待处理" : "已通过" }}</t-tag
+                    >
+                    <ul v-if="validate(r, db).length" class="batch-error-list">
+                      <li v-for="e in validate(r, db)" :key="e">{{ e }}</li>
+                    </ul>
+                  </td>
+                  <td>
+                    <t-button variant="text" @click="editContent(r)">{{
+                      validate(r, db).length ? "修复内容" : "编辑内容"
+                    }}</t-button
+                    ><t-button
+                      variant="text"
+                      @click="emit('preview', { kind: 'cover', row: r })"
+                      >预览封面</t-button
+                    ><t-button
+                      variant="text"
+                      theme="danger"
+                      @click="removeRow(r)"
+                      >移出</t-button
+                    >
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+        <p class="batch-inline-note">
+          创建只生成批次与待执行任务，不启动发布。资源占用将在创建时重新检查；{{
+            gap
+              ? "将保留原始目标与缺口，提交前需确认部分创建。"
+              : "所有任务通过预检后方可确认。"
+          }}
+        </p>
+      </template>
+      <section v-if="state.step === 4" class="batch-created-result">
+        <div class="batch-created-check"><CheckIcon /></div>
+        <h2>{{ resultSaved ? "批次与任务已创建" : "创建结果等待保存" }}</h2>
+        <p>{{ state.name }}</p>
+        <t-tag theme="primary" variant="light">待执行 · 尚未启动</t-tag>
+        <div class="batch-created-metrics">
+          <div>
+            <small>原始目标</small><strong>{{ target }}</strong>
+          </div>
+          <div>
+            <small>已创建任务</small
+            ><strong>{{ createdResult?.tasks.length || 0 }}</strong>
+          </div>
+          <div
+            :class="{
+              'batch-warning-text': target > (createdResult?.tasks.length || 0),
+            }"
+          >
+            <small>目标缺口</small
+            ><strong>{{
+              Math.max(0, target - (createdResult?.tasks.length || 0))
+            }}</strong>
+          </div>
+        </div>
+        <p class="batch-inline-note">
+          {{
+            resultSaved
+              ? "任务已保存为待执行。进入批次详情后可检查任务与账号队列，明确启动后才开始执行。"
+              : "任务已生成，正在保存创建结果；保存成功后可进入批次详情。"
+          }}{{
+            target > (createdResult?.tasks.length || 0)
+              ? "已保留原始目标与缺口，不自动补量。"
+              : ""
+          }}
+        </p>
+      </section>
     </div>
     <template #footer
-      ><span class="composer-footer-note">{{
-        state.step === 0
-          ? `目标 ${batchTarget} · 建议分配 ${suggested.length} · 缺口 ${Math.max(0, batchTarget - suggested.length)}`
-          : state.step === 1
-            ? `目标 ${batchTarget} · 已分配 ${state.rows.length} · 资源问题 ${resourceErrors.length}`
-            : `目标 ${batchTarget} · 候选 ${state.rows.length} · 已就绪 ${readyCount}`
-      }}</span
-      ><t-button variant="outline" @click="saveDraft">保存草稿</t-button
-      ><t-button theme="default" variant="outline" @click="visible = false"
-        >保留配置并关闭</t-button
-      ><t-button
-        v-if="state.step > 0"
-        theme="default"
-        variant="outline"
-        @click="back"
-        >上一步</t-button
-      ><t-button
-        v-if="state.step < 3"
-        :loading="preparing"
-        :disabled="state.step === 0 ? !suggested.length : !state.rows.length"
-        @click="next"
-        >{{
-          state.step === 0
-            ? "检查资源分配"
-            : state.step === 1
-              ? "进入 AI 内容配置"
-              : "进入最终预检"
-        }}</t-button
-      ><t-button
-        v-else
-        :disabled="!state.rows.length || !!issues.length"
-        @click="create"
-        >{{ `创建 ${state.rows.length} 条待执行任务` }}</t-button
+      ><template v-if="state.step === 4"
+        ><span class="batch-footer-note"
+          >批次 {{ createdResult?.batch.id }} ·
+          {{ createdResult?.tasks.length }} 条待执行任务</span
+        ><t-button v-if="resultSaved" @click="finish"
+          >进入批次详情<template #suffix><ArrowRightIcon /></template></t-button
+        ><t-button v-else :loading="busy" @click="retrySaveCreated"
+          >重试保存创建结果</t-button
+        ></template
+      ><template v-else
+        ><span class="batch-footer-note">{{
+          state.step < 2
+            ? `目标 ${target} · 已匹配 ${allocated.length} · 缺口 ${gap}`
+            : `已就绪 ${ready} / ${state.rows.length} 条 · 创建后待执行`
+        }}</span
+        ><t-button
+          variant="outline"
+          :loading="busy"
+          :disabled="contentBusy"
+          @click="saveDraft(false)"
+          >保存草稿</t-button
+        ><t-button
+          v-if="
+            state.step === 1 ||
+            state.step === 3 ||
+            (state.step === 0 && resourcePane === 1)
+          "
+          variant="outline"
+          @click="back"
+          ><template #icon><ArrowLeftIcon /></template
+          >{{ state.step === 3 ? "返回内容配置" : "上一步" }}</t-button
+        ><t-button
+          v-if="state.step < 3"
+          :loading="busy || contentBusy"
+          :disabled="
+            contentBusy ||
+            (state.step === 0
+              ? !platform ||
+                !state.categories.length ||
+                (resourcePane === 1 && !target)
+              : !state.rows.length)
+          "
+          @click="next"
+          >{{
+            state.step === 0
+              ? resourcePane === 0
+                ? "下一步：配置类目数量"
+                : "下一步：匹配账号与成片"
+              : state.step === 1
+                ? "确认资源并进入内容配置"
+                : "下一步：结果总览"
+          }}<template #suffix><ArrowRightIcon /></template></t-button
+        ><t-button
+          v-else
+          :loading="busy || contentBusy"
+          :disabled="contentBusy || !state.rows.length || !!issues.length"
+          @click="create"
+          >确认创建 {{ state.rows.length }} 条待执行任务</t-button
+        ></template
       ></template
     >
   </ResourceOverlay>
+  <ResourceOverlay
+    v-model:visible="lockOpen"
+    title="确认资源，进入内容配置"
+    :width="640"
+    ><div class="batch-lock-summary">
+      <CheckIcon />
+      <h3>{{ state.rows.length }} 条账号与成片组合有效</h3>
+      <p>
+        {{ platform }} · 目标 {{ target }} 条 · 已分配
+        {{ state.rows.length }} 条<template v-if="gap">
+          · 缺口 {{ gap }} 条</template
+        >
+      </p>
+    </div>
+    <p class="batch-dialog-copy">
+      确认后，平台、类目、目标、账号与成片在本草稿中变为只读。接下来配置文案与封面；需要调整资源时，可复制为新草稿，原草稿会保留。
+    </p>
+    <t-alert
+      theme="info"
+      message="此操作不创建正式任务、不占用成片，也不会启动发布。"
+    /><template #footer
+      ><t-button variant="outline" @click="lockOpen = false"
+        >继续调整资源</t-button
+      ><t-button @click="confirmResources"
+        >确认并进入内容配置</t-button
+      ></template
+    ></ResourceOverlay
+  >
+  <ResourceOverlay
+    :visible="!!replaceRow"
+    @update:visible="
+      (v) => {
+        if (!v) replaceRow = null;
+      }
+    "
+    title="更换成片"
+    :width="800"
+    ><p class="batch-dialog-copy">
+      仅显示当前类目的可用、未重复分配成片。更换后需在下一阶段重新配置内容。
+    </p>
+    <t-input v-model="replaceSearch" placeholder="搜索可用成片" />
+    <div class="batch-replacement-list">
+      <label v-for="v in replacementOptions" :key="v.id"
+        ><input type="radio" v-model="replacement" :value="v.id" /><img
+          :src="v.cover"
+          alt=""
+        /><span
+          ><b>{{ v.title }}</b
+          ><small
+            >V-{{ v.id }} · {{ v.duration }} · {{ v.quality }}</small
+          ></span
+        ></label
+      >
+      <p v-if="!replacementOptions.length" class="batch-empty">
+        没有其他可用成片。可返回补充资源或移出当前候选。
+      </p>
+    </div>
+    <template #footer
+      ><t-button variant="outline" @click="replaceRow = null">取消</t-button
+      ><t-button :disabled="!replacement" @click="applyReplacement"
+        >确认更换</t-button
+      ></template
+    ></ResourceOverlay
+  >
 </template>
-<style scoped>
-.batch-resource-overview {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 10px;
-  margin: 0 0 15px;
-}
-.batch-resource-overview > div {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  min-width: 0;
-  padding: 14px 16px;
-  border: 1px solid #e2e9f3;
-  border-radius: 9px;
-  background: #fff;
-  box-shadow: 0 3px 14px #24446b0a;
-}
-.batch-resource-overview small,
-.batch-resource-overview span {
-  color: #7b8ba3;
-  font-size: 11px;
-}
-.batch-resource-overview strong {
-  color: #236bd7;
-  font-size: 27px;
-  line-height: 1.2;
-}
-.batch-resource-overview .has-gap strong,
-.batch-category-grid .has-gap {
-  color: #d38722;
-}
-.batch-resource-overview.compact {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  margin: 12px 0 17px;
-}
-.batch-category-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 9px;
-}
-.batch-category-grid > div {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-  padding: 12px;
-  border: 1px solid #e5ebf4;
-  border-radius: 7px;
-  background: #fbfcff;
-}
-.batch-category-grid strong {
-  color: #2d466c;
-  font-size: 13px;
-}
-.batch-category-grid span {
-  color: #6e819d;
-  font-size: 12px;
-}
-.batch-category-overview :deep(.t-alert) {
-  margin-top: 12px;
-}
-.composer-workspace-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 295px;
-  gap: 18px;
-  align-items: start;
-}
-.composer-workspace-main {
-  min-width: 0;
-}
-.composer-workspace-rail {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  position: sticky;
-  top: 0;
-}
-.composer-rail-card {
-  padding: 18px;
-  border: 1px solid #e2e9f3;
-  border-radius: 10px;
-  background: #fff;
-  box-shadow: 0 3px 14px #24446b0a;
-}
-.composer-rail-card h3 {
-  margin: 4px 0 13px;
-  font-size: 15px;
-  color: #20385e;
-}
-.rail-kicker {
-  color: #3976d6;
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.1em;
-}
-.composer-rail-card dl {
-  margin: 0;
-}
-.composer-rail-card dl div {
-  display: flex;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 9px 0;
-  border-top: 1px solid #edf1f7;
-  font-size: 12px;
-}
-.composer-rail-card dt {
-  color: #8290a5;
-}
-.composer-rail-card dd {
-  margin: 0;
-  max-width: 165px;
-  color: #344866;
-  text-align: right;
-  font-weight: 600;
-  overflow-wrap: anywhere;
-}
-.composer-rail-card ul {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-.composer-rail-card li {
-  position: relative;
-  padding: 8px 0 8px 21px;
-  color: #72829a;
-  font-size: 12px;
-  border-top: 1px solid #edf1f7;
-}
-.composer-rail-card li:before {
-  content: "○";
-  position: absolute;
-  left: 0;
-  color: #a4b0c0;
-}
-.composer-rail-card li.done {
-  color: #2d6b56;
-}
-.composer-rail-card li.done:before {
-  content: "✓";
-  color: #35a976;
-  font-weight: 700;
-}
-.rail-warning,
-.rail-success {
-  padding: 9px 11px;
-  border-radius: 6px;
-  font-size: 12px;
-  margin: 10px 0 0;
-}
-.rail-warning {
-  background: #fff6e8;
-  color: #955f0e;
-}
-.rail-success {
-  background: #edf9f3;
-  color: #2d7955;
-}
-.rail-note {
-  background: #f7faff;
-}
-.rail-note strong {
-  display: block;
-  margin-bottom: 7px;
-  font-size: 13px;
-  color: #2d5fa9;
-}
-.rail-note p {
-  margin: 0;
-  color: #69809d;
-  font-size: 12px;
-  line-height: 1.7;
-}
-.composer {
-  color: var(--wt-text-primary);
-}
-.composer-steps {
-  margin: 0 0 28px;
-}
-.composer-alert {
-  margin-bottom: 20px;
-}
-.composer-section {
-  margin: 0 0 14px;
-  padding: 22px;
-  border: 1px solid #e2e9f3;
-  border-radius: 10px;
-  background: #fff;
-  box-shadow: 0 3px 14px #24446b0a;
-}
-@media (max-width: 1100px) {
-  .composer-workspace-grid {
-    grid-template-columns: 1fr;
-  }
-  .composer-workspace-rail {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    position: static;
-  }
-  .composer-workspace-rail .rail-note {
-    grid-column: 1/-1;
-  }
-}
-@media (max-width: 700px) {
-  .batch-resource-overview {
-    grid-template-columns: 1fr;
-  }
-  .composer-workspace-rail {
-    grid-template-columns: 1fr;
-  }
-}
-.section-heading {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 20px;
-  margin-bottom: 20px;
-}
-.section-heading h3,
-.final-summary h3 {
-  font-size: 16px;
-  margin: 0;
-  font-weight: 600;
-}
-.section-heading p,
-.final-summary p {
-  font-size: 13px;
-  color: var(--wt-text-tertiary);
-  margin: 6px 0 0;
-  line-height: 1.7;
-}
-.scope-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 24px;
-}
-.composer-field {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  min-width: 0;
-  font-size: 13px;
-}
-.composer-field em {
-  font-style: normal;
-  color: var(--wt-danger);
-}
-.composer-field .t-checkbox-group {
-  min-height: 36px;
-  align-items: center;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 18px;
-}
-.inventory-summary {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  border: 1px solid var(--wt-border);
-  border-radius: 8px;
-  background: var(--wt-bg-page);
-  margin: 24px 0;
-}
-.inventory-summary > div {
-  padding: 18px 22px;
-  border-right: 1px solid var(--wt-border);
-}
-.inventory-summary > div:last-child {
-  border-right: 0;
-}
-.inventory-summary span {
-  display: block;
-  font-size: 12px;
-  color: var(--wt-text-tertiary);
-}
-.inventory-summary strong {
-  font-size: 28px;
-  line-height: 1.5;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-}
-.inventory-summary small {
-  font-size: 12px;
-  font-weight: 400;
-  margin-left: 8px;
-  color: var(--wt-text-tertiary);
-}
-.is-highlight strong {
-  color: var(--wt-primary);
-}
-.inventory-details {
-  border-bottom: 1px solid var(--wt-border);
-  padding-bottom: 18px;
-}
-.inventory-details summary,
-.account-scope summary {
-  cursor: pointer;
-  font-weight: 500;
-  margin-bottom: 14px;
-  font-size: 13px;
-}
-.inventory-details summary span,
-.account-scope summary span {
-  color: var(--wt-text-tertiary);
-  font-size: 12px;
-  font-weight: 400;
-  margin-left: 10px;
-}
-.composer-table-tools {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 16px;
-  flex-wrap: wrap;
-  margin: 20px 0 16px;
-}
-.composer-table-tools > .t-input__wrap {
-  max-width: 290px;
-}
-.availability-list {
-  display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-.availability-list > span {
-  font-size: 12px;
-  display: flex;
-  align-items: center;
-  gap: 5px;
-}
-.availability-list i {
-  width: 6px;
-  height: 6px;
-  background: var(--wt-success);
-  border-radius: 50%;
-}
-.availability-list i.is-unavailable {
-  background: var(--wt-text-placeholder);
-}
-.availability-list .is-unavailable {
-  color: var(--wt-text-tertiary);
-}
-.availability-list small {
-  font-size: 11px;
-}
-.account-scope {
-  border-top: 1px solid var(--wt-border);
-  padding-top: 20px;
-  margin-top: 24px;
-}
-.account-allocation-settings {
-  margin-top: 20px;
-  border-top: 1px solid var(--wt-border);
-}
-.account-allocation-settings > div {
-  display: flex;
-  gap: 20px;
-  align-items: center;
-  padding: 12px 0;
-  border-bottom: 1px solid var(--wt-border);
-  flex-wrap: wrap;
-}
-.account-allocation-settings > div > span {
-  flex: 1;
-  min-width: 160px;
-  font-size: 13px;
-}
-.account-allocation-settings label {
-  display: flex;
-  gap: 10px;
-  align-items: center;
-  font-size: 12px;
-  color: var(--wt-text-tertiary);
-}
-.account-allocation-settings .t-input-number {
-  width: 150px;
-}
-.account-scope .t-checkbox-group {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 16px 24px;
-}
-.composer-context {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 16px 20px;
-  background: var(--wt-bg-page);
-  border: 1px solid var(--wt-border);
-  border-radius: 6px;
-  margin-bottom: 24px;
-  gap: 16px;
-}
-.composer-context strong {
-  display: block;
-  font-size: 14px;
-}
-.composer-context span {
-  display: block;
-  font-size: 12px;
-  color: var(--wt-text-tertiary);
-  margin-top: 4px;
-}
-.defaults-fields {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
-  gap: 16px;
-  margin: 20px 0;
-}
-.defaults-fields > .composer-field {
-  flex: 1 1 190px;
-}
-.platform-defaults {
-  padding-bottom: 8px;
-  border-bottom: 1px solid var(--wt-border);
-}
-.candidate-asset {
-  display: flex;
-  gap: 10px;
-  align-items: center;
-  min-width: 0;
-}
-.candidate-asset > div {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font-size: 13px;
-}
-.candidate-asset small,
-.cell-secondary,
-.candidate-content small {
-  display: block;
-  font-size: 12px;
-  color: var(--wt-text-tertiary);
-  margin-top: 5px;
-}
-.candidate-content {
-  line-height: 1.7;
-  overflow-wrap: anywhere;
-}
-.candidate-content .t-tag {
-  margin-top: 6px;
-}
-.issue-count {
-  display: block;
-  font-size: 12px;
-  color: var(--wt-warning);
-  margin-top: 6px;
-  cursor: help;
-}
-.final-summary {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 20px;
-  margin-bottom: 24px;
-}
-.batch-name {
-  max-width: 560px;
-  margin-bottom: 24px;
-}
-.composer-footer-note {
-  margin-right: auto;
-  color: var(--wt-text-tertiary);
-  font-size: 12px;
-}
-.media-thumb {
-  border: 0;
-  padding: 0;
-  background: transparent;
-  cursor: zoom-in;
-  flex-shrink: 0;
-}
-.media-thumb img {
-  display: block;
-  width: 64px;
-  height: 48px;
-  object-fit: cover;
-  border-radius: 4px;
-}
-.title-cell {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-.title-cell strong {
-  font-size: 13px;
-  font-weight: 500;
-}
-.title-cell small {
-  display: block;
-  font-size: 12px;
-  color: var(--wt-text-tertiary);
-  margin-top: 5px;
-}
-@media (max-width: 700px) {
-  .scope-grid {
-    grid-template-columns: 1fr;
-  }
-  .inventory-summary {
-    grid-template-columns: 1fr 1fr;
-  }
-  .inventory-summary > div:nth-child(2) {
-    border-right: 0;
-  }
-  .inventory-summary > div {
-    padding: 14px 16px;
-  }
-  .inventory-summary > div:nth-child(-n + 2) {
-    border-bottom: 1px solid var(--wt-border);
-  }
-  .inventory-details summary span {
-    display: block;
-    margin: 6px 0;
-  }
-  .composer-footer-note {
-    flex-basis: 100%;
-  }
-  .composer-context {
-    align-items: flex-start;
-  }
-  .composer-steps {
-    margin-bottom: 24px;
-  }
-}
-</style>

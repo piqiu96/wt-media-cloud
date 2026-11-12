@@ -388,6 +388,7 @@ export function suggestDistribution(
   accountIds,
   previous = [],
   limits = {},
+  categoryPriority = [],
 ) {
   const load = new Map();
   const scarcity = (assetId) => {
@@ -402,7 +403,14 @@ export function suggestDistribution(
         ).length
       : Infinity;
   };
-  const orderedAssets = [...assetIds].sort((a, b) => scarcity(a) - scarcity(b));
+  const priority = (id) => {
+    const category = db.assets.find((v) => v.id === id)?.category;
+    const index = categoryPriority.indexOf(category);
+    return index < 0 ? categoryPriority.length : index;
+  };
+  const orderedAssets = [...assetIds].sort(
+    (a, b) => priority(a) - priority(b) || scarcity(a) - scarcity(b),
+  );
   return selectedPlatforms.flatMap((platform) =>
     orderedAssets.flatMap((assetId) => {
       const video = db.assets.find((v) => v.id === assetId);
@@ -432,6 +440,7 @@ export function suggestDistribution(
           : ["普通", "新号", "优质"];
       candidates.sort(
         (a, b) =>
+          a.categories.length - b.categories.length ||
           qualityOrder.indexOf(a.quality) - qualityOrder.indexOf(b.quality) ||
           accountIds.indexOf(a.id) - accountIds.indexOf(b.id),
       );
