@@ -9,6 +9,14 @@ import {
   nextTick,
 } from "vue";
 import { feedback } from "../../../src/shared/ui/feedback/index.js";
+import {
+  ViewListIcon,
+  CalendarIcon,
+  ImageIcon,
+  VideoIcon,
+  SendIcon,
+} from "tdesign-icons-vue-next";
+import ResourceDateRange from "../../../src/shared/ui/resource/ResourceDateRange.vue";
 import ResourceFilterBar from "../../../src/shared/ui/resource/ResourceFilterBar.vue";
 import ResourceAdvancedToggle from "../../../src/shared/ui/resource/ResourceAdvancedToggle.vue";
 import ResourceSelectionToolbar from "../../../src/shared/ui/resource/ResourceSelectionToolbar.vue";
@@ -19,7 +27,6 @@ import ResourceNotice from "../../../src/shared/ui/resource/ResourceNotice.vue";
 import MediaPreview from "../../../src/shared/ui/media/MediaPreview.vue";
 import { imageReferences, templateReferences, deleteImage } from "./library.js";
 import BatchWorkbench from "./BatchWorkbench.vue";
-import { addScenario, addTaskReviewScenario } from "./scenarios.js";
 import PlanWizard from "./PlanWizard.vue";
 import PlanWorkbench from "./PlanWorkbench.vue";
 import { defaultDocument, renderDocument } from "./covers.js";
@@ -92,7 +99,6 @@ const db = reactive(seed()),
   storageError = ref(""),
   hydrated = ref(false),
   savingSnapshot = ref(false);
-const simulateSaveFailure = ref(false);
 let saveTimer;
 let saveQueue = Promise.resolve();
 async function persistNow() {
@@ -101,7 +107,6 @@ async function persistNow() {
   saveQueue = saveQueue
     .catch(() => {})
     .then(() => {
-      if (simulateSaveFailure.value) throw Error("演示：本地存储写入失败");
       return savePrototype(snapshot);
     });
   try {
@@ -109,7 +114,7 @@ async function persistNow() {
     storageError.value = "";
     return true;
   } catch (e) {
-    storageError.value = `演示配置未能保存：${e.message || "请重试"}。当前内容仍在本页，请不要刷新。`;
+    storageError.value = `任务信息未能保存：${e.message || "请重试"}。当前内容仍在本页，请不要刷新。`;
     return false;
   } finally {
     savingSnapshot.value = false;
@@ -123,7 +128,7 @@ onMounted(async () => {
     if (!db.images.some((i) => i.pureBackground))
       db.images.push({
         id: id(),
-        name: "通用纯净底图（演示）",
+        name: "通用纯净底图",
         category: "通用",
         uses: ["底图"],
         enabled: true,
@@ -132,7 +137,7 @@ onMounted(async () => {
         format: "SVG",
         width: 1200,
         height: 900,
-        source: "内置图形（演示）",
+        source: "内置图形",
         version: 1,
         updatedAt: new Date().toISOString(),
       });
@@ -159,7 +164,7 @@ onMounted(async () => {
       }
     }
   } catch (e) {
-    storageError.value = `演示记录未能恢复：${e.message}。当前显示初始示例。`;
+    storageError.value = `任务记录未能加载：${e.message}。请稍后重试。`;
   }
   hydrated.value = true;
 });
@@ -385,10 +390,25 @@ watch(detailOpen, async (open) => {
 function cancelTask(t) {
   actionDialog.value?.open(t, "cancel");
 }
+function taskRowActions(t) {
+  const actions = allowedActions(t),
+    primary = taskPresentation(t, db).action;
+  return ["start", "human", "verify", "retry"].includes(primary)
+    ? [primary, ...actions.filter((a) => a !== primary)]
+    : actions;
+}
 function taskMore(t) {
   return allowedActions(t)
     .filter((a) => !["detail", taskPresentation(t, db).action].includes(a))
-    .map((a) => ({ content: actionLabels[a], value: a }));
+    .map((a) => ({
+      content:
+        a === "edit"
+          ? "编辑发布内容"
+          : a === "cancel"
+            ? "取消任务"
+            : actionLabels[a],
+      value: a,
+    }));
 }
 function taskMenu(t, value) {
   if (value === "detail") return view(t);
@@ -497,7 +517,7 @@ async function start(t, silent = false) {
   try {
     const ok = queueTask(db, t, { retry: canRetry(t) });
     if (ok) t.manualDispatch = true;
-    if (ok && !silent) toast("已进入本地演示队列");
+    if (ok && !silent) toast("任务已进入执行队列");
     return ok;
   } catch (e) {
     warning(e.message);
@@ -540,21 +560,21 @@ const listColumns = computed(() => {
     ...(["images"].includes(page.value)
       ? [{ colKey: "row-select", type: "multiple", width: 44 }]
       : []),
-    { colKey: "id", title: "ID", width: 85 },
+    { colKey: "id", title: "ID", width: page.value === "tasks" ? 76 : 85 },
     {
       colKey: "content",
       title: page.value === "tasks" ? "发布内容" : "名称",
-      minWidth: 240,
+      minWidth: page.value === "tasks" ? 220 : 240,
       ellipsis: false,
     },
   ];
   const middle =
     page.value === "tasks"
       ? [
-          { colKey: "scope", title: "平台 / 类目", width: 140 },
-          { colKey: "account", title: "发布账号", width: 150 },
-          { colKey: "createdAt", title: "创建时间", width: 150 },
-          { colKey: "status", title: "执行状态 / 结果", width: 150 },
+          { colKey: "scope", title: "平台 / 类目", width: 110 },
+          { colKey: "account", title: "发布账号", width: 130 },
+          { colKey: "createdAt", title: "创建时间", width: 120 },
+          { colKey: "status", title: "执行状态 / 结果", width: 125 },
         ]
       : page.value === "batches"
         ? [
@@ -595,7 +615,7 @@ const listColumns = computed(() => {
       colKey: "operation",
       title: "操作",
       width:
-        page.value === "tasks" ? 230 : page.value === "templates" ? 285 : 215,
+        page.value === "tasks" ? 216 : page.value === "templates" ? 285 : 215,
       fixed: compact.value ? undefined : "right",
     },
   ];
@@ -937,8 +957,7 @@ function readImage(e) {
     !["image/png", "image/jpeg", "image/webp"].includes(f.type) ||
     f.size > 3 * 1024 * 1024
   ) {
-    imageError.value =
-      "请选择不超过 3MB 的 PNG、JPEG 或 WebP（本地演示存储限制）";
+    imageError.value = "请选择不超过 3MB 的 PNG、JPEG 或 WebP";
     return;
   }
   const token = ++imageReadToken;
@@ -955,7 +974,7 @@ function readImage(e) {
     imageForm.name ||= f.name;
     imageForm.format = f.type.split("/")[1].toUpperCase();
     imageForm.size = f.size;
-    imageForm.source = "人工上传（本地演示）";
+    imageForm.source = "人工上传";
     const im = new Image();
     im.onload = () => {
       if (token !== imageReadToken) return;
@@ -1280,27 +1299,59 @@ function cloneTask(t) {
     class="publish-shell wt-resource-page resource-visual-approved"
   >
     <aside class="publish-nav">
-      <a href="/example/" class="brand">WT <span>MEDIA</span></a>
-      <p>内容运营</p>
+      <a href="/example/proto/content-operations/" class="brand"
+        ><img
+          src="/example/proto/content-operations/assets/logo.png"
+          alt="起飞"
+        />
+        <div><strong>起飞</strong><small>CONTENT OPERATIONS</small></div></a
+      >
+      <p>内容生产</p>
+      <a
+        class="publish-nav-link"
+        href="/example/proto/content-operations/#materials"
+        ><ImageIcon />素材库</a
+      >
+      <a
+        class="publish-nav-link"
+        href="/example/proto/content-operations/#tasks"
+        ><VideoIcon />合成任务</a
+      >
+      <a
+        class="publish-nav-link"
+        href="/example/proto/content-operations/#outputs"
+        ><VideoIcon />成片管理</a
+      >
+      <p>发布管理</p>
       <button
         v-for="p in ['tasks', 'batches', 'plans', 'images', 'templates']"
         :key="p"
         :class="{ active: page === p }"
+        :aria-current="page === p ? 'page' : undefined"
         @click="navigate(p)"
       >
-        {{ names[p] }}
+        <component
+          :is="
+            {
+              tasks: SendIcon,
+              batches: ViewListIcon,
+              plans: CalendarIcon,
+              images: ImageIcon,
+              templates: ViewListIcon,
+            }[p]
+          "
+        />{{ names[p] }}
       </button>
-      <div class="nav-bottom">
-        <a href="/example/proto/content-operations/">内容生产工作台 ↗</a
-        ><a href="/__docs/workspace/docs/design/publishing.md"
-          >发布设计说明 ↗</a
-        ><small>交互原型 · 仅本地演示<br />不会上传或发布到真实平台</small>
-      </div>
+      <p>作品管理</p>
+      <a
+        class="publish-nav-link"
+        href="/example/proto/content-operations/#works"
+        ><ViewListIcon />作品列表</a
+      >
     </aside>
     <main class="publish-main">
       <div class="breadcrumbs">
-        内容运营 <span>/</span> {{ names[page] }}
-        <t-tag size="small" variant="light">原型预览</t-tag>
+        <span>内容运营 / {{ names[page] }}</span>
       </div>
       <ResourcePageHeader
         :title="names[page]"
@@ -1358,38 +1409,7 @@ function cloneTask(t) {
           ></template
         ></t-alert
       >
-      <details class="prototype-scenarios">
-        <summary>可复现演示场景（新增虚构数据，保留已有记录）</summary>
-        <label
-          ><input
-            type="checkbox"
-            v-model="simulateSaveFailure"
-          />模拟本地保存失败（取消后重试）</label
-        >
-        <div class="inline-bar">
-          <t-button
-            variant="outline"
-            @click="
-              addTaskReviewScenario(db);
-              navigate('tasks');
-              query = '体验验收 ·';
-              applyQuery();
-            "
-            >载入任务八状态场景</t-button
-          >
-          <t-button
-            v-for="kind in ['30/28', '10%', '20%', '未知']"
-            :key="kind"
-            variant="outline"
-            @click="view(addScenario(db, kind))"
-            >载入 {{ kind }} 场景</t-button
-          >
-        </div>
-        <p>
-          仅为回归验收生成独立的示例计划、账号与成片；AI
-          和发布结果均是演示数据。
-        </p>
-      </details>
+
       <div v-if="page === 'tasks'" class="v4-list-stats">
         <button
           @click="
@@ -1515,12 +1535,6 @@ function cloneTask(t) {
                 v-model="filterCreator"
                 placeholder="创建人"
                 clearable /></label
-            ><label class="wt-filter-field"
-              ><span class="wt-filter-field__label">创建时间起</span
-              ><input type="date" v-model="filterFrom" /></label
-            ><label class="wt-filter-field"
-              ><span class="wt-filter-field__label">创建时间止</span
-              ><input type="date" v-model="filterTo" /></label
           ></template>
           <div class="wt-filter-actions">
             <t-button @click="applyQuery">查询</t-button
@@ -1530,7 +1544,10 @@ function cloneTask(t) {
           </div>
           <ResourceAdvancedToggle
             v-model="advanced"
-            :count="appliedFilters.category ? 1 : 0"
+            :count="
+              Number(!!appliedFilters.category) +
+              Number(!!appliedFilters.from || !!appliedFilters.to)
+            "
             controls="publishing-advanced"
           />
           <div
@@ -1538,6 +1555,17 @@ function cloneTask(t) {
             id="publishing-advanced"
             class="wt-advanced-filters"
           >
+            <label v-if="page === 'tasks'" class="wt-filter-field"
+              ><span class="wt-filter-field__label">创建时间</span
+              ><ResourceDateRange
+                :value="[filterFrom, filterTo]"
+                @change="
+                  (v) => {
+                    filterFrom = v?.[0] || '';
+                    filterTo = v?.[1] || '';
+                  }
+                "
+            /></label>
             <label class="wt-filter-field"
               ><span class="wt-filter-field__label">内容类目</span
               ><t-select
@@ -1732,7 +1760,7 @@ function cloneTask(t) {
           }}</template>
           <template #metadata="{ row }"
             >{{ row.width || 1200 }} × {{ row.height || 900 }} ·
-            {{ row.format || "SVG 演示图"
+            {{ row.format || "SVG 图片"
             }}<small class="cell-secondary"
               >{{ row.source || "种子资源" }} ·
               {{ row.updatedAt || "2026-11-10" }}</small
@@ -1787,29 +1815,45 @@ function cloneTask(t) {
           <template #operation="{ row }">
             <ResourceRowActions>
               <template v-if="page === 'tasks'">
-                <t-button variant="text" @click="view(row)">详情</t-button>
                 <t-tooltip
-                  v-if="taskPresentation(row, db).action !== 'detail'"
+                  v-for="a in taskRowActions(row).slice(
+                    0,
+                    taskRowActions(row).length > 5 ? 4 : 5,
+                  )"
+                  :key="a"
                   :content="
-                    taskPresentation(row, db).disabled
+                    a === 'start' && taskPresentation(row, db).disabled
                       ? taskPresentation(row, db).checks.join('；')
-                      : taskPresentation(row, db).label
+                      : actionLabels[a]
                   "
-                  ><t-button
-                    variant="text"
-                    class="is-primary"
-                    :disabled="taskPresentation(row, db).disabled"
-                    @click="primaryTask(row)"
-                    >{{ taskPresentation(row, db).label }}</t-button
-                  ></t-tooltip
                 >
+                  <t-button
+                    variant="text"
+                    :class="{
+                      'is-primary':
+                        ['start', 'human', 'verify', 'retry'].includes(a) &&
+                        a === taskPresentation(row, db).action,
+                      'is-danger': a === 'cancel',
+                    }"
+                    :disabled="
+                      a === 'start' && taskPresentation(row, db).disabled
+                    "
+                    @click="taskMenu(row, a)"
+                    >{{ actionLabels[a] }}</t-button
+                  >
+                </t-tooltip>
                 <t-dropdown
-                  v-if="taskMore(row).length"
-                  :options="taskMore(row)"
+                  v-if="taskRowActions(row).length > 5"
+                  :options="
+                    taskRowActions(row)
+                      .slice(4)
+                      .map((a) => ({ content: actionLabels[a], value: a }))
+                  "
                   @click="({ value }) => taskMenu(row, value)"
                   ><t-button variant="text">更多</t-button></t-dropdown
-                > </template
-              ><template v-else-if="['batches', 'plans'].includes(page)"
+                >
+              </template>
+              <template v-else-if="['batches', 'plans'].includes(page)"
                 ><t-button variant="text" @click="view(row)">详情</t-button
                 ><t-button
                   v-if="
@@ -2174,7 +2218,7 @@ function cloneTask(t) {
         <t-alert
           v-if="rowEdit.declaration === '内容为转载'"
           theme="warning"
-          message="转载的来源及条件字段尚未核验，当前演示配置不能代替正式投稿检查。"
+          message="转载的来源及条件字段尚未核验，请补充来源和授权信息后再提交。"
         />
         <details class="more-settings">
           <summary>
@@ -2509,7 +2553,7 @@ function cloneTask(t) {
         <t-alert
           v-if="detail.legacySource"
           theme="info"
-          message="此旧演示分组已按实际任务平台兼容整理，原任务 ID、结果与执行记录保留。"
+          message="此历史分组已按实际任务平台兼容整理，原任务 ID、结果与执行记录保留。"
         />
         <div class="metric-grid">
           <div>
@@ -2670,19 +2714,36 @@ function cloneTask(t) {
             >取消未提交任务</t-button
           ><t-button @click="related(detail.id)">查看任务</t-button></template
         ><template v-if="detail?.assetId"
-          ><t-button
-            v-for="a in allowedActions(detail).filter((a) => a !== 'detail')"
-            :key="a"
-            :theme="a === 'cancel' ? 'danger' : 'primary'"
-            :variant="
-              ['start', 'human', 'verify', 'retry'].includes(a)
-                ? 'base'
-                : 'outline'
+          ><t-dropdown
+            v-if="taskMore(detail).length"
+            :options="taskMore(detail)"
+            :popup-props="{ zIndex: 5500 }"
+            @click="({ value }) => taskMenu(detail, value)"
+            ><t-button theme="default" variant="outline"
+              >更多</t-button
+            ></t-dropdown
+          >
+          <t-button
+            v-if="taskPresentation(detail, db).action !== 'detail'"
+            :theme="
+              taskPresentation(detail, db).action === 'cancel'
+                ? 'danger'
+                : 'primary'
             "
-            @click="taskMenu(detail, a)"
-            >{{ actionLabels[a] }}</t-button
-          ></template
-        ><t-button variant="outline" @click="detailOpen = false"
+            :variant="
+              taskPresentation(detail, db).action === 'cancel'
+                ? 'outline'
+                : 'base'
+            "
+            :disabled="taskPresentation(detail, db).disabled"
+            @click="primaryTask(detail)"
+            >{{
+              taskPresentation(detail, db).action === "start"
+                ? "启动任务"
+                : taskPresentation(detail, db).label
+            }}</t-button
+          > </template
+        ><t-button theme="default" variant="outline" @click="detailOpen = false"
           >关闭</t-button
         ></template
       >
@@ -2717,6 +2778,6 @@ function cloneTask(t) {
       ></ResourceOverlay
     >
   </div>
-  <t-loading v-else fullscreen text="正在恢复原型配置…" />
+  <t-loading v-else fullscreen text="正在加载任务…" />
 </template>
 <style scoped src="./publishing.css"></style>

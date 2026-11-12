@@ -47,7 +47,7 @@ async function submit() {
     if (action.value === "cancel") cancelPublication(t, form.value.reason);
     if (action.value === "human") processHuman(t, form.value.human);
     if (action.value === "verify")
-      verifyResult(props.db, t, form.value, "本地原型操作人（非认证身份）");
+      verifyResult(props.db, t, form.value, "未登录用户");
     if (action.value === "retry") {
       if (!canRetry(t)) throw Error("原执行结束或未发布证据不足，不能重试");
       const errors = taskChecks(t, props.db);
@@ -59,7 +59,7 @@ async function submit() {
       for (const key of Object.keys(t)) delete t[key];
       Object.assign(t, before);
       props.db.works = works;
-      throw Error("本地保存失败，未应用此次操作，请重试");
+      throw Error("保存失败，本次操作未生效，请重试");
     }
     visible.value = false;
   } catch (e) {
@@ -73,7 +73,7 @@ defineExpose({ open });
 <template>
   <Overlay
     v-model:visible="visible"
-    :title="titles[action]"
+    :title="titles[action] || '任务操作'"
     :width="640"
     :busy="busy"
     ><template v-if="task"
@@ -92,7 +92,7 @@ defineExpose({ open });
       <t-alert v-if="error" theme="warning" :message="error" />
       <template v-if="action === 'cancel'"
         ><p>
-          停止后续执行不等于撤回平台投稿。取消成功后资源可能仍占用，原任务不可恢复。
+          取消后停止后续执行，保留当前成片的平台占用；原任务不可恢复。已提交的平台稿件不会被撤回。
         </p>
         <label class="v4-field"
           >取消原因（选填）<t-textarea
@@ -107,9 +107,7 @@ defineExpose({ open });
       >
       <template v-if="action === 'human'"
         ><p>当前阻塞：{{ task.evidence || "等待原账号登录或平台验证" }}</p>
-        <p>
-          请在原账号的官方平台会话完成处理。本地原型未连接人工接管窗口，也不会采集密码或验证码。
-        </p>
+        <p>请在对应账号的平台窗口完成登录或验证，再确认处理结果。</p>
         <t-radio-group v-model="form.human" class="v4-options"
           ><t-radio value="validated">已完成验证、未手动投稿</t-radio
           ><t-radio value="submitted">可能已提交内容</t-radio
@@ -124,6 +122,7 @@ defineExpose({ open });
         <label class="v4-field"
           >核实结论<t-select
             v-model="form.status"
+            @change="error = ''"
             :options="[
               { label: '确认已发布', value: '已发布' },
               { label: '已提交平台审核中', value: '平台审核中' },
@@ -135,7 +134,7 @@ defineExpose({ open });
             v-model="form.url"
             placeholder="具体作品的 HTTPS 链接"
           /><small
-            >当前平台配置未授权无链接例外；不能使用主页或审核页面。</small
+            >请填写具体作品的公开链接，不能使用账号主页或审核页面。</small
           ></label
         ><label v-if="form.status === '执行失败'" class="v4-field"
           >失败原因 *<t-input v-model="form.reason" /></label
@@ -177,25 +176,26 @@ defineExpose({ open });
 .v4-dialog-identity {
   display: flex;
   gap: 16px;
-  background: #f3f6fc;
-  border: 1px solid #e1e8f5;
+  background: var(--wt-color-bg-subtle);
+  border: 1px solid var(--wt-color-border);
   padding: 16px;
-  border-radius: 8px;
-  margin-bottom: 22px;
+  border-radius: 4px;
+  margin-bottom: 24px;
 }
 .v4-dialog-identity img {
-  width: 100px;
-  height: 66px;
+  width: 72px;
+  height: 52px;
   object-fit: cover;
-  border-radius: 5px;
+  border-radius: 4px;
 }
 .v4-dialog-identity h3 {
   margin: 0;
-  font-size: 17px;
+  font-size: 14px;
+  font-weight: 500;
 }
 .v4-dialog-identity p {
   font-size: 13px;
-  color: #64748b;
+  color: var(--wt-color-text-secondary);
 }
 .v4-field {
   display: grid;
@@ -210,6 +210,6 @@ defineExpose({ open });
   margin: 20px 0;
 }
 small {
-  color: #7c8799;
+  color: var(--wt-color-text-secondary);
 }
 </style>

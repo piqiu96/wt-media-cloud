@@ -40,42 +40,53 @@ onUnmounted(() => clearTimeout(restoreTimer));
 
 <style>
 .publishing-workspace-overlay .t-drawer__content-wrapper {
-  width: calc(100vw - 208px) !important;
-  max-width: none !important;
-  box-shadow: -2px 0 18px #16335b16 !important;
+  width: calc(100vw - 216px) !important;
+  max-width: 1280px !important;
+  box-shadow: var(--wt-shadow-popup) !important;
 }
 .publishing-workspace-overlay .t-drawer__content,
 .publishing-workspace-overlay .t-drawer__body {
-  background: #f3f6fb;
+  background: var(--wt-color-bg-container);
 }
 .publishing-workspace-overlay .t-drawer__header {
-  height: 68px;
-  min-height: 68px;
-  padding: 0 34px;
-  background: #fff;
-  border-bottom: 1px solid #e3eaf3;
-  color: #20375b;
-  font-size: 19px;
+  height: 64px;
+  min-height: 64px;
+  padding: 0 28px;
+  background: var(--wt-color-bg-container);
+  border-bottom: 1px solid var(--wt-color-border);
+  color: var(--wt-color-text-primary);
+  font-size: 18px;
 }
 .publishing-workspace-overlay .t-drawer__body {
-  padding: 26px 34px 34px;
+  padding: 24px 28px 32px;
 }
 .publishing-workspace-overlay .t-drawer__footer {
-  padding: 14px 34px;
-  background: #fff;
-  border-top: 1px solid #e3eaf3;
-  box-shadow: 0 -3px 14px #24446b0a;
+  padding: 16px 28px;
+  background: var(--wt-color-bg-container);
+  border-top: 1px solid var(--wt-color-border);
 }
 .publishing-workspace-overlay .t-drawer__mask {
-  background: transparent !important;
+  background: var(--wt-color-overlay-mask) !important;
 }
 .publishing-workspace-overlay .resource-overlay__body,
 .publishing-workspace-overlay .resource-overlay__footer {
-  max-width: 1620px;
+  max-width: 1200px;
   margin-inline: auto;
 }
 @media (max-width: 900px) {
-  .publishing-workspace-overlay .t-drawer__content-wrapper { width: 100vw !important; }
-  .publishing-workspace-overlay .t-drawer__body { padding: 16px; }
+  .publishing-workspace-overlay .t-drawer__content-wrapper {
+    width: calc(100vw - 32px) !important;
+  }
+  .publishing-workspace-overlay .t-drawer__body {
+    padding: 20px;
+  }
+}
+@media (max-width: 680px) {
+  .publishing-workspace-overlay .t-drawer__content-wrapper {
+    width: 100vw !important;
+  }
+  .publishing-workspace-overlay .t-drawer__body {
+    padding: 16px;
+  }
 }
 </style>

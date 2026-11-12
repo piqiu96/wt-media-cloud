@@ -73,44 +73,6 @@ async function tick(all = false) {
         }}</small>
       </div>
     </div>
-    <details>
-      <summary>本地演示执行器 · 不调用平台</summary>
-      <div class="demo-buttons">
-        <label
-          ><input
-            type="checkbox"
-            :checked="db.platformBlocks?.[batch.platform]"
-            @change="
-              (e) => {
-                db.platformBlocks ||= {};
-                db.platformBlocks[batch.platform] = e.target.checked;
-              }
-            "
-          />演示当前平台故障（仅停止本平台新领取）</label
-        >
-        <t-button
-          variant="outline"
-          @click="
-            rows.filter((t) => claimTask(db, t));
-            message = '已领取，保留在途供取消竞态检查';
-          "
-          >演示领取并保留在途</t-button
-        ><t-button :loading="running" variant="outline" @click="tick(false)"
-          >演示领取并处理一轮</t-button
-        ><t-button :loading="running" variant="outline" @click="tick(true)"
-          >运行演示至安全节点</t-button
-        ><t-button
-          variant="outline"
-          @click="
-            rows
-              .filter((t) => t.claimed && t.status === '执行中')
-              .forEach((t) => setResult(t, '结果待确认'))
-          "
-          >演示提交后断线</t-button
-        >
-      </div>
-      <p>{{ message }}</p>
-    </details>
     <div class="demo-buttons">
       <label
         >状态<select v-model="filter">

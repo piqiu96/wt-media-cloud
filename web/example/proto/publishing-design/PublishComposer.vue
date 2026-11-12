@@ -1501,7 +1501,7 @@ defineExpose({
           </section>
           <section class="composer-rail-card rail-note">
             <strong>创建后会怎样？</strong>
-            <p>创建后进入待执行队列。本地原型不会向真实平台提交内容。</p>
+            <p>创建后进入待执行，确认内容后再启动任务。</p>
           </section>
         </aside>
       </div>

@@ -6,7 +6,6 @@ import {
   requestSuggestion,
   receiveSuggestion,
   adopt,
-  demoValues,
   contentFields,
   invalidateCover,
 } from "./content.js";
@@ -23,7 +22,6 @@ const scope = ref("全部"),
   busy = ref(false),
   done = ref(0),
   total = ref(0),
-  simulateFailure = ref(false),
   q = ref(""),
   onlyProblems = ref(false),
   page = ref(1),
@@ -80,19 +78,14 @@ async function generate(
     rows.map(async (r, i) => {
       const req = requestSuggestion(r, singleFields);
       r.ai.progress = "生成中";
-      await new Promise((resolve) =>
-        setTimeout(resolve, 500 + (rows.length - i) * 110),
-      );
       receiveSuggestion(
         r,
         req,
-        demoValues(r, style.value),
-        simulateFailure.value && !retry && i % 4 === 0
-          ? "演示服务超时，请仅重试失败项"
-          : null,
+        {},
+        "暂时无法获取 AI 建议，请手动填写或稍后重试。",
       );
       if (req.fields.some((f) => r.ai.latest[f] === req.token))
-        r.ai.progress = "已返回";
+        r.ai.progress = "生成失败";
       if (run === generation) done.value++;
     }),
   );
@@ -206,10 +199,6 @@ if (props.single) active.value = props.rows[0] || null;
 <template>
   <section class="ai-workspace">
     <div class="ai-heading"><span>CONTENT GENERATION</span><h3>{{ single ? '配置这条任务的内容与封面' : 'AI 批量内容配置工作台' }}</h3><p>{{ single ? 'AI 只为当前任务生成建议；人工确认声明、成品封面和发布时机。' : '按字段生成建议，逐条核对文案与封面后再创建任务。' }}</p></div>
-    <t-alert
-      theme="info"
-      :message="single ? '演示生成服务 · 无真实模型调用。建议不会自动覆盖人工编辑，采用后仍需检查封面并确认当前版本。' : '演示生成服务 · 无真实模型调用。每行一轮生成标题、独立短标题、话题、标签和正文；建议需明确采用。人工声明须按内容事实确认。'"
-    />
     <div v-if="single && active" class="single-ai-toolbar"><t-button :loading="busy" @click="generate([active])">为这条任务生成建议</t-button><t-button variant="outline" @click="adoptAll">采用未修改字段建议</t-button><span>生成进度 {{ done }} / {{ total }}</span></div>
     <template v-if="!single">
     <div class="ai-tools">
@@ -228,8 +217,6 @@ if (props.single) active.value = props.rows[0] || null;
         ><input type="checkbox" v-model="fields" :value="f" />{{
           labels[f]
         }}</label
-      ><label
-        ><input type="checkbox" v-model="simulateFailure" />演示部分失败</label
       >
     </div>
     <p>
@@ -443,7 +430,7 @@ if (props.single) active.value = props.rows[0] || null;
       </div>
       <p v-if="active.coverMode !== '模板合成'" class="cover-mode-note">现成封面保留图片原有文字；AI 封面短标题不会写入图片。需要把短标题印在封面上时，请切换为“模板合成”并选择模板。</p>
       <p v-if="active.platform === '百家号'">
-        百家号精确封面比例待核验，当前按模板画布或原图演示。
+        百家号精确封面比例待核验，当前按模板画布或原图预览。
       </p>
       <p v-if="active.coverError">{{ active.coverError }}</p>
       <div v-if="single" class="single-cover-check"><button @click="emit('preview', { row: active })"><img :src="active.cover" alt="当前封面" /></button><div><strong>{{ active.coverRender || '待合成' }} · {{ active.coverApproved ? '当前版本已审核' : '待审核' }}</strong><p>更换图片、模板或短标题后需要重新合成并审核。</p></div></div>

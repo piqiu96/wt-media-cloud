@@ -1,6 +1,6 @@
 <script setup>
 import { computed } from "vue";
-import { displayStatus } from "./taskExperience.js";
+import { displayStatus, taskPresentation } from "./taskExperience.js";
 import { publicWork } from "./taskActions.js";
 const props = defineProps({ task: Object, db: Object });
 const emit = defineEmits(["batch", "preview"]);
@@ -10,6 +10,7 @@ const account = computed(() =>
 const batch = computed(() =>
   props.db.batches.find((b) => b.id === props.task.batchId),
 );
+const presentation = computed(() => taskPresentation(props.task, props.db));
 const latest = computed(() => props.task.attemptHistory?.at(-1));
 const content = computed(() =>
   props.task.status === "待执行"
@@ -55,7 +56,7 @@ const date = (v) =>
         >{{ displayStatus(task) }}</t-tag
       >
     </header>
-    <section class="v4-state">
+    <section class="v4-state" :data-state="task.status">
       <strong>{{ displayStatus(task) }}</strong>
       <p>
         {{
@@ -65,9 +66,17 @@ const date = (v) =>
               ? "任务已终止，资源占用仍保留；原任务不能恢复。"
               : task.status === "已放弃"
                 ? "原任务已终止，资源已释放。"
-                : task.evidence || "任务内容已保存，等待下一步操作。"
+                : task.evidence || presentation.description
         }}
       </p>
+      <p v-if="task.status === '待执行'" class="v4-checks">
+        {{
+          presentation.checks.length
+            ? "执行前需完善：" + presentation.checks.join("；")
+            : "执行前检查已通过，可启动任务。"
+        }}
+      </p>
+      <small v-if="task.failedStep">失败步骤：{{ task.failedStep }}</small>
       <small v-if="task.status === '执行中'"
         >当前阶段：{{ task.log?.at(-1)?.text || "等待执行器反馈" }}</small
       >
@@ -143,7 +152,11 @@ const date = (v) =>
           </div>
           <div>
             <dt>创作声明</dt>
-            <dd>{{ content.declaration || "未填写" }}</dd>
+            <dd>
+              {{
+                (content.declaration || "未填写").replace("（原型设置）", "")
+              }}
+            </dd>
           </div>
           <div v-if="task.platform === 'B站'">
             <dt>分区</dt>
@@ -193,7 +206,13 @@ const date = (v) =>
     </section>
     <section>
       <h3>执行历史</h3>
-      <p v-if="!task.attemptHistory?.length">任务尚未执行</p>
+      <p v-if="!task.attemptHistory?.length">
+        {{
+          task.status === "待执行" && !task.attempts
+            ? "任务尚未执行"
+            : "暂无已保存的执行记录"
+        }}
+      </p>
       <details v-for="a in task.attemptHistory || []" :key="a.number">
         <summary>
           第 {{ a.number }} 次 · 内容版本 {{ a.version || 1 }} ·
@@ -217,45 +236,95 @@ const date = (v) =>
 </template>
 <style scoped>
 .v4-detail {
-  color: #26364e;
+  color: var(--wt-color-text-primary);
+  font-size: 14px;
+  line-height: 1.7;
 }
 .v4-detail nav {
-  font-size: 13px;
-  color: #79869a;
+  font-size: 12px;
+  color: var(--wt-color-text-secondary);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.v4-detail nav :deep(.t-button) {
+  height: 28px;
+  padding: 0 6px;
+  font-size: 12px;
+  color: var(--wt-color-primary);
 }
 .v4-detail header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin: 16px 0 24px;
+  gap: 16px;
+  margin: 12px 0 20px;
 }
 .v4-detail h2 {
-  font-size: 24px;
+  font-size: 18px;
+  font-weight: 600;
   margin: 0;
+  overflow-wrap: anywhere;
 }
 .v4-detail header p {
-  color: #7b889a;
-  margin: 6px 0;
+  color: var(--wt-color-text-secondary);
+  font-size: 12px;
+  margin: 4px 0 0;
 }
 .v4-detail section {
-  background: white;
-  border: 1px solid #e4eaf3;
-  border-radius: 9px;
-  padding: 24px;
-  margin: 0 0 18px;
-  box-shadow: 0 3px 12px #25466c04;
+  padding: 24px 0 0;
+  margin: 24px 0 0;
+  border-top: 1px solid var(--wt-color-border);
 }
 .v4-detail h3 {
-  font-size: 18px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 14px;
+  font-weight: 600;
   margin: 0 0 18px;
-  color: #1e3558;
 }
-.v4-state {
-  background: #f0f5ff !important;
+.v4-detail h3::before {
+  content: "";
+  width: 3px;
+  height: 14px;
+  background: var(--wt-color-primary);
+  border-radius: 2px;
+  flex: none;
+}
+.v4-detail .v4-state {
+  padding: 12px 16px;
+  margin: 0;
+  background: var(--wt-color-bg-subtle);
+  border: 1px solid var(--wt-color-border);
+  border-radius: 4px;
+}
+.v4-state strong {
+  font-size: 14px;
+  font-weight: 500;
 }
 .v4-state p {
-  margin: 8px 0;
-  color: #61718b;
+  margin: 4px 0 0;
+  color: var(--wt-color-text-secondary);
+  font-size: 13px;
+}
+.v4-state[data-state="结果待确认"],
+.v4-state[data-state="等待人工"] {
+  background: var(--wt-color-warning-bg);
+  border-color: var(--wt-color-warning-border);
+}
+.v4-state[data-state="执行失败"] {
+  background: var(--wt-color-danger-bg);
+  border-color: var(--wt-color-danger-border);
+}
+.v4-state[data-state="已发布"] {
+  background: var(--wt-color-success-bg);
+  border-color: var(--wt-color-success-border);
+}
+.v4-state small {
+  display: block;
+  margin-top: 6px;
+  color: var(--wt-color-text-secondary);
 }
 .v4-summary {
   display: grid;
@@ -263,49 +332,60 @@ const date = (v) =>
   gap: 20px;
   margin: 0;
 }
-.v4-summary div {
-  border-right: 1px solid #edf0f5;
-  padding-right: 12px;
-}
 dt {
-  font-size: 12px;
-  color: #76849b;
+  font-size: 13px;
+  color: var(--wt-color-text-secondary);
 }
 dd {
   margin: 6px 0 0;
   overflow-wrap: anywhere;
+  font-size: 13px;
 }
 .v4-section-title {
   display: flex;
   justify-content: space-between;
+  align-items: baseline;
+  gap: 16px;
 }
 .v4-section-title small {
-  color: #8794a7;
+  color: var(--wt-color-text-assist);
+  font-size: 12px;
 }
 .v4-content {
   display: grid;
-  grid-template-columns: minmax(230px, 32%) 1fr;
+  grid-template-columns: 220px minmax(0, 1fr);
   gap: 28px;
 }
 .v4-cover {
-  border: 0;
+  border: 1px solid var(--wt-color-border);
+  border-radius: 4px;
   padding: 0;
-  background: transparent;
+  background: var(--wt-color-bg-subtle);
   cursor: zoom-in;
   align-self: start;
+  overflow: hidden;
 }
 .v4-cover img {
+  display: block;
   width: 100%;
-  border-radius: 8px;
+  max-height: 260px;
+  object-fit: contain;
+}
+.v4-cover:focus-visible {
+  outline: 2px solid var(--wt-color-primary);
+  outline-offset: 3px;
 }
 .v4-content dl {
   margin: 0;
 }
 .v4-content dl > div {
   display: grid;
-  grid-template-columns: 95px 1fr;
-  padding: 11px 0;
-  border-bottom: 1px solid #edf0f6;
+  grid-template-columns: 96px minmax(0, 1fr);
+  gap: 12px;
+  padding: 10px 0;
+}
+.v4-content dl > div:first-child {
+  padding-top: 0;
 }
 .v4-content dd {
   margin: 0;
@@ -317,35 +397,45 @@ dd {
 .v4-history p {
   display: flex;
   gap: 24px;
-  border-bottom: 1px solid #edf1f6;
+  border-bottom: 1px solid var(--wt-color-border);
   padding: 10px 0;
   font-size: 13px;
 }
 .v4-history time {
-  color: #7c899c;
+  color: var(--wt-color-text-secondary);
   flex-shrink: 0;
 }
 details {
-  padding: 10px 0;
+  padding: 12px 0;
   font-size: 13px;
+  border-bottom: 1px solid var(--wt-color-border);
 }
 summary {
   cursor: pointer;
+  color: var(--wt-color-primary);
 }
 a {
-  color: #2c58cb;
+  color: var(--wt-color-primary);
+  overflow-wrap: anywhere;
 }
 @media (max-width: 1100px) {
   .v4-summary {
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
 @media (max-width: 650px) {
   .v4-content {
     grid-template-columns: 1fr;
   }
+  .v4-cover {
+    width: 220px;
+    max-width: 100%;
+  }
   .v4-summary {
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .v4-detail header {
+    align-items: flex-start;
   }
 }
 </style>

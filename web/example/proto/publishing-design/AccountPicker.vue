@@ -84,9 +84,7 @@ defineExpose({
       </article>
       <p v-if="!rows.length">未找到匹配账号，请调整筛选条件。</p>
     </div>
-    <p class="muted">
-      等级和额度未同步时如实显示未知；执行前仍须校验实际平台限制。
-    </p>
+    <p class="muted">账号额度以平台最新同步结果为准。</p>
     <template #footer
       ><t-button variant="outline" @click="visible = false"
         >取消</t-button
@@ -114,28 +112,28 @@ defineExpose({
   grid-template-columns: 40px 1fr 1fr auto;
   gap: 16px;
   align-items: center;
-  padding: 18px 8px;
-  border-bottom: 1px solid #e9edf5;
+  padding: 16px 8px;
+  border-bottom: 1px solid var(--wt-color-border);
 }
 .account-list small {
   display: block;
-  color: #7c899c;
+  color: var(--wt-color-text-secondary);
   margin-top: 5px;
 }
 .avatar {
-  background: #edf2ff;
+  background: var(--wt-color-primary-light);
   border-radius: 50%;
   width: 40px;
   height: 40px;
   display: grid;
   place-items: center;
-  color: #315cc8;
+  color: var(--wt-color-primary);
 }
 .blocked {
-  color: #b47b2b !important;
+  color: var(--wt-color-warning-text) !important;
 }
 .muted {
-  color: #7c899c;
+  color: var(--wt-color-text-secondary);
   font-size: 12px;
 }
 </style>

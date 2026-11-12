@@ -60,6 +60,17 @@ const accountOptions = computed(() =>
 const selectedAccount = computed(() =>
   accountOptions.value.find((a) => a.id === accountId.value),
 );
+const selectedAvailability = computed(() =>
+  selectedAccount.value
+    ? accountAvailability(
+        props.db,
+        selectedAccount.value,
+        platform.value,
+        category.value,
+        editing.value?.id,
+      )
+    : null,
+);
 const categoryOptions = computed(() => [
   ...new Set(accountOptions.value.flatMap((a) => a.categories || [])),
 ]);
@@ -288,7 +299,7 @@ async function chooseAsset(a) {
   row.value = next;
   coverChoice.value = next.coverTreatment || "替换图片";
   picker.value = false;
-  if(next.coverMode === "现成封面") await renderCover();
+  if (next.coverMode === "现成封面") await renderCover();
 }
 function setField(field, value) {
   editField(row.value, field, value);
@@ -296,7 +307,7 @@ function setField(field, value) {
   notice.value = "";
 }
 async function generate() {
-  error.value = "AI 服务尚未接入，未生成或覆盖任何内容。请手动填写。";
+  error.value = "暂时无法获取 AI 建议，请手动填写或稍后重试。";
 }
 async function renderCover() {
   const current = row.value;
@@ -310,6 +321,16 @@ async function renderCover() {
       current.coverTreatment = "图片库图 + 模板";
       current.coverMode = "模板合成";
     }
+    if (
+      current.coverTreatment === "图片库图 + 模板" &&
+      !props.db.images.some(
+        (image) =>
+          image.id === current.imageId &&
+          image.enabled &&
+          image.uses?.includes("底图"),
+      )
+    )
+      throw Error("请选择图片库中可用的底图");
     await ensureCoverResults(current);
   } catch (e) {
     error.value = e.message;
@@ -335,6 +356,27 @@ function setTemplate(value) {
     if (matching)
       row.value.templateDocuments[spec.key] = clone(matching.document);
   }
+}
+function setCoverChoice(value) {
+  coverChoice.value = value;
+  row.value.coverTreatment = value;
+  setField("coverMode", value === "替换图片" ? "现成封面" : "模板合成");
+  if (value === "当前素材图 + 模板") {
+    row.value.imageId = null;
+    row.value.coverSource = selectedAsset.value?.cover;
+  } else if (value === "图片库图 + 模板") {
+    const image = props.db.images.find(
+      (i) => i.id === row.value.imageId && i.enabled && i.uses.includes("底图"),
+    );
+    row.value.imageId = image?.id || null;
+    row.value.coverSource = image?.src || "";
+  }
+  row.value.coverError =
+    value === "替换图片"
+      ? ""
+      : value === "图片库图 + 模板" && !row.value.imageId
+        ? "请选择底图后生成封面"
+        : "请点击生成封面";
 }
 function image(value) {
   const img = props.db.images.find((i) => i.id === value);
@@ -549,7 +591,6 @@ defineExpose({ open, resume, edit, hasDraft });
   >
     <div ref="form" class="quick-publish">
       <header class="quick-intro">
-        <h2>{{ editing ? "编辑发布内容" : "快速发布" }}</h2>
         <p>
           {{
             editing
@@ -590,7 +631,7 @@ defineExpose({ open, resume, edit, hasDraft });
         <p v-if="selectedAccount" class="quick-help">
           {{ selectedAccount.name }} · 等级
           {{ selectedAccount.level ?? "未同步" }} · 今日余量
-          {{ selectedAccount.remainingToday ?? "未知" }}
+          {{ selectedAvailability?.remaining ?? "未知" }}
         </p>
         <p v-if="platform && !accountOptions.length" class="quick-warning">
           当前平台没有可用账号，请先补充账号或处理登录状态。
@@ -634,9 +675,6 @@ defineExpose({ open, resume, edit, hasDraft });
             >AI 填写</t-button
           >
         </div>
-        <p class="quick-help">
-          AI 服务未接入时不会生成假建议；创作声明请按实际内容确认。
-        </p>
         <div class="quick-content-grid">
           <div class="quick-copy-fields">
             <label v-if="platform !== '百家号'" data-field="title"
@@ -715,21 +753,7 @@ defineExpose({ open, resume, edit, hasDraft });
           </div>
           <div class="quick-cover-fields" data-field="cover" tabindex="-1">
             <h4>发布封面</h4>
-            <t-radio-group
-              :value="coverChoice"
-              @change="
-                (v) => {
-                  coverChoice = v;
-                  row.coverTreatment = v;
-                  setField(
-                    'coverMode',
-                    v === '替换图片' ? '现成封面' : '模板合成',
-                  );
-                  if (v === '当前素材图 + 模板')
-                    row.coverSource = selectedAsset?.cover;
-                  row.coverError = v === '替换图片' ? '' : '请点击生成封面';
-                }
-              "
+            <t-radio-group :value="coverChoice" @change="setCoverChoice"
               ><t-radio-button value="替换图片">替换图片</t-radio-button
               ><t-radio-button value="当前素材图 + 模板"
                 >当前素材图 + 模板</t-radio-button
@@ -776,9 +800,14 @@ defineExpose({ open, resume, edit, hasDraft });
             ><label v-if="coverChoice !== '当前素材图 + 模板'"
               >{{ row.coverMode !== "现成封面" ? "选择底图" : "封面来源"
               }}<t-select
-                :value="row.imageId || 0"
+                :value="
+                  row.imageId ||
+                  (coverChoice === '图片库图 + 模板' ? undefined : 0)
+                "
                 :options="[
-                  { label: '成片自带封面', value: 0 },
+                  ...(coverChoice === '图片库图 + 模板'
+                    ? []
+                    : [{ label: '成片自带封面', value: 0 }]),
                   ...db.images
                     .filter(
                       (i) =>
@@ -820,24 +849,14 @@ defineExpose({ open, resume, edit, hasDraft });
       </section>
       <t-alert v-if="error" theme="warning" :message="error" />
       <p v-if="row?.coverError" class="quick-warning">{{ row.coverError }}</p>
-      <details class="quick-demo">
-        <summary>本地演示 · 异常场景</summary>
-        <t-select
-          v-model="failure"
-          :options="
-            ['正常', 'AI生成失败', '封面生成失败', '保存失败'].map((v) => ({
-              label: v,
-              value: v === '正常' ? '' : v,
-            }))
-          "
-        />
-      </details>
     </div>
     <template #footer
       ><span class="quick-footer-note">{{
         problems.length
           ? `还有 ${problems.length} 项待处理`
-          : "创建后待执行，不会立即发布"
+          : editing
+            ? "保存后更新内容版本，任务保持待执行"
+            : "创建后待执行，不会立即发布"
       }}</span
       ><t-button
         theme="default"
@@ -938,89 +957,101 @@ defineExpose({ open, resume, edit, hasDraft });
 </template>
 <style scoped>
 .quick-publish {
-  color: #263d5b;
-  max-width: 1000px;
+  color: var(--wt-color-text-primary);
+  max-width: 1120px;
   margin: auto;
+  font-size: 14px;
 }
 .quick-intro {
   margin: 0 0 24px;
-}
-.quick-intro > span {
-  font-size: 11px;
-  letter-spacing: 0.08em;
-  color: #4c7cbd;
-}
-.quick-intro h2 {
-  margin: 7px 0 8px;
-  font-size: 25px;
-  font-weight: 600;
 }
 .quick-intro p,
 .quick-help {
   font-size: 12px;
   line-height: 1.7;
-  color: #7b8ba0;
+  color: var(--wt-color-text-secondary);
+  margin: 8px 0 16px;
+}
+.quick-intro p {
+  margin: 0;
 }
 .quick-block {
-  padding: 22px 0;
-  border-top: 1px solid #e4eaf2;
+  padding: 24px 0 0;
+  margin-top: 24px;
+  border-top: 1px solid var(--wt-color-border);
+}
+.quick-block[data-field="resources"] {
+  padding-top: 0;
+  margin-top: 0;
+  border-top: 0;
 }
 .quick-section-heading {
   display: flex;
   justify-content: space-between;
   gap: 12px;
   align-items: center;
-  margin-bottom: 16px;
+  margin-bottom: 20px;
 }
 .quick-section-heading h3 {
   display: flex;
   align-items: center;
   gap: 10px;
-  font-size: 16px;
+  font-size: 14px;
+  font-weight: 600;
   margin: 0;
 }
 .quick-section-heading h3 > span {
-  font-size: 11px;
-  color: #527fbd;
-  background: #eef4fc;
-  padding: 5px;
-  border-radius: 4px;
+  font-size: 13px;
+  color: var(--wt-color-primary);
+  font-weight: 500;
 }
 .quick-section-heading > small {
-  font-size: 11px;
-  color: #8492a5;
+  font-size: 12px;
+  color: var(--wt-color-text-secondary);
 }
 .quick-resource-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 16px;
+  gap: 20px 24px;
 }
 .quick-resource-grid.two {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
-.quick-publish label:not(.t-radio):not(.t-checkbox) {
+.quick-publish label:not(.t-radio):not(.t-radio-button):not(.t-checkbox) {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  color: #536880;
-  font-size: 12px;
+  color: var(--wt-color-text-primary);
+  font-size: 13px;
+  font-weight: 500;
   min-width: 0;
 }
+.quick-publish label > span {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+.quick-publish label small {
+  color: var(--wt-color-text-assist);
+  font-weight: 400;
+  font-size: 12px;
+}
 .quick-selected-asset {
-  margin-top: 16px;
+  margin-top: 20px;
   display: flex;
   align-items: center;
-  gap: 14px;
-  padding: 14px;
-  background: #f7f9fc;
-  border: 1px solid #e5ebf3;
-  border-radius: 8px;
+  gap: 12px;
+  padding: 12px 16px;
+  background: var(--wt-color-bg-subtle);
+  border: 1px solid var(--wt-color-border);
+  border-radius: 4px;
 }
 .quick-selected-asset img {
-  width: 82px;
-  height: 55px;
+  width: 72px;
+  height: 52px;
   object-fit: cover;
-  border-radius: 5px;
+  border-radius: 4px;
 }
 .quick-selected-asset > div {
   flex: 1;
@@ -1028,128 +1059,140 @@ defineExpose({ open, resume, edit, hasDraft });
 }
 .quick-selected-asset strong {
   font-size: 13px;
+  font-weight: 500;
   display: block;
 }
 .quick-selected-asset small {
-  font-size: 11px;
+  font-size: 12px;
   display: block;
-  color: #8592a5;
-  margin-top: 6px;
+  color: var(--wt-color-text-secondary);
+  margin-top: 4px;
 }
 .quick-content-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 290px;
+  grid-template-columns: minmax(0, 1fr) 320px;
   gap: 28px;
 }
 .quick-copy-fields,
 .quick-cover-fields {
   display: flex;
   flex-direction: column;
-  gap: 17px;
-}
-.quick-copy-fields label > small {
-  color: #8a98aa;
+  gap: 20px;
 }
 .quick-cover-fields {
   padding: 16px;
-  background: #f7f9fc;
-  border-radius: 8px;
-  gap: 12px;
+  border: 1px solid var(--wt-color-border);
+  border-radius: 4px;
+  gap: 16px;
   align-self: start;
 }
 .quick-cover-fields h4 {
   margin: 0;
-  font-size: 13px;
+  font-size: 14px;
+  font-weight: 500;
+}
+.quick-cover-fields :deep(.t-radio-group) {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.quick-cover-fields :deep(.t-radio-button) {
+  width: 100%;
+  justify-content: flex-start;
+  border: 1px solid var(--wt-color-border-control);
+  border-radius: 4px;
+  margin: 0;
+  box-sizing: border-box;
+}
+.quick-cover-fields :deep(.t-radio-button::before),
+.quick-cover-fields :deep(.t-radio-group__bg) {
+  display: none;
+}
+.quick-cover-fields :deep(.t-radio-button.t-is-checked) {
+  background: var(--wt-color-primary-light);
+  border-color: var(--wt-color-primary);
+  color: var(--wt-color-primary);
 }
 .quick-cover-image {
-  border: 0;
+  border: 1px solid var(--wt-color-border);
   padding: 0;
-  border-radius: 6px;
+  border-radius: 4px;
   overflow: hidden;
-  background: #edf2f8;
+  background: var(--wt-color-bg-subtle);
   cursor: zoom-in;
 }
 .quick-cover-image img {
   display: block;
   width: 100%;
-  max-height: 190px;
+  max-height: 180px;
   object-fit: contain;
 }
 .quick-cover-image span {
   display: block;
   padding: 8px;
-  color: #547eaf;
-  font-size: 11px;
+  color: var(--wt-color-primary);
+  font-size: 12px;
 }
 .quick-settings {
-  padding-top: 6px;
+  padding-top: 4px;
 }
 .quick-settings summary {
-  color: #3c679f;
+  color: var(--wt-color-primary);
   cursor: pointer;
-  font-size: 12px;
-  padding-bottom: 13px;
+  font-size: 13px;
+  padding-bottom: 16px;
 }
 .quick-settings summary > span {
-  color: #8a97aa;
-  margin-left: 10px;
-  font-size: 11px;
+  color: var(--wt-color-text-secondary);
+  margin-left: 12px;
+  font-size: 12px;
 }
 .quick-publish input[type="datetime-local"] {
-  padding: 8px;
-  border: 1px solid #dce3ed;
-  border-radius: 5px;
+  box-sizing: border-box;
+  height: 36px;
+  padding: 0 12px;
+  border: 1px solid var(--wt-color-border-control);
+  border-radius: 4px;
+  color: var(--wt-color-text-primary);
+  background: var(--wt-color-bg-container);
   min-width: 0;
 }
-.quick-preflight {
-  padding: 18px;
-  background: #f7faff;
-  border: 1px solid #dfe8f6;
-  border-radius: 8px;
-  margin-top: 7px;
-}
-.quick-preflight ul {
-  list-style: none;
-  padding: 0;
-  margin: 0 0 12px;
-}
-.quick-preflight li {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 15px;
+.quick-publish input[type="file"] {
   font-size: 12px;
-}
-.quick-preflight p {
-  font-size: 12px;
-  color: #4c8064;
+  color: var(--wt-color-text-secondary);
+  font-weight: 400;
+  width: 100%;
 }
 .quick-notice {
   padding: 10px 12px;
-  background: #edf8f2;
-  color: #397a5c;
-  font-size: 12px;
-  border-radius: 6px;
+  background: var(--wt-color-info-bg);
+  color: var(--wt-color-info-text);
+  font-size: 13px;
+  border-radius: 4px;
 }
 .quick-warning {
-  color: #a66c2d;
+  color: var(--wt-color-warning-text);
   font-size: 12px;
 }
 .quick-footer-note {
   margin-right: auto;
-  color: #8390a4;
+  color: var(--wt-color-text-secondary);
   font-size: 12px;
 }
 .quick-demo {
-  margin-top: 22px;
-  font-size: 11px;
-  color: #8794a5;
+  margin-top: 24px;
+  font-size: 12px;
+  color: var(--wt-color-text-assist);
 }
 .quick-demo summary {
   cursor: pointer;
 }
 .quick-demo .t-select {
-  margin-top: 10px;
+  margin-top: 12px;
+}
+.quick-picker-tools {
+  display: flex;
+  gap: 16px;
 }
 .quick-picker-tools > .t-input__wrap {
   flex: 1;
@@ -1159,20 +1202,16 @@ defineExpose({ open, resume, edit, hasDraft });
   flex: none;
   white-space: nowrap;
 }
-.quick-picker-tools {
-  display: flex;
-  gap: 14px;
-}
 .quick-picker-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 14px;
-  margin: 18px 0;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin: 20px 0;
 }
 .quick-picker-item {
   padding: 12px;
-  border: 1px solid #e0e7f0;
-  border-radius: 8px;
+  border: 1px solid var(--wt-color-border);
+  border-radius: 4px;
   display: flex;
   gap: 12px;
   align-items: start;
@@ -1186,42 +1225,48 @@ defineExpose({ open, resume, edit, hasDraft });
 }
 .quick-picker-item img {
   display: block;
-  width: 100px;
-  height: 72px;
+  width: 88px;
+  height: 66px;
   object-fit: cover;
-  border-radius: 5px;
+  border-radius: 4px;
 }
 .quick-picker-item strong {
   font-size: 13px;
   line-height: 1.6;
+  font-weight: 500;
 }
 .quick-picker-item small {
-  font-size: 11px;
+  font-size: 12px;
   display: block;
-  color: #8390a5;
-  margin: 5px 0 9px;
+  color: var(--wt-color-text-secondary);
+  margin: 4px 0 8px;
 }
 .quick-picker-item p {
   font-size: 12px;
-  color: #a66c2d;
+  color: var(--wt-color-warning-text);
 }
 .quick-empty {
   text-align: center;
-  padding: 40px 10px;
-  color: #72849a;
+  padding: 40px 16px;
+  color: var(--wt-color-text-secondary);
 }
 .quick-empty h3 {
-  font-size: 16px;
+  font-size: 14px;
+  font-weight: 500;
 }
 .quick-empty p {
-  font-size: 12px;
+  font-size: 13px;
+}
+@media (max-width: 900px) {
+  .quick-content-grid {
+    grid-template-columns: minmax(0, 1fr) 280px;
+    gap: 24px;
+  }
 }
 @media (max-width: 700px) {
   .quick-resource-grid,
   .quick-content-grid,
-  .quick-picker-grid {
-    grid-template-columns: 1fr;
-  }
+  .quick-picker-grid,
   .quick-resource-grid.two {
     grid-template-columns: 1fr;
   }
@@ -1230,31 +1275,10 @@ defineExpose({ open, resume, edit, hasDraft });
     flex-wrap: wrap;
   }
   .quick-selected-asset {
-    display: grid;
-    grid-template-columns: 72px minmax(0, 1fr);
-    gap: 12px;
-  }
-  .quick-selected-asset img {
-    width: 72px;
-    height: 52px;
+    flex-wrap: wrap;
   }
   .quick-selected-asset strong {
     overflow-wrap: anywhere;
-    line-height: 1.6;
-  }
-  .quick-selected-asset small {
-    line-height: 1.5;
-  }
-  .quick-selected-asset > .t-button {
-    justify-self: start;
-  }
-  .quick-picker-tools > .t-input__wrap {
-    flex: 1;
-    min-width: 0;
-  }
-  .quick-picker-tools > .t-radio-group {
-    flex: none;
-    white-space: nowrap;
   }
   .quick-picker-tools {
     flex-direction: column;
@@ -1262,15 +1286,9 @@ defineExpose({ open, resume, edit, hasDraft });
   .quick-footer-note {
     display: none;
   }
-  .quick-intro h2 {
-    font-size: 22px;
-  }
-  .quick-cover-fields {
-    max-width: 100%;
-  }
   .quick-settings summary > span {
     display: block;
-    margin: 7px 0;
+    margin: 8px 0;
   }
 }
 </style>

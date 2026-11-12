@@ -21,7 +21,9 @@ for (const status of states)
     const html = await renderToString(app);
     expect(html.indexOf("任务摘要")).toBeLessThan(html.indexOf(">发布内容<"));
     expect(html.indexOf(">发布内容<")).toBeLessThan(html.indexOf(">执行历史<"));
-    expect(html).toContain("任务尚未执行");
+    expect(html).toContain(
+      status === "待执行" ? "任务尚未执行" : "暂无已保存的执行记录",
+    );
     expect(html).not.toMatch(
       /<input|<textarea|保存并关闭|当前执行进度|安全提示|查看原始日志/,
     );

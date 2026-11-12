@@ -118,8 +118,18 @@ export function validate(row, db, ignoreId) {
   if (!title?.trim())
     errors.push(row.platform === "百家号" ? "请填写作品描述" : "请填写标题");
   if (Array.from(title || "").length > limit)
-    errors.push(`文案超过原型长度检查 ${limit}；百家号计数折算待核验`);
+    errors.push(`文案超过当前长度上限 ${limit}，请精简后重试`);
   if (!row.cover) errors.push("请选择封面");
+  if (
+    row.coverTreatment === "图片库图 + 模板" &&
+    !db.images?.some(
+      (image) =>
+        image.id === row.imageId &&
+        image.enabled &&
+        image.uses?.includes("底图"),
+    )
+  )
+    errors.push("请选择图片库中可用的底图");
   if (
     row.candidateId &&
     (!row.contentApproved ||
@@ -480,5 +490,5 @@ export function declarationOptions(platform) {
             "内容包含营销广告",
           ]
         : ["无需声明"]
-  ).map((value) => ({ label: value, value }));
+  ).map((value) => ({ label: value.replace("（原型设置）", ""), value }));
 }
