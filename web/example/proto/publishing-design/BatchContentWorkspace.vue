@@ -80,7 +80,7 @@ const hasSuggestion = (r) =>
 const rowStatus = (r) =>
   hasSuggestion(r)
     ? "有 AI 建议"
-    : validate(r, props.db).length
+    : validate(r, props.db, r.id).length
       ? "待配置"
       : "已配置";
 const filtered = computed(() =>
@@ -113,7 +113,7 @@ watch(filtered, (rows) => {
     activeId.value = rows[0]?.candidateId || null;
 });
 const ready = computed(
-  () => props.rows.filter((r) => !validate(r, props.db).length).length,
+  () => props.rows.filter((r) => !validate(r, props.db, r.id).length).length,
 );
 const allSelected = computed(
   () =>
@@ -181,8 +181,8 @@ function adoptBatch() {
   const rows = selected.value.length
     ? props.rows.filter((r) => selected.value.includes(r.candidateId))
     : filtered.value;
-  for (const row of rows) for (const f of fieldKeys) if (adopt(row, f)) n++;
-  notice.value = `已采用 ${n} 个有效字段；生成后修改过的字段与过期建议保持原样。请检查并确认内容。`;
+  for (const row of rows) for (const f of fieldKeys) if (!String(row[f] || "").trim() && adopt(row, f)) n++;
+  notice.value = `已补齐 ${n} 个空白字段；已有人工内容与过期建议保持原样。请检查并确认内容。`;
 }
 function edit(row) {
   editing.value = clone(row);
@@ -296,7 +296,7 @@ async function saveEdit() {
     const row = editing.value;
     row.contentApproved = true;
     row.coverApproved = true;
-    const errors = validate(row, props.db);
+    const errors = validate(row, props.db, row.id);
     if (errors.length) {
       editError.value = errors.join("；");
       return;
@@ -335,7 +335,7 @@ async function approve(row) {
     await ensureCoverResults(row);
     row.contentApproved = true;
     row.coverApproved = true;
-    const errors = validate(row, props.db);
+    const errors = validate(row, props.db, row.id);
     if (errors.length) {
       row.contentApproved = false;
       error.value = errors.join("；");
@@ -370,7 +370,7 @@ async function approveBatch() {
     try {
       await ensureCoverResults(row);
       const test = { ...row, contentApproved: true, coverApproved: true };
-      if (!validate(test, props.db).length) {
+      if (!validate(test, props.db, test.id).length) {
         row.contentApproved = true;
         row.coverApproved = true;
         n++;

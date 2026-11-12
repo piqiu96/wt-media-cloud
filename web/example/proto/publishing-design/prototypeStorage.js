@@ -1,3 +1,4 @@
+import { loadBatchSnapshot, saveBatchSnapshot } from "./batchApi.js";
 // Isolated browser storage for this offline prototype; never used by runtime APIs.
 const DATABASE = "wt-media-publishing-prototype",
   STORE = "snapshots";
@@ -24,13 +25,14 @@ export async function loadPrototype() {
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
   });
-  if (saved?.version === 1) return saved.data;
+  if (saved?.version === 1) return await loadBatchSnapshot(saved.data);
   const legacy = JSON.parse(
     localStorage.getItem("wt-publishing-design-v1") || "null",
   );
-  return legacy?.version === 1 ? legacy.data : null;
+  return await loadBatchSnapshot(legacy?.version === 1 ? legacy.data : null);
 }
 export async function savePrototype(data) {
+  await saveBatchSnapshot(data);
   const db = await open();
   await new Promise((resolve, reject) => {
     const tx = db.transaction(STORE, "readwrite");

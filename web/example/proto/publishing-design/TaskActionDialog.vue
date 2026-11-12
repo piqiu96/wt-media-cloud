@@ -1,4 +1,5 @@
 <script setup>
+import { batchCommand } from "./batchApi.js";
 import { ref } from "vue";
 import Overlay from "./PrototypeOverlay.vue";
 import RequiredLabel from "./RequiredLabel.vue";
@@ -22,17 +23,24 @@ const titles = {
   human: "处理发布异常",
   verify: "核实发布结果",
   retry: "重试任务",
+  start: "执行任务",
+  supplement: "补录公开结果",
 };
 function open(t, a) {
   task.value = t;
   action.value = a;
   form.value = {
-    status: "",
+    status: a === "supplement" ? "已发布" : "",
     evidence: "",
     reason: "",
     url: "",
+    publicAt: "",
     human: "",
     attempt: t.attemptHistory?.at(-1)?.number,
+    expectedStatus: t.status,
+    expectedAttempts: t.attempts || 0,
+    taskId: t.id,
+    requestKey: crypto.randomUUID(),
   };
   error.value = "";
   visible.value = true;
@@ -43,6 +51,19 @@ async function submit() {
   error.value = "";
   try {
     const t = task.value;
+    if (t.batchId) {
+      if (!(await props.persist())) throw Error("当前数据尚未保存，请重试");
+      const { requestKey, ...input } = form.value;
+      const result = await batchCommand(
+        t.batchId,
+        "taskOperation",
+        { ...input, action: action.value },
+        requestKey,
+      );
+      Object.assign(props.db, result);
+      visible.value = false;
+      return;
+    }
     const before = JSON.parse(JSON.stringify(t)),
       works = JSON.parse(JSON.stringify(props.db.works || []));
     if (action.value === "cancel") cancelPublication(t, form.value.reason);
@@ -84,9 +105,8 @@ defineExpose({ open });
           <h3>{{ task.title || task.description }}</h3>
           <p>
             {{ task.platform }} ·
-            {{ db.accounts.find((a) => a.id === task.accountId)?.name }} · {{
-              task.id
-            }}
+            {{ db.accounts.find((a) => a.id === task.accountId)?.name }} ·
+            {{ task.id }}
           </p>
         </div>
       </div>
@@ -115,7 +135,7 @@ defineExpose({ open });
           ><t-radio value="later">尚未完成，稍后处理</t-radio></t-radio-group
         ></template
       >
-      <template v-if="action === 'verify'"
+      <template v-if="['verify', 'supplement'].includes(action)"
         ><p>
           已知证据：{{ task.evidence || "尚无平台反馈" }} · 尝试
           {{ form.attempt || "缺失" }}
@@ -125,12 +145,18 @@ defineExpose({ open });
           ><t-select
             v-model="form.status"
             @change="error = ''"
-            :options="[
-              { label: '确认已发布', value: '已发布' },
-              { label: '已提交平台审核中', value: '平台审核中' },
-              { label: '确认发布失败', value: '执行失败' },
-              { label: '仍无法判断', value: '结果待确认' },
-            ]" /></label
+            :options="
+              action === 'supplement'
+                ? [{ label: '确认已发布', value: '已发布' }]
+                : [
+                    { label: '确认已发布', value: '已发布' },
+                    ...(task.batchId
+                      ? []
+                      : [{ label: '已提交平台审核中', value: '平台审核中' }]),
+                    { label: '确认未发布', value: '执行失败' },
+                    { label: '仍无法判断', value: '结果待确认' },
+                  ]
+            " /></label
         ><label v-if="form.status === '已发布'" class="v4-field"
           ><RequiredLabel>最终公开作品链接</RequiredLabel
           ><t-input
@@ -139,6 +165,9 @@ defineExpose({ open });
           /><small
             >请填写具体作品的公开链接，不能使用账号主页或审核页面。</small
           ></label
+        ><label v-if="form.status === '已发布' && task.batchId" class="v4-field"
+          ><RequiredLabel>实际发布时间</RequiredLabel
+          ><t-input v-model="form.publicAt" type="datetime-local" /></label
         ><label v-if="form.status === '执行失败'" class="v4-field"
           ><RequiredLabel>失败原因</RequiredLabel
           ><t-input v-model="form.reason" /></label
@@ -173,7 +202,9 @@ defineExpose({ open });
               ? "确认重试"
               : action === "human"
                 ? "确认处理结果"
-                : "保存核实结果"
+                : action === "start"
+                  ? "确认执行任务"
+                  : "保存核实结果"
         }}</t-button
       ></template
     ></Overlay

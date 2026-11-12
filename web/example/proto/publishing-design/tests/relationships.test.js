@@ -1,3 +1,4 @@
+import { runBatchCommand, batchState } from "../batchLifecycle.js";
 import { describe, it, expect } from "vitest";
 import { seed, defaults, declarationOptions, nextBatch } from "../model.js";
 import {
@@ -245,7 +246,8 @@ describe("D05 D07 D09 D10 D11 dispatch and cancellation", () => {
     dispatchBatch(db, batch);
     expect(claimTask(db, tasks[0])).toBe(true);
     setResult(tasks[0], "结果待确认");
-    cancelBatchSafely(db, batch);
+    expect(() => cancelBatchSafely(db, batch)).toThrow("首次执行后");
+    runBatchCommand(db, batch, "stop");
     expect(tasks.map((t) => t.status)).toEqual([
       "结果待确认",
       "已取消",
@@ -255,15 +257,13 @@ describe("D05 D07 D09 D10 D11 dispatch and cancellation", () => {
     expect(() => dispatchBatch(db, batch)).toThrow("终结");
     expect(tasks.every((t) => t.status !== "已放弃")).toBe(true);
   });
-  it("cancelled batch requires human skip even with a successful result", () => {
-    const db = fresh(),
-      p = prepare(db);
+  it("completed execution cannot be cancelled and keeps the published result", () => {
+    const db = fresh(), p = prepare(db);
     dispatchPlan(db, p);
     setResult(db.tasks[0], "已发布");
-    cancelBatchSafely(db, db.batches[0]);
+    expect(() => cancelBatchSafely(db, db.batches[0])).toThrow("首次执行后");
+    expect(batchState(db, db.batches[0])).toBe("已结束");
     syncPlan(db, p);
-    expect(p.control).toBe("等待跳过确认");
-    advance(db, p, true);
     expect(p.position).toBe(1);
   });
   it("unknown/login block only their account while other accounts run; concurrency bounded at 3", () => {
@@ -414,12 +414,13 @@ describe("D06 D08 D15 creation and result boundaries", () => {
     const t = tasks[0],
       before = clone(t.attemptHistory[0].snapshot);
     setResult(t, "执行失败");
-    cancelBatchSafely(db, batch);
-    t.title = "修正标题";
-    queueTask(db, t, { retry: true });
-    expect(t.attempts).toBe(2);
+    expect(() => cancelBatchSafely(db, batch)).toThrow("首次执行后");
+    t.batchStopped = true;
+    batch.stoppedAt = new Date().toISOString();
+    expect(() => queueTask(db, t, { retry: true })).toThrow("停止");
+    expect(t.attempts).toBe(1);
     expect(t.attemptHistory[0].snapshot).toEqual(before);
-    expect(batch.control).toBe("已取消");
+    expect(batch.control).toBe("执行中");
   });
   it("migrates old standalone refs out of plans without deleting historical tasks", () => {
     const db = seed();

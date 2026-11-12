@@ -18,6 +18,7 @@ export const categories = ["三角洲行动", "火影忍者", "通用"];
 export const threshold = 0.1;
 export const occupied = (task) => task.status !== "已放弃";
 export const canRetry = (task) =>
+  !task.batchStopped &&
   task.status === "执行失败" &&
   task.result === "确认未发布" &&
   !task.claimed &&

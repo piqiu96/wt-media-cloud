@@ -27,13 +27,13 @@ import ResourceNotice from "../../../src/shared/ui/resource/ResourceNotice.vue";
 import MediaPreview from "../../../src/shared/ui/media/MediaPreview.vue";
 import CoverPreview from "./CoverPreview.vue";
 import { imageReferences, templateReferences, deleteImage } from "./library.js";
-import BatchWorkbench from "./BatchWorkbench.vue";
+import BatchManager from "./BatchManager.vue";
+import { migrateBatchLifecycle } from "./batchLifecycle.js";
 import PlanWizard from "./PlanWizard.vue";
 import PlanWorkbench from "./PlanWorkbench.vue";
 import { defaultDocument, renderDocument } from "./covers.js";
 import {
   pausePlan,
-  pauseBatch,
   queueTask,
   takeBatchControl,
   cancelBatchSafely,
@@ -104,6 +104,8 @@ const db = reactive(seed()),
 let saveTimer;
 let saveQueue = Promise.resolve();
 async function persistNow() {
+  if (!hydrated.value) return false;
+  clearTimeout(saveTimer);
   const snapshot = clone(db);
   savingSnapshot.value = true;
   saveQueue = saveQueue
@@ -116,17 +118,35 @@ async function persistNow() {
     storageError.value = "";
     return true;
   } catch (e) {
-    storageError.value = `任务信息未能保存：${e.message || "请重试"}。当前内容仍在本页，请不要刷新。`;
+    storageError.value = e.message?.includes("409")
+      ? "409：其他窗口已更新，本次改动未写入。请先保留未保存的文案，再重新加载最新记录。"
+      : e.message?.includes("首次执行锁定")
+        ? `${e.message}。本次改动未写入，请先保留未保存的文案，再重新加载最新记录。`
+        : `任务信息未能保存：${e.message || "请重试"}。当前内容仍在本页，请先重试保存。`;
     return false;
   } finally {
     savingSnapshot.value = false;
   }
+}
+async function reloadLatest() {
+  if (
+    await feedback.confirmWarning({
+      title: "重新加载最新记录？",
+      message:
+        "将读取已保存的最新版本，本页尚未保存的修改会丢失。请先复制需要保留的文案。",
+      confirmText: "重新加载",
+    })
+  )
+    location.reload();
 }
 onMounted(async () => {
   try {
     const saved = await loadPrototype();
     if (saved) Object.assign(db, saved);
     migrateRelationships(db);
+    migrateBatchLifecycle(db);
+    await nextTick();
+    batchManagerRef.value?.directURL();
     if (!db.images.some((i) => i.pureBackground))
       db.images.push({
         id: id(),
@@ -166,7 +186,8 @@ onMounted(async () => {
       }
     }
   } catch (e) {
-    storageError.value = `任务记录未能加载：${e.message}。请稍后重试。`;
+    storageError.value = `任务记录未能加载：${e.message}。请重新加载页面，当前禁止保存以保护已有记录。`;
+    return;
   }
   hydrated.value = true;
 });
@@ -182,9 +203,9 @@ watch(
 );
 const page = ref(
     ["tasks", "batches", "plans", "images", "templates"].includes(
-      location.hash.slice(1),
+      location.hash.slice(1).split("?")[0],
     )
-      ? location.hash.slice(1)
+      ? location.hash.slice(1).split("?")[0]
       : "tasks",
   ),
   pageNo = ref(1),
@@ -207,7 +228,7 @@ function navigate(p) {
   planFilter.value = null;
 }
 const hash = () => {
-  const p = location.hash.slice(1);
+  const p = location.hash.slice(1).split("?")[0];
   if (
     ["tasks", "batches", "plans", "images", "templates"].includes(p) &&
     p !== page.value
@@ -357,12 +378,17 @@ const stateTheme = (s) =>
       : s === "执行中"
         ? "primary"
         : "default";
+const batchManagerRef = ref(null);
 const detail = ref(null),
   detailOpen = ref(false),
   evidence = ref(""),
   bulkResult = ref(null);
 let listScroll = null;
 function view(row) {
+  if (row && !row.assetId && !row.items) {
+    batchManagerRef.value?.open(row);
+    return;
+  }
   if (!detailOpen.value)
     listScroll = [
       ...new Set(
@@ -482,6 +508,13 @@ async function takeControl(item) {
   return true;
 }
 async function start(t, silent = false) {
+  if (t.batchId && !canRetry(t)) {
+    const batch = db.batches.find((b) => b.id === t.batchId);
+    if (batch) {
+      batchManagerRef.value?.action(batch, "execute");
+      return false;
+    }
+  }
   const errors = taskChecks(t, db);
   if (errors.length) {
     warning(errors.join("；"));
@@ -512,19 +545,10 @@ async function start(t, silent = false) {
 }
 
 async function batchAction(b) {
-  if (b.phase !== "内容预检通过") return configureBatch(b);
-  try {
-    if (b.control === "执行中") {
-      pauseBatch(b);
-      toast("已暂停批次后续派发");
-    } else {
-      if (!(await takeControl({ kind: "batch", id: b.id }))) return;
-      dispatchBatch(db, b, { takeover: true });
-      toast("批次已进入演示执行队列");
-    }
-  } catch (error) {
-    warning(error.message || "批次操作失败，请检查任务预检结果后重试");
-  }
+  batchManagerRef.value?.action(
+    b,
+    b.phase !== "内容预检通过" ? "configure" : "execute",
+  );
 }
 function configureBatch(b) {
   detailOpen.value = false;
@@ -539,10 +563,8 @@ watch(
       if (
         b.control === "执行中" &&
         batchTasks(db, b).length &&
-        !batchTasks(db, b).some((t) =>
-          ["待执行", "排队中", "执行中", "等待人工", "结果待确认"].includes(
-            t.status,
-          ),
+        !batchTasks(db, b).some(
+          (t) => !["已发布", "已取消", "已放弃"].includes(t.status),
         )
       )
         b.control = "执行已结束";
@@ -652,6 +674,7 @@ async function onCreated({ batch, tasks }) {
   if (saved) toast(`已保存 ${tasks.length} 条待执行任务，尚未启动`);
 }
 const coverPreviewOpen = ref(false),
+  coverPreviewReadOnly = ref(false),
   coverPreviewRow = ref(null);
 const mediaPreviewOpen = ref(false),
   previewImages = ref([]),
@@ -660,6 +683,7 @@ const mediaPreviewOpen = ref(false),
   previewTitle = ref("");
 async function openPreview(payload) {
   if (payload.kind === "cover" && payload.row) {
+    coverPreviewReadOnly.value = !!payload.readOnly;
     const cover = clone(payload.row);
     if (cover.coverMode === "现成封面") {
       try {
@@ -1435,8 +1459,20 @@ function cloneTask(t) {
           ><t-button
             variant="text"
             :loading="savingSnapshot"
-            @click="persistNow"
-            >重试保存</t-button
+            @click="
+              storageError.includes('409') ||
+              storageError.includes('首次执行锁定') ||
+              !hydrated
+                ? reloadLatest()
+                : persistNow()
+            "
+            >{{
+              storageError.includes("409") ||
+              storageError.includes("首次执行锁定") ||
+              !hydrated
+                ? "重新加载最新记录"
+                : "重试保存"
+            }}</t-button
           ></template
         ></t-alert
       >
@@ -1481,7 +1517,16 @@ function cloneTask(t) {
           }}</strong>
         </button>
       </div>
-      <ResourceCard>
+      <BatchManager
+        ref="batchManagerRef"
+        :db="db"
+        :persist="persistNow"
+        :active="page === 'batches'"
+        @configure="configureBatch"
+        @task="view"
+        @preview="openPreview"
+      />
+      <ResourceCard v-if="page !== 'batches'">
         <ResourceFilterBar>
           <label class="wt-filter-field wt-filter-field--wide"
             ><span class="wt-filter-field__label">名称</span
@@ -1993,7 +2038,11 @@ function cloneTask(t) {
       @preview="openPreview"
       @created="onCreated"
     />
-    <CoverPreview v-model:visible="coverPreviewOpen" :row="coverPreviewRow" />
+    <CoverPreview
+      v-model:visible="coverPreviewOpen"
+      :row="coverPreviewRow"
+      :read-only="coverPreviewReadOnly"
+    />
     <MediaPreview
       v-model:visible="mediaPreviewOpen"
       :title="previewTitle"
@@ -2588,112 +2637,6 @@ function cloneTask(t) {
           >
         </div></template
       >
-      <template v-else-if="detail"
-        ><h2>{{ detail.name }}</h2>
-        <p>
-          {{ detail.platform }} · {{ detail.control }} ·
-          {{ batchSummary(db, detail).categories.join("、") }}
-        </p>
-        <p>
-          批次 {{ detail.id }} · {{ batchSummary(db, detail).videos }} 条成片 ·
-          {{ batchSummary(db, detail).total }} 条任务
-        </p>
-        <p>
-          关联计划：<t-button
-            v-if="associatedPlan(db, { kind: 'batch', id: detail.id })"
-            variant="text"
-            @click="
-              returnToPlan(associatedPlan(db, { kind: 'batch', id: detail.id }))
-            "
-            >{{
-              associatedPlan(db, { kind: "batch", id: detail.id }).name
-            }}</t-button
-          ><span v-else>未关联，可独立执行</span>
-        </p>
-        <t-alert
-          v-if="detail.legacySource"
-          theme="info"
-          message="此历史分组已按实际任务平台兼容整理，原任务 ID、结果与执行记录保留。"
-        />
-        <div class="metric-grid">
-          <div>
-            <small>任务总数</small
-            ><strong>{{
-              stats(db.tasks.filter((t) => t.batchId === detail.id)).total
-            }}</strong>
-          </div>
-          <div>
-            <small>已发布</small
-            ><strong>{{
-              stats(db.tasks.filter((t) => t.batchId === detail.id)).published
-            }}</strong>
-          </div>
-          <div>
-            <small>发布成功率</small
-            ><strong
-              >{{
-                stats(db.tasks.filter((t) => t.batchId === detail.id)).total
-                  ? Math.round(
-                      (stats(db.tasks.filter((t) => t.batchId === detail.id))
-                        .published /
-                        stats(db.tasks.filter((t) => t.batchId === detail.id))
-                          .total) *
-                        100,
-                    )
-                  : 0
-              }}%</strong
-            >
-          </div>
-          <div>
-            <small>处理进度</small
-            ><strong
-              >{{
-                stats(db.tasks.filter((t) => t.batchId === detail.id)).total
-                  ? Math.round(
-                      (stats(db.tasks.filter((t) => t.batchId === detail.id))
-                        .finished /
-                        stats(db.tasks.filter((t) => t.batchId === detail.id))
-                          .total) *
-                        100,
-                    )
-                  : 0
-              }}%</strong
-            >
-          </div>
-        </div>
-        <p>处理进度包含失败、取消和放弃，不代表发布成功。</p>
-        <div class="state-links">
-          <t-button
-            v-for="s in states"
-            :key="s"
-            variant="outline"
-            @click="
-              related(detail.id);
-              filterStatus = s;
-              applyQuery();
-            "
-            >{{ s }}
-            {{
-              db.tasks.filter((t) => t.batchId === detail.id && t.status === s)
-                .length
-            }}</t-button
-          >
-        </div>
-        <p>
-          配置阶段：{{ detail.phase }} · 目标 {{ targetTotal(detail) }} ·
-          正式创建 {{ batchSummary(db, detail).total }} · 创建缺口
-          {{ batchSummary(db, detail).creationGap }} · 执行收口
-          {{ batchSummary(db, detail).closed }} /
-          {{ batchSummary(db, detail).total }} · 公开目标
-          {{ batchSummary(db, detail).published }} / {{ targetTotal(detail) }}
-        </p>
-        <t-button
-          v-if="detail.phase !== '内容预检通过'"
-          @click="configureBatch(detail)"
-          >进入资源 / 内容配置</t-button
-        >
-        <BatchWorkbench :db="db" :batch="detail" @task="view" />
-      </template>
       <template #footer
         ><t-button
           v-if="
@@ -2756,20 +2699,6 @@ function cloneTask(t) {
             @click="cancelCurrentPlan(detail)"
             >取消计划</t-button
           > </template
-        ><template v-else-if="detail"
-          ><t-button
-            v-if="!['已取消', '执行已结束'].includes(detail.control)"
-            variant="outline"
-            @click="batchAction(detail)"
-            >{{
-              detail.control === "执行中" ? "暂停批次" : "启动 / 恢复批次"
-            }}</t-button
-          ><t-button
-            v-if="!['已取消', '执行已结束'].includes(detail.control)"
-            variant="outline"
-            @click="cancelBatch(detail)"
-            >取消未提交任务</t-button
-          ><t-button @click="related(detail.id)">查看任务</t-button></template
         ><t-button theme="default" variant="outline" @click="detailOpen = false"
           >关闭</t-button
         ></template

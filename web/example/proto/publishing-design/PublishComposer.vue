@@ -354,7 +354,12 @@ async function open() {
   visible.value = true;
 }
 function openBatch(batch) {
-  if (batch.phase === "内容预检通过") return;
+  if (
+    batch.phase === "内容预检通过" ||
+    batch.firstStartedAt ||
+    batch.control === "已取消"
+  )
+    return;
   const saved = batch.draft;
   Object.assign(state, {
     mode: "批量发布",
@@ -425,23 +430,6 @@ async function saveDraft(silent = false) {
   }
   if (!silent) feedback.toast.success("草稿已保存，尚未创建任务或占用成片");
   return true;
-}
-async function duplicateForResources() {
-  if (!(await saveDraft(true))) return;
-  const draft = copy(state);
-  Object.assign(state, {
-    ...draft,
-    batchId: null,
-    planId: null,
-    creationKey: crypto.randomUUID(),
-    name: `${draft.name} · 副本`,
-    step: 0,
-    resourcesLocked: false,
-    rows: [],
-  });
-  resourcePane.value = 1;
-  errors.value = [];
-  feedback.toast.success("原草稿已保留，正在调整副本的资源");
 }
 async function next() {
   errors.value = [];
@@ -624,6 +612,10 @@ async function create() {
   }
 }
 async function removeRow(row) {
+  if (state.resourcesLocked) {
+    errors.value = ["资源已锁定，请创建任务后取消或放弃，不可移出或替换资源。"];
+    return;
+  }
   if (
     await feedback.confirmWarning({
       title: "移出这条候选任务？",
@@ -684,12 +676,6 @@ defineExpose({
             · {{ state.planId ? "目标继承自发布计划" : "批次资源准备" }}
           </p>
         </div>
-        <t-button
-          v-if="state.resourcesLocked"
-          variant="text"
-          @click="duplicateForResources"
-          >复制为新草稿调整资源</t-button
-        >
       </header>
       <ol
         v-if="state.step < 4"
@@ -1329,6 +1315,7 @@ defineExpose({
                       @click="emit('preview', { kind: 'cover', row: r })"
                       >预览封面</t-button
                     ><t-button
+                      v-if="!state.resourcesLocked"
                       variant="text"
                       theme="danger"
                       @click="removeRow(r)"
@@ -1463,7 +1450,7 @@ defineExpose({
       </p>
     </div>
     <p class="batch-dialog-copy">
-      确认后，平台、类目、目标、账号与成片在本草稿中变为只读。接下来配置文案与封面；需要调整资源时，可复制为新草稿，原草稿会保留。
+      确认后，平台、类目、目标、账号与成片在本草稿中变为只读。接下来配置文案与封面；锁定后只能恢复原账号、原成片的可用性；如永久不可用，请取消或放弃对应任务，再由新批次补足目标。
     </p>
     <t-alert
       theme="info"

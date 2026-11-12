@@ -4,7 +4,7 @@ import { ImageIcon } from "tdesign-icons-vue-next";
 import Overlay from "./PrototypeOverlay.vue";
 import { coverPreviewState } from "./coverPreview.js";
 
-const props = defineProps({ visible: Boolean, row: Object });
+const props = defineProps({ visible: Boolean, row: Object, readOnly: Boolean });
 const emit = defineEmits(["update:visible"]);
 const selected = ref(0),
   actual = ref(false),
@@ -111,9 +111,11 @@ function close() {
           }}</strong>
           <p>
             {{
-              state.pending
-                ? "封面配置已更新，请返回编辑生成封面。"
-                : "请返回编辑检查图片并重新生成。"
+              readOnly
+                ? "冻结的封面暂时无法预览，原配置保持只读；请在新批次中重新配置。"
+                : state.pending
+                  ? "封面配置已更新，请返回编辑生成封面。"
+                  : "请返回编辑检查图片并重新生成。"
             }}
           </p>
         </div>
@@ -130,7 +132,9 @@ function close() {
       </div>
     </div>
     <template #footer
-      ><t-button variant="outline" @click="close">返回编辑</t-button></template
+      ><t-button variant="outline" @click="close">{{
+        readOnly ? "关闭预览" : "返回编辑"
+      }}</t-button></template
     >
   </Overlay>
 </template>

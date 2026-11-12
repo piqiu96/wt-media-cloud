@@ -1,3 +1,4 @@
+import { freezeBatch, isDisposed } from "./batchLifecycle.js";
 // Offline prototype business rules. No runtime API or external platform calls.
 import { platforms, validate, nextBatch, stats, canRetry } from "./model.js";
 export const clone = (x) => JSON.parse(JSON.stringify(x));
@@ -45,7 +46,7 @@ export function batchSummary(db, b) {
     ).length,
     target: targetTotal(b),
     creationGap: Math.max(0, targetTotal(b) - rows.length),
-    closed: rows.filter((t) => !unresolved(t)).length,
+    closed: rows.filter(isDisposed).length,
   };
 }
 export const canLink = () => false;
@@ -296,16 +297,32 @@ export function createPublication(
       partialConfirmed: partial,
       candidates: [],
     });
+    b.created ||= new Date().toISOString();
+    b.createdBy ||= "本地演示用户";
+    b.updatedAt = new Date().toISOString();
+    b.version = (b.version || 0) + 1;
+    b.log ||= [];
+    b.log.push({
+      time: b.updatedAt,
+      actor: "本地演示用户",
+      type: "确认配置",
+      text: `已创建 ${tasks.length} 条待执行任务，未启动发布`,
+      result: "成功",
+    });
     if (!old) db.batches.push(b);
   }
   db.tasks.push(...tasks);
   return { batch: b, tasks };
 }
 export function queueTask(db, t, { retry = false } = {}) {
+  const batch = db.batches.find((b) => b.id === t.batchId);
+  if (batch?.stoppedAt || t.batchStopped || batch?.control === "已取消")
+    throw Error("批次已停止或取消，不允许新执行");
   if (t.claimed || !(t.status === "待执行" || (retry && canRetry(t))))
     return false;
   const errors = validate(t, db, t.id);
   if (errors.length) throw Error(errors.join("；"));
+  if (batch) freezeBatch(db, batch);
   t.status = "排队中";
   t.result = "未提交";
   t.claimed = false;
@@ -329,7 +346,7 @@ export function queueTask(db, t, { retry = false } = {}) {
 function ready(db, b) {
   if (!b || b.phase !== "内容预检通过" || !batchTasks(db, b).length)
     throw Error("批次未就绪，请先配置资源和内容");
-  if (["已取消", "执行已结束"].includes(b.control))
+  if (b.stoppedAt || ["已取消", "执行已结束"].includes(b.control))
     throw Error("批次已终结，不可恢复队列");
 }
 function preflightDispatch(db, b) {
@@ -475,6 +492,7 @@ export function cancellationImpact(db, b) {
   };
 }
 export function cancelBatchSafely(db, b) {
+  if (b.firstStartedAt) throw Error("首次执行后不可取消批次，请使用停止发布");
   b.control = "已取消";
   for (const t of batchTasks(db, b))
     if (["待执行", "排队中"].includes(t.status) && !t.claimed)
@@ -503,6 +521,7 @@ export function claimTask(db, t, now = Date.now()) {
   if (db.platformBlocks?.[t.platform]) return false;
   const b = db.batches.find((b) => b.id === t.batchId);
   if (
+    b?.stoppedAt ||
     t.status !== "排队中" ||
     (b && b.control !== "执行中" && !t.manualDispatch) ||
     (t.schedule && Date.parse(t.schedule) > now)

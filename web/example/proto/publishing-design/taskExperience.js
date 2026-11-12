@@ -1,7 +1,7 @@
 import { canRetry, validate } from "./model.js";
 export const displayStatus = (t) =>
   t.status === "执行失败" ? "发布失败" : t.status;
-export const canEditTask = (t) => t.status === "待执行" && !t.claimed;
+export const canEditTask = (t) => t.status === "待执行" && !t.claimed && !t.batchConfigLocked && !t.batchStopped;
 export const canCancelTask = (t) => {
   if (
     t.submittedAt ||

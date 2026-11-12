@@ -1,6 +1,7 @@
 import { readFile, realpath, readdir } from 'node:fs/promises'
 import path from 'node:path'
 import { Marked } from 'marked'
+import { createPublishingMiddleware } from './publishing-preview.mjs'
 import { localPreviewLink } from './preview-links.js'
 
 const escapeHTML = value => String(value).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c])
@@ -73,11 +74,12 @@ export function createDocumentationMiddleware({ workspaceRoot, cloudRoot }) {
 export const injectNavigation = html => html.replace('</head>', '<script type="module" src="/example/navigation.js"></script></head>')
 
 export function examplePreviewPlugin({ webRoot, workspaceRoot }) {
+  const publishing = createPublishingMiddleware({ webRoot })
   const middleware = createDocumentationMiddleware({ workspaceRoot, cloudRoot: path.dirname(webRoot) })
   return {
     name: 'wt-example-preview',
-    configureServer(server) { server.middlewares.use(middleware) },
-    configurePreviewServer(server) { server.middlewares.use(middleware) },
+    configureServer(server) { server.middlewares.use(publishing); server.middlewares.use(middleware) },
+    configurePreviewServer(server) { server.middlewares.use(publishing); server.middlewares.use(middleware) },
     transformIndexHtml: {
       order: 'pre',
       handler(html, context) {
