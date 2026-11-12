@@ -1,6 +1,7 @@
 <script setup>
 import { ref } from "vue";
 import Overlay from "./PrototypeOverlay.vue";
+import RequiredLabel from "./RequiredLabel.vue";
 import {
   cancelPublication,
   verifyResult,
@@ -83,7 +84,7 @@ defineExpose({ open });
           <h3>{{ task.title || task.description }}</h3>
           <p>
             {{ task.platform }} ·
-            {{ db.accounts.find((a) => a.id === task.accountId)?.name }} · #{{
+            {{ db.accounts.find((a) => a.id === task.accountId)?.name }} · {{
               task.id
             }}
           </p>
@@ -120,7 +121,8 @@ defineExpose({ open });
           {{ form.attempt || "缺失" }}
         </p>
         <label class="v4-field"
-          >核实结论<t-select
+          ><RequiredLabel>核实结论</RequiredLabel
+          ><t-select
             v-model="form.status"
             @change="error = ''"
             :options="[
@@ -130,22 +132,27 @@ defineExpose({ open });
               { label: '仍无法判断', value: '结果待确认' },
             ]" /></label
         ><label v-if="form.status === '已发布'" class="v4-field"
-          >最终公开作品链接 *<t-input
+          ><RequiredLabel>最终公开作品链接</RequiredLabel
+          ><t-input
             v-model="form.url"
             placeholder="具体作品的 HTTPS 链接"
           /><small
             >请填写具体作品的公开链接，不能使用账号主页或审核页面。</small
           ></label
         ><label v-if="form.status === '执行失败'" class="v4-field"
-          >失败原因 *<t-input v-model="form.reason" /></label
+          ><RequiredLabel>失败原因</RequiredLabel
+          ><t-input v-model="form.reason" /></label
         ><label v-if="form.status" class="v4-field"
-          >{{
-            form.status === "平台审核中"
-              ? "投稿编号或有效审核证据 *"
-              : form.status === "执行失败"
-                ? "核实依据 *"
-                : "核实备注（选填）"
-          }}<t-textarea v-model="form.evidence" :maxlength="2000" /></label
+          ><RequiredLabel
+            :required="['平台审核中', '执行失败'].includes(form.status)"
+            >{{
+              form.status === "平台审核中"
+                ? "投稿编号或有效审核证据"
+                : form.status === "执行失败"
+                  ? "核实依据"
+                  : "核实备注（选填）"
+            }}</RequiredLabel
+          ><t-textarea v-model="form.evidence" :maxlength="2000" /></label
       ></template> </template
     ><template #footer
       ><t-button theme="default" variant="outline" @click="visible = false">{{

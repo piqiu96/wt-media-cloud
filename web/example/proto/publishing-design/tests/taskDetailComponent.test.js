@@ -77,3 +77,14 @@ it("handles malformed historical dates without showing Invalid Date", async () =
   expect(html).not.toContain("Invalid Date");
   expect(html).toContain("尚无记录");
 });
+it("links the existing source asset and displays the task ID without a hash", async () => {
+  const html = await renderDetail();
+  expect(html).toContain('aria-label="查看来源成片 128"');
+  expect(html).not.toContain("#1001");
+  expect(html).not.toContain("#128");
+});
+it("does not expose a misleading source link when the associated asset is missing", async () => {
+  const html = await renderDetail({ assetId: 99999 });
+  expect(html).not.toContain('aria-label="查看来源成片 99999"');
+  expect(html).toContain("成片记录缺失");
+});

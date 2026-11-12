@@ -1,6 +1,7 @@
 <script setup>
 import { computed, nextTick, ref, watch } from "vue";
 import Overlay from "./PrototypeOverlay.vue";
+import RequiredLabel from "./RequiredLabel.vue";
 import { accountAvailability } from "./accountAvailability.js";
 import AccountPicker from "./AccountPicker.vue";
 import { canEditTask } from "./taskExperience.js";
@@ -582,7 +583,7 @@ defineExpose({ open, resume, edit, hasDraft });
 <template>
   <Overlay
     :visible="visible"
-    :title="editing ? `编辑发布内容 · #${editing.id}` : '快速发布'"
+    :title="editing ? `编辑发布内容 · ${editing.id}` : '快速发布'"
     workspace
     kind="drawer"
     :width="1060"
@@ -608,19 +609,22 @@ defineExpose({ open, resume, edit, hasDraft });
         </div>
         <div class="quick-resource-grid">
           <label
-            >发布平台<t-select
+            ><RequiredLabel>发布平台</RequiredLabel
+            ><t-select
               :value="platform"
               :disabled="!!editing"
               :options="platforms.map((p) => ({ label: p, value: p }))"
               @change="(v) => changeResource('platform', v)" /></label
           ><label
-            >发布类目<t-select
+            ><RequiredLabel>发布类目</RequiredLabel
+            ><t-select
               :value="category"
               :disabled="!platform || !!editing"
               :options="categoryOptions.map((c) => ({ label: c, value: c }))"
               @change="(v) => changeResource('category', v)" /></label
           ><label
-            >发布账号<t-button
+            ><RequiredLabel>发布账号</RequiredLabel
+            ><t-button
               variant="outline"
               :disabled="!category || !!editing"
               @click="accountPicker.open()"
@@ -642,7 +646,7 @@ defineExpose({ open, resume, edit, hasDraft });
             <strong>{{ selectedAsset?.title || "选择本次要发布的成片" }}</strong
             ><small>{{
               selectedAsset
-                ? `成片 #${selectedAsset.id} · ${selectedAsset.duration} · ${selectedAsset.category}`
+                ? `成片 ${selectedAsset.id} · ${selectedAsset.duration} · ${selectedAsset.category}`
                 : "只安排当前账号支持、同平台未占用的成片。"
             }}</small>
           </div>
@@ -679,7 +683,7 @@ defineExpose({ open, resume, edit, hasDraft });
           <div class="quick-copy-fields">
             <label v-if="platform !== '百家号'" data-field="title"
               ><span
-                >发布标题
+                ><RequiredLabel>发布标题</RequiredLabel>
                 <small
                   >{{ Array.from(row.title || "").length }}/{{
                     platform === "小红书" ? 20 : 80
@@ -690,18 +694,20 @@ defineExpose({ open, resume, edit, hasDraft });
                 placeholder="让用户一眼看懂这条内容"
                 @change="(v) => setField('title', v)" /></label
             ><label data-field="description"
-              >{{
+              ><RequiredLabel :required="platform === '百家号'">{{
                 platform === "百家号"
-                  ? "作品描述 *"
+                  ? "作品描述"
                   : platform === "B站"
                     ? "简介（选填）"
                     : "正文（选填）"
-              }}<t-textarea
+              }}</RequiredLabel
+              ><t-textarea
                 :value="row.description"
                 :autosize="{ minRows: 3, maxRows: 5 }"
                 @change="(v) => setField('description', v)" /></label
             ><label v-if="platform === 'B站'" data-field="platform"
-              >标签 *<t-input
+              ><RequiredLabel>标签</RequiredLabel
+              ><t-input
                 :value="row.tags"
                 placeholder="多个标签用逗号分隔"
                 @change="(v) => setField('tags', v)" /></label
@@ -713,13 +719,15 @@ defineExpose({ open, resume, edit, hasDraft });
             /></label>
             <div class="quick-resource-grid two">
               <label data-field="declaration"
-                >创作声明 *<t-select
+                ><RequiredLabel>创作声明</RequiredLabel
+                ><t-select
                   :value="row.declaration"
                   :options="declarationOptions(platform)"
                   placeholder="按内容事实选择"
                   @change="(v) => setField('declaration', v)" /></label
               ><label v-if="platform === 'B站'"
-                >平台分区 *<t-select
+                ><RequiredLabel>平台分区</RequiredLabel
+                ><t-select
                   :value="row.partition"
                   :options="[{ label: '游戏', value: '游戏' }]"
                   @change="(v) => setField('partition', v)"
@@ -798,8 +806,10 @@ defineExpose({ open, resume, edit, hasDraft });
                   }
                 " /></label
             ><label v-if="coverChoice !== '当前素材图 + 模板'"
-              >{{ row.coverMode !== "现成封面" ? "选择底图" : "封面来源"
-              }}<t-select
+              ><RequiredLabel :required="coverChoice === '图片库图 + 模板'">{{
+                row.coverMode !== "现成封面" ? "选择底图" : "封面来源"
+              }}</RequiredLabel
+              ><t-select
                 :value="
                   row.imageId ||
                   (coverChoice === '图片库图 + 模板' ? undefined : 0)
@@ -821,11 +831,13 @@ defineExpose({ open, resume, edit, hasDraft });
                 @change="image" /></label
             ><template v-if="row.coverMode !== '现成封面'"
               ><label
-                >封面短语 *<t-input
+                ><RequiredLabel>封面短语</RequiredLabel
+                ><t-input
                   :value="row.shortTitle"
                   @change="(v) => setField('shortTitle', v)" /></label
               ><label
-                >合成模板 *<t-select
+                ><RequiredLabel>合成模板</RequiredLabel
+                ><t-select
                   :value="row.templateId"
                   :options="
                     db.templates
@@ -1026,7 +1038,7 @@ defineExpose({ open, resume, edit, hasDraft });
   font-weight: 500;
   min-width: 0;
 }
-.quick-publish label > span {
+.quick-publish label > span:not(.publishing-field-label) {
   display: flex;
   justify-content: space-between;
   align-items: center;

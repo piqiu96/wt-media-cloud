@@ -65,6 +65,7 @@ import {
 import PublishComposer from "./PublishComposer.vue";
 import QuickPublish from "./QuickPublish.vue";
 import TaskDetail from "./TaskDetail.vue";
+import RequiredLabel from "./RequiredLabel.vue";
 import TaskActionDialog from "./TaskActionDialog.vue";
 import {
   taskPresentation,
@@ -637,8 +638,23 @@ async function onCreated({ batch, tasks }) {
 const mediaPreviewOpen = ref(false),
   previewImages = ref([]),
   previewRow = ref(null),
+  previewAsset = ref(null),
   previewTitle = ref("");
 async function openPreview(payload) {
+  previewAsset.value = payload.asset || null;
+  if (previewAsset.value) {
+    previewRow.value = null;
+    previewTitle.value = `来源成片 · ${previewAsset.value.title}`;
+    previewImages.value = [
+      {
+        src: previewAsset.value.cover,
+        label: "成片封面",
+        note: "来源成片的当前封面",
+      },
+    ];
+    mediaPreviewOpen.value = true;
+    return;
+  }
   previewRow.value = payload.row || null;
   previewTitle.value = payload.row
     ? "最终发布内容预览"
@@ -1950,8 +1966,29 @@ function cloneTask(t) {
       :title="previewTitle"
       :images="previewImages"
     >
-      <template v-if="previewRow" #details>
-        <div class="preview-publishing-details">
+      <template v-if="previewRow || previewAsset" #details>
+        <div v-if="previewAsset" class="preview-publishing-details">
+          <h3>{{ previewAsset.title }}</h3>
+          <dl>
+            <dt>成片 ID</dt>
+            <dd>{{ previewAsset.id }}</dd>
+            <dt>内容类目</dt>
+            <dd>{{ previewAsset.category }}</dd>
+            <dt>时长</dt>
+            <dd>{{ previewAsset.duration || "尚无记录" }}</dd>
+            <dt>成片质量</dt>
+            <dd>{{ previewAsset.quality || "尚无记录" }}</dd>
+          </dl>
+          <video
+            v-if="previewAsset.videoUrl"
+            :src="previewAsset.videoUrl"
+            controls
+            preload="metadata"
+            style="width: 100%"
+          />
+          <p v-else>当前成片暂无可播放的视频文件。</p>
+        </div>
+        <div v-else class="preview-publishing-details">
           <t-tag variant="light">{{ previewRow.platform }}</t-tag>
           <h3>
             {{
@@ -2046,16 +2083,16 @@ function cloneTask(t) {
                   .map((a) => ({ label: a.name, value: a.id }))
               " /></label
           ><label v-if="rowEdit.platform !== '百家号'"
-            >标题 *<t-input
+            ><RequiredLabel>标题</RequiredLabel
+            ><t-input
               v-model="rowEdit.title"
               :maxlength="rowEdit.platform === '小红书' ? 20 : 80"
               show-limit-number /></label
           ><label class="full"
-            >{{
-              rowEdit.platform === "百家号"
-                ? "作品描述 *"
-                : "正文 / 简介（选填）"
-            }}<t-textarea
+            ><RequiredLabel :required="rowEdit.platform === '百家号'">{{
+              rowEdit.platform === "百家号" ? "作品描述" : "正文 / 简介（选填）"
+            }}</RequiredLabel
+            ><t-textarea
               v-model="rowEdit.description"
               :maxlength="
                 rowEdit.platform === '百家号'
@@ -2172,7 +2209,8 @@ function cloneTask(t) {
         /></label>
         <div class="form-grid">
           <label
-            >创作声明 *<t-select
+            ><RequiredLabel>创作声明</RequiredLabel
+            ><t-select
               :popup-props="{
                 hideEmptyPopup: false,
                 attach: 'body',
@@ -2182,7 +2220,8 @@ function cloneTask(t) {
               placeholder="按实际内容选择"
               :options="declarationOptions(rowEdit.platform)" /></label
           ><label v-if="rowEdit.platform === 'B站'"
-            >分区 *<t-select
+            ><RequiredLabel>分区</RequiredLabel
+            ><t-select
               :popup-props="{
                 hideEmptyPopup: false,
                 attach: 'body',
@@ -2193,8 +2232,10 @@ function cloneTask(t) {
                 ['游戏', '知识', '生活'].map((s) => ({ label: s, value: s }))
               " /></label
           ><label
-            >{{ rowEdit.platform === "B站" ? "标签 *" : "话题（选填）"
-            }}<t-input
+            ><RequiredLabel :required="rowEdit.platform === 'B站'">{{
+              rowEdit.platform === "B站" ? "标签" : "话题（选填）"
+            }}</RequiredLabel
+            ><t-input
               v-model="platformTopics"
               placeholder="仅填相关标签，多个用逗号分隔"
           /></label>
@@ -2340,7 +2381,9 @@ function cloneTask(t) {
       :width="640"
       ><t-alert v-if="imageError" theme="warning" :message="imageError" />
       <div class="form-grid">
-        <label class="full">名称 *<t-input v-model="imageForm.name" /></label
+        <label class="full"
+          ><RequiredLabel>名称</RequiredLabel
+          ><t-input v-model="imageForm.name" /></label
         ><label
           >内容类目<t-select
             :popup-props="{

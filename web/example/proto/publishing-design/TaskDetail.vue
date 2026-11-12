@@ -1,16 +1,18 @@
 <script setup>
 import { computed } from "vue";
-import { displayStatus, taskPresentation } from "./taskExperience.js";
+import { displayStatus } from "./taskExperience.js";
 import { publicWork } from "./taskActions.js";
 const props = defineProps({ task: Object, db: Object });
 const emit = defineEmits(["batch", "preview"]);
 const account = computed(() =>
   props.db.accounts.find((a) => a.id === props.task.accountId),
 );
+const sourceAsset = computed(() =>
+  props.db.assets.find((asset) => asset.id === props.task.assetId),
+);
 const batch = computed(() =>
   props.db.batches.find((b) => b.id === props.task.batchId),
 );
-const presentation = computed(() => taskPresentation(props.task, props.db));
 const latest = computed(() => props.task.attemptHistory?.at(-1));
 const content = computed(() =>
   props.task.status === "待执行"
@@ -106,36 +108,12 @@ const progress = computed(() => {
         </div>
       </li>
     </ol>
-    <div class="v4-state" :data-state="task.status">
-      <p>
-        {{
-          task.status === "平台审核中"
-            ? "平台已接收，尚未公开；不计入已发布目标。"
-            : task.status === "已取消"
-              ? "任务已终止，资源占用仍保留；原任务不能恢复。"
-              : task.status === "已放弃"
-                ? "原任务已终止，资源已释放。"
-                : task.evidence || presentation.description
-        }}
-      </p>
-      <p v-if="task.status === '待执行'" class="v4-checks">
-        {{
-          presentation.checks.length
-            ? "执行前需完善：" + presentation.checks.join("；")
-            : "执行前检查已通过。可关闭详情，在列表启动任务。"
-        }}
-      </p>
-      <small v-if="task.failedStep">失败步骤：{{ task.failedStep }}</small>
-      <small v-if="task.status === '执行中'"
-        >当前阶段：{{ task.log?.at(-1)?.text || "等待执行器反馈" }}</small
-      >
-    </div>
     <section>
       <h3>任务摘要</h3>
       <dl class="v4-summary">
         <div>
           <dt>任务 ID</dt>
-          <dd>#{{ task.id }}</dd>
+          <dd>{{ task.id }}</dd>
         </div>
         <div>
           <dt>任务状态</dt>
@@ -169,7 +147,16 @@ const progress = computed(() => {
         </div>
         <div>
           <dt>来源成片</dt>
-          <dd>#{{ task.assetId }}</dd>
+          <dd>
+            <t-button
+              v-if="sourceAsset"
+              class="v4-asset-link"
+              variant="text"
+              :aria-label="`查看来源成片 ${sourceAsset.id}`"
+              @click="emit('preview', { asset: sourceAsset })"
+              >{{ sourceAsset.id }}</t-button
+            ><span v-else>{{ task.assetId }} · 成片记录缺失</span>
+          </dd>
         </div>
         <div>
           <dt>创建时间</dt>
@@ -281,6 +268,13 @@ const progress = computed(() => {
     </section>
     <section>
       <h3>执行历史</h3>
+      <p v-if="task.failedStep">失败步骤：{{ task.failedStep }}</p>
+      <p v-if="task.status === '等待人工' && task.evidence">
+        处理原因：{{ task.evidence }}
+      </p>
+      <p v-if="task.status === '执行中'">
+        当前阶段：{{ task.log?.at(-1)?.text || "等待执行器反馈" }}
+      </p>
       <p v-if="!task.attemptHistory?.length">
         {{
           task.status === "待执行" && !task.attempts
@@ -415,9 +409,7 @@ const progress = computed(() => {
   color: var(--wt-color-text-secondary);
 }
 .v4-detail section {
-  padding: 24px 0 0;
-  margin: 24px 0 0;
-  border-top: 1px solid var(--wt-color-border);
+  margin: 32px 0 0;
 }
 .v4-detail h3 {
   display: flex;
@@ -434,25 +426,6 @@ const progress = computed(() => {
   background: var(--wt-color-primary);
   border-radius: 2px;
   flex: none;
-}
-.v4-detail .v4-state {
-  margin-top: 16px;
-  color: var(--wt-color-text-secondary);
-}
-.v4-state p {
-  margin: 4px 0 0;
-  font-size: 13px;
-}
-.v4-state small {
-  display: block;
-  margin-top: 4px;
-}
-.v4-state[data-state="结果待确认"],
-.v4-state[data-state="等待人工"] {
-  color: var(--wt-color-warning-text);
-}
-.v4-state[data-state="执行失败"] {
-  color: var(--wt-color-danger-text);
 }
 .v4-summary,
 .v4-content-fields {
@@ -476,6 +449,12 @@ dt {
 dd {
   margin: 0;
   overflow-wrap: anywhere;
+  font-size: 14px;
+}
+.v4-asset-link {
+  padding: 0 4px;
+  margin: -4px;
+  height: 28px;
   font-size: 14px;
 }
 .v4-section-title {
