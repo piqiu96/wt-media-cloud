@@ -27,8 +27,51 @@ const work = computed(() => {
     return "";
   }
 });
-const date = (v) =>
-  v ? new Date(v).toLocaleString("zh-CN", { hour12: false }) : "尚无记录";
+const date = (value) => {
+  if (!value) return "尚无记录";
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime())
+    ? "尚无记录"
+    : parsed.toLocaleString("zh-CN", { hour12: false });
+};
+const progress = computed(() => {
+  const task = props.task;
+  const stopped = ["已取消", "已放弃"].includes(task.status);
+  const failed = task.status === "执行失败";
+  const current = stopped
+    ? 3
+    : failed
+      ? task.submittedAt || task.platformId
+        ? 2
+        : 1
+      : ({
+          待执行: 0,
+          排队中: 1,
+          执行中: 1,
+          等待人工: 1,
+          结果待确认: 2,
+          平台审核中: 2,
+          已发布: 3,
+        }[task.status] ?? 0);
+  return ["准备内容", "执行任务", "确认结果", "发布结果"].map(
+    (label, index) => ({
+      label,
+      current: index === current,
+      complete: !stopped && (index < current || task.status === "已发布"),
+      tone:
+        index === current
+          ? stopped
+            ? "stopped"
+            : failed
+              ? "error"
+              : ["等待人工", "结果待确认", "平台审核中"].includes(task.status)
+                ? "waiting"
+                : "active"
+          : "",
+      description: index === current ? displayStatus(task) : "",
+    }),
+  );
+});
 </script>
 <template>
   <article class="v4-detail">
@@ -40,24 +83,30 @@ const date = (v) =>
       ><span v-else>独立任务</span>
     </nav>
     <header>
-      <div>
-        <h2>{{ task.title || task.description }}</h2>
-        <p>任务 #{{ task.id }}</p>
-      </div>
-      <t-tag
-        variant="light"
-        :theme="
-          task.status === '已发布'
-            ? 'success'
-            : ['执行失败', '结果待确认', '等待人工'].includes(task.status)
-              ? 'warning'
-              : 'primary'
-        "
-        >{{ displayStatus(task) }}</t-tag
-      >
+      <h2>{{ task.title || task.description }}</h2>
     </header>
-    <section class="v4-state" :data-state="task.status">
-      <strong>{{ displayStatus(task) }}</strong>
+    <ol class="v4-progress" aria-label="发布进度">
+      <li
+        v-for="(step, index) in progress"
+        :key="step.label"
+        :class="[
+          { 'is-complete': step.complete, 'is-current': step.current },
+          step.tone,
+        ]"
+        :aria-current="step.current ? 'step' : undefined"
+      >
+        <span class="v4-step-number" aria-hidden="true">{{
+          step.complete ? "✓" : step.tone === "error" ? "!" : index + 1
+        }}</span>
+        <div>
+          <strong>{{ step.label }}</strong
+          ><span v-if="step.description" class="v4-step-description">{{
+            step.description
+          }}</span>
+        </div>
+      </li>
+    </ol>
+    <div class="v4-state" :data-state="task.status">
       <p>
         {{
           task.status === "平台审核中"
@@ -73,17 +122,43 @@ const date = (v) =>
         {{
           presentation.checks.length
             ? "执行前需完善：" + presentation.checks.join("；")
-            : "执行前检查已通过，可启动任务。"
+            : "执行前检查已通过。可关闭详情，在列表启动任务。"
         }}
       </p>
       <small v-if="task.failedStep">失败步骤：{{ task.failedStep }}</small>
       <small v-if="task.status === '执行中'"
         >当前阶段：{{ task.log?.at(-1)?.text || "等待执行器反馈" }}</small
       >
-    </section>
+    </div>
     <section>
       <h3>任务摘要</h3>
       <dl class="v4-summary">
+        <div>
+          <dt>任务 ID</dt>
+          <dd>#{{ task.id }}</dd>
+        </div>
+        <div>
+          <dt>任务状态</dt>
+          <dd>
+            <t-tag
+              variant="light"
+              :theme="
+                task.status === '已发布'
+                  ? 'success'
+                  : task.status === '执行失败'
+                    ? 'danger'
+                    : ['结果待确认', '等待人工', '平台审核中'].includes(
+                          task.status,
+                        )
+                      ? 'warning'
+                      : task.status === '执行中'
+                        ? 'primary'
+                        : 'default'
+              "
+              >{{ displayStatus(task) }}</t-tag
+            >
+          </dd>
+        </div>
         <div>
           <dt>发布平台 / 类目</dt>
           <dd>{{ task.platform }} · {{ task.category }}</dd>
@@ -125,7 +200,7 @@ const date = (v) =>
         >
           <img :src="content.cover" alt="发布封面" />
         </button>
-        <dl>
+        <dl class="v4-content-fields">
           <div v-if="task.platform !== '百家号'">
             <dt>标题</dt>
             <dd>{{ content.title }}</dd>
@@ -254,11 +329,7 @@ const date = (v) =>
   color: var(--wt-color-primary);
 }
 .v4-detail header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  margin: 12px 0 20px;
+  margin: 12px 0 24px;
 }
 .v4-detail h2 {
   font-size: 18px;
@@ -266,10 +337,82 @@ const date = (v) =>
   margin: 0;
   overflow-wrap: anywhere;
 }
-.v4-detail header p {
-  color: var(--wt-color-text-secondary);
+.v4-progress {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  list-style: none;
+  padding: 0;
+  margin: 0 0 16px;
+  gap: 24px;
+}
+.v4-progress li {
+  position: relative;
+  display: flex;
+  gap: 10px;
+  min-width: 0;
+  color: var(--wt-color-text-assist);
+}
+.v4-progress li:not(:last-child)::after {
+  content: "";
+  position: absolute;
+  top: 14px;
+  left: 124px;
+  right: -14px;
+  height: 1px;
+  background: var(--wt-color-border-control);
+}
+.v4-progress strong {
+  display: block;
+  font-size: 14px;
+  line-height: 28px;
+  font-weight: 500;
+}
+.v4-step-number {
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--wt-color-border-control);
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  flex: none;
+  font-size: 13px;
+  line-height: 1;
+  box-sizing: border-box;
+}
+.v4-step-description {
+  display: block;
   font-size: 12px;
-  margin: 4px 0 0;
+  margin-top: 3px;
+}
+.v4-progress .is-complete,
+.v4-progress .active {
+  color: var(--wt-color-primary);
+}
+.v4-progress .is-complete .v4-step-number {
+  border-color: var(--wt-color-primary);
+  background: var(--wt-color-primary-light);
+}
+.v4-progress .active .v4-step-number {
+  color: white;
+  background: var(--wt-color-primary);
+  border-color: var(--wt-color-primary);
+}
+.v4-progress .waiting {
+  color: var(--wt-color-warning-text);
+}
+.v4-progress .waiting .v4-step-number {
+  border-color: var(--wt-color-warning-border);
+  background: var(--wt-color-warning-bg);
+}
+.v4-progress .error {
+  color: var(--wt-color-danger-text);
+}
+.v4-progress .error .v4-step-number {
+  border-color: var(--wt-color-danger-border);
+  background: var(--wt-color-danger-bg);
+}
+.v4-progress .stopped {
+  color: var(--wt-color-text-secondary);
 }
 .v4-detail section {
   padding: 24px 0 0;
@@ -293,53 +436,47 @@ const date = (v) =>
   flex: none;
 }
 .v4-detail .v4-state {
-  padding: 12px 16px;
-  margin: 0;
-  background: var(--wt-color-bg-subtle);
-  border: 1px solid var(--wt-color-border);
-  border-radius: 4px;
-}
-.v4-state strong {
-  font-size: 14px;
-  font-weight: 500;
+  margin-top: 16px;
+  color: var(--wt-color-text-secondary);
 }
 .v4-state p {
   margin: 4px 0 0;
-  color: var(--wt-color-text-secondary);
   font-size: 13px;
-}
-.v4-state[data-state="结果待确认"],
-.v4-state[data-state="等待人工"] {
-  background: var(--wt-color-warning-bg);
-  border-color: var(--wt-color-warning-border);
-}
-.v4-state[data-state="执行失败"] {
-  background: var(--wt-color-danger-bg);
-  border-color: var(--wt-color-danger-border);
-}
-.v4-state[data-state="已发布"] {
-  background: var(--wt-color-success-bg);
-  border-color: var(--wt-color-success-border);
 }
 .v4-state small {
   display: block;
-  margin-top: 6px;
-  color: var(--wt-color-text-secondary);
+  margin-top: 4px;
 }
-.v4-summary {
+.v4-state[data-state="结果待确认"],
+.v4-state[data-state="等待人工"] {
+  color: var(--wt-color-warning-text);
+}
+.v4-state[data-state="执行失败"] {
+  color: var(--wt-color-danger-text);
+}
+.v4-summary,
+.v4-content-fields {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 20px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 20px 32px;
   margin: 0;
+}
+.v4-summary > div,
+.v4-content-fields > div {
+  display: grid;
+  grid-template-columns: 104px minmax(0, 1fr);
+  align-items: baseline;
+  gap: 16px;
+  min-width: 0;
 }
 dt {
   font-size: 13px;
   color: var(--wt-color-text-secondary);
 }
 dd {
-  margin: 6px 0 0;
+  margin: 0;
   overflow-wrap: anywhere;
-  font-size: 13px;
+  font-size: 14px;
 }
 .v4-section-title {
   display: flex;
@@ -375,22 +512,6 @@ dd {
   outline: 2px solid var(--wt-color-primary);
   outline-offset: 3px;
 }
-.v4-content dl {
-  margin: 0;
-}
-.v4-content dl > div {
-  display: grid;
-  grid-template-columns: 96px minmax(0, 1fr);
-  gap: 12px;
-  padding: 10px 0;
-}
-.v4-content dl > div:first-child {
-  padding-top: 0;
-}
-.v4-content dd {
-  margin: 0;
-  font-size: 14px;
-}
 .v4-body {
   white-space: pre-wrap;
 }
@@ -418,9 +539,14 @@ a {
   color: var(--wt-color-primary);
   overflow-wrap: anywhere;
 }
-@media (max-width: 1100px) {
-  .v4-summary {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+@media (max-width: 900px) {
+  .v4-content {
+    grid-template-columns: 180px minmax(0, 1fr);
+    gap: 24px;
+  }
+  .v4-content-fields > div {
+    grid-template-columns: 1fr;
+    gap: 4px;
   }
 }
 @media (max-width: 650px) {
@@ -428,14 +554,21 @@ a {
     grid-template-columns: 1fr;
   }
   .v4-cover {
-    width: 220px;
+    width: 180px;
     max-width: 100%;
   }
   .v4-summary {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: 1fr;
   }
-  .v4-detail header {
-    align-items: flex-start;
+  .v4-content-fields > div {
+    grid-template-columns: 1fr;
+  }
+  .v4-progress {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
+  }
+  .v4-progress li::after {
+    display: none;
   }
 }
 </style>

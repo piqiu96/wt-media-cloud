@@ -397,19 +397,6 @@ function taskRowActions(t) {
     ? [primary, ...actions.filter((a) => a !== primary)]
     : actions;
 }
-function taskMore(t) {
-  return allowedActions(t)
-    .filter((a) => !["detail", taskPresentation(t, db).action].includes(a))
-    .map((a) => ({
-      content:
-        a === "edit"
-          ? "编辑发布内容"
-          : a === "cancel"
-            ? "取消任务"
-            : actionLabels[a],
-      value: a,
-    }));
-}
 function taskMenu(t, value) {
   if (value === "detail") return view(t);
   if (value === "edit") {
@@ -419,9 +406,6 @@ function taskMenu(t, value) {
   if (value === "start") return start(t);
   if (value === "copy") return cloneTask(t);
   actionDialog.value?.open(t, value);
-}
-function primaryTask(t) {
-  taskMenu(t, taskPresentation(t, db).action);
 }
 function related(batchId, planId) {
   navigate("tasks");
@@ -2664,10 +2648,7 @@ function cloneTask(t) {
           "
           >返回关联计划</t-button
         ><template v-if="detail?.assetId"
-          ><span class="task-footer-hint"
-            >任务 #{{ detail.id }} · {{ displayStatus(detail) }} ·
-            关闭后返回原列表位置</span
-          ></template
+          ><span class="task-footer-hint">关闭后返回原列表位置</span></template
         ><template v-else-if="detail?.items"
           ><t-button variant="outline" @click="related(null, detail.id)"
             >查看所属任务</t-button
@@ -2713,36 +2694,6 @@ function cloneTask(t) {
             @click="cancelBatch(detail)"
             >取消未提交任务</t-button
           ><t-button @click="related(detail.id)">查看任务</t-button></template
-        ><template v-if="detail?.assetId"
-          ><t-dropdown
-            v-if="taskMore(detail).length"
-            :options="taskMore(detail)"
-            :popup-props="{ zIndex: 5500 }"
-            @click="({ value }) => taskMenu(detail, value)"
-            ><t-button theme="default" variant="outline"
-              >更多</t-button
-            ></t-dropdown
-          >
-          <t-button
-            v-if="taskPresentation(detail, db).action !== 'detail'"
-            :theme="
-              taskPresentation(detail, db).action === 'cancel'
-                ? 'danger'
-                : 'primary'
-            "
-            :variant="
-              taskPresentation(detail, db).action === 'cancel'
-                ? 'outline'
-                : 'base'
-            "
-            :disabled="taskPresentation(detail, db).disabled"
-            @click="primaryTask(detail)"
-            >{{
-              taskPresentation(detail, db).action === "start"
-                ? "启动任务"
-                : taskPresentation(detail, db).label
-            }}</t-button
-          > </template
         ><t-button theme="default" variant="outline" @click="detailOpen = false"
           >关闭</t-button
         ></template
