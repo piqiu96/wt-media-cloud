@@ -25,6 +25,7 @@ import ResourceEmptyState from "../../../src/shared/ui/resource/ResourceEmptySta
 import ResourceDescriptions from "../../../src/shared/ui/resource/ResourceDescriptions.vue";
 import ResourceNotice from "../../../src/shared/ui/resource/ResourceNotice.vue";
 import MediaPreview from "../../../src/shared/ui/media/MediaPreview.vue";
+import CoverPreview from "./CoverPreview.vue";
 import { imageReferences, templateReferences, deleteImage } from "./library.js";
 import BatchWorkbench from "./BatchWorkbench.vue";
 import PlanWizard from "./PlanWizard.vue";
@@ -635,12 +636,27 @@ async function onCreated({ batch, tasks }) {
   view(batch || tasks[0]);
   if (saved) toast(`已保存 ${tasks.length} 条待执行任务，尚未启动`);
 }
+const coverPreviewOpen = ref(false),
+  coverPreviewRow = ref(null);
 const mediaPreviewOpen = ref(false),
   previewImages = ref([]),
   previewRow = ref(null),
   previewAsset = ref(null),
   previewTitle = ref("");
 async function openPreview(payload) {
+  if (payload.kind === "cover" && payload.row) {
+    const cover = clone(payload.row);
+    if (cover.coverMode === "现成封面") {
+      try {
+        await ensureCoverResults(cover);
+      } catch {
+        /* The viewer shows the unavailable image state. */
+      }
+    }
+    coverPreviewRow.value = cover;
+    coverPreviewOpen.value = true;
+    return;
+  }
   previewAsset.value = payload.asset || null;
   if (previewAsset.value) {
     previewRow.value = null;
@@ -1961,6 +1977,7 @@ function cloneTask(t) {
       @preview="openPreview"
       @created="onCreated"
     />
+    <CoverPreview v-model:visible="coverPreviewOpen" :row="coverPreviewRow" />
     <MediaPreview
       v-model:visible="mediaPreviewOpen"
       :title="previewTitle"

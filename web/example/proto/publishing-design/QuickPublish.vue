@@ -782,7 +782,7 @@ defineExpose({ open, resume, edit, hasDraft });
               <div class="quick-cover-workspace">
                 <button
                   class="quick-cover-image"
-                  @click="emit('preview', { row })"
+                  @click="emit('preview', { row, kind: 'cover' })"
                 >
                   <img :src="row.cover" alt="当前发布封面" /><span
                     >点击检查各比例效果</span
