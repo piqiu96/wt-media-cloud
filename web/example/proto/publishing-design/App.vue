@@ -140,6 +140,10 @@ async function reloadLatest() {
     location.reload();
 }
 onMounted(async () => {
+  if (location.hash.slice(1).split("?")[0] === "plans") {
+    location.replace("/example/proto/publishing-design/plan/");
+    return;
+  }
   try {
     const saved = await loadPrototype();
     if (saved) Object.assign(db, saved);
@@ -211,6 +215,10 @@ const page = ref(
   pageNo = ref(1),
   size = ref(8);
 function navigate(p) {
+  if (p === "plans") {
+    location.assign("/example/proto/publishing-design/plan/");
+    return;
+  }
   page.value = p;
   location.hash = p;
   pageNo.value = 1;
