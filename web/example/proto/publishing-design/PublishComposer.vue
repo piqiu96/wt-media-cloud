@@ -80,6 +80,7 @@ const state = reactive({
   taskIntervalSeconds: 0,
 });
 const editBaseline = ref('');
+watch(visible, value => { if (value) { createdResult.value = null; resultSaved.value = false; } });
 if (props.db.publishDraft && props.db.publishDraft.mode !== "快速发布" && !props.db.publishDraft.batchId) Object.assign(state, copy(props.db.publishDraft));
 if (state.step === 1) state.step = 0;
 watch(
@@ -189,7 +190,7 @@ const suggested = computed(() =>
 const allocated = computed(() => state.rows);
 const gap = computed(() => Math.max(0, target.value - allocated.value.length));
 const issues = computed(() =>
-  state.rows.filter((r) => validate(r, props.db).length),
+  state.rows.filter((r) => validate(r, props.db, r.id).length),
 );
 const ready = computed(() => state.rows.length - issues.value.length);
 const stage = computed(() => (state.step < 2 ? 0 : state.step - 1));
@@ -415,6 +416,13 @@ function resume() {
 async function close() {
   if (!visible.value) return;
   if (busy.value || contentBusy.value) return;
+  if (createdResult.value) {
+    if (!resultSaved.value) return;
+    visible.value = false;
+    await nextTick();
+    if(sourceReturn.value){sourceReturn.value=false;emit("return-source");}else emit("closed");
+    return;
+  }
   if (state.batchId) {
     if (JSON.stringify(state) !== editBaseline.value && !(await feedback.confirmWarning({
       title: "放弃未保存的修改？", message: "本次批次配置尚未保存，返回后将丢失。",
@@ -613,6 +621,7 @@ function applyReplacement() {
   replaceRow.value = null;
 }
 async function create() {
+  if (busy.value || createdResult.value) return;
   errors.value = [];
   if (!state.rows.length || issues.value.length) {
     errors.value = [
@@ -651,10 +660,9 @@ async function create() {
     });
     state.active = false;
     if (!state.batchId) props.db.publishDraft = { active: false };
+    state.rows.forEach((row, index) => { row.id = result.tasks[index].id; });
     createdResult.value = result;
     resultSaved.value = false;
-    state.step = 4;
-    await nextTick();
     resultSaved.value = await props.persist();
     if (!resultSaved.value)
       errors.value = [
@@ -686,10 +694,12 @@ async function editContent(row) {
   contentRef.value?.edit(row);
 }
 async function retrySaveCreated() {
+  if (busy.value || !createdResult.value) return;
   busy.value = true;
-  resultSaved.value = await props.persist();
-  busy.value = false;
-  if (resultSaved.value) errors.value = [];
+  try {
+    resultSaved.value = await props.persist();
+    if (resultSaved.value) errors.value = [];
+  } finally { busy.value = false; }
 }
 function finish() {
   if (!resultSaved.value) return;
@@ -716,7 +726,7 @@ defineExpose({
     kind="drawer"
     :width="1440"
     class="batch-v2-overlay"
-    :busy="busy || contentBusy"
+    :busy="busy || contentBusy || (!!createdResult && !resultSaved)"
   >
     <div ref="root" class="batch-create">
       <ResourceWizardSteps v-if="state.step < 4" class="batch-stagebar" :current="stage" :steps="stages.map(([title])=>({title}))" />
@@ -728,6 +738,7 @@ defineExpose({
         @close="errors = []"
         class="batch-message"
       />
+      <div style="display: contents" :inert="!!createdResult">
       <t-alert
         v-if="softConflicts.length"
         theme="warning"
@@ -979,52 +990,12 @@ defineExpose({
           <BatchContentTable :rows="reviewRows" :db="db" :pagination="{current:reviewPage,pageSize:reviewPageSize,pageSizeOptions:[10,20,50],total:reviewRows.length,showJumper:false}" @page-change="value=>{reviewPage=value.current;reviewPageSize=value.pageSize}" @edit="editContent" @preview="emit('preview',$event)" />
         </ResourceSection></ResourceCard>
       </template>
-      <section v-if="state.step === 4" class="batch-created-result">
-        <div class="batch-created-check"><CheckIcon /></div>
-        <h2>{{ resultSaved ? "批次与任务已创建" : "创建结果等待保存" }}</h2>
-        <p>{{ state.name }}</p>
-        <t-tag theme="primary" variant="light">{{ db.batches.find(b=>b.id===state.batchId)?.control || "待执行" }}</t-tag>
-        <div class="batch-created-metrics">
-          <div>
-            <small>原始目标</small><strong>{{ target }}</strong>
-          </div>
-          <div>
-            <small>已创建任务</small
-            ><strong>{{ createdResult?.tasks.length || 0 }}</strong>
-          </div>
-          <div
-            :class="{
-              'batch-warning-text': target > (createdResult?.tasks.length || 0),
-            }"
-          >
-            <small>目标缺口</small
-            ><strong>{{
-              Math.max(0, target - (createdResult?.tasks.length || 0))
-            }}</strong>
-          </div>
-        </div>
-        <p class="batch-inline-note">
-          {{
-            resultSaved
-              ? "任务已保存为待执行。进入批次详情后可检查任务与账号队列，明确启动后才开始执行。"
-              : "任务已生成，正在保存创建结果；保存成功后可进入批次详情。"
-          }}{{
-            target > (createdResult?.tasks.length || 0)
-              ? "已保留原始目标与缺口，不自动补量。"
-              : ""
-          }}
-        </p>
-      </section>
+    </div>
     </div>
     <template #footer
-      ><template v-if="state.step === 4"
-        ><span class="batch-footer-note"
-          >批次 {{ createdResult?.batch.id }} ·
-          {{ createdResult?.tasks.length }} 条待执行任务</span
-        ><t-button v-if="resultSaved" @click="finish"
-          >查看批次</t-button
-        ><t-button v-else :loading="busy" @click="retrySaveCreated"
-          >重试保存创建结果</t-button
+      ><template v-if="createdResult"
+        ><span class="batch-footer-note">{{ resultSaved ? "已保存为待执行" : "任务已生成，请重试保存" }}</span
+        ><t-button v-if="!resultSaved" :loading="busy" @click="retrySaveCreated">重试保存</t-button
         ></template
       ><template v-else
         ><span class="batch-footer-note">{{
@@ -1067,6 +1038,15 @@ defineExpose({
         ></template
       ></template
     >
+  </ResourceOverlay>
+  <ResourceOverlay :visible="visible && resultSaved" title="批次与任务已创建" :width="560" :busy="busy" @update:visible="value => { if (!value) close(); }">
+    <div class="batch-created-summary">
+      <div class="batch-created-check"><CheckIcon /></div>
+      <strong>{{ state.name }}</strong>
+      <p>{{ createdResult?.tasks.length || 0 }} 条任务待执行</p>
+      <p v-if="target > (createdResult?.tasks.length || 0)" class="batch-warning-text">目标 {{ target }} 条，缺口 {{ target - (createdResult?.tasks.length || 0) }} 条</p>
+    </div>
+    <template #footer><t-button variant="outline" @click="close">返回</t-button><t-button @click="finish">查看批次</t-button></template>
   </ResourceOverlay>
   <ResourceOverlay :visible="!!accountSelection" @update:visible="value => { if (!value) accountSelection = null; }" :title="`选择发布账号 · ${accountSelection?.category || ''}`" :width="760">
     <template v-if="accountSelection">

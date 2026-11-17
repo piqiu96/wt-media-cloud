@@ -1,3 +1,4 @@
+const {requestBody}=require('./previewFixture.cjs');
 const {test,before,after}=require('node:test');
 const assert=require('node:assert/strict');
 const {chromium}=require('playwright');
@@ -11,7 +12,7 @@ async function setup(t,mutate=()=>{}){
  const context=await browser.newContext({viewport:{width:1440,height:1000}});t.after(()=>context.close());const p=await context.newPage();p.setDefaultTimeout(5000);
  const errors=[];p.on('pageerror',e=>errors.push(e.message));t.after(()=>assert.deepEqual(errors,[]));
  let data=seed(),revision=1;mutate(data);const writes=[];
- await p.route('**/__example/publishing/**',r=>{if(r.request().method()!=='GET'){data=r.request().postDataJSON().data;revision++;writes.push(structuredClone(data));}return r.fulfill({json:{revision,data}});});
+ await p.route('**/__example/publishing/**',r=>{if(r.request().method()!=='GET'){data=requestBody(r.request()).data;revision++;writes.push(structuredClone(data));}return r.fulfill({json:{revision,data}});});
  await p.goto(base+'/example/?view=publishing#batches');await p.getByRole('button',{name:'批量发布',exact:true}).click();await p.getByPlaceholder('请输入批次名称',{exact:true}).fill('同页资源配置');return {p,writes};
 }
 const quantity=p=>p.locator('.batch-goal-field .t-input-number input');

@@ -1,3 +1,4 @@
+const {requestBody}=require('./previewFixture.cjs');
 var __create = Object.create;
 var __defProp = Object.defineProperty;
 var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
@@ -62,7 +63,7 @@ fs.mkdirSync(evidence, { recursive: true });
   await page.route("**/__example/publishing/**", async (r) => {
     if (responseDelay && r.request().method() !== "GET") await new Promise((resolve) => setTimeout(resolve, responseDelay));
     if (fail && r.request().method() !== "GET") return r.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ message: "走查注入的保存失败" }) });
-    if (r.request().method() !== "GET") snapshot = { revision: snapshot.revision + 1, data: r.request().postDataJSON().data };
+    if (r.request().method() !== "GET") snapshot = { revision: snapshot.revision + 1, data: requestBody(r.request()).data };
     return r.fulfill({ contentType: "application/json", body: JSON.stringify(snapshot) });
   });
   const shot = async (name) => {

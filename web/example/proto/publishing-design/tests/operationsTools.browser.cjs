@@ -1,3 +1,4 @@
+const {requestBody}=require('./previewFixture.cjs');
 // Chrome checks with isolated prototype data; never writes the reviewer's records.
 const {chromium}=require('playwright');
 const assert=require('node:assert/strict');
@@ -15,7 +16,7 @@ const evidence=process.env.SCREENSHOT_DIR||'/tmp/wt-operations-tools';fs.mkdirSy
  const passed=[];const pass=name=>{passed.push(name);console.log('PASS',name)};
  try{
   const page=await browser.newPage({viewport:{width:1440,height:900}});page.setDefaultTimeout(6000);const errors=[];page.on('pageerror',e=>{errors.push(e.message);console.error('PAGEERROR',e.stack)});
-  await page.route('**/__example/publishing/**',async r=>{if(r.request().method()!=='GET'){if(delay)await new Promise(resolve=>setTimeout(resolve,delay));snapshot={revision:snapshot.revision+1,data:r.request().postDataJSON().data}}return r.fulfill({json:snapshot})});
+  await page.route('**/__example/publishing/**',async r=>{if(r.request().method()!=='GET'){if(delay)await new Promise(resolve=>setTimeout(resolve,delay));snapshot={revision:snapshot.revision+1,data:requestBody(r.request()).data}}return r.fulfill({json:snapshot})});
   const basic=()=>page.locator('.resource-filter-bar:visible');
   const row=()=>page.locator('.t-table__body:visible tr').first();
   async function select(field,value,scope=basic()) {await scope.locator('.wt-filter-field').filter({has:page.locator('.wt-filter-field__label').filter({hasText:new RegExp(`^${field}$`)})}).locator('.t-select__wrap').click();await page.locator('.t-select-option:visible').filter({hasText:new RegExp(`^${value}$`)}).click();}

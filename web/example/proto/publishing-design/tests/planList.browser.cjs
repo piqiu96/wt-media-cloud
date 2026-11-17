@@ -1,3 +1,4 @@
+const {requestBody}=require('./previewFixture.cjs');
 const { test, before, after } = require('node:test');
 const assert = require('node:assert/strict');
 const { chromium } = require('playwright');
@@ -15,7 +16,7 @@ async function setup(t, mutate, mutateDb) {
   const {seed}=await import(root+'model.js'),{createBatchStore}=await import(root+'../../publishing-preview.mjs');
   const db=seed();await planFixture(db);if(mutateDb)await mutateDb(db);
   const store=createBatchStore();await store.bootstrap(db);page.fixture=structuredClone(db);
-  await page.route('**/__example/publishing/**',async route=>{try{const q=route.request(),body=q.method()==='GET'?null:q.postDataJSON();const result=q.method()==='GET'?await store.get():q.url().endsWith('/command')?await store.command(body):await store.save(body.data,body.revision);await route.fulfill({json:result});}catch(e){await route.fulfill({status:409,json:{error:e.message}});}});
+  await page.route('**/__example/publishing/**',async route=>{try{const q=route.request(),body=q.method()==='GET'?null:requestBody(q);const result=q.method()==='GET'?await store.get():q.url().endsWith('/command')?await store.command(body):await store.save(body.data,body.revision);await route.fulfill({json:result});}catch(e){await route.fulfill({status:409,json:{error:e.message}});}});
   const saved={version:1,ui:{filters:{search:'',status:'all',platform:'',category:''},filterDraft:{search:'',status:'all',platform:'',category:''},pageNo:1,pageSize:10}};
   mutate?.(saved);await page.addInitScript(value=>{if(!sessionStorage.getItem('plan-list-fixture-loaded')){localStorage.setItem('wt-publishing-plan-v1',JSON.stringify(value));sessionStorage.setItem('plan-list-fixture-loaded','1');}},saved);
   await page.goto(base+'/example/operations/publishing/plans');await page.getByRole('heading',{name:'发布计划',exact:true}).waitFor();return page;

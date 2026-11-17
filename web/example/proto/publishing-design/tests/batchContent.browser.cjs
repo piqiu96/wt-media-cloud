@@ -1,3 +1,4 @@
+const {requestBody}=require('./previewFixture.cjs');
 const {test,before,after}=require('node:test');
 const assert=require('node:assert/strict');
 const {chromium}=require('playwright');
@@ -18,7 +19,7 @@ async function setup(t,{count=7,platform='B站',openDraft=true,mutate=()=>{}}={}
  data.publishDraft={active:true,mode:'批量发布',step:2,name:'内容配置走查',platforms:[platform],categories:[...new Set(assets.map(v=>v.category))],rows,assets:assets.map(v=>v.id),targets:[...new Set(assets.map(v=>v.category))].map(category=>({category,count:assets.filter(v=>v.category===category).length})),resourcesLocked:true,creationKey:'batch-content-review'};
  rows.forEach(row=>{row.coverSignature=coverSignature(row);row.coverVariants={source:row.cover};});
  mutate(data);const writes=[];
- await p.route('**/__example/publishing/**',r=>{if(r.request().method()!=='GET'){const body=r.request().postDataJSON();if(r.request().url().endsWith('/command'))runBatchCommand(data,data.batches.find(b=>b.id===body.batchId),body.action,body.input);else data=body.data;revision++;writes.push(structuredClone(data));}return r.fulfill({json:{revision,data}});});
+ await p.route('**/__example/publishing/**',r=>{if(r.request().method()!=='GET'){const body=requestBody(r.request());if(r.request().url().endsWith('/command'))runBatchCommand(data,data.batches.find(b=>b.id===body.batchId),body.action,body.input);else data=body.data;revision++;writes.push(structuredClone(data));}return r.fulfill({json:{revision,data}});});
  await p.goto(base+'/example/?view=publishing#batches');if(openDraft){await p.getByRole('button',{name:'批量发布',exact:true}).click();await p.getByRole('button',{name:'继续编辑',exact:true}).click();await p.locator('.batch-content-workspace').waitFor();}return {p,writes};
 }
 const table=p=>p.locator('.batch-content-table');

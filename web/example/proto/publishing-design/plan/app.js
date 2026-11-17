@@ -189,7 +189,7 @@ const currentNote=p=>{
  if(next?.phase==='running')return {txt:`${next.name} · 执行中`,type:'active',reason:'暂无人工待办'};
  return {txt:'等待推进',type:'neutral',reason:''};
 };
-let lastFocus=null,lastLayer=null,modalFocus=null,unmountDetail=null,unmountList=null,unmountBasics=null,unmountScope=null,listScroll=savedPrototype?.ui?.listScroll||0,routeInitialised=false,editorFooterObserver=null;
+let lastFocus=null,lastLayer=null,modalFocus=null,unmountDetail=null,unmountList=null,unmountBasics=null,unmountScope=null,mountedEditor=null,listScroll=savedPrototype?.ui?.listScroll||0,routeInitialised=false,editorFooterObserver=null;
 function syncDetailURL(){
  if(!routeInitialised||leaveResolve||routes.readOperationRoute(new URL(location.href)).page!=='plans')return;
  const target=routes.operationURL('plans',{editor:state.page==='editor',planId:state.page==='detail'?state.planId:state.editor?.mode==='edit'?state.editor.sourceId:null});
@@ -207,13 +207,28 @@ function render(){
  const scrolls=[...dom.querySelectorAll('.drawer-body,.modal-body,.table-wrap')].map(el=>[el.scrollTop,el.scrollLeft]);
  if(layerKey&&!lastLayer)lastFocus=key;
  if(layerKey?.startsWith('modal:')&&!lastLayer?.startsWith('modal:'))modalFocus=key;
- unmountDetail?.();unmountDetail=null;unmountList?.();unmountList=null;unmountBasics?.();unmountBasics=null;unmountScope?.();unmountScope=null;
+ // Retain mounted editor fields through dependent-table updates. Rebuilding a
+ // Select loses its open popup, focus and the document's scroll position.
+ const preserveEditor=state.page==='editor'&&state.editor===mountedEditor;
+ const basics=preserveEditor?dom.querySelector('#plan-basics'):null;
+ const scope=preserveEditor?dom.querySelector('#plan-goal-scope'):null;
+ const windowScroll=[window.scrollX,window.scrollY];
+ unmountDetail?.();unmountDetail=null;unmountList?.();unmountList=null;
+ if(!preserveEditor){unmountBasics?.();unmountBasics=null;unmountScope?.();unmountScope=null;}
  editorFooterObserver?.disconnect();
  host.innerHTML=renderLayout();
+ if(basics)dom.querySelector('#plan-basics')?.replaceWith(basics);
+ if(scope)dom.querySelector('#plan-goal-scope')?.replaceWith(scope);
  const editorFooter=dom.querySelector('.editor-footer');
  if(editorFooter){editorFooterObserver=new ResizeObserver(()=>host.style.setProperty('--editor-footer-height',editorFooter.getBoundingClientRect().height+'px'));editorFooterObserver.observe(editorFooter);}
- if(state.page==='editor')unmountBasics=adapters.mountBasics(dom.querySelector('#plan-basics'),{editor:state.editor,original:state.editor.mode==='edit'?getPlan(state.editor.sourceId):null,actor:actor(),members:adapters.members,locked:isGoalLocked(state.editor),onChange:changes=>{Object.assign(state.editor,changes);persistPrototype();}});
- if(state.page==='editor')unmountScope=adapters.mountScope(dom.querySelector('#plan-goal-scope'),{platforms:state.editor.platforms,categories:state.editor.categories,platformOptions:PLATFORM_DATA.map(p=>p.name),categoryOptions:CATS,locked:isGoalLocked(state.editor),onChange:changeGoalScope});
+
+ if(state.page==='editor'){
+  const basicProps={editor:state.editor,original:state.editor.mode==='edit'?getPlan(state.editor.sourceId):null,actor:actor(),members:adapters.members,locked:isGoalLocked(state.editor),onChange:changes=>{Object.assign(state.editor,changes);persistPrototype();}};
+  if(unmountBasics)unmountBasics.update(basicProps);else unmountBasics=adapters.mountBasics(dom.querySelector('#plan-basics'),basicProps);
+  const scopeProps={platforms:state.editor.platforms,categories:state.editor.categories,platformOptions:PLATFORM_DATA.map(p=>p.name),categoryOptions:CATS,locked:isGoalLocked(state.editor),onChange:changeGoalScope};
+  if(unmountScope)unmountScope.update(scopeProps);else unmountScope=adapters.mountScope(dom.querySelector('#plan-goal-scope'),scopeProps);
+ }
+ mountedEditor=state.page==='editor'?state.editor:null;
  adapters.onView?.(state.page,state.editor?.mode);
  if(state.page==='list')unmountList=adapters.mountList(dom.querySelector('#plan-list'),{view:listView(),onFilterChange:(key,value)=>{if(key==='advanced'){state.advanced=value;render();dom.querySelector('#plan-list .resource-advanced-toggle button')?.focus({preventScroll:true});}else state.filterDraft[key]=value;},onQuery:()=>{state.filters=clone(state.filterDraft);state.pageNo=1;render();},onPageChange:page=>{state.pageNo=page.current;state.pageSize=page.pageSize;persistPrototype();}});
  if(state.page==='detail'){const p=getPlan(state.planId);unmountDetail=adapters.mountDetail(dom.querySelector('#plan-detail'),{plan:p,view:p?detailView(p):null,onBack:()=>onAction('list',{dataset:{}})});}
@@ -227,7 +242,8 @@ function render(){
  dom.querySelectorAll('.tagcheck').forEach(el=>{el.tabIndex=0;el.setAttribute('role','checkbox');el.setAttribute('aria-checked',String(el.classList.contains('selected')));el.setAttribute('aria-disabled',String(!!el.querySelector('input:disabled')));});
  window.WTControls?.enhance(host);
  dom.querySelectorAll('.drawer-body,.modal-body,.table-wrap').forEach((el,i)=>{if(scrolls[i]){el.scrollTop=scrolls[i][0];el.scrollLeft=scrolls[i][1];}});
- const focus=findFocus(key);
+ if(preserveEditor)window.scrollTo(...windowScroll);
+ const focus=active?.isConnected?active:findFocus(key);
  if(layerKey===lastLayer&&focus){focus.focus({preventScroll:true});if(typeof position==='number'&&focus.setSelectionRange&&['text','search','textarea'].includes(focus.type))focus.setSelectionRange(position,position);}
  else if(layerKey?.startsWith('drawer:')&&lastLayer?.startsWith('modal:'))findFocus(modalFocus)?.focus({preventScroll:true});
  else if(!layerKey&&lastLayer)findFocus(lastFocus)?.focus({preventScroll:true});

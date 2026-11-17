@@ -1,3 +1,4 @@
+const {requestBody}=require('./previewFixture.cjs');
 const {test,before,after}=require('node:test');
 const assert=require('node:assert/strict');
 const {chromium}=require('playwright');
@@ -30,7 +31,7 @@ async function scenario(t,mode){
  const page=await context.newPage(),errors=[];page.setDefaultTimeout(7000);page.on('pageerror',e=>errors.push(e.message));
  t.after(()=>assert.deepEqual(errors,[]));
  await page.route('**/__example/publishing/**',async route=>{
-  try{const request=route.request(),body=request.method()==='GET'?null:request.postDataJSON();
+  try{const request=route.request(),body=request.method()==='GET'?null:requestBody(request);
    const result=request.method()==='GET'?await store.get():request.url().endsWith('/command')?await store.command(body):await store.save(body.data,body.revision);
    await route.fulfill({json:result});
   }catch(e){await route.fulfill({status:409,json:{error:e.message}});}

@@ -1,10 +1,22 @@
+import { packSnapshot } from "./snapshotTransport.js";
 let revision = null;
 async function request(route, method = "GET", body, signal) {
+  const headers = { "Content-Type": "application/json" };
+  let payload = body ? JSON.stringify(body) : undefined;
+  // Preserve JSON semantics (including omitted undefined fields) before packing.
+  if (payload?.length > 1024 * 1024)
+    payload = JSON.stringify(packSnapshot(JSON.parse(payload)));
+  if (payload?.length > 1024 * 1024 && typeof CompressionStream !== "undefined") {
+    const stream = new Blob([payload]).stream().pipeThrough(new CompressionStream("gzip"));
+    payload = await new Response(stream).arrayBuffer();
+    headers["Content-Encoding"] = "gzip";
+  }
+  signal?.throwIfAborted();
   const response = await fetch("/__example/publishing/" + route, {
     method,
-    headers: { "Content-Type": "application/json" },
+    headers,
     ...(signal ? { signal } : {}),
-    ...(body ? { body: JSON.stringify(body) } : {}),
+    ...(payload ? { body: payload } : {}),
   });
   if (!response.headers.get("content-type")?.includes("application/json"))
     throw Error("当前预览服务不支持批次校验，请使用本地 example 服务");

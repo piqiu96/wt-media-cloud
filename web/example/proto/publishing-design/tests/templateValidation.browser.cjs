@@ -1,3 +1,4 @@
+const {requestBody}=require('./previewFixture.cjs');
 // Exercises the reported 8-character limit without changing existing demo records.
 const {chromium}=require('playwright'),assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),{pathToFileURL}=require('node:url');
 const root=process.env.PROTOTYPE_ROOT||path.resolve(__dirname,'..'),out=process.env.SCREENSHOT_DIR||'/tmp/wt-template-validation';fs.mkdirSync(out,{recursive:true});
@@ -7,7 +8,7 @@ const root=process.env.PROTOTYPE_ROOT||path.resolve(__dirname,'..'),out=process.
  const browser=await chromium.launch({headless:true,...(process.env.CHROMIUM_EXECUTABLE?{executablePath:process.env.CHROMIUM_EXECUTABLE}:{})});const passed=[],errors=[];
  try{
   const page=await browser.newPage({viewport:{width:1440,height:900}});page.setDefaultTimeout(5000);page.on('pageerror',e=>errors.push(e.message));
-  await page.route('**/__example/publishing/**',r=>{if(r.request().method()!=='GET')snapshot={revision:snapshot.revision+1,data:r.request().postDataJSON().data};return r.fulfill({json:snapshot});});
+  await page.route('**/__example/publishing/**',r=>{if(r.request().method()!=='GET')snapshot={revision:snapshot.revision+1,data:requestBody(r.request()).data};return r.fulfill({json:snapshot});});
   const button=name=>page.getByRole('button',{name,exact:true}),issue=()=>page.locator('.cover-issue.error');
   const shortPass=async()=>{await page.locator('.cover-preview-stage img').waitFor();await page.getByText('当前样例校验通过',{exact:true}).waitFor();assert.equal(await issue().count(),0);};
   await page.goto((process.env.EXAMPLE_URL||'http://127.0.0.1:8768')+'/example/operations/tools/templates');await page.locator('.t-table__body tr').filter({hasText:row.name}).getByRole('button',{name:'编辑',exact:true}).click();await button('预览与校验').click();await shortPass();passed.push('八字限制下标准短标题正常预览');
