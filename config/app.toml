@@ -1,4 +1,6 @@
 name = 'wt-media-cloud'
+# M6-A task preparation only; does not authorize browser submission.
+publishing_baidu_preparation = true
 
 [initial_admin]
 password = ''

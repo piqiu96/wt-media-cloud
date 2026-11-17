@@ -7,9 +7,11 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"gorm.io/gorm"
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 	"unicode"
@@ -25,6 +27,7 @@ import (
 )
 
 var (
+	ErrInUse     = repository.ErrInUse
 	ErrInvalid   = errors.New("file input invalid")
 	ErrTooLarge  = errors.New("file too large")
 	ErrNotFound  = repository.ErrNotFound
@@ -38,6 +41,7 @@ type Repository interface {
 	Find(int64) (model.File, error)
 	FindToken(string) (model.File, error)
 	Rename(int64, string) error
+	BeginDelete(int64) error
 	Delete(int64) error
 	List(model.Scope, string, string, int, int) ([]model.File, int64, error)
 }
@@ -51,13 +55,24 @@ type Service struct {
 	Inspect       func(context.Context, string, string) (string, string, error)
 }
 
+// SetReferenceCheck binds the known business owners at bootstrap, before serving requests.
+var referenceCheck func(*gorm.DB, int64) error
+
+func SetReferenceCheck(check func(*gorm.DB, int64) error) { referenceCheck = check }
+
+// LockAvailable serializes saved references with deletion. Lock IDs in a stable order.
+func LockAvailable(tx *gorm.DB, ids []int64) error {
+	ordered := append([]int64(nil), ids...)
+	sort.Slice(ordered, func(i, j int) bool { return ordered[i] < ordered[j] })
+	return repository.LockAvailable(tx, ordered)
+}
 func Wired() (*Service, error) {
 	cfg := config.Get()
 	objects, ok := storage.Get().(storage.ImmutableStore)
 	if !ok {
 		return nil, storage.ErrNotConfigured
 	}
-	return &Service{Repo: repository.Store{DB: database.DB()}, Objects: objects, PublicBaseURL: cfg.Storage.ObjectStorage.FilesPublicBaseURL, Bucket: cfg.Storage.ObjectStorage.Bucket, MaxBytes: cfg.Storage.ObjectStorage.UploadMaxBytes, GrantTTL: cfg.Storage.ObjectStorage.PresignTTL.Duration, Inspect: func(ctx context.Context, p, ext string) (string, string, error) {
+	return &Service{Repo: repository.Store{DB: database.DB(), CheckReferences: referenceCheck}, Objects: objects, PublicBaseURL: cfg.Storage.ObjectStorage.FilesPublicBaseURL, Bucket: cfg.Storage.ObjectStorage.Bucket, MaxBytes: cfg.Storage.ObjectStorage.UploadMaxBytes, GrantTTL: cfg.Storage.ObjectStorage.PresignTTL.Duration, Inspect: func(ctx context.Context, p, ext string) (string, string, error) {
 		info, err := media.ProbeFile(ctx, cfg.Media.FFmpeg.FFprobePath, p)
 		if err != nil {
 			return "", "", fmt.Errorf("%w: 文件无法读取", ErrInvalid)
@@ -152,11 +167,14 @@ func canRead(sc model.Scope, f model.File) bool {
 	return sc.All || (sc.OwnerID > 0 && sc.OwnerID == f.OwnerID) || (sc.TeamID > 0 && f.TeamID != nil && sc.TeamID == *f.TeamID)
 }
 func (s *Service) view(f model.File) (model.View, error) {
+	if f.DeleteState == "deleting" {
+		return model.View{DeleteState: "deleting", ID: f.ID, Name: f.Name, Filename: f.Name + "." + f.Extension, Type: f.Type, SizeBytes: f.SizeBytes, OwnerID: f.OwnerID, OwnerName: f.OwnerName, TeamID: f.TeamID, TeamName: f.TeamName, CreatedAt: f.CreatedAt}, nil
+	}
 	publicURL, err := storage.PublicObjectURL(s.PublicBaseURL, s.Bucket, f.ObjectKey)
 	if err != nil {
 		return model.View{}, err
 	}
-	return model.View{PublicURL: publicURL, ID: f.ID, Name: f.Name, Filename: f.Name + "." + f.Extension, Type: f.Type, ContentType: f.ContentType, SizeBytes: f.SizeBytes, SHA256: f.SHA256, OwnerID: f.OwnerID, OwnerName: f.OwnerName, TeamID: f.TeamID, TeamName: f.TeamName, CreatedAt: f.CreatedAt, ResourcePath: "/api/v1/file-resources/" + f.ResourceToken}, nil
+	return model.View{DeleteState: "ready", PublicURL: publicURL, ID: f.ID, Name: f.Name, Filename: f.Name + "." + f.Extension, Type: f.Type, ContentType: f.ContentType, SizeBytes: f.SizeBytes, SHA256: f.SHA256, OwnerID: f.OwnerID, OwnerName: f.OwnerName, TeamID: f.TeamID, TeamName: f.TeamName, CreatedAt: f.CreatedAt, ResourcePath: "/api/v1/file-resources/" + f.ResourceToken}, nil
 }
 func (s *Service) Read(actor identity.PublicUser, id int64) (model.File, error) {
 	sc, err := scope(actor)
@@ -167,10 +185,20 @@ func (s *Service) Read(actor identity.PublicUser, id int64) (model.File, error) 
 	if err != nil {
 		return f, err
 	}
-	if !canRead(sc, f) {
+	if !canRead(sc, f) || f.DeleteState == "deleting" {
 		return model.File{}, ErrNotFound
 	}
 	return f, nil
+}
+
+// ReadSavedReference is for a business service that has already authorized a saved
+// reference. It does not grant general file-list access to another owner's uploads.
+func (s *Service) ReadSavedReference(ctx context.Context, id int64) (model.File, error) {
+	f, err := s.Repo.Find(id)
+	if err != nil {
+		return f, err
+	}
+	return s.ResolveToken(ctx, f.ResourceToken)
 }
 func (s *Service) List(actor identity.PublicUser, kind, search string, page, size int) ([]model.View, int64, error) {
 	sc, err := scope(actor)
@@ -313,8 +341,18 @@ func (s *Service) Rename(actor identity.PublicUser, id int64, name string) (mode
 	return result, nil
 }
 func (s *Service) Delete(ctx context.Context, actor identity.PublicUser, id int64) error {
-	f, err := s.Read(actor, id)
+	sc, err := scope(actor)
 	if err != nil {
+		return err
+	}
+	f, err := s.Repo.Find(id)
+	if err != nil {
+		return err
+	}
+	if !canRead(sc, f) {
+		return ErrNotFound
+	}
+	if err := s.Repo.BeginDelete(id); err != nil {
 		return err
 	}
 	if err := s.Objects.Remove(ctx, f.ObjectKey); err != nil && !errors.Is(err, storage.ErrObjectNotFound) {
@@ -333,6 +371,9 @@ func (s *Service) ResolveToken(ctx context.Context, token string) (model.File, e
 		return model.File{}, ErrNotFound
 	}
 	f, err := s.Repo.FindToken(token)
+	if err == nil && f.DeleteState == "deleting" {
+		return f, ErrNotFound
+	}
 	if err != nil {
 		return f, err
 	}
@@ -357,4 +398,11 @@ func (s *Service) Resource(ctx context.Context, token string, download bool) (st
 		return storage.PresignDownload(ctx, s.Objects, f.ObjectKey, f.Name+"."+f.Extension, s.GrantTTL)
 	}
 	return s.Objects.PresignGet(ctx, f.ObjectKey, s.GrantTTL)
+}
+
+// ReferenceToken exposes only the fixed resource identifier to trusted business
+// reference checkers in the same transaction; the caller already holds its row lock.
+func ReferenceToken(tx *gorm.DB, id int64) (string, error) {
+	f, err := (repository.Store{DB: tx}).Find(id)
+	return f.ResourceToken, err
 }

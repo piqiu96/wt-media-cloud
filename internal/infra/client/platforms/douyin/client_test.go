@@ -242,3 +242,27 @@ func closeHTTPClient(t *testing.T, closer func() error) {
 		}
 	})
 }
+
+func TestCanonicalVideoURLUsesExistingIDProtocol(t *testing.T) {
+	for _, source := range []string{"https://www.douyin.com/video/7695729018592006905", "https://douyin.com/video/7695729018592006905/?from=share"} {
+		t.Run(source, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if err := r.ParseForm(); err != nil {
+					t.Error(err)
+				}
+				if got := r.PostForm.Get("id"); got != "7695729018592006905" {
+					t.Errorf("canonical URL must use id, got %q", got)
+				}
+				if r.PostForm.Get("shorturl") != "" {
+					t.Error("canonical URL sent as short link")
+				}
+				_, _ = w.Write([]byte(`{"result":1,"data":{"aweme_id":"7695729018592006905"}}`))
+			}))
+			defer server.Close()
+			client := NewWithClient(server.URL, config.DouyinCredentialConfig{APIKey: "test"}, newTransport(1))
+			if _, err := client.FetchByURL(context.Background(), FetchByURLRequest{URL: source}); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}

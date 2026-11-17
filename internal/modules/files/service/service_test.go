@@ -55,6 +55,12 @@ func (m *memoryFiles) Rename(id int64, name string) error {
 	m.records[id] = f
 	return nil
 }
+func (m *memoryFiles) BeginDelete(id int64) error {
+	f := m.records[id]
+	f.DeleteState = "deleting"
+	m.records[id] = f
+	return nil
+}
 func (m *memoryFiles) Delete(id int64) error { delete(m.records, id); return nil }
 func (m *memoryFiles) List(scope model.Scope, kind, search string, page, size int) ([]model.File, int64, error) {
 	var out []model.File
@@ -175,8 +181,8 @@ func TestFileScopeAndDeleteRevokeResource(t *testing.T) {
 	if err := s.Delete(context.Background(), a, f.ID); err == nil {
 		t.Fatal("failed delete claimed success")
 	}
-	if _, err := s.Resource(context.Background(), token, false); err != nil {
-		t.Fatal("failed delete silently revoked a live file")
+	if _, err := s.Resource(context.Background(), token, false); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("deleting file still accessible: %v", err)
 	}
 	o.removeErr = nil
 	if err := s.Delete(context.Background(), a, f.ID); err != nil {
@@ -238,5 +244,39 @@ func TestInvalidPublicConfigurationDoesNotAllocateOrUpload(t *testing.T) {
 	s.Bucket = "other-bucket"
 	if _, err := s.Upload(context.Background(), operator(1, 10, identity.RoleOperator), "开头", "a.png", strings.NewReader("png")); err == nil || len(r.records) != 0 {
 		t.Fatal("wrong bucket accepted")
+	}
+}
+
+func TestDeletingFileNeverBecomesReadableAfterStorageFailure(t *testing.T) {
+	s, r, o := testService()
+	a := operator(1, 10, identity.RoleOperator)
+	f, err := s.Upload(context.Background(), a, "封面", "a.png", strings.NewReader("png"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	o.removeErr = errors.New("storage unavailable")
+	if err := s.Delete(context.Background(), a, f.ID); err == nil {
+		t.Fatal("failed delete claimed success")
+	}
+	if r.records[f.ID].DeleteState != "deleting" {
+		t.Fatal("failed delete lost durable recovery state")
+	}
+	if _, err := s.Read(a, f.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("deleting file selectable: %v", err)
+	}
+	token := strings.TrimPrefix(f.ResourcePath, "/api/v1/file-resources/")
+	if _, err := s.Resource(context.Background(), token, false); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("deleting file still grants access: %v", err)
+	}
+	items, _, err := s.List(a, "", "", 1, 20)
+	if err != nil || len(items) != 1 || items[0].DeleteState != "deleting" || items[0].ResourcePath != "" || items[0].PublicURL != "" {
+		t.Fatalf("deletion recovery row=%+v err=%v", items, err)
+	}
+	o.removeErr = nil
+	if err := s.Delete(context.Background(), a, f.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := r.records[f.ID]; ok {
+		t.Fatal("retry did not finish deletion")
 	}
 }

@@ -171,6 +171,16 @@ func (c *Client) FetchByIDs(ctx context.Context, request FetchByIDsRequest) (map
 // FetchByURL requests a Douyin video by numeric ID or short URL.
 func (c *Client) FetchByURL(ctx context.Context, request FetchByURLRequest) (map[string]any, error) {
 	source := strings.TrimSpace(request.URL)
+	// The detail provider accepts canonical video pages by ID. Sending these
+	// pages as shorturl is rejected; actual short links keep their own protocol.
+	if u, err := url.Parse(source); err == nil && (u.Scheme == "https" || u.Scheme == "http") && (strings.EqualFold(u.Hostname(), "www.douyin.com") || strings.EqualFold(u.Hostname(), "douyin.com")) {
+		parts := strings.Split(strings.Trim(u.Path, "/"), "/")
+		if len(parts) == 2 && parts[0] == "video" {
+			if id, err := strconv.ParseUint(parts[1], 10, 64); err == nil && id > 0 {
+				source = parts[1]
+			}
+		}
+	}
 	values := map[string]string{}
 	if _, err := strconv.ParseUint(source, 10, 64); err == nil {
 		values["id"] = source

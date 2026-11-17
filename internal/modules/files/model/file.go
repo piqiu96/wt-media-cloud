@@ -3,6 +3,7 @@ package model
 import "time"
 
 type File struct {
+	DeleteState   string
 	ID            int64
 	OwnerID       int64
 	TeamID        *int64
@@ -29,6 +30,7 @@ type Scope struct {
 }
 
 type View struct {
+	DeleteState  string    `json:"delete_state"`
 	ID           int64     `json:"id"`
 	Name         string    `json:"name"`
 	Filename     string    `json:"filename"`

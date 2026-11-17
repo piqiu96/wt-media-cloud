@@ -6,11 +6,16 @@ import (
 
 	"github.com/wt-media/wt-media-cloud/internal/modules/files/model"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 var ErrNotFound = errors.New("file not found")
+var ErrInUse = errors.New("file is referenced")
 
-type Store struct{ DB *gorm.DB }
+type Store struct {
+	DB              *gorm.DB
+	CheckReferences func(*gorm.DB, int64) error
+}
 
 func (s Store) Insert(f *model.File) error { return s.DB.Create(f).Error }
 func (s Store) SetLocation(id int64, key string) error {
@@ -37,10 +42,41 @@ func (s Store) FindToken(token string) (model.File, error) {
 	return f, missing(err)
 }
 func (s Store) Rename(id int64, name string) error {
-	return s.DB.Exec(`UPDATE operations_files SET name=?,updated_at=? WHERE id=? AND uploaded_at IS NOT NULL`, name, time.Now(), id).Error
+	return s.DB.Exec(`UPDATE operations_files SET name=?,updated_at=? WHERE id=? AND uploaded_at IS NOT NULL AND delete_state='ready'`, name, time.Now(), id).Error
+}
+
+// BeginDelete serializes reference creation and deletion on the file row.
+func (s Store) BeginDelete(id int64) error {
+	return s.DB.Transaction(func(tx *gorm.DB) error {
+		var f model.File
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id=? AND uploaded_at IS NOT NULL", id).First(&f).Error; err != nil {
+			return missing(err)
+		}
+		if f.DeleteState == "deleting" {
+			return nil
+		}
+		if s.CheckReferences == nil {
+			return errors.New("file reference checker is not configured")
+		}
+		if err := s.CheckReferences(tx, id); err != nil {
+			return err
+		}
+		return tx.Model(&model.File{}).Where("id=?", id).Update("delete_state", "deleting").Error
+	})
 }
 func (s Store) Delete(id int64) error {
-	return s.DB.Exec(`DELETE FROM operations_files WHERE id=?`, id).Error
+	return s.DB.Exec(`DELETE FROM operations_files WHERE id=? AND delete_state='deleting'`, id).Error
+}
+
+// LockAvailable is called in the reference writer's transaction, before saving IDs.
+func LockAvailable(tx *gorm.DB, ids []int64) error {
+	for _, id := range ids {
+		var f model.File
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id=? AND uploaded_at IS NOT NULL AND delete_state='ready'", id).First(&f).Error; err != nil {
+			return missing(err)
+		}
+	}
+	return nil
 }
 func (s Store) List(scope model.Scope, kind, search string, page, size int) ([]model.File, int64, error) {
 	q := s.DB.Table("operations_files f").Where("f.uploaded_at IS NOT NULL")

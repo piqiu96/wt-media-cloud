@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/wt-media/wt-media-cloud/internal/infra/database"
+	fileservice "github.com/wt-media/wt-media-cloud/internal/modules/files/service"
 	"github.com/wt-media/wt-media-cloud/internal/modules/production/model"
 	"github.com/wt-media/wt-media-cloud/internal/shared/id"
 	identity "github.com/wt-media/wt-media-cloud/internal/shared/identity"
@@ -65,6 +66,9 @@ func createComposeStrategyAudited(db *gorm.DB, item model.ComposeStrategy, actio
 		item.ScheduleJSON = encoded
 	}
 	err := db.Transaction(func(tx *gorm.DB) error {
+		if err := fileservice.LockJSONReferences(tx, item.Config, item.OutputSettingsJSON); err != nil {
+			return err
+		}
 		if err := tx.Create(&item).Error; err != nil {
 			return err
 		}
@@ -98,6 +102,9 @@ func updateComposeStrategyAudited(db *gorm.DB, item model.ComposeStrategy, actio
 		}
 	}
 	err := db.Transaction(func(tx *gorm.DB) error {
+		if err := fileservice.LockJSONReferences(tx, item.Config, item.OutputSettingsJSON); err != nil {
+			return err
+		}
 		result := tx.Exec(`UPDATE compose_strategies SET name = ?, operator_id = ?, config_json = ?, output_settings_json = ?, execution_mode = ?, schedule_json = ?, priority_rules_json = ?, single_limit = ?, daily_limit = ?, next_run_at = ?, status = ?, updated_by = ?, updated_at = ? WHERE id = ? AND team_id = ? AND category_id = ?`, item.Name, item.OperatorID, item.Config, []byte(item.OutputSettingsJSON), item.ExecutionMode, scheduleJSON, item.RulesJSON, item.SingleLimit, item.DailyLimit, item.NextRunAt, item.Status, item.UpdatedBy, now, item.ID, item.TeamID, item.CategoryID)
 		if result.Error != nil {
 			return result.Error

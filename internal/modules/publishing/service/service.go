@@ -1,0 +1,255 @@
+package service
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"github.com/wt-media/wt-media-cloud/internal/config"
+	"github.com/wt-media/wt-media-cloud/internal/infra/database"
+	filemodel "github.com/wt-media/wt-media-cloud/internal/modules/files/model"
+	files "github.com/wt-media/wt-media-cloud/internal/modules/files/service"
+	identity "github.com/wt-media/wt-media-cloud/internal/modules/identity/service"
+	accounts "github.com/wt-media/wt-media-cloud/internal/modules/mediaaccount/service"
+	production "github.com/wt-media/wt-media-cloud/internal/modules/production/service"
+	"github.com/wt-media/wt-media-cloud/internal/modules/publishing/model"
+	"github.com/wt-media/wt-media-cloud/internal/modules/publishing/repository"
+	"gorm.io/gorm"
+	"strings"
+	"time"
+	"unicode/utf8"
+)
+
+var (
+	ErrInvalid  = errors.New("publication input invalid")
+	ErrNotFound = repository.ErrNotFound
+	ErrConflict = repository.ErrConflict
+	ErrOccupied = repository.ErrOccupied
+	ErrClosed   = errors.New("publication platform not available")
+)
+
+type Filter = repository.Filter
+type ConflictError = repository.ConflictError
+type Repository interface {
+	ByRequest(int64, string) (model.Task, error)
+	Create(model.Task) (model.Task, error)
+	Get(uint64) (model.Task, error)
+	List(Filter) ([]model.Task, int64, error)
+	Summary(Filter) (map[string]int64, error)
+	Edit(model.Task, uint64) (model.Task, error)
+}
+type Service struct {
+	SavedFile          func(context.Context, int64) (filemodel.File, error)
+	PreparationEnabled bool
+	Repo               Repository
+	Account            func(identity.PublicUser, string) (accounts.Account, error)
+	Output             func(identity.PublicUser, int64) (production.ComposeOutputDetail, error)
+	File               func(context.Context, identity.PublicUser, int64) (filemodel.File, error)
+}
+
+func Wired() *Service {
+	return &Service{SavedFile: func(ctx context.Context, id int64) (filemodel.File, error) {
+		s, e := files.Wired()
+		if e != nil {
+			return filemodel.File{}, e
+		}
+		return s.ReadSavedReference(ctx, id)
+	}, PreparationEnabled: config.Get().App.PublishingBaiduPreparation, Repo: repository.Store{DB: database.DB(), LockFiles: files.LockAvailable}, Account: accounts.GetAccount, Output: production.GetComposeOutput, File: func(ctx context.Context, a identity.PublicUser, id int64) (filemodel.File, error) {
+		s, e := files.Wired()
+		if e != nil {
+			return filemodel.File{}, e
+		}
+		f, e := s.Read(a, id)
+		if e != nil {
+			return f, e
+		}
+		return s.ResolveToken(ctx, f.ResourceToken)
+	}}
+}
+func CheckFileReferences(tx *gorm.DB, id int64) error {
+	used, err := repository.FileReferenced(tx, id)
+	if err != nil {
+		return err
+	}
+	if used {
+		return files.ErrInUse
+	}
+	return nil
+}
+
+type CreateInput struct {
+	RequestKey        string        `json:"request_key"`
+	Platform          string        `json:"platform"`
+	CategoryID        int64         `json:"category_id,string"`
+	MediaAccountID    uint64        `json:"media_account_id,string"`
+	CompositeOutputID int64         `json:"composite_output_id,string"`
+	Content           model.Content `json:"content"`
+	NotBefore         *time.Time    `json:"not_before"`
+}
+type EditInput struct {
+	ExpectedRevision uint64        `json:"expected_revision,string"`
+	Content          model.Content `json:"content"`
+	NotBefore        *time.Time    `json:"not_before"`
+}
+
+func CanRead(a identity.PublicUser, v model.Task) bool {
+	t := identity.TeamID(v.TeamID)
+	return a.ID > 0 && a.CanAccess(identity.UserID(v.OperatorID), &t, identity.CategoryID(v.CategoryID))
+}
+func (s *Service) Get(a identity.PublicUser, id uint64) (model.Task, error) {
+	v, e := s.Repo.Get(id)
+	if e == nil && !CanRead(a, v) {
+		return model.Task{}, ErrNotFound
+	}
+	return v, e
+}
+func validateFilter(a identity.PublicUser, f Filter) error {
+	if a.Role == identity.RoleSeniorOperator && a.TeamID == nil {
+		return ErrNotFound
+	}
+	if a.ID <= 0 || a.Status != identity.UserStatusEnabled || a.Role != identity.RoleAdmin && a.Role != identity.RoleSeniorOperator && a.Role != identity.RoleOperator {
+		return ErrNotFound
+	}
+	if f.CategoryID < 0 || f.Platform != "" && f.Platform != "baidu" && f.Platform != "bilibili" && f.Platform != "xiaohongshu" || f.CreatedFrom != nil && f.CreatedBefore != nil && !f.CreatedFrom.Before(*f.CreatedBefore) || f.Page < 1 || f.PageSize < 1 || f.PageSize > 100 || utf8.RuneCountInString(f.Search) > 100 {
+		return ErrInvalid
+	}
+	if f.Status != "" {
+		valid := false
+		for _, status := range []string{"pending", "queued", "running", "awaiting_human", "uncertain", "reviewing", "failed", "published", "cancelled", "abandoned"} {
+			if f.Status == status {
+				valid = true
+			}
+		}
+		if !valid {
+			return ErrInvalid
+		}
+	}
+	return nil
+}
+func (s *Service) List(a identity.PublicUser, f Filter) ([]model.Task, int64, error) {
+	if err := validateFilter(a, f); err != nil {
+		return nil, 0, err
+	}
+	f.Actor = a
+	return s.Repo.List(f)
+}
+
+func (s *Service) Summary(a identity.PublicUser, f Filter) (map[string]int64, error) {
+	if err := validateFilter(a, f); err != nil {
+		return nil, err
+	}
+	f.Actor = a
+	return s.Repo.Summary(f)
+}
+
+func contentValid(c model.Content) bool {
+	return strings.TrimSpace(c.Description) != "" && utf8.RuneCountInString(c.Description) <= 1000 && c.CoverFileID > 0 && c.Declaration == "无需声明" && utf8.RuneCountInString(c.Topics) <= 200 && c.Confirmed
+}
+func (s *Service) Create(ctx context.Context, a identity.PublicUser, in CreateInput) (model.Task, error) {
+	if a.ID <= 0 || a.Status != identity.UserStatusEnabled {
+		return model.Task{}, ErrNotFound
+	}
+	if len(in.RequestKey) < 1 || len(in.RequestKey) > 64 || strings.TrimSpace(in.RequestKey) != in.RequestKey || in.CategoryID <= 0 || in.MediaAccountID == 0 || in.CompositeOutputID <= 0 || !contentValid(in.Content) {
+		return model.Task{}, ErrInvalid
+	}
+	bytes, _ := json.Marshal(in)
+	sum := sha256.Sum256(bytes)
+	digest := hex.EncodeToString(sum[:])
+	if prior, err := s.Repo.ByRequest(int64(a.ID), in.RequestKey); err == nil {
+		if !CanRead(a, prior) {
+			return model.Task{}, ErrNotFound
+		}
+		if prior.RequestHash != digest {
+			return model.Task{}, ErrConflict
+		}
+		return prior, nil
+	} else if !errors.Is(err, ErrNotFound) {
+		return model.Task{}, err
+	}
+	if !s.PreparationEnabled || in.Platform != "baidu" {
+		return model.Task{}, ErrClosed
+	}
+	account, err := s.Account(a, fmt.Sprint(in.MediaAccountID))
+	if err != nil {
+		return model.Task{}, err
+	}
+	if string(account.Platform) != in.Platform || !account.Enabled || account.IdentificationStatus != "identified" || account.PlatformLoginStatus != "normal" || account.PlatformAccountID == "" || account.BrowserProfileID == "" || account.TeamID == nil {
+		return model.Task{}, ErrInvalid
+	}
+	category := false
+	for _, id := range account.CategoryIDs {
+		if int64(id) == in.CategoryID {
+			category = true
+		}
+	}
+	if !category || !a.CanAccess(account.UserID, account.TeamID, identity.CategoryID(in.CategoryID)) {
+		return model.Task{}, ErrNotFound
+	}
+	output, err := s.Output(a, in.CompositeOutputID)
+	if err != nil {
+		return model.Task{}, err
+	}
+	o := output.Output
+	platformOK := false
+	for _, p := range o.Platforms {
+		if p == in.Platform {
+			platformOK = true
+		}
+	}
+	if !platformOK {
+		return model.Task{}, ErrInvalid
+	}
+	if int64(o.CategoryID) != in.CategoryID || o.TeamID != int64(*account.TeamID) || o.PublishStatus == "archived" || o.Video.Status != "ready" || o.FileSizeBytes <= 0 || len(o.SHA256) != 64 {
+		return model.Task{}, ErrInvalid
+	}
+	cover, err := s.File(ctx, a, in.Content.CoverFileID)
+	if err != nil {
+		return model.Task{}, err
+	}
+	if cover.Type != "image" || cover.SizeBytes <= 0 || len(cover.SHA256) != 64 {
+		return model.Task{}, ErrInvalid
+	}
+	snapshot, _ := json.Marshal(map[string]any{"account_name": account.PlatformName, "account_owner": account.UserName, "browser_profile_id": account.BrowserProfileID, "output_name": o.Name, "video_sha256": o.SHA256, "video_size": o.FileSizeBytes, "cover_sha256": cover.SHA256, "cover_name": cover.Name, "cover_resource_path": "/api/v1/file-resources/" + cover.ResourceToken})
+	now := time.Now().UTC()
+	v := model.Task{TeamID: int64(*account.TeamID), OperatorID: int64(account.UserID), Platform: in.Platform, CategoryID: in.CategoryID, MediaAccountID: in.MediaAccountID, CompositeOutputID: in.CompositeOutputID, PlatformAccountUID: account.PlatformAccountID, CoverFileID: cover.ID, ResourceSnapshot: snapshot, Content: in.Content, Status: "pending", NotBefore: in.NotBefore, Revision: 1, CreatedBy: int64(a.ID), RequestKey: in.RequestKey, RequestHash: digest, CreatedAt: now, UpdatedAt: now}
+	return s.Repo.Create(v)
+}
+func (s *Service) Edit(ctx context.Context, a identity.PublicUser, id uint64, in EditInput) (model.Task, error) {
+	v, err := s.Get(a, id)
+	if err != nil {
+		return v, err
+	}
+	if v.Status != "pending" || v.CurrentAttemptID != nil || v.AuthorizedAt != nil || v.Revision != in.ExpectedRevision {
+		return model.Task{}, &ConflictError{TaskID: v.ID, Revision: v.Revision}
+	}
+	if !contentValid(in.Content) {
+		return model.Task{}, ErrInvalid
+	}
+	var cover filemodel.File
+	if in.Content.CoverFileID == v.CoverFileID && s.SavedFile != nil {
+		cover, err = s.SavedFile(ctx, v.CoverFileID)
+	} else {
+		cover, err = s.File(ctx, a, in.Content.CoverFileID)
+	}
+	if err != nil {
+		return model.Task{}, err
+	}
+	if cover.Type != "image" || cover.SizeBytes <= 0 || len(cover.SHA256) != 64 {
+		return model.Task{}, ErrInvalid
+	}
+	var snapshot map[string]any
+	if err := json.Unmarshal(v.ResourceSnapshot, &snapshot); err != nil {
+		return model.Task{}, err
+	}
+	snapshot["cover_sha256"] = cover.SHA256
+	snapshot["cover_name"] = cover.Name
+	snapshot["cover_resource_path"] = "/api/v1/file-resources/" + cover.ResourceToken
+	v.ResourceSnapshot, _ = json.Marshal(snapshot)
+	v.Content = in.Content
+	v.CoverFileID = cover.ID
+	v.NotBefore = in.NotBefore
+	v.AuditActor = int64(a.ID)
+	return s.Repo.Edit(v, in.ExpectedRevision)
+}

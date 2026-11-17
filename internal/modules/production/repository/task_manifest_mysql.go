@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"github.com/wt-media/wt-media-cloud/internal/infra/database"
+	fileservice "github.com/wt-media/wt-media-cloud/internal/modules/files/service"
 	"gorm.io/gorm"
 )
 
@@ -17,6 +18,9 @@ func freezeComposeManifest(db *gorm.DB, taskID, nodeID int64, attempt int, raw j
 	}
 	var result []byte
 	err := db.Transaction(func(tx *gorm.DB) error {
+		if err := fileservice.LockJSONReferences(tx, raw); err != nil {
+			return err
+		}
 		var current []byte
 		row := tx.Raw(`SELECT execution_manifest_json FROM compose_tasks WHERE id = ? AND claimed_node_id = ? AND attempt_count = ? AND status = 'running' AND cancel_requested = 0 AND lease_expires_at > NOW(3) FOR UPDATE`, taskID, nodeID, attempt).Row()
 		if err := row.Scan(&current); err != nil {
