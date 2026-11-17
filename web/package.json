@@ -13,8 +13,10 @@
     "dev:example": "vite --config vite.config.example.js --open /example/",
     "build:example": "vite build --config vite.config.example.js",
     "preview:example": "vite preview --config vite.config.example.js",
-    "test:example": "node --test example/preview.test.mjs example/proto/content-operations/tests/*.test.cjs",
-    "test:publishing-prototype": "vitest run --config vite.config.example.js example/proto/publishing-design/tests/*.test.js"
+    "test:example": "node --test example/preview.test.mjs example/proto/publishing-design/production/tests/*.test.cjs",
+    "test:publishing-prototype": "vitest run --config vite.config.example.js example/proto/publishing-design/tests/*.test.js",
+    "test:publishing-plan": "node --test example/proto/publishing-design/plan/tests/plan.test.cjs",
+    "test:publishing-browser": "node scripts/test-publishing-browser.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.0.0",
@@ -28,6 +30,7 @@
   "devDependencies": {
     "@vitejs/plugin-vue": "6.0.1",
     "marked": "18.1.3",
+    "playwright": "1.65.0",
     "unplugin-auto-import": "^21.0.0",
     "unplugin-vue-components": "^32.1.0",
     "vite": "7.3.6",

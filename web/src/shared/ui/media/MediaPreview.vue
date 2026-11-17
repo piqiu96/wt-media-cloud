@@ -1,5 +1,6 @@
 <script setup>
 import { ref, watch, computed } from "vue";
+import ResourceFieldHelp from "../resource/ResourceFieldHelp.vue";
 import ResourceOverlay from "../resource/ResourceOverlay.vue";
 import ResourceEmptyState from "../resource/ResourceEmptyState.vue";
 const props = defineProps({
@@ -60,11 +61,7 @@ watch(index, () => {
             description="返回更换图片后重试。"
           />
         </div>
-        <p class="preview-image-caption">
-          {{
-            current?.note || "预览当前图片结果；小图模式用于检查标题可读性。"
-          }}
-        </p>
+
       </div>
       <aside v-if="$slots.details" class="preview-details">
         <slot name="details" />
@@ -163,4 +160,5 @@ watch(index, () => {
     height: 350px;
   }
 }
+.preview-field-label{display:inline-flex;align-items:center;gap:8px;font-size:13px;font-weight:500;color:var(--wt-text-secondary);}
 </style>

@@ -3,6 +3,6 @@
 </template>
 
 <style scoped>
-.resource-card { padding: 20px; background: var(--wt-bg-card); border: 1px solid var(--wt-border); border-radius: var(--wt-radius-md); box-shadow: var(--wt-shadow-card); }
-@media (max-width: 680px) { .resource-card { padding: 16px; } }
+.resource-card { padding: var(--wt-space-card, 24px); background: var(--wt-bg-card); border: 1px solid var(--wt-border); border-radius: var(--wt-radius-md); box-shadow: var(--wt-shadow-card); }
+@media (max-width: 680px) { .resource-card { padding: 20px 16px; } }
 </style>

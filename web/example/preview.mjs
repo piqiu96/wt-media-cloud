@@ -1,6 +1,8 @@
 import { readFile, realpath, readdir } from 'node:fs/promises'
 import path from 'node:path'
 import { Marked } from 'marked'
+import { createOperationsMiddleware } from './operations-preview.mjs'
+import { createPublishingMiddleware } from './publishing-preview.mjs'
 import { localPreviewLink } from './preview-links.js'
 
 const escapeHTML = value => String(value).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c])
@@ -73,11 +75,12 @@ export function createDocumentationMiddleware({ workspaceRoot, cloudRoot }) {
 export const injectNavigation = html => html.replace('</head>', '<script type="module" src="/example/navigation.js"></script></head>')
 
 export function examplePreviewPlugin({ webRoot, workspaceRoot }) {
+  const publishing = createPublishingMiddleware({ webRoot })
   const middleware = createDocumentationMiddleware({ workspaceRoot, cloudRoot: path.dirname(webRoot) })
   return {
     name: 'wt-example-preview',
-    configureServer(server) { server.middlewares.use(middleware) },
-    configurePreviewServer(server) { server.middlewares.use(middleware) },
+    configureServer(server) { server.middlewares.use(createOperationsMiddleware()); server.middlewares.use(publishing); server.middlewares.use(middleware) },
+    configurePreviewServer(server) { server.middlewares.use(createOperationsMiddleware()); server.middlewares.use(publishing); server.middlewares.use(middleware) },
     transformIndexHtml: {
       order: 'pre',
       handler(html, context) {
@@ -93,7 +96,7 @@ export function examplePreviewPlugin({ webRoot, workspaceRoot }) {
           const full = path.join(directory, entry.name)
           if (entry.isDirectory()) { await walk(full); continue }
           const relative = path.relative(root, full).split(path.sep).join('/')
-          if (relative === 'index.html' || !/\.(html|css|js|png|svg)$/.test(relative) && !relative.endsWith('LICENSE')) continue
+          if (relative === 'index.html' || relative === 'proto/publishing-design/plan/index.html' || !/\.(html|css|js|png|svg)$/.test(relative) && !relative.endsWith('LICENSE')) continue
           let source = await readFile(full)
           if (relative.endsWith('.html')) source = injectNavigation(source.toString('utf8'))
           this.emitFile({ type: 'asset', fileName: `example/${relative}`, source })

@@ -1,24 +1,25 @@
 <script setup>
+import ResourceFieldHelp from './ResourceFieldHelp.vue'
 defineProps({ title: { type: String, required: true }, description: { type: String, default: '' }, variant: { type: String, default: 'detail' } })
 </script>
 
 <template>
   <section class="resource-section" :class="`resource-section--${variant}`" :aria-label="title">
-    <header class="resource-section__header"><h3>{{ title }}<slot name="title-extra" /></h3><p v-if="description">{{ description }}</p></header>
+    <header class="resource-section__header"><h3>{{ title }}<ResourceFieldHelp v-if="description" :label="title" :content="description" /><slot name="title-extra" /></h3></header>
     <div class="resource-section__body"><slot /></div>
   </section>
 </template>
 
 <style scoped>
-.resource-section + .resource-section { margin-top: 24px; }
+.resource-section + .resource-section { margin-top: var(--wt-space-block, 16px); }
 .resource-section__header { margin-bottom: 16px; }
-.resource-section--detail .resource-section__header h3 { padding-left: 10px; border-left: 3px solid var(--wt-primary); }
+.resource-section--detail .resource-section__header h3::before { content: ""; width: var(--wt-section-mark-width, 3px); height: var(--wt-section-mark-height, 14px); flex: 0 0 var(--wt-section-mark-width, 3px); border-radius: 1px; background: var(--wt-primary); }
 .resource-section--form .resource-section__header { display:flex; align-items:center; gap:16px; }
-.resource-section--form .resource-section__header::after { content:""; flex:1; height:1px; background:var(--wt-border); }
-.resource-section__header h3 { display:flex;align-items:center;gap:6px; margin: 0; color: var(--wt-text-primary); font-size: 14px; font-weight: 600; line-height: 1.6; }
+
+.resource-section__header h3 { display:flex;align-items:center;gap:8px; margin: 0; color: var(--wt-text-primary); font-size: var(--wt-font-size-section, 16px); font-weight: 500; line-height: var(--wt-line-height-section, 24px); }
 .resource-section__header p { margin: 4px 0 0; color: var(--wt-text-tertiary); font-size: 12px; line-height: 1.6; }
 .resource-section__body { min-width: 0; container-type: inline-size; }
-.resource-section :deep(.t-descriptions__label) { color: var(--wt-text-tertiary); font-size: 14px; }
+.resource-section :deep(.t-descriptions__label) { color: var(--wt-text-tertiary); font-size: 13px; font-weight: 500; }
 .resource-section :deep(.t-descriptions__content) { color: var(--wt-text-secondary); font-size: 14px; overflow-wrap: anywhere; }
 .resource-section :deep(.t-descriptions__label), .resource-section :deep(.t-descriptions__content) { vertical-align: top; }
 .resource-section :deep(.t-form__item:last-child) { margin-bottom: 0; }

@@ -1,3 +1,6 @@
+import { resolvedPublishingDefaults } from "./publishingSettings.js";
+import { accountAvailability } from "./accountAvailability.js";
+import { coverSignature, coverTextErrors, coverReadinessIssues } from "./covers.js";
 // Offline publishing prototype. These rules do not invoke platform services.
 export const platforms = ["小红书", "B站", "百家号"];
 export const states = [
@@ -13,10 +16,16 @@ export const states = [
   "已放弃",
 ];
 export const categories = ["三角洲行动", "火影忍者", "通用"];
+export const publishingCategories = db => [...new Set([...categories, ...(db.assets || []).map(asset => asset.category), ...(db.accounts || []).flatMap(account => account.categories || [])].filter(Boolean))];
 export const threshold = 0.1;
 export const occupied = (task) => task.status !== "已放弃";
 export const canRetry = (task) =>
-  task.status === "执行失败" && task.result === "确认未发布";
+  !task.batchStopped &&
+  task.status === "执行失败" &&
+  task.result === "确认未发布" &&
+  !task.claimed &&
+  (!task.platformId || task.retrySafe === true) &&
+  !!(task.attemptHistory?.at(-1)?.ended || task.executionEndedAt);
 export function nextBatch(tasks) {
   if (
     tasks.some((t) =>
@@ -30,7 +39,8 @@ export function nextBatch(tasks) {
     ["已发布", "平台审核中", "执行失败"].includes(t.status),
   );
   if (!known.length) return "等待跳过确认";
-  return known.filter(canRetry).length / known.length > threshold
+  return known.filter((t) => t.status === "执行失败").length / known.length >
+    threshold
     ? "等待继续确认"
     : "自动继续";
 }
@@ -40,7 +50,7 @@ export function stats(tasks, target = 0) {
     total: tasks.length,
     published,
     reviewing: tasks.filter((t) => t.status === "平台审核中").length,
-    failed: tasks.filter(canRetry).length,
+    failed: tasks.filter((t) => t.status === "执行失败").length,
     pending: tasks.filter((t) =>
       ["待执行", "排队中", "执行中"].includes(t.status),
     ).length,
@@ -53,9 +63,12 @@ export function stats(tasks, target = 0) {
     rate: target ? Math.round((published / target) * 100) : null,
   };
 }
-export function defaults(platform, asset) {
+export function defaults(platform, asset, db) {
   return {
     title: asset?.title || "",
+    shortTitle: "",
+    subTitle: "",
+    topics: "",
     description: platform === "百家号" ? asset?.title || "" : "",
     tags: platform === "B站" ? asset?.category || "" : "",
     partition: platform === "B站" ? "游戏" : "",
@@ -68,6 +81,7 @@ export function defaults(platform, asset) {
     coverMode: "现成封面",
     templateId: null,
     templateDocument: null,
+    ...resolvedPublishingDefaults(db, platform, asset),
   };
 }
 export function validate(row, db, ignoreId) {
@@ -76,6 +90,16 @@ export function validate(row, db, ignoreId) {
     v = db.assets.find((a) => a.id === row.assetId);
   if (!a || !a.enabled || a.platform !== row.platform)
     errors.push("请选择可用的同平台账号");
+  if (a) {
+    const access = accountAvailability(
+      db,
+      a,
+      row.platform,
+      row.category || v?.category,
+      ignoreId,
+    );
+    if (access.reason) errors.push(access.reason);
+  }
   if (!v) errors.push("请选择成片");
   if (v?.ready === false)
     errors.push(v.unavailableReason || "成片尚未生成完成");
@@ -99,8 +123,25 @@ export function validate(row, db, ignoreId) {
   if (!title?.trim())
     errors.push(row.platform === "百家号" ? "请填写作品描述" : "请填写标题");
   if (Array.from(title || "").length > limit)
-    errors.push(`文案超过原型长度检查 ${limit}；百家号计数折算待核验`);
+    errors.push(`文案超过当前长度上限 ${limit}，请精简后重试`);
   if (!row.cover) errors.push("请选择封面");
+  errors.push(...coverTextErrors(row));
+  if (
+    row.coverTreatment === "图片库图 + 模板" &&
+    !db.images?.some(
+      (image) =>
+        image.id === row.imageId &&
+        image.enabled &&
+        image.uses?.includes("底图"),
+    )
+  )
+    errors.push("请选择图片库中可用的底图");
+  if (row.candidateId) {
+    errors.push(...coverReadinessIssues(row));
+    if (!row.contentApproved || !row.coverApproved) errors.push('请审核当前版本的内容与已合成封面');
+  }
+  if (row.imageId && !['模板合成','规则生成封面'].includes(row.coverMode) && !db.images?.some(image=>image.id===row.imageId && image.enabled && image.uses?.includes('现成封面')))
+    errors.push('请选择可用的现成封面');
   if (
     row.platform === "B站" &&
     row.tags?.split(/[,，、\s]+/).filter(Boolean).length > 10
@@ -129,7 +170,7 @@ export function validate(row, db, ignoreId) {
   if (
     row.schedule &&
     (!Number.isFinite(Date.parse(row.schedule)) ||
-      Date.parse(row.schedule) <= Date.now())
+      (!ignoreId && Date.parse(row.schedule) <= Date.now()))
   )
     errors.push("发布时间应晚于当前时间");
   return errors;
@@ -140,6 +181,13 @@ export function picture(n, text = "游戏时刻") {
     encodeURIComponent(
       `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="900"><defs><linearGradient id="g" x2="1" y2="1"><stop stop-color="${["#152e4d", "#263359", "#0c4c4e"][n % 3]}"/><stop offset="1" stop-color="${["#538d98", "#8a6b98", "#4e9082"][n % 3]}"/></linearGradient></defs><path fill="url(#g)" d="M0 0h1200v900H0z"/><circle cx="1000" cy="80" r="360" fill="#ffffff" opacity=".08"/><path d="M0 700L460 220l740 680H0" fill="#0b1c35" opacity=".5"/><text x="80" y="700" fill="white" font-family="sans-serif" font-size="70" font-weight="bold">${text}</text><text x="85" y="770" fill="#c5d8e8" font-family="sans-serif" font-size="24">WT MEDIA · CONTENT STUDIO</text></svg>`,
     )
+  );
+}
+export function backgroundPicture(n = 0) {
+  const svg = decodeURIComponent(picture(n).split(",")[1]);
+  return (
+    "data:image/svg+xml;charset=utf-8," +
+    encodeURIComponent(svg.replace(/<text[^>]*>.*?<\/text>/g, ""))
   );
 }
 export function seed() {
@@ -268,6 +316,10 @@ export function seed() {
       uses: ["现成封面", "底图"],
       enabled: true,
       src: a.cover,
+      width: 1200,
+      height: 900,
+      format: "SVG",
+      source: "种子资源",
     })),
     templates: [],
   };
@@ -275,6 +327,7 @@ export function seed() {
 
 // Inventory eligibility is independent of editable publishing content.
 export function resourceStatus(db, asset, platform, accountIds = null) {
+  if(asset.publishingPlatforms && !asset.publishingPlatforms.includes(platform))return "成片未分配给当前用户或不适用于该平台";
   if (asset.ready === false)
     return asset.unavailableReason || "成片尚未生成完成";
   if (asset.fileAvailable === false) return "成片文件不可取得";
@@ -287,6 +340,7 @@ export function resourceStatus(db, asset, platform, accountIds = null) {
   const candidates = db.accounts.filter(
     (a) =>
       a.enabled &&
+      a.loginValid !== false &&
       a.platform === platform &&
       a.categories.includes(asset.category) &&
       (!accountIds || accountIds.includes(a.id)),
@@ -305,6 +359,7 @@ export function resourceInventory(
       const accounts = db.accounts.filter(
         (a) =>
           a.enabled &&
+          a.loginValid !== false &&
           a.platform === platform &&
           a.categories.includes(category) &&
           (!accountIds || accountIds.includes(a.id)),
@@ -341,6 +396,8 @@ export function suggestDistribution(
   accountIds,
   previous = [],
   limits = {},
+  categoryPriority = [],
+  categoryAccountIds = {},
 ) {
   const load = new Map();
   const scarcity = (assetId) => {
@@ -349,12 +406,21 @@ export function suggestDistribution(
       ? db.accounts.filter(
           (a) =>
             accountIds.includes(a.id) &&
+            (!Array.isArray(categoryAccountIds[video.category]) || categoryAccountIds[video.category].includes(a.id)) &&
             a.enabled &&
+            a.loginValid !== false &&
             a.categories.includes(video.category),
         ).length
       : Infinity;
   };
-  const orderedAssets = [...assetIds].sort((a, b) => scarcity(a) - scarcity(b));
+  const priority = (id) => {
+    const category = db.assets.find((v) => v.id === id)?.category;
+    const index = categoryPriority.indexOf(category);
+    return index < 0 ? categoryPriority.length : index;
+  };
+  const orderedAssets = [...assetIds].sort(
+    (a, b) => priority(a) - priority(b) || scarcity(a) - scarcity(b),
+  );
   return selectedPlatforms.flatMap((platform) =>
     orderedAssets.flatMap((assetId) => {
       const video = db.assets.find((v) => v.id === assetId);
@@ -362,28 +428,30 @@ export function suggestDistribution(
       const hasCapacity = (accountId) =>
         !Number(limits[accountId]) ||
         (load.get(accountId) || 0) < Number(limits[accountId]);
+      const candidates = db.accounts.filter(
+        (a) =>
+          accountIds.includes(a.id) &&
+          (!Array.isArray(categoryAccountIds[video.category]) || categoryAccountIds[video.category].includes(a.id)) &&
+          a.platform === platform &&
+          a.categories.includes(video.category) &&
+          a.enabled &&
+          a.loginValid !== false &&
+          hasCapacity(a.id),
+      );
+      if (!candidates.length) return [];
       const prior = previous.find(
         (r) =>
           r.platform === platform &&
           r.assetId === assetId &&
-          accountIds.includes(r.accountId) &&
-          hasCapacity(r.accountId),
+          candidates.some((a) => a.id === r.accountId),
       );
-      const candidates = db.accounts.filter(
-        (a) =>
-          accountIds.includes(a.id) &&
-          a.platform === platform &&
-          a.categories.includes(video.category) &&
-          a.enabled &&
-          hasCapacity(a.id),
-      );
-      if (!candidates.length) return [];
       const qualityOrder =
         video.quality === "优质"
           ? ["优质", "普通", "新号"]
           : ["普通", "新号", "优质"];
       candidates.sort(
         (a, b) =>
+          a.categories.length - b.categories.length ||
           qualityOrder.indexOf(a.quality) - qualityOrder.indexOf(b.quality) ||
           accountIds.indexOf(a.id) - accountIds.indexOf(b.id),
       );
@@ -400,7 +468,7 @@ export function suggestDistribution(
               category: video.category,
               assetId,
               accountId: chosen.id,
-              ...defaults(platform, video),
+              ...defaults(platform, video, db),
               overrides: [],
               modified: false,
             },
@@ -444,5 +512,5 @@ export function declarationOptions(platform) {
             "内容包含营销广告",
           ]
         : ["无需声明"]
-  ).map((value) => ({ label: value, value }));
+  ).map((value) => ({ label: value.replace("（原型设置）", ""), value }));
 }

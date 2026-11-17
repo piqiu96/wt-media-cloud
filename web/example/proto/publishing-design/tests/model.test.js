@@ -215,3 +215,47 @@ it("respects per-account batch limits without creating a cartesian product", () 
   expect(excluded.accounts).toBe(0);
   expect(excluded.available).toBe(0);
 });
+
+it("excludes accounts with invalid login from inventory and recommendations", () => {
+  const db = seed();
+  db.tasks = [];
+  const first = db.accounts.find((a) => a.id === 1);
+  const fallback = db.accounts.find((a) => a.id === 2);
+  first.loginValid = false;
+  fallback.categories.push("三角洲行动");
+  expect(resourceStatus(db, db.assets[0], "小红书", [1])).toBe("没有匹配账号");
+  expect(
+    resourceInventory(db, ["小红书"], ["三角洲行动"], [1])[0].available,
+  ).toBe(0);
+  const stale = {
+    platform: "小红书",
+    assetId: 128,
+    accountId: 1,
+    key: "小红书:128",
+  };
+  const rows = suggestDistribution(db, ["小红书"], [128], [1, 2], [stale]);
+  expect(rows).toHaveLength(1);
+  expect(rows[0].accountId).toBe(2);
+});
+
+describe("library cover source", () => {
+  it.each([
+    [null, true, true],
+    [901, false, true],
+    [901, true, false],
+  ])(
+    "checks selected library image %s enabled=%s",
+    (imageId, enabled, blocked) => {
+      const db = seed();
+      db.images = [{ id: 901, enabled, uses: ["底图"] }];
+      const task = {
+        ...db.tasks[0],
+        coverTreatment: "图片库图 + 模板",
+        imageId,
+      };
+      expect(
+        validate(task, db, task.id).includes("请选择图片库中可用的底图"),
+      ).toBe(blocked);
+    },
+  );
+});
