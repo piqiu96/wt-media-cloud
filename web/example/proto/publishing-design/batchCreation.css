@@ -279,7 +279,7 @@
 .batch-warning-text {
   color: #bc7c23 !important;
 }
-.batch-target-table + .t-alert {
+.batch-target-container + .resource-notice {
   margin-top: 16px;
 }
 .batch-account-pool {

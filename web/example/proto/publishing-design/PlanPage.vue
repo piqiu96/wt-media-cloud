@@ -8,6 +8,8 @@ import PlanList from './plan/PlanList.vue'
 import PlanDetail from './plan/PlanDetail.vue'
 import PlanBasicForm from './plan/PlanBasicForm.vue'
 import PlanGoalScope from './plan/PlanGoalScope.vue'
+import BatchDetailContent from './BatchDetailContent.vue'
+import ResourceOverlay from '../../../src/shared/ui/resource/ResourceOverlay.vue'
 import { planViews, savePlanViews, planInventory, importLegacyPlans } from './planBridge.js'
 import { feedback } from '../../../src/shared/ui/feedback/index.js'
 import { batchCommand } from './batchApi.js'
@@ -15,7 +17,7 @@ import planCSS from './plan/style.css?inline'
 import commonCSS from '../../common/example.css?inline'
 const props=defineProps({db:Object,persist:Function})
 const emit=defineEmits(['view-change','navigate'])
-const host=ref(null),context=getCurrentInstance().appContext
+const host=ref(null),previewBatch=ref(null),context=getCurrentInstance().appContext
 let controller,style
 function mount(component,element,props){
  const update=props=>{const node=createVNode(component,props);node.appContext=context;render(node,element)};update(props);const unmount=()=>render(null,element);unmount.update=update;return unmount
@@ -38,10 +40,16 @@ onMounted(async()=>{
   mountScope:(el,props)=>mount(PlanGoalScope,el,props),
   confirmScope:message=>feedback.confirmWarning({title:'调整发布范围？',message,confirmText:'确认调整'}),
   onView:(page,mode)=>emit('view-change',page,mode),navigate:href=>emit('navigate',href),
+  previewBatch:id=>{previewBatch.value=props.db.batches.find(b=>String(b.id)===String(id))||null},
  })
 })
 watch(()=>JSON.stringify([props.db.tasks.map(t=>[t.id,t.status,t.version]),props.db.batches.map(b=>[b.id,b.phase,b.version]),props.db.plans.map(p=>[p.id,p.control,p.position])]),()=>controller?.refresh())
 onBeforeUnmount(()=>{controller?.dispose();style?.remove()})
 defineExpose({confirmLeave:()=>controller?.confirmLeave()??Promise.resolve(true),readRoute:()=>controller?.readRoute(),currentURL:()=>controller?.currentURL()??routes.operationURL('plans')})
 </script>
-<template><div ref="host" class="plan-scope"></div></template>
+<template>
+  <div ref="host" class="plan-scope"></div>
+  <ResourceOverlay :visible="!!previewBatch" title="发布批次详情" kind="drawer" full-width attach="#operations-detail-layer" show-in-attached-element @update:visible="value=>{if(!value)previewBatch=null}">
+    <BatchDetailContent v-if="previewBatch" :key="previewBatch.id" :batch="previewBatch" :db="db" read-only />
+  </ResourceOverlay>
+</template>
