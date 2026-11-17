@@ -1,0 +1,36 @@
+[
+  {
+    "seq": 1,
+    "result": {
+      "status": "uncertain",
+      "evidence": {
+        "reason": "中文 <>& \\u2028\n"
+      }
+    },
+    "expected": "2136d67e96eb9c8635918855e133f98e9c88aa44274dbfc28430d6bc1fb2a2cb"
+  },
+  {
+    "seq": 9007199254740993,
+    "result": {
+      "status": "reviewing",
+      "evidence": {
+        "scene_closed": true,
+        "receipt_id": "123",
+        "note": "实测 分隔 符"
+      }
+    },
+    "expected": "48fdc4bbd8f4384f709a74ea360b79cf04eca3b5aaea60b14aed7a969fff057d"
+  },
+  {
+    "seq": 3,
+    "result": {
+      "status": "failed",
+      "evidence": {
+        "not_submitted": true,
+        "scene_closed": true
+      },
+      "error_message": "line\nquote\"slash\\\t"
+    },
+    "expected": "93003abd2b1a9a1218976cd72b5fdfa014f834963acb5f4c00132125323361f6"
+  }
+]

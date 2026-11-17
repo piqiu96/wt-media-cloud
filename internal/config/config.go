@@ -40,6 +40,7 @@ type Config struct {
 }
 
 type AppConfig struct {
+	PublishingBaiduExecution   bool               `toml:"publishing_baidu_execution"`
 	PublishingBaiduPreparation bool               `toml:"publishing_baidu_preparation"`
 	Name                       string             `toml:"name"`
 	Server                     ServerConfig       `toml:"server"`

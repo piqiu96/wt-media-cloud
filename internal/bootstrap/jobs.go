@@ -2,8 +2,10 @@ package bootstrap
 
 import (
 	"context"
+	publishing "github.com/wt-media/wt-media-cloud/internal/modules/publishing/service"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/wt-media/wt-media-cloud/internal/config"
 	"github.com/wt-media/wt-media-cloud/internal/jobs"
@@ -67,6 +69,16 @@ func runWorkerProcess() error {
 	// one the deployment runs — the reconcile exists to finish tasks the executor
 	// abandoned, and a sweep no process runs is exactly the dead code that left
 	// cancelled downloads stuck.
+	runner.Register("publication-enqueue", 5*time.Second, func(context.Context) error {
+		if !config.Get().App.PublishingBaiduExecution {
+			return nil
+		}
+		return publishing.ExecutionStore().QueueDue(time.Now().UTC())
+	})
+	runner.Register("publication-reconcile", 30*time.Second, func(context.Context) error {
+		// Reports and loss detection must continue after execution is disabled.
+		return publishing.ExecutionStore().InterruptStale(time.Now().UTC())
+	})
 	runner.Register("transfer-reconcile", cfg.Scheduler.WorkerInterval.Duration, func(ctx context.Context) error {
 		return jobs.RunTransferReconcile(ctx)
 	})

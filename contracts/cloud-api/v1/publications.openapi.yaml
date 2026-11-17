@@ -1,8 +1,8 @@
 openapi: 3.1.0
 info:
   title: WT Media Single Publication Preparation
-  version: 2026.11.18.1
-  description: Formal pending tasks only. Creating never authorizes execution or submits a platform post. Baidu preparation requires the server publishing_baidu_preparation switch; all execution and public platform opening remain unavailable until separately verified. IDs and revisions are decimal strings; timestamps RFC3339. Uses errcode/message/data/logid.
+  version: 2026.11.18.2
+  description: Creating never authorizes execution or submits a platform post. Separate revision-bound start requires the publishing_baidu_execution switch; public opening remains subject to real platform acceptance. Baidu preparation uses publishing_baidu_preparation. IDs and revisions are decimal strings; timestamps RFC3339. Uses errcode/message/data/logid.
 paths:
   /api/v1/publications:
     get:
@@ -77,6 +77,22 @@ paths:
         '400': {description: Invalid or unconfirmed content.}
         '404': {description: Task absent or outside actor scope.}
         '409': {description: Revision changed, task claimed/authorized or no longer pending. Reload before editing.}
+  /api/v1/publications/{id}/start:
+    post:
+      operationId: startPublication
+      security: [{sessionCookie: []}]
+      parameters: [{in: path, name: id, required: true, schema: {$ref: '#/components/schemas/ID'}}]
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [expected_revision], additionalProperties: false, properties: {expected_revision: {$ref: '#/components/schemas/ID'}}}}}}
+      responses:
+        '200': {description: 'Authorized task, pending until not_before or queued when due. Never creates an attempt; frozen inputs cannot subsequently be edited.'}
+        '409': {description: 'Revision/state conflict, unavailable resource or platform not open for execution.'}
+  /api/v1/publications/{id}/attempts:
+    get:
+      operationId: listPublicationAttempts
+      security: [{sessionCookie: []}]
+      parameters: [{in: path, name: id, required: true, schema: {$ref: '#/components/schemas/ID'}}]
+      responses:
+        '200': {description: 'Owner-scoped attempt history without credentials, signed grants or mutable old input.'}
 components:
   securitySchemes:
     sessionCookie: {type: apiKey, in: cookie, name: wt_media_session}

@@ -43,7 +43,7 @@ func TestPublicationRoutesAndContractRequireSession(t *testing.T) {
 			}
 		}
 	}
-	if count != 4 {
+	if count != 6 {
 		t.Fatalf("route/contract count=%d", count)
 	}
 	for _, action := range []string{"execute", "authorize", "retry"} {
@@ -93,5 +93,16 @@ func TestRevisionConflictIncludesCurrentVersion(t *testing.T) {
 	}
 	if r.Result().StatusCode() != 409 || body.Errcode != 18003 || body.Error.Details.TaskID != "9007199254740993" || body.Error.Details.Revision != "7" {
 		t.Fatalf("conflict response %s", r.Result().Body())
+	}
+}
+
+func TestPublicationAgentRoutesRequireBearer(t *testing.T) {
+	h := server.New()
+	RegisterRoutes(h)
+	for _, path := range []string{"claim", "1/heartbeat", "1/progress", "1/complete"} {
+		r := ut.PerformRequest(h.Engine, "POST", "/api/v1/cloud-agent/publication-tasks/"+path, nil)
+		if r.Result().StatusCode() != 401 {
+			t.Fatalf("%s: %d", path, r.Result().StatusCode())
+		}
 	}
 }

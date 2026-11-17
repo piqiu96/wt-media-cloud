@@ -85,6 +85,11 @@ func setProfile(db *gorm.DB, record model.AccountRecord) error {
 		if err != nil {
 			return err
 		}
+		for _, id := range []string{old.String, record.BrowserProfileID} {
+			if e := checkPublication(tx, id); e != nil {
+				return e
+			}
+		}
 		n, err := execSQL(tx, `UPDATE media_accounts SET browser_profile_id=?, check_operation_id=NULL, check_profile_id=NULL, check_started_at=NULL, last_check_status='never', last_check_message=NULL, last_check_identity=NULL, updated_at=? WHERE id=? AND user_id=?`, nullIfEmpty(record.BrowserProfileID), record.UpdatedAt, record.ID, record.UserID)
 		if duplicateKey(err) {
 			return model.ErrProfilePlatformTaken

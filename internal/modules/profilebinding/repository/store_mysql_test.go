@@ -188,6 +188,7 @@ func TestBindBitAccountRebindKeepsThePreviousMainInTheAudit(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT bit_main_user_id, bit_account_bound_at FROM users WHERE id = ? FOR UPDATE")).
 		WithArgs(sharedidentity.UserID(1)).
 		WillReturnRows(sqlmock.NewRows([]string{"bit_main_user_id", "bit_account_bound_at"}).AddRow("main-user-a", now))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT id FROM browser_profiles WHERE user_id=? ORDER BY id FOR UPDATE")).WithArgs(sharedidentity.UserID(1)).WillReturnRows(sqlmock.NewRows([]string{"id"}))
 	mock.ExpectExec("UPDATE users SET bit_main_user_id = ?").
 		WithArgs("main-user-b", model.BitAccountBound, now, now, now, sharedidentity.UserID(1)).
 		WillReturnResult(sqlmock.NewResult(0, 1))

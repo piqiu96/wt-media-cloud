@@ -76,6 +76,7 @@ func isolatedDB(t *testing.T, fixtures bool) *gorm.DB {
 	// Reference ID types match current provider migrations. No foreign key checks are disabled.
 	exec("CREATE TABLE media_accounts(id BIGINT UNSIGNED PRIMARY KEY)")
 	exec("CREATE TABLE composite_outputs(id BIGINT UNSIGNED PRIMARY KEY)")
+	exec("CREATE TABLE browser_profiles(id BIGINT UNSIGNED PRIMARY KEY)")
 	exec("CREATE TABLE audit_logs LIKE " + c.Database + ".audit_logs")
 	body, err := os.ReadFile(config.GetRuntimePaths().Migrations + "/20261106_098_operations_files.sql")
 	if err != nil {
@@ -94,6 +95,13 @@ func isolatedDB(t *testing.T, fixtures bool) *gorm.DB {
 	}
 	if result, err := migration.Apply(context.Background(), db, migrations); err != nil || len(result) != 0 {
 		t.Fatalf("migration replay result=%v err=%v", result, err)
+	}
+	body, err = os.ReadFile(config.GetRuntimePaths().Migrations + "/20261118_104_publication_attempt.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = migration.Apply(context.Background(), db, []migration.Migration{{Version: "attempt", Name: "attempt", SQL: string(body)}}); err != nil {
+		t.Fatal(err)
 	}
 	exec("INSERT INTO media_accounts(id) VALUES(12)")
 	exec("INSERT INTO composite_outputs(id) VALUES(42),(43),(44)")
