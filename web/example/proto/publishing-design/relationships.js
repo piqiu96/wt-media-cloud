@@ -1,3 +1,5 @@
+import { taskInterval, batchTaskCanStart } from "./batchExecutionSettings.js";
+import { publishMethod } from "./publishingSettings.js";
 import { freezeBatch, isDisposed } from "./batchLifecycle.js";
 // Offline prototype business rules. No runtime API or external platform calls.
 import { platforms, validate, nextBatch, stats, canRetry } from "./model.js";
@@ -12,6 +14,10 @@ export const itemTasks = (db, i) =>
   i?.kind === "batch" ? batchTasks(db, itemRecord(db, i)) : [];
 export const planTasks = (db, p) =>
   planItems(p).flatMap((i) => itemTasks(db, i));
+// Old previews can have batch execution records without the plan lock marker.
+// Observing a start protects structure; it never grants automatic dispatch authority.
+export const planHasStarted = (db, p) =>
+  !!(p?.lockedAt || planItems(p || {}).some((i) => itemRecord(db, i)?.firstStartedAt));
 export const associatedPlan = (db, i) =>
   i?.kind === "batch"
     ? db.plans.find((p) => planItems(p).some((x) => x.id === i.id))
@@ -31,7 +37,7 @@ export const nextId = (db) =>
       "templates",
       "assets",
       "accounts",
-    ].flatMap((k) => (db[k] || []).map((r) => r.id)),
+    ].flatMap((k) => (db[k] || []).map((r) => Number(r.id)).filter(Number.isFinite)),
   ) + 1;
 export function batchSummary(db, b) {
   const rows = batchTasks(db, b);
@@ -108,7 +114,7 @@ export function validatePlan(draft) {
   return [...new Set(errors)];
 }
 export function planImpact(db, p, draft) {
-  if (p?.lockedAt || ["已取消", "执行已结束"].includes(p?.control))
+  if (planHasStarted(db, p) || ["已取消", "执行已结束"].includes(p?.control))
     throw Error("首次启动后结构永久锁定");
   const errors = validatePlan(draft);
   if (errors.length) throw Error(errors.join("；"));
@@ -143,7 +149,7 @@ export function confirmPlan(db, draft, { draftOnly = false } = {}) {
   if (errors.length && !draftOnly) throw Error(errors.join("；"));
   let seq = nextId(db);
   const p = existing || {
-    id: seq++,
+    id: draft.id || seq++,
     position: 0,
     items: [],
     skipped: [],
@@ -159,7 +165,7 @@ export function confirmPlan(db, draft, { draftOnly = false } = {}) {
         const changed = impact.find((i) => i.id === old?.id)?.changed;
         return {
           ...old,
-          id: old?.id || seq++,
+          id: old?.id || s.id || seq++,
           name: s.name,
           platform: s.platform,
           planId: p.id,
@@ -221,10 +227,13 @@ export function createPublication(
     name,
     planId = null,
     batchId = null,
+    sourceBatchId = null,
+    sourcePlanId = null,
     quick = false,
     targets = null,
     partial = false,
     creationKey = null,
+    taskIntervalSeconds = 0,
   },
 ) {
   const old = batchId ? db.batches.find((b) => b.id === batchId) : null;
@@ -238,6 +247,7 @@ export function createPublication(
         tasks: done,
       };
   }
+  const interval = taskInterval(taskIntervalSeconds);
   const errors = validateBatch(db, platform, rows);
   if (quick && (rows.length !== 1 || planId || batchId))
     errors.push("快速发布只能创建一条计划外独立任务");
@@ -268,9 +278,10 @@ export function createPublication(
   }
   if (errors.length) throw Error([...new Set(errors)].join("；"));
   let seq = nextId(db);
-  const b = quick ? null : old || { id: seq++, planId: null };
+  const b = quick ? null : old || { id: seq++, planId: null, sourceBatchId, sourcePlanId };
   const tasks = rows.map((r) => {
     const { planId: ignored, ...content } = clone(r);
+    content.publishMethod ||= publishMethod;
     return {
       ...content,
       id: seq++,
@@ -295,6 +306,7 @@ export function createPublication(
       phase: "内容预检通过",
       control: "待执行",
       partialConfirmed: partial,
+      rules: { ...(b.rules || {}), taskIntervalSeconds: interval },
       candidates: [],
     });
     b.created ||= new Date().toISOString();
@@ -410,7 +422,15 @@ export function dispatchPlan(db, p) {
     throw Error("计划已终结，补量请另行规划");
   if (!p.confirmed || !p.items.length)
     throw Error("请先确认计划并生成批次骨架");
-  const b = itemRecord(db, p.items[p.position]);
+  let position = p.position;
+  if (!planHasStarted(db, p)) {
+    while (position < p.items.length) {
+      const cancelled = itemRecord(db, p.items[position]);
+      if (cancelled?.control !== "已取消" || !batchTasks(db, cancelled).every(isDisposed)) break;
+      position++;
+    }
+  }
+  const b = itemRecord(db, p.items[position]);
   if (
     p.lockedAt &&
     b &&
@@ -423,6 +443,7 @@ export function dispatchPlan(db, p) {
     return;
   }
   preflightDispatch(db, b);
+  p.position = position;
   lock(p, "plan");
   p.control = "执行中";
   dispatchBatch(db, b, { fromPlan: true });
@@ -430,8 +451,7 @@ export function dispatchPlan(db, p) {
 }
 export function decision(db, p) {
   const b = itemRecord(db, p.items[p.position]);
-  const d = nextBatch(batchTasks(db, b));
-  return d !== "等待核实" && b?.control === "已取消" ? "等待跳过确认" : d;
+  return nextBatch(batchTasks(db, b));
 }
 export function advance(db, p, confirmed = false) {
   if (
@@ -444,8 +464,9 @@ export function advance(db, p, confirmed = false) {
   const d = decision(db, p);
   if (d === "等待核实") throw Error("当前批次仍有未决任务，不能衔接");
   if (d !== "自动继续" && !confirmed) throw Error("需要人工确认后继续");
+  if (confirmed) p.boundaryApproved = p.position;
   const next = itemRecord(db, p.items[p.position + 1]);
-  if (next) {
+  if (next && next.control !== "已取消") {
     try {
       preflightDispatch(db, next);
       if (batchTasks(db, next).some((t) => t.attempts > 0))
@@ -464,17 +485,21 @@ export function advance(db, p, confirmed = false) {
     time: new Date().toISOString(),
   });
   p.position++;
+  delete p.boundaryApproved;
   if (p.position >= p.items.length) {
     p.control = "执行已结束";
     return;
   }
   p.control = "执行中";
-  dispatchBatch(db, next, { fromPlan: true });
+  if (next.control !== "已取消") dispatchBatch(db, next, { fromPlan: true });
+  syncPlan(db, p);
 }
 export function syncPlan(db, p) {
-  if (p.control !== "执行中" || p.owner !== "plan") return;
+  if (!["执行中", "等待配置"].includes(p.control) || p.owner !== "plan") return;
   const d = decision(db, p);
-  if (d === "自动继续") advance(db, p);
+  if (d === "自动继续" || p.boundaryApproved === p.position) {
+    advance(db, p, p.boundaryApproved === p.position);
+  }
   else if (d !== "等待核实") p.control = d;
 }
 export function cancellationImpact(db, b) {
@@ -500,7 +525,7 @@ export function cancelBatchSafely(db, b) {
   return cancellationImpact(db, b);
 }
 export function pausePlan(p) {
-  if (p.control !== "执行中") return;
+  if (!["执行中", "等待配置", "等待继续确认", "等待跳过确认"].includes(p.control)) return;
   p.control = "已暂停";
   p.log.push({ type: "暂停后续调度", time: new Date().toISOString() });
 }
@@ -510,16 +535,32 @@ export function pauseBatch(b) {
   b.log ||= [];
   b.log.push({ type: "暂停批次派发", time: new Date().toISOString() });
 }
-export function cancelPlan(p) {
+export function cancelPlan(p, db) {
   if (p.control === "已取消") return;
-  if (p.control === "执行已结束") throw Error("计划已结束");
+  if (p.endedAt) throw Error("计划已结束");
+  if (!db) throw Error("终止计划需要完整批次记录");
+  const time = new Date().toISOString();
+  for (const item of planItems(p)) {
+    const b = itemRecord(db, item);
+    if (!b) continue;
+    const tasks = batchTasks(db, b);
+    if (b.control === "已取消" || (tasks.length && tasks.every(isDisposed))) continue;
+    b.stoppedAt ||= time;
+    if (!b.firstStartedAt) b.control = "已取消";
+    for (const t of tasks) {
+      t.batchStopped = true;
+      if (["待执行", "排队中"].includes(t.status) && !t.claimed)
+        setResult(t, "已取消", { evidence: "终止所属计划：未开始任务已取消" });
+    }
+  }
   p.control = "已取消";
   p.owner = null;
-  p.log.push({ type: "取消后续调度", time: new Date().toISOString() });
+  p.log.push({ type: "终止计划及所属批次", time });
 }
 export function claimTask(db, t, now = Date.now()) {
   if (db.platformBlocks?.[t.platform]) return false;
   const b = db.batches.find((b) => b.id === t.batchId);
+  if (!batchTaskCanStart(db, b, t, now)) return false;
   if (
     b?.stoppedAt ||
     t.status !== "排队中" ||
@@ -547,6 +588,7 @@ export function claimTask(db, t, now = Date.now()) {
   return true;
 }
 export function setResult(t, status, { evidence = "", publicAt = null } = {}) {
+  if (status === "执行中" && t.status !== "执行中") delete t.executionEndedAt;
   t.status = status;
   t.result =
     status === "已发布"
@@ -562,7 +604,10 @@ export function setResult(t, status, { evidence = "", publicAt = null } = {}) {
     t.submittedAt ||= new Date().toISOString();
   if (status === "已发布") t.publicAt = publicAt || new Date().toISOString();
   if (evidence) t.evidence = evidence;
-  if (!unresolved(t)) t.claimed = false;
+  if (!unresolved(t)) {
+    t.claimed = false;
+    t.executionEndedAt ||= new Date().toISOString();
+  }
   const a = t.attemptHistory?.at(-1);
   if (a) {
     a.status = status;

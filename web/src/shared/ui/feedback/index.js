@@ -9,7 +9,7 @@ function toast(theme, message) {
   return MessagePlugin[theme](config)
 }
 
-function confirmWarning({ title, message, confirmText = '继续', danger = false }) {
+function confirmWarning({ title, message, confirmText = '继续', cancelText = '取消', danger = false }) {
   return new Promise((resolve) => {
     let settled = false
     function finish(answer) {
@@ -21,10 +21,11 @@ function confirmWarning({ title, message, confirmText = '继续', danger = false
     const dialog = DialogPlugin.confirm({
       theme: 'warning',
       header: title,
+      dialogClassName: 'resource-feedback-dialog',
       width: 'min(calc(100vw - 32px), 480px)',
       body: message,
       confirmBtn: { content: confirmText, theme: danger ? 'danger' : 'primary' },
-      cancelBtn: { content: '取消' },
+      cancelBtn: { content: cancelText },
       closeOnOverlayClick: false,
       onConfirm: () => finish(true),
       onCancel: () => finish(false),
@@ -46,6 +47,7 @@ function notice({ title, message, confirmText = '知道了' }) {
     }
     const dialog = DialogPlugin.alert({
       header: title,
+      dialogClassName: 'resource-feedback-dialog',
       width: 'min(calc(100vw - 32px), 480px)',
       body: message,
       confirmBtn: { content: confirmText, theme: 'primary' },

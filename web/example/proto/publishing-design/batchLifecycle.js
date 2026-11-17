@@ -1,36 +1,38 @@
 // Shared policy for the existing example and its loopback preview service.
+import { batchCreationDraft, migrateBatchCreationDrafts } from "./creationDrafts.js";
 import { validate, canRetry } from "./model.js";
 const copy = (x) => JSON.parse(JSON.stringify(x));
 export const rowsFor = (db, b) => db.tasks.filter((t) => t.batchId === b.id);
+export const formalBatch = (db, b) => rowsFor(db, b).length > 0;
 export const isDisposed = (t) =>
   ["已发布", "已取消", "已放弃"].includes(t.status);
 export const started = (b) => Boolean(b?.firstStartedAt);
+export const pendingContentEditable = (t, b) => t?.status === "待执行" && !t.claimed && !t.batchStopped && !b?.stoppedAt && b?.control !== "已取消";
 export const contentEditable = (db, b) =>
   !!b &&
   !started(b) &&
   b.control !== "已取消" &&
   rowsFor(db, b).some((t) => !isDisposed(t)) &&
   b.phase === "内容预检通过";
+export const isPendingTask = (t, b) =>
+  ["执行失败", "结果待确认", "等待人工", "平台审核中", "待补链接"].includes(t.status) ||
+  (started(b) && t.status === "待执行");
 export function batchMetrics(db, b) {
   const rows = rowsFor(db, b),
     total = rows.length,
     target = (b.targets || []).reduce((n, t) => n + Number(t.count), 0),
     published = rows.filter((t) => t.status === "已发布").length,
     disposed = rows.filter(isDisposed).length;
-  const pending = rows.filter(
-    (t) =>
-      ["执行失败", "结果待确认", "等待人工", "平台审核中", "待补链接"].includes(
-        t.status,
-      ) ||
-      (started(b) && t.status === "待执行"),
-  ).length;
+  const pending = rows.filter((t) => isPendingTask(t, b)).length;
+  const failed = rows.filter((t) => t.status === "执行失败").length;
   return {
     total,
     target,
     published,
+    failed,
     disposed,
     pending,
-    progress: total ? Math.round((disposed / total) * 100) : 0,
+    progress: target ? Math.round((published / target) * 100) : 0,
     achievement: target ? Math.round((published / target) * 100) : 0,
     result:
       published === total && total
@@ -286,33 +288,10 @@ export function runBatchCommand(
     if (!["已结束", "已取消"].includes(state))
       throw Error("只能复制已结束或已取消批次");
     if (!input.name?.trim()) throw Error("请输入新批次名称");
-    const id =
-      Math.max(
-        1000,
-        ...db.batches.map((x) => x.id),
-        ...db.tasks.map((x) => x.id),
-        ...(db.plans || []).map((x) => x.id),
-      ) + 1;
-    const draft = {
-      id,
-      name: input.name.trim(),
-      platform: b.platform,
-      targets: copy(b.targets || []),
-      categories: copy(b.categories || []),
-      rules: copy(b.rules || {}),
-      sourcePlanId: b.planId || b.sourcePlanId || null,
-      sourceBatchId: b.id,
-      phase: "待资源配置",
-      control: "待配置",
-      candidates: [],
-      version: 1,
-      created: new Date().toISOString(),
-      createdBy: "本地演示用户",
-      updatedAt: new Date().toISOString(),
-      log: [],
-    };
-    db.batches.push(draft);
-    record(draft, "复制批次", `复制自 B-${b.id}；账号与成片需重新匹配`);
+    if (db.publishDraft?.active) throw Error("存在未完成的批次配置，请先继续编辑或重新开始");
+    const draft = batchCreationDraft(b);
+    draft.name = input.name.trim();
+    db.publishDraft = draft;
     return draft;
   } else if (action === "saveContent") {
     if (!contentEditable(db, b))
@@ -373,6 +352,7 @@ export function runBatchCommand(
   return b;
 }
 export function migrateBatchLifecycle(db) {
+  migrateBatchCreationDrafts(db);
   for (const b of db.batches) {
     const rows = rowsFor(db, b);
     b.version ||= 1;
@@ -408,7 +388,12 @@ export function migrateBatchLifecycle(db) {
 export function protectBatchSnapshot(before, after) {
   for (const b of before.batches || []) {
     const n = after.batches?.find((x) => x.id === b.id);
-    if (!n) throw Error("不能删除已有批次");
+    if (!n) {
+      const p=before.plans?.find(p=>p.id===b.planId),next=after.plans?.find(x=>x.id===p?.id);
+      const removable=p&&next&&!p.lockedAt&&!next.lockedAt&&!started(b)&&!rowsFor(before,b).length&&!rowsFor(after,b).length&&!b.draft?.resourcesLocked&&p.items?.some(i=>i.id===b.id)&&!next.items?.some(i=>i.id===b.id);
+      if(removable)continue;
+      throw Error("不能删除已有批次");
+    }
     const oldRows = rowsFor(before, b),
       newRows = rowsFor(after, b);
     if (
@@ -465,6 +450,8 @@ export function protectBatchSnapshot(before, after) {
       throw Error(
         `B-${b.id} 首次执行锁定不可撤销（${n.firstStartedAt !== b.firstStartedAt ? "执行时间" : "冻结快照"}已变化）`,
       );
+    if (started(b) && JSON.stringify(b.rules) !== JSON.stringify(n.rules))
+      throw Error("首次执行后发布设置不可修改");
     if (b.stoppedAt && n.stoppedAt !== b.stoppedAt)
       throw Error("停止发布不能恢复");
     for (const t of rowsFor(before, b)) {
@@ -486,6 +473,7 @@ export function protectBatchSnapshot(before, after) {
         throw Error("停止发布后禁止新重试");
       if (
         (started(b) || n.firstStartedAt) &&
+        !(pendingContentEditable(t, b) && pendingContentEditable(nt, n)) &&
         contentKeys.some((k) => JSON.stringify(t[k]) !== JSON.stringify(nt[k]))
       )
         throw Error("发布配置已永久锁定，请刷新页面");

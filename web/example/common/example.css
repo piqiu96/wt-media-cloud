@@ -1,5 +1,25 @@
 /* 规范配套参考，非运行时样式。Token来源：../../docs/standards/frontend/前端架构与视觉规范.md §3.6.1；修改时同步核对。 */
 :root {
+  /* Typography: same roles in Vue components and the HTML reference. */
+  --wt-font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", Arial, sans-serif;
+  --wt-font-size-title: 24px;
+  --wt-font-size-dialog: 18px;
+  --wt-font-size-section: 16px;
+  --wt-line-height-section: 24px;
+  --wt-space-page-heading: 20px;
+  --wt-space-block: 16px;
+  --wt-space-card: 24px;
+  --wt-section-mark-width: 3px;
+  --wt-section-mark-height: 14px;
+  --wt-color-bg-table-header: #f1f5fb;
+  --wt-font-size-body: 14px;
+  --wt-font-size-table: 13px;
+  --wt-font-size-assist: 12px;
+  --wt-line-height-title: 34px;
+  --wt-line-height-body: 24px;
+  --wt-line-height-table: 22px;
+  --wt-line-height-assist: 20px;
+
   /* Brand */
   --wt-color-primary: #0052d9;
   --wt-color-primary-hover: #266fe8;
@@ -55,7 +75,7 @@
 /* 所有模式共用；原型起始页也引用此文件，不复制一份样式。 */
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
-body { margin: 0; color: var(--wt-color-text-primary); background: var(--wt-color-bg-page); font: 14px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",Arial,sans-serif; }
+body { margin: 0; color: var(--wt-color-text-primary); background: var(--wt-color-bg-page); font: var(--wt-font-size-body)/var(--wt-line-height-body) var(--wt-font-family); -webkit-font-smoothing: antialiased; }
 button,input,select,textarea { font: inherit; color: inherit; }
 button,a,summary { -webkit-tap-highlight-color: transparent; }
 a { color: var(--wt-color-primary); text-decoration: none; }
@@ -64,7 +84,7 @@ button { cursor: pointer; }
 button:disabled { cursor: not-allowed; }
 :focus-visible { outline: 2px solid var(--wt-color-primary); outline-offset: 3px; }
 h1,h2,h3,p,dl,dd { margin: 0; }
-h1 { font-size: 24px; line-height: 1.4; font-weight: 600; }
+h1 { font-size: var(--wt-font-size-title); line-height: var(--wt-line-height-title); font-weight: 500; letter-spacing: 0; }
 h2,h3 { font-size: 14px; font-weight: 600; }
 .ex-shell { display: grid; grid-template-columns: 216px minmax(0,1fr); min-height: 100vh; }
 .ex-sidebar { position: sticky; top: 0; height: 100vh; padding: 28px 16px; display: flex; flex-direction: column; background: var(--wt-color-bg-container); border-right: 1px solid var(--wt-color-border); }
@@ -95,8 +115,9 @@ h2,h3 { font-size: 14px; font-weight: 600; }
 .ex-text-button { border: 0; background: transparent; padding: 4px 0; color: var(--wt-color-primary); line-height: 22px; white-space: nowrap; }
 .ex-text-button:hover:not(:disabled) { color: var(--wt-color-primary-hover); }
 .ex-text-button:disabled { color: var(--wt-color-text-disabled); }
-.ex-text-button.danger { min-height: 32px; padding-inline: 8px; border-radius: 4px; color: var(--wt-color-text-primary); }
-.ex-text-button.danger:hover:not(:disabled) { color: var(--wt-color-danger-text); background: var(--wt-color-danger-bg); }
+.ex-text-button.danger { min-height: 32px; padding-inline: 8px; border-radius: 4px; }
+.ex-text-button.danger:not(:disabled) { color: var(--wt-color-danger-text); }
+.ex-text-button.danger:hover:not(:disabled), .ex-text-button.danger:focus-visible:not(:disabled) { color: var(--wt-color-danger-text); background: var(--wt-color-danger-bg); }
 .ex-row-actions { display: inline-flex; gap: 8px; align-items: center; }
 .ex-row-actions button { font-size: 13px; }
 .ex-panel { background: var(--wt-color-bg-container); border: 1px solid var(--wt-color-border); border-radius: 8px; min-width: 0; }
@@ -110,7 +131,7 @@ h2,h3 { font-size: 14px; font-weight: 600; }
 .ex-field textarea { min-height: 88px; resize: vertical; }
 .ex-field input:disabled,.ex-field select:disabled { color: var(--wt-color-text-disabled); background: var(--wt-color-bg-subtle); }
 .ex-field [aria-invalid="true"] { border-color: var(--wt-color-danger) !important; }
-.ex-help { color: var(--wt-color-text-secondary); font-size: 12px; line-height: 1.6; }
+.ex-help { color: var(--wt-color-text-secondary); font-size: var(--wt-font-size-assist); line-height: var(--wt-line-height-assist); }
 .ex-error { color: var(--wt-color-danger-text); font-size: 12px; }
 .ex-filter-search { flex: 1 1 260px; max-width: 360px; }
 .ex-filter-select { flex: 0 1 152px; min-width: 120px; }
@@ -155,10 +176,10 @@ h2,h3 { font-size: 14px; font-weight: 600; }
 .ex-desc-item.full { grid-column: 1/-1; }
 @container (min-width: 640px) { .ex-description-list[data-density="dense"] { grid-template-columns: repeat(2,minmax(0,1fr)); } }
 @container (max-width: 360px) { .ex-desc-item { grid-template-columns: 88px minmax(0,1fr); gap: 12px; } }
-.ex-section + .ex-section { margin-top: 28px; }
-.ex-section-title { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; font-size: 14px; font-weight: 600; }
-.ex-section-title.detail::before { content:''; width: 3px; height: 14px; background: var(--wt-color-primary); border-radius: 2px; }
-.ex-section-title.form::after { content:''; height: 1px; flex: 1; background: var(--wt-color-border); margin-left: 6px; }
+.ex-section + .ex-section { margin-top: var(--wt-space-block); }
+.ex-section-title { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; font-size: var(--wt-font-size-section); font-weight: 500; line-height: var(--wt-line-height-section); }
+.ex-section-title.detail::before { content:''; width: var(--wt-section-mark-width); height: var(--wt-section-mark-height); background: var(--wt-color-primary); border-radius: 1px; }
+
 .ex-compare { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 16px; }
 .ex-compare-card { padding: 16px; border: 1px solid var(--wt-color-border); border-radius: 6px; }
 .ex-compare-card h3 { margin-bottom: 10px; }
@@ -270,7 +291,7 @@ progress::-webkit-progress-value { background: var(--wt-color-primary); border-r
 .ex-row-actions .ex-text-button { display: inline-flex; align-items: center; justify-content: center; min-height: 32px; padding: 4px; border-radius: 4px; color: var(--wt-color-primary); line-height: 20px; }
 .ex-row-actions .ex-text-button[data-open="detail"] { color: var(--wt-color-primary); }
 .ex-row-actions .ex-text-button:hover:not(:disabled) { color: var(--wt-color-primary-hover); background: var(--wt-color-primary-light); }
-.ex-row-actions .ex-text-button.danger { color: var(--wt-color-text-primary); }
+.ex-row-actions .ex-text-button.danger:not(:disabled) { color: var(--wt-color-danger-text); }
 .ex-row-actions .ex-text-button.danger:hover:not(:disabled) { color: var(--wt-color-danger-text); background: var(--wt-color-danger-bg); }
 .ex-row-actions .ex-text-button:disabled { color: var(--wt-color-text-disabled); background: transparent; }
 .ex-row-actions .ex-row-primary { gap: 6px; padding-inline: 10px; background: var(--wt-color-primary-light); font-weight: 500; }
@@ -344,3 +365,23 @@ progress::-webkit-progress-value { background: var(--wt-color-primary); border-r
 @media(max-width:680px){
   .ex-panel.ex-list-pattern .ex-filters.ex-filters-stacked>.ex-field,.ex-filters.ex-filters-stacked .ex-filter-extra>.ex-field{flex:1 1 100%;min-width:0;max-width:none}
 }
+
+/* Shared full-page reference roles; native adapters consume the same tokens as Vue. */
+.ex-page-head { min-height: 36px; margin-bottom: var(--wt-space-page-heading); }
+.ex-list-pattern.ex-panel { padding: 0; overflow: hidden; }
+.ex-list-pattern .ex-table th { height: 44px; background: var(--wt-color-bg-table-header); border-block: 1px solid var(--wt-color-border-control); color: var(--wt-color-text-primary); font-weight: 500; }
+.ex-list-pattern .ex-table td { height: 64px; }
+.ex-list-pattern .ex-table :is(th,td):first-child { padding-left: 24px; }
+.ex-list-pattern .ex-table :is(th,td):last-child { padding-right: 24px; }
+.ex-list-pattern .ex-pagination { padding: 16px 24px; }
+.ex-panel.ex-list-pattern .ex-filters.ex-filters-stacked { padding: 24px 24px 20px; gap: 16px 24px; }
+.ex-field-help { position: relative; display: inline-flex; align-items: center; margin-left: 6px; vertical-align: middle; font-size: 12px; font-weight: 400; }
+.ex-field-help > button { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; padding: 0; border: 0; border-radius: 3px; color: var(--wt-color-text-secondary); background: transparent; font-size: 12px; line-height: 16px; }
+.ex-field-help > button::before { content: '?'; display: inline-block; width: 12px; height: 12px; border: 1px solid currentColor; border-radius: 50%; font-size: 10px; line-height: 11px; text-align: center; }
+.ex-field-help > .ex-field-help-content { display: none; position: absolute; z-index: 60; left: 0; bottom: calc(100% + 8px); width: max-content; max-width: min(320px, calc(100vw - 40px)); padding: 8px 12px; border-radius: 4px; background: #262626; color: white; font-size: 12px; line-height: 20px; font-weight: 400; white-space: normal; box-shadow: var(--wt-shadow-popup); }
+.ex-field-help:not(.is-dismissed):is(:hover,:focus-within,.is-open) > .ex-field-help-content { display: block; }
+@media (max-width: 680px) { .ex-panel.ex-list-pattern .ex-filters.ex-filters-stacked { padding: 20px 16px 16px; } .ex-list-pattern .ex-table :is(th,td):first-child { padding-left: 16px; } .ex-list-pattern .ex-table :is(th,td):last-child { padding-right: 16px; } .ex-list-pattern .ex-pagination { padding: 16px; } }
+
+/* Forms use solid primary / neutral actions; row actions remain text buttons. */
+:where(.ex-form-container, form[data-local-form], .ex-overlay-footer, .ex-filters) .ex-button:not(.primary):not(.danger):not(:where(.ex-notice *, .ex-row-actions *, table *)) { background:var(--wt-color-bg-subtle); border-color:transparent; color:var(--wt-color-text-primary); }
+:where(.ex-form-container, form[data-local-form], .ex-overlay-footer, .ex-filters) .ex-button:not(.primary):not(.danger):not(:where(.ex-notice *, .ex-row-actions *, table *)):hover:not(:disabled) { background:var(--wt-color-bg-hover); color:var(--wt-color-text-primary); }

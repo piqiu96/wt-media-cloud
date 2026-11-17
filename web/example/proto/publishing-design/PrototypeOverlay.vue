@@ -1,10 +1,39 @@
 <script setup>
-import { onUnmounted, useAttrs, watch } from "vue";
+import { computed, inject, nextTick, onUnmounted, useAttrs, watch } from "vue";
 import ResourceOverlay from "../../../src/shared/ui/resource/ResourceOverlay.vue";
 
+import ResourceEditorPage from "../../../src/shared/ui/resource/ResourceEditorPage.vue";
+
 defineOptions({ inheritAttrs: false });
-const props = defineProps({ visible: Boolean, workspace: Boolean });
+const props = defineProps({ visible: Boolean, workspace: Boolean, page: Boolean, taskPage: Boolean, hideTitle: Boolean, backLabel: String });
 const attrs = useAttrs();
+const pages = inject('publishing-editor-pages', null);
+const identity = Symbol('publishing-editor');
+const topPage = computed(() => !pages || pages.value.at(-1)?.id === identity);
+let pageScroll = 0;
+async function requestClose() {
+  if (attrs.busy) return;
+  const handlers = attrs['onUpdate:visible'];
+  for (const handler of Array.isArray(handlers) ? handlers : [handlers]) await handler?.(false);
+}
+watch(() => props.visible && props.page, async active => {
+  if (!pages) return;
+  if (active) {
+    pageScroll = window.scrollY;
+    pages.value.push({ id: identity, title: attrs.title, taskPage: props.taskPage, close: requestClose });
+    await nextTick();
+    window.scrollTo(0, 0);
+  } else {
+    const index = pages.value.findIndex(item => item.id === identity);
+    if (index < 0) return;
+    pages.value.splice(index, 1);
+    await nextTick();
+    window.scrollTo(0, pageScroll);
+  }
+}, { immediate: true });
+onUnmounted(() => {
+  if (pages) pages.value = pages.value.filter(item => item.id !== identity);
+});
 let opener = null;
 let restoreTimer;
 watch(
@@ -27,7 +56,13 @@ onUnmounted(() => clearTimeout(restoreTimer));
 </script>
 
 <template>
-  <ResourceOverlay
+  <Teleport v-if="page && pages" to="#publishing-editor-root" defer>
+    <component :is="ResourceEditorPage" v-if="visible" v-show="topPage" :title="attrs.title" :hide-title="hideTitle" :busy="attrs.busy" :back-label="backLabel || '返回列表'" :class="[attrs.class, { 'publishing-task-page': taskPage }]" @back="requestClose">
+      <div class="resource-overlay__body"><slot /></div>
+      <template v-if="$slots.footer" #footer><div class="resource-overlay__footer"><slot name="footer" /></div></template>
+    </component>
+  </Teleport>
+  <ResourceOverlay v-else
     v-bind="attrs"
     :visible="visible"
     :class="{ 'publishing-workspace-overlay': workspace }"

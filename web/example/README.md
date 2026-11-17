@@ -6,7 +6,7 @@
 
 - 推荐从 Workspace 运行 `python3 scripts/wt.py dev example`，按已有仓库映射启动并挂载当前本地文档。
 - 单独在本仓 `web/` 运行 `npm run dev:example`；文档未挂载时明确显示远端入口。需要挂载时通过本机环境变量 `WT_MEDIA_WORKSPACE_ROOT` 指定 Workspace 根目录，不把绝对路径提交到 Git。
-- 统一入口 `http://127.0.0.1:8768/example/`，旧 `/example/common/`、`/example/proto/` 路径保留。沿用原域名、端口及评审存储键，不清理浏览器 localStorage；切换浏览器或来源前从原评审页导出意见。
+- 统一业务工作台 `/example/operations/production/materials`，公共示例入口 `http://127.0.0.1:8768/example/`。内容生产与新版发布、运营工具统一在 `proto/publishing-design/`；运营概览与旧发布实现已删除，作品／互动／复刻暂缓迁移。旧 `/example/common/`、`/example/proto/` 路径保留。沿用原域名、端口及评审存储键，不清理浏览器 localStorage；切换浏览器或来源前从原评审页导出意见。
 - `npm run build:example` 单独输出 `dist-example/`；`npm run preview:example -- --open /example/` 查看构建结果。旧 HTML/脚本/图片按原路径输出，新 Vue 入口独立打包。
 - `npm run test:example` 验证文档读取边界与已有原型模型。Cloud/Desktop 正式构建不包含本目录，不要求 Workspace 存在。
 

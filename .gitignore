@@ -11,6 +11,9 @@ web/dist/
 web/dist-cloud/
 web/dist-desktop/
 web/dist-example/
+# 原型测试截图、日志及中间输出不进入源码。
+web/example/proto/publishing-design/evidence/
+web/example/proto/publishing-design/plan/evidence/
 # npm tooling can also install dependencies at the repository root.
 node_modules/
 web/node_modules/

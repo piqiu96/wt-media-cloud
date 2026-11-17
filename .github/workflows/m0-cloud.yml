@@ -49,7 +49,15 @@ jobs:
         working-directory: web
         run: |
           npm run test:example
+          npm run test:publishing-prototype
+          npm run test:publishing-plan
           npm run build:example
+
+      - name: Verify publishing prototype interactions
+        working-directory: web
+        run: |
+          npx playwright install --with-deps chromium
+          npm run test:publishing-browser
 
       - name: Apply MySQL migrations
         env:

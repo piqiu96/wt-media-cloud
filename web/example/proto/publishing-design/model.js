@@ -1,5 +1,6 @@
+import { resolvedPublishingDefaults } from "./publishingSettings.js";
 import { accountAvailability } from "./accountAvailability.js";
-import { coverSignature, coverTextErrors } from "./covers.js";
+import { coverSignature, coverTextErrors, coverReadinessIssues } from "./covers.js";
 // Offline publishing prototype. These rules do not invoke platform services.
 export const platforms = ["小红书", "B站", "百家号"];
 export const states = [
@@ -15,6 +16,7 @@ export const states = [
   "已放弃",
 ];
 export const categories = ["三角洲行动", "火影忍者", "通用"];
+export const publishingCategories = db => [...new Set([...categories, ...(db.assets || []).map(asset => asset.category), ...(db.accounts || []).flatMap(account => account.categories || [])].filter(Boolean))];
 export const threshold = 0.1;
 export const occupied = (task) => task.status !== "已放弃";
 export const canRetry = (task) =>
@@ -61,7 +63,7 @@ export function stats(tasks, target = 0) {
     rate: target ? Math.round((published / target) * 100) : null,
   };
 }
-export function defaults(platform, asset) {
+export function defaults(platform, asset, db) {
   return {
     title: asset?.title || "",
     shortTitle: "",
@@ -79,6 +81,7 @@ export function defaults(platform, asset) {
     coverMode: "现成封面",
     templateId: null,
     templateDocument: null,
+    ...resolvedPublishingDefaults(db, platform, asset),
   };
 }
 export function validate(row, db, ignoreId) {
@@ -133,13 +136,12 @@ export function validate(row, db, ignoreId) {
     )
   )
     errors.push("请选择图片库中可用的底图");
-  if (
-    row.candidateId &&
-    (!row.contentApproved ||
-      !row.coverApproved ||
-      row.coverSignature !== coverSignature(row))
-  )
-    errors.push("请审核当前版本的内容与已合成封面");
+  if (row.candidateId) {
+    errors.push(...coverReadinessIssues(row));
+    if (!row.contentApproved || !row.coverApproved) errors.push('请审核当前版本的内容与已合成封面');
+  }
+  if (row.imageId && !['模板合成','规则生成封面'].includes(row.coverMode) && !db.images?.some(image=>image.id===row.imageId && image.enabled && image.uses?.includes('现成封面')))
+    errors.push('请选择可用的现成封面');
   if (
     row.platform === "B站" &&
     row.tags?.split(/[,，、\s]+/).filter(Boolean).length > 10
@@ -314,6 +316,10 @@ export function seed() {
       uses: ["现成封面", "底图"],
       enabled: true,
       src: a.cover,
+      width: 1200,
+      height: 900,
+      format: "SVG",
+      source: "种子资源",
     })),
     templates: [],
   };
@@ -321,6 +327,7 @@ export function seed() {
 
 // Inventory eligibility is independent of editable publishing content.
 export function resourceStatus(db, asset, platform, accountIds = null) {
+  if(asset.publishingPlatforms && !asset.publishingPlatforms.includes(platform))return "成片未分配给当前用户或不适用于该平台";
   if (asset.ready === false)
     return asset.unavailableReason || "成片尚未生成完成";
   if (asset.fileAvailable === false) return "成片文件不可取得";
@@ -390,6 +397,7 @@ export function suggestDistribution(
   previous = [],
   limits = {},
   categoryPriority = [],
+  categoryAccountIds = {},
 ) {
   const load = new Map();
   const scarcity = (assetId) => {
@@ -398,6 +406,7 @@ export function suggestDistribution(
       ? db.accounts.filter(
           (a) =>
             accountIds.includes(a.id) &&
+            (!Array.isArray(categoryAccountIds[video.category]) || categoryAccountIds[video.category].includes(a.id)) &&
             a.enabled &&
             a.loginValid !== false &&
             a.categories.includes(video.category),
@@ -422,6 +431,7 @@ export function suggestDistribution(
       const candidates = db.accounts.filter(
         (a) =>
           accountIds.includes(a.id) &&
+          (!Array.isArray(categoryAccountIds[video.category]) || categoryAccountIds[video.category].includes(a.id)) &&
           a.platform === platform &&
           a.categories.includes(video.category) &&
           a.enabled &&
@@ -458,7 +468,7 @@ export function suggestDistribution(
               category: video.category,
               assetId,
               accountId: chosen.id,
-              ...defaults(platform, video),
+              ...defaults(platform, video, db),
               overrides: [],
               modified: false,
             },

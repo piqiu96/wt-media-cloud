@@ -1,6 +1,7 @@
 <script setup>
-import { computed, ref } from "vue";
+import { computed, ref, watch } from "vue";
 import Overlay from "./PrototypeOverlay.vue";
+import PublishingScopeFilters from "./PublishingScopeFilters.vue";
 import { accountAvailability } from "./accountAvailability.js";
 const props = defineProps({ db: Object, platform: String, category: String });
 const emit = defineEmits(["select"]);
@@ -26,11 +27,13 @@ const rows = computed(() =>
   props.db.accounts.filter(
     (a) =>
       a.platform === props.platform &&
+      a.categories?.includes(props.category) &&
       `${a.name} ${a.id}`.includes(search.value) &&
       (!level.value || a.level === level.value) &&
       (!only.value || !reason(a)),
   ),
 );
+watch(() => [props.platform, props.category], () => { search.value = ""; level.value = ""; only.value = false; });
 defineExpose({
   open() {
     visible.value = true;
@@ -39,7 +42,7 @@ defineExpose({
 </script>
 <template>
   <Overlay v-model:visible="visible" title="选择发布账号" :width="900"
-    ><p>{{ platform }} · {{ category }} · 仅可选择当前类目可用账号</p>
+    ><PublishingScopeFilters :platform="platform" :category="category" />
     <div class="account-tools">
       <t-input
         v-model="search"
@@ -84,7 +87,6 @@ defineExpose({
       </article>
       <p v-if="!rows.length">未找到匹配账号，请调整筛选条件。</p>
     </div>
-    <p class="muted">账号额度以平台最新同步结果为准。</p>
     <template #footer
       ><t-button variant="outline" @click="visible = false"
         >取消</t-button
@@ -131,9 +133,5 @@ defineExpose({
 }
 .blocked {
   color: var(--wt-color-warning-text) !important;
-}
-.muted {
-  color: var(--wt-color-text-secondary);
-  font-size: 12px;
 }
 </style>

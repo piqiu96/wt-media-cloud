@@ -80,6 +80,7 @@ function appFor(component, props) {
     "t-alert",
     "t-select",
     "t-textarea",
+    "t-radio",
     "t-radio-group",
     "t-radio-button",
   ])
@@ -92,6 +93,17 @@ function appFor(component, props) {
             ? null
             : h("div", slots.default?.()),
     });
+  app.component("t-table", {
+    props: ["data", "columns"],
+    setup(props, { slots }) {
+      return () => h("table", [
+        h("thead", [h("tr", props.columns.map(column => h("th", column.title)))]),
+        h("tbody", props.data.map(row => h("tr",
+          props.columns.map(column => h("td", slots[column.colKey]?.({ row }))),
+        ))),
+      ]);
+    },
+  });
   return app;
 }
 it("opens the creation component with an empty or resumed draft without initialization errors", async () => {
@@ -120,8 +132,32 @@ it("shows adopted content and a task selector in the content workspace before in
     appFor(BatchContentWorkspace, { db, rows }),
   );
   expect(html).toContain("人工已确认标题");
-  expect(html).toContain("资源只读");
-  expect(html).toContain("批量 AI 生成");
-  expect(html).toContain("当前采用封面");
+  expect(html).toContain("发布账号");
+  expect(html).toContain("发布成片");
+  expect(html).not.toContain("batch-content-selection");
+  expect(html).toContain("配置状态");
+  expect(html).toContain("待完善");
+  expect(html).toContain("未选择创作声明");
   expect(html).not.toContain("CONTENT GENERATION");
+});
+
+describe('category account selection', () => {
+  function scopedDb() {
+    const db=seed();db.tasks=[];
+    db.accounts=[{id:1,enabled:true,platform:'小红书',quality:'普通',categories:['三角洲行动','火影忍者']},{id:2,enabled:true,platform:'小红书',quality:'普通',categories:['三角洲行动']}];
+    return db;
+  }
+  it('matches only accounts selected for each category',()=>{
+    const rows=suggestDistribution(scopedDb(),['小红书'],[128,129],[1,2],[],{},['三角洲行动','火影忍者'],{'三角洲行动':[2],'火影忍者':[1]});
+    expect(rows.find(r=>r.assetId===128).accountId).toBe(2);
+    expect(rows.find(r=>r.assetId===129).accountId).toBe(1);
+  });
+  it('an explicitly empty category pool cannot borrow accounts from another category',()=>{
+    const rows=suggestDistribution(scopedDb(),['小红书'],[128,129],[1],[],{},[],{'三角洲行动':[],'火影忍者':[1]});
+    expect(rows.map(r=>r.assetId)).toEqual([129]);
+  });
+  it('shares one account limit across category selections',()=>{
+    const rows=suggestDistribution(scopedDb(),['小红书'],[128,129],[1],[],{1:1},['三角洲行动','火影忍者'],{'三角洲行动':[1],'火影忍者':[1]});
+    expect(rows).toHaveLength(1);
+  });
 });

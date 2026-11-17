@@ -36,9 +36,19 @@ describe('warning confirmation', () => {
     expect(destroy).toHaveBeenCalledOnce()
 
     const canceled = feedback.confirmWarning({ title: '继续执行', message: '存在风险' })
+    expect(confirm.mock.lastCall[0].cancelBtn.content).toBe('取消')
     confirm.mock.lastCall[0].onCancel()
     expect(await canceled).toBe(false)
   })
+})
+
+it('keeps editing when the explicit stay action is selected', async () => {
+  confirm.mockReturnValue({ destroy })
+  const result = feedback.confirmWarning({ title: '放弃修改？', message: '修改尚未保存', cancelText: '继续编辑', confirmText: '放弃修改' })
+  const dialog = confirm.mock.lastCall[0]
+  expect(dialog.cancelBtn.content).toBe('继续编辑')
+  dialog.onCancel()
+  expect(await result).toBe(false)
 })
 
 describe('notice', () => {

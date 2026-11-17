@@ -9,6 +9,7 @@ import {
 } from "./proto/publishing-design/taskActions.js";
 import { canRetry } from "./proto/publishing-design/model.js";
 import { queueTask } from "./proto/publishing-design/relationships.js";
+import { planAction, protectPlanSnapshot } from "./proto/publishing-design/planBridge.js";
 import {
   batchState,
   executionChecks,
@@ -118,6 +119,7 @@ export function createBatchStore({ file, check } = {}) {
             }
           }
         }
+        protectPlanSnapshot(current.data, db);
         protectBatchSnapshot(current.data, db);
         migrateBatchLifecycle(db);
         return {
@@ -143,7 +145,9 @@ export function createBatchStore({ file, check } = {}) {
           b = db.batches.find((b) => b.id === batchId);
         const beforeState = b ? batchState(db, b) : null,
           logLength = b?.log?.length || 0;
-        if (action === "taskOperation") {
+        if (action === "planOperation") {
+          planAction(db, input.planId, input.action, input.value);
+        } else if (action === "taskOperation") {
           const t = db.tasks.find(
             (t) => t.id === input.taskId && t.batchId === batchId,
           );
@@ -167,9 +171,9 @@ export function createBatchStore({ file, check } = {}) {
             }
             if (
               input.action === "verify" &&
-              !["已发布", "执行失败", "结果待确认"].includes(input.status)
+              !["已发布", "平台审核中", "执行失败", "结果待确认"].includes(input.status)
             )
-              throw Error("批次任务仅支持已发布、未发布或仍不明确三种核实结论");
+              throw Error("请选择有效的核实结论");
             if (
               input.status === "已发布" &&
               (!input.publicAt ||

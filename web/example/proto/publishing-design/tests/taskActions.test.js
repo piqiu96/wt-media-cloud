@@ -93,6 +93,7 @@ describe("evidence-bound operations", () => {
         {
           status: "已发布",
           url: "https://www.bilibili.com/video/BV123",
+          publicAt: "2026-01-01T00:00:00Z",
           attempt: 1,
         },
         "运营",

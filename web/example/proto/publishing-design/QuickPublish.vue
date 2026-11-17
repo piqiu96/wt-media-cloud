@@ -1,9 +1,13 @@
 <script setup>
 import { computed, nextTick, ref, watch } from "vue";
 import Overlay from "./PrototypeOverlay.vue";
+import { chooseDraft } from "./draftRecovery.js";
 import RequiredLabel from "./RequiredLabel.vue";
+import TaskFieldHelp from "./TaskFieldHelp.vue";
 import { accountAvailability } from "./accountAvailability.js";
 import AccountPicker from "./AccountPicker.vue";
+import PublishingScopeFilters from "./PublishingScopeFilters.vue";
+import PublishingExecutionSettings from "./PublishingExecutionSettings.vue";
 import { defaultPublishingResources } from "./quickPublishSelection.js";
 import { canEditTask } from "./taskExperience.js";
 import { feedback } from "../../../src/shared/ui/feedback/index.js";
@@ -23,7 +27,7 @@ import {
 } from "./covers.js";
 import { createPublication, clone } from "./relationships.js";
 const props = defineProps({ db: Object, persist: Function });
-const emit = defineEmits(["created", "preview"]);
+const emit = defineEmits(["created", "preview", "return-source"]);
 const visible = ref(false),
   picker = ref(false),
   search = ref(""),
@@ -38,14 +42,23 @@ const visible = ref(false),
   failure = ref(""),
   form = ref(null);
 const coverChoice = ref("替换图片");
+const editBaseline = ref("");
+const editingVersion = ref(null);
 const savedDraft = ref(""),
   editing = ref(null),
   accountPicker = ref(null);
+function openAccountPicker() {
+  if (!category.value || editing.value) return;
+  accountPicker.value?.open();
+}
 async function edit(task) {
+  sourceReturn.value=false;
   coverChoice.value = task.coverTreatment || "替换图片";
-  if (!canEditTask(task)) return;
+  if (!canEditTask(task, props.db)) return;
+  editingVersion.value = task.version || 1;
   editing.value = task;
   row.value = clone(task);
+  editBaseline.value = JSON.stringify(row.value);
   platform.value = task.platform;
   category.value = task.category;
   accountId.value = task.accountId;
@@ -123,12 +136,8 @@ const problems = computed(() =>
               : "请选择一条可用成片",
       ],
 );
-const hasDraft = computed(
-  () =>
-    !!props.db.quickDraft?.active ||
-    (props.db.publishDraft?.active &&
-      props.db.publishDraft?.mode === "快速发布"),
-);
+const currentDraft = computed(() => props.db.quickDraft?.active ? props.db.quickDraft : props.db.publishDraft?.active && props.db.publishDraft.mode === '快速发布' ? props.db.publishDraft : null);
+const hasDraft = computed(() => !!currentDraft.value);
 const templateFields = computed(() =>
   coverTextFields(row.value?.templateDocument),
 );
@@ -149,6 +158,7 @@ function draft() {
     category: category.value,
     row: row.value ? clone(row.value) : null,
     creationKey: creationKey.value,
+    savedAt: props.db.quickDraft?.creationKey === creationKey.value ? props.db.quickDraft.savedAt || null : null,
   };
 }
 watch(
@@ -162,26 +172,34 @@ watch(
   { deep: true },
 );
 watch([search, unavailable], () => (assetPage.value = 1));
+watch([platform, category, accountId], () => { search.value = ""; unavailable.value = false; assetPage.value = 1; });
+const sourceReturn=ref(false);
 async function open(source = null) {
+  sourceReturn.value=!!source?.returnURL;
   editing.value = null;
-  if (hasDraft.value && !source) {
-    await resume();
-    return;
+  if (hasDraft.value) {
+    const choice = await chooseDraft({ label: '发布任务', savedAt: currentDraft.value?.savedAt });
+    if (!choice) return;
+    if (choice === 'continue') return resume();
+    const previous = clone(props.db.quickDraft || null);
+    props.db.quickDraft = { active: false };
+    const legacyActive = props.db.publishDraft?.mode === '快速发布' && props.db.publishDraft.active;
+    if (legacyActive) props.db.publishDraft.active = false;
+    if (!(await persist())) {
+      props.db.quickDraft = previous;
+      if (legacyActive) props.db.publishDraft.active = true;
+      feedback.toast.error('无法重新开始，原草稿已保留，请重试。');
+      return;
+    }
   }
-  if (
-    hasDraft.value &&
-    source &&
-    !(await feedback.confirmWarning({
-      title: "替换未完成的快速发布配置？",
-      message: "当前草稿会被替换；可取消并继续原草稿。",
-      confirmText: "使用复制配置",
-    }))
-  )
-    return;
   row.value = null;
   platform.value = source?.platform || "";
   accountId.value = source?.accountId || null;
   category.value = source?.category || "";
+  if(source?.sourceOutputId!=null && !source.accountId){
+    accountId.value=defaultPublishingResources(props.db,platform.value,category.value,null).account?.id||null;
+    source={...source,accountId:accountId.value};
+  }
   copied.value = source ? clone(source) : null;
   if (source) {
     const fields = [
@@ -211,13 +229,14 @@ async function open(source = null) {
       "coverVariants",
       "coverSignature",
     ];
-    row.value = initCandidate(
-      Object.fromEntries(
+    row.value = initCandidate({
+      ...defaults(platform.value, props.db.assets.find(a => a.id === source.assetId), props.db),
+      ...Object.fromEntries(
         fields
           .filter((f) => source[f] !== undefined)
           .map((f) => [f, clone(source[f])]),
       ),
-    );
+    });
     coverChoice.value = source.coverTreatment || "替换图片";
   }
   creationKey.value = crypto.randomUUID();
@@ -232,7 +251,8 @@ async function open(source = null) {
 }
 async function resume() {
   editing.value = null;
-  const old = props.db.quickDraft || props.db.publishDraft;
+  const old = currentDraft.value;
+  if (!old) return;
   platform.value = old.platform || old.platforms?.[0] || "";
   accountId.value = old.accountId || old.quickAccountId || null;
   category.value = old.category || old.categories?.[0] || "";
@@ -242,8 +262,10 @@ async function resume() {
       ? clone(old.rows[0])
       : null;
   creationKey.value = old.creationKey || crypto.randomUUID();
+  props.db.quickDraft = { ...clone(old), creationKey: creationKey.value };
   error.value = "";
-  notice.value = "已恢复草稿，资源可用性会重新检查。";
+  notice.value = "";
+  feedback.toast.info({ content: "已恢复草稿，资源可用性会重新检查。", duration: 3000 });
   checked.value = false;
   coverChoice.value = row.value?.coverTreatment || "替换图片";
   visible.value = true;
@@ -299,7 +321,7 @@ async function chooseAsset(a) {
     accountId: accountId.value,
     assetId: a.id,
     category: a.category,
-    ...defaults(platform.value, a),
+    ...defaults(platform.value, a, props.db),
     coverSource: a.cover,
     manualFields: [],
   });
@@ -336,7 +358,15 @@ function setField(field, value) {
   notice.value = "";
 }
 async function generate() {
-  error.value = "暂时无法获取 AI 建议，请手动填写或稍后重试。";
+  if (generating.value || rendering.value || busy.value || !row.value) return;
+  generating.value = true;
+  try {
+    // 当前未接建议服务。短暂的操作反馈窗口防止连点和加载闪烁，不生成假内容。
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    feedback.toast.error({ content: "暂时无法获取 AI 建议，请手动填写或稍后重试。", duration: 3000 });
+  } finally {
+    generating.value = false;
+  }
 }
 async function renderCover() {
   const current = row.value;
@@ -469,16 +499,23 @@ async function persist() {
 async function save() {
   error.value = "";
   busy.value = true;
-  props.db.quickDraft = draft();
+  props.db.quickDraft = { ...draft(), savedAt: new Date().toISOString() };
   if (await persist()) {
-    notice.value = "草稿已保存，不占用成片。";
+    notice.value = "";
     savedDraft.value = JSON.stringify(draft());
-    feedback.toast.success(notice.value);
+    feedback.toast.success({ content: "草稿已保存，不占用成片。", duration: 3000 });
   }
   busy.value = false;
 }
 async function close() {
+  if (generating.value || rendering.value || busy.value) return;
   if (editing.value) {
+    if (JSON.stringify(row.value) !== editBaseline.value && !(await feedback.confirmWarning({
+      title: "放弃未保存的内容？",
+      message: "本次标题、封面等修改尚未保存，返回后将丢失。",
+      confirmText: "放弃修改",
+      cancelText: "继续编辑",
+    }))) return;
     visible.value = false;
     editing.value = null;
     return;
@@ -487,22 +524,23 @@ async function close() {
   if (!platform.value && !row.value) {
     props.db.quickDraft = { active: false };
     visible.value = false;
+    if(sourceReturn.value){sourceReturn.value=false;emit("return-source");}
     return;
   }
   if (
     JSON.stringify(draft()) !== savedDraft.value &&
     (platform.value || row.value) &&
     !(await feedback.confirmWarning({
-      title: "保存草稿后关闭？",
+      title: "保存草稿后返回？",
       message: "保存后可继续配置；草稿不会占用成片或启动任务。",
-      confirmText: "保存并关闭",
+      confirmText: "保存并返回",
       cancelText: "继续编辑",
     }))
   )
     return;
   busy.value = true;
-  props.db.quickDraft = draft();
-  if (await persist()) visible.value = false;
+  props.db.quickDraft = { ...draft(), savedAt: new Date().toISOString() };
+  if (await persist()) {visible.value = false;if(sourceReturn.value){sourceReturn.value=false;emit("return-source");}}
   busy.value = false;
 }
 async function create() {
@@ -550,8 +588,9 @@ async function create() {
       throw Error("保存失败，尚未创建任务，当前输入已保留。");
     if (editing.value) {
       const current = props.db.tasks.find((t) => t.id === editing.value.id);
-      if (!current || !canEditTask(current))
+      if (!current || !canEditTask(current, props.db))
         throw Error("任务状态已变化，不能保存修改");
+      if ((current.version || 1) !== editingVersion.value) throw Error("任务内容已由其他操作更新，请保留当前输入后重新打开任务");
       const before = clone(current);
       const fields = [
         "title",
@@ -577,6 +616,8 @@ async function create() {
         "imageId",
         "contentApproved",
         "coverApproved",
+        "publishMethod",
+        "publishingConfigVersion",
       ];
       for (const field of fields)
         if (row.value[field] !== undefined)
@@ -643,29 +684,21 @@ defineExpose({ open, resume, edit, hasDraft });
 <template>
   <Overlay
     :visible="visible"
-    :title="editing ? `编辑发布内容 · ${editing.id}` : '快速发布'"
-    workspace
+    :title="editing ? '编辑发布内容' : '快速发布'"
+    page
+    task-page
+    :back-label="sourceReturn ? '返回成片管理' : '返回发布任务列表'"
     kind="drawer"
     :width="1060"
     :busy="busy || generating || rendering"
     @update:visible="close"
   >
     <div ref="form" class="quick-publish">
-      <header class="quick-intro">
-        <p>
-          {{
-            editing
-              ? "修改当前待执行内容，保存产生新版本。"
-              : "选择平台与账号，配置内容。创建任务后保持待执行。"
-          }}
-        </p>
-      </header>
       <t-alert v-if="error" theme="warning" :message="error" />
       <p v-if="notice" class="quick-notice" role="status">{{ notice }}</p>
-      <section class="quick-block" data-field="resources" tabindex="-1">
+      <section class="quick-block resource-editor-section" :class="{ 'is-locked': !!editing }" data-field="resources" tabindex="-1">
         <div class="quick-section-heading">
-          <h3><span>01</span>选择发布平台与账号</h3>
-          <small>一个平台 · 一个账号 · 一条成片</small>
+          <h3><span>01</span>{{ editing ? "发布资源（已锁定）" : "选择发布平台与账号" }}</h3>
         </div>
         <div class="quick-resource-grid">
           <label
@@ -682,21 +715,20 @@ defineExpose({ open, resume, edit, hasDraft });
               :disabled="!platform || !!editing"
               :options="categoryOptions.map((c) => ({ label: c, value: c }))"
               @change="(v) => changeResource('category', v)" /></label
-          ><label
-            ><RequiredLabel>发布账号</RequiredLabel
-            ><t-button
-              variant="outline"
+          ><div class="quick-account-field"
+            ><span class="quick-field-heading"><RequiredLabel>发布账号</RequiredLabel><TaskFieldHelp v-if="selectedAccount" label="发布账号" :content="`等级 ${selectedAccount.level ?? '未同步'}；今日余量 ${selectedAvailability?.remaining ?? '未知'}。`" /></span
+            ><t-input
+              class="quick-account-input"
+              :value="selectedAccount?.name || ''"
+              placeholder="请选择发布账号"
+              readonly
               :disabled="!category || !!editing"
-              @click="accountPicker.open()"
-              >{{ selectedAccount?.name || "选择账号" }}</t-button
-            ></label
-          >
+              @click="openAccountPicker"
+              @enter="openAccountPicker"
+            ><template #suffix><t-button variant="text" size="small" :disabled="!category || !!editing" :aria-label="selectedAccount ? '更换账号' : '选择账号'" @click.stop="openAccountPicker">{{ selectedAccount ? '更换' : '选择' }}</t-button></template></t-input>
+            </div>
         </div>
-        <p v-if="selectedAccount" class="quick-help">
-          {{ selectedAccount.name }} · 等级
-          {{ selectedAccount.level ?? "未同步" }} · 今日余量
-          {{ selectedAvailability?.remaining ?? "未知" }}
-        </p>
+
         <p v-if="platform && !accountOptions.length" class="quick-warning">
           当前平台没有可用账号，请先补充账号或处理登录状态。
         </p>
@@ -723,8 +755,6 @@ defineExpose({ open, resume, edit, hasDraft });
             :disabled="!category || !accountId || !!editing"
             @click="
               picker = true;
-              search = '';
-              unavailable = false;
             "
             >{{ selectedAsset ? "更换成片" : "选择成片" }}</t-button
           ><t-button
@@ -740,10 +770,10 @@ defineExpose({ open, resume, edit, hasDraft });
           >
         </div>
       </section>
-      <section v-if="row" class="quick-block">
+      <section v-if="row" class="quick-block resource-editor-section">
         <div class="quick-section-heading">
           <h3><span>02</span>发布内容</h3>
-          <t-button variant="outline" :loading="generating" @click="generate()"
+          <t-button variant="outline" :loading="generating" :disabled="generating || rendering || busy" :aria-busy="generating" @click="generate()"
             >AI 填写</t-button
           >
         </div>
@@ -770,22 +800,20 @@ defineExpose({ open, resume, edit, hasDraft });
                 @change="(v) => setField('title', v)"
             /></label>
             <div class="quick-cover-fields" data-field="cover" tabindex="-1">
-              <h4><RequiredLabel>发布封面</RequiredLabel></h4>
-              <t-radio-group
-                :value="coverChoice === '替换图片' ? '替换图片' : '使用模板'"
-                @change="setCoverMethod"
-                ><t-radio-button value="替换图片">替换图片</t-radio-button
-                ><t-radio-button value="使用模板"
-                  >使用模板</t-radio-button
-                ></t-radio-group
-              >
+              <h4 class="quick-field-heading"><RequiredLabel>发布封面</RequiredLabel><TaskFieldHelp label="发布封面" :content="platform === '百家号' ? '使用现成图片或选择模板添加文字。横竖封面规格待平台核验，当前按原图预览。' : '使用现成图片，或选择模板添加文字；文字字段由模板决定。'" /></h4>
+              <div class="quick-cover-methods" role="radiogroup" aria-label="封面来源">
+                <label class="quick-cover-method" v-for="choice in [{value:'替换图片', title:'使用现成封面', note:'默认使用成片封面，可从图片库更换'}, {value:'使用模板', title:'模板合成', note:'选择模板、底图并填写封面文字'}]" :key="choice.value" :class="{selected: (coverChoice === '替换图片' ? '替换图片' : '使用模板') === choice.value}">
+                  <input type="radio" name="quick-cover-method" :value="choice.value" :checked="(coverChoice === '替换图片' ? '替换图片' : '使用模板') === choice.value" @change="setCoverMethod(choice.value)" />
+                  <span><strong>{{ choice.title }}</strong><small>{{ choice.note }}</small></span>
+                </label>
+              </div>
               <div class="quick-cover-workspace">
                 <button
                   class="quick-cover-image"
                   @click="emit('preview', { row, kind: 'cover' })"
                 >
                   <img :src="row.cover" alt="当前发布封面" /><span
-                    >点击检查各比例效果</span
+                    >查看最终封面</span
                   >
                 </button>
                 <div class="quick-cover-controls">
@@ -804,9 +832,9 @@ defineExpose({ open, resume, edit, hasDraft });
                       @change="setTemplate"
                   /></label>
                   <label class="quick-cover-source"
-                    ><RequiredLabel :required="false">{{
-                      coverChoice === "替换图片" ? "选择图片" : "底图（选填）"
-                    }}</RequiredLabel
+                    ><span class="quick-field-heading"><RequiredLabel :required="false">{{
+                      coverChoice === "替换图片" ? "选择图片" : "底图"
+                    }}</RequiredLabel><TaskFieldHelp v-if="coverChoice !== '替换图片'" label="底图" content="不选择底图时使用素材默认图片，也可从图片库选择替换。" /></span
                     ><t-select
                       :value="
                         row.imageId ||
@@ -853,18 +881,13 @@ defineExpose({ open, resume, edit, hasDraft });
                       >生成封面</t-button
                     >
                   </template>
-                  <p v-else class="quick-help">
-                    直接使用图片，无需填写封面文字。
-                  </p>
-                  <small v-if="platform === '百家号'" class="quick-help"
-                    >横竖封面规格待平台核验，当前按原图预览。</small
-                  >
                 </div>
               </div>
+              <p v-if="row.coverError" class="quick-warning" role="alert">{{ row.coverError }}</p>
             </div>
             <label v-if="platform !== '百家号'" data-field="description"
               ><RequiredLabel :required="platform === '百家号'">{{
-                platform === "B站" ? "简介（选填）" : "正文（选填）"
+                platform === "B站" ? "简介" : "正文"
               }}</RequiredLabel
               ><t-textarea
                 :value="row.description"
@@ -877,10 +900,10 @@ defineExpose({ open, resume, edit, hasDraft });
                 placeholder="多个标签用逗号分隔"
                 @change="(v) => setField('tags', v)" /></label
             ><label v-else
-              >话题（选填）<t-input
-                :value="row.topics"
+              >话题<t-input
+                :value="platform === '百家号' ? row.tags : row.topics"
                 placeholder="添加与内容相关的话题"
-                @change="(v) => setField('topics', v)"
+                @change="(v) => setField(platform === '百家号' ? 'tags' : 'topics', v)"
             /></label>
             <div class="quick-resource-grid two">
               <label data-field="declaration"
@@ -898,52 +921,22 @@ defineExpose({ open, resume, edit, hasDraft });
                   @change="(v) => setField('partition', v)"
               /></label>
             </div>
-            <details class="quick-settings">
-              <summary>
-                更多设置
-                <span
-                  >{{ row.visibility || "公开" }} ·
-                  {{ row.schedule || "启动后尽快提交" }}</span
-                >
-              </summary>
-              <div class="quick-resource-grid two">
-                <label v-if="platform !== '百家号'"
-                  >可见范围<t-select
-                    :value="row.visibility"
-                    :options="[
-                      { label: '公开', value: '公开' },
-                      { label: '仅自己可见', value: '仅自己可见' },
-                    ]"
-                    @change="(v) => setField('visibility', v)" /></label
-                ><label data-field="schedule"
-                  >指定发布时间（选填）<input
-                    type="datetime-local"
-                    :value="row.schedule"
-                    @change="setField('schedule', $event.target.value)"
-                /></label>
-              </div>
-            </details>
+            <label v-if="platform !== '百家号'">可见范围<t-select :value="row.visibility" :options="[{ label: '公开', value: '公开' }, { label: '仅自己可见', value: '仅自己可见' }]" @change="value => setField('visibility', value)" /></label>
+
           </div>
         </div>
       </section>
-      <t-alert v-if="error" theme="warning" :message="error" />
-      <p v-if="row?.coverError" class="quick-warning">{{ row.coverError }}</p>
+      <PublishingExecutionSettings v-if="row" :row="row" number="03" @change="setField" />
     </div>
     <template #footer
-      ><span class="quick-footer-note">{{
-        problems.length
-          ? `还有 ${problems.length} 项待处理`
-          : editing
-            ? "保存后更新内容版本，任务保持待执行"
-            : "创建后待执行，不会立即发布"
-      }}</span
-      ><t-button v-if="!editing" variant="outline" @click="save"
+      ><span v-if="problems.length" class="quick-footer-note" role="status">还有 {{ problems.length }} 项待处理</span
+      ><t-button v-if="!editing" theme="default" variant="outline" :disabled="busy || generating || rendering" @click="save"
         >保存草稿</t-button
       ><t-button
         :disabled="generating || rendering"
         :loading="busy"
         @click="create"
-        >{{ editing ? "保存修改" : "创建任务" }}</t-button
+        >{{ editing ? "保存" : "创建任务" }}</t-button
       ></template
     >
   </Overlay>
@@ -955,7 +948,8 @@ defineExpose({ open, resume, edit, hasDraft });
     @select="(a) => changeResource('account', a.id)"
   />
   <Overlay v-model:visible="picker" title="选择成片" :width="900"
-    ><div class="quick-picker-tools">
+    ><PublishingScopeFilters :platform="platform" :category="category" />
+    <div class="quick-picker-tools">
       <t-input
         v-model="search"
         clearable
@@ -1030,44 +1024,52 @@ defineExpose({ open, resume, edit, hasDraft });
   >
 </template>
 <style scoped>
+.quick-account-input :deep(input:not(:disabled)) { cursor:pointer; }
+.quick-cover-methods { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+.quick-cover-methods > label { display:flex; flex-direction:row; align-items:flex-start; gap:10px; padding:14px; border:1px solid var(--wt-color-border); border-radius:6px; cursor:pointer; }
+.quick-cover-methods > label.selected { border-color:var(--wt-color-primary); background:var(--wt-color-primary-light); }
+.quick-cover-methods input { flex:none; margin:4px 0 0; accent-color:var(--wt-color-primary); }
+.quick-publish .quick-cover-methods label.quick-cover-method > span { display:block; }
+.quick-cover-methods strong { display:block; font-size:13px; font-weight:400; }
+.quick-cover-methods small { display:block; margin-top:4px; font-size:12px; color:var(--wt-color-text-secondary); }
+@media(max-width:680px){.quick-cover-methods{grid-template-columns:1fr;}}
+
 .quick-publish {
   color: var(--wt-color-text-primary);
-  max-width: 1120px;
+  max-width: none;
   margin: auto;
   font-size: 14px;
 }
-.quick-intro {
-  margin: 0 0 24px;
-}
-.quick-intro p,
 .quick-help {
   font-size: 12px;
   line-height: 1.7;
   color: var(--wt-color-text-secondary);
   margin: 8px 0 16px;
 }
-.quick-intro p {
-  margin: 0;
-}
 .quick-block {
-  margin-top: 32px;
+  margin-top: var(--wt-space-block, 16px);
 }
+.quick-block.is-locked :deep(.t-input.t-is-disabled),
+.quick-block.is-locked :deep(.t-input__inner:disabled) { color: var(--wt-color-text-secondary); -webkit-text-fill-color: var(--wt-color-text-secondary); background: var(--wt-color-bg-subtle); }
+.quick-block.is-locked :deep(.t-button:disabled) { color: var(--wt-color-text-secondary); background: var(--wt-color-bg-subtle); }
 .quick-block[data-field="resources"] {
   margin-top: 0;
 }
+.quick-field-heading { display: flex; align-items: center; justify-content: flex-start !important; gap: 6px !important; }
 .quick-section-heading {
   display: flex;
   justify-content: space-between;
   gap: 12px;
   align-items: center;
-  margin-bottom: 20px;
+  margin-bottom: 16px;
 }
 .quick-section-heading h3 {
   display: flex;
   align-items: center;
   gap: 10px;
-  font-size: 14px;
-  font-weight: 600;
+  font-size: var(--wt-font-size-section, 16px);
+  line-height: var(--wt-line-height-section, 24px);
+  font-weight: 500;
   margin: 0;
 }
 .quick-section-heading h3 > span {
@@ -1081,10 +1083,6 @@ defineExpose({ open, resume, edit, hasDraft });
   place-items: center;
   font-weight: 500;
 }
-.quick-section-heading > small {
-  font-size: 12px;
-  color: var(--wt-color-text-secondary);
-}
 .quick-resource-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -1093,12 +1091,14 @@ defineExpose({ open, resume, edit, hasDraft });
 .quick-resource-grid.two {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
-.quick-publish label:not(.t-radio):not(.t-radio-button):not(.t-checkbox) {
+.quick-publish label:not(.t-radio):not(.t-radio-button):not(.t-checkbox):not(.quick-cover-method),
+.quick-account-field {
   display: flex;
   flex-direction: column;
   gap: 8px;
   color: var(--wt-color-text-primary);
   font-size: 13px;
+  line-height: 20px;
   font-weight: 500;
   min-width: 0;
 }
@@ -1134,7 +1134,7 @@ defineExpose({ open, resume, edit, hasDraft });
   min-width: 0;
 }
 .quick-selected-asset strong {
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 500;
   display: block;
 }
@@ -1161,6 +1161,7 @@ defineExpose({ open, resume, edit, hasDraft });
 .quick-cover-fields h4 {
   margin: 0;
   font-size: 13px;
+  line-height: 20px;
   font-weight: 500;
 }
 .quick-cover-fields :deep(.t-radio-group) {
@@ -1192,10 +1193,6 @@ defineExpose({ open, resume, edit, hasDraft });
 }
 .quick-cover-source {
   grid-column: 1 / -1;
-}
-.quick-cover-controls .quick-help {
-  grid-column: 1 / -1;
-  margin: 0;
 }
 .quick-generate-cover {
   align-self: end;
@@ -1230,30 +1227,6 @@ defineExpose({ open, resume, edit, hasDraft });
   padding: 8px;
   color: var(--wt-color-primary);
   font-size: 12px;
-}
-.quick-settings {
-  padding-top: 4px;
-}
-.quick-settings summary {
-  color: var(--wt-color-primary);
-  cursor: pointer;
-  font-size: 13px;
-  padding-bottom: 16px;
-}
-.quick-settings summary > span {
-  color: var(--wt-color-text-secondary);
-  margin-left: 12px;
-  font-size: 12px;
-}
-.quick-publish input[type="datetime-local"] {
-  box-sizing: border-box;
-  height: 36px;
-  padding: 0 12px;
-  border: 1px solid var(--wt-color-border-control);
-  border-radius: 4px;
-  color: var(--wt-color-text-primary);
-  background: var(--wt-color-bg-container);
-  min-width: 0;
 }
 .quick-publish input[type="file"] {
   font-size: 12px;
@@ -1373,6 +1346,7 @@ defineExpose({ open, resume, edit, hasDraft });
   .quick-selected-asset {
     flex-wrap: wrap;
   }
+  .quick-selected-asset > div { flex: 1 1 calc(100% - 90px); }
   .quick-selected-asset strong {
     overflow-wrap: anywhere;
   }
@@ -1381,10 +1355,6 @@ defineExpose({ open, resume, edit, hasDraft });
   }
   .quick-footer-note {
     display: none;
-  }
-  .quick-settings summary > span {
-    display: block;
-    margin: 8px 0;
   }
 }
 </style>

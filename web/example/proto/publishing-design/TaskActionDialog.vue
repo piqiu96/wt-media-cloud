@@ -3,6 +3,7 @@ import { batchCommand } from "./batchApi.js";
 import { ref } from "vue";
 import Overlay from "./PrototypeOverlay.vue";
 import RequiredLabel from "./RequiredLabel.vue";
+import ResourceDateTime from "../../../src/shared/ui/resource/ResourceDateTime.vue";
 import {
   cancelPublication,
   verifyResult,
@@ -19,12 +20,12 @@ const visible = ref(false),
   busy = ref(false),
   form = ref({});
 const titles = {
-  cancel: "确认取消任务",
+  cancel: "确认终止任务",
   human: "处理发布异常",
   verify: "核实发布结果",
   retry: "重试任务",
   start: "执行任务",
-  supplement: "补录公开结果",
+  supplement: "补录发布结果",
 };
 function open(t, a) {
   task.value = t;
@@ -68,8 +69,8 @@ async function submit() {
       works = JSON.parse(JSON.stringify(props.db.works || []));
     if (action.value === "cancel") cancelPublication(t, form.value.reason);
     if (action.value === "human") processHuman(t, form.value.human);
-    if (action.value === "verify")
-      verifyResult(props.db, t, form.value, "未登录用户");
+    if (["verify", "supplement"].includes(action.value))
+      verifyResult(props.db, t, form.value, "当前运营");
     if (action.value === "retry") {
       if (!canRetry(t)) throw Error("原执行结束或未发布证据不足，不能重试");
       const errors = taskChecks(t, props.db);
@@ -113,10 +114,10 @@ defineExpose({ open });
       <t-alert v-if="error" theme="warning" :message="error" />
       <template v-if="action === 'cancel'"
         ><p>
-          取消后停止后续执行，保留当前成片的平台占用；原任务不可恢复。已提交的平台稿件不会被撤回。
+          终止后停止后续执行，保留当前成片的平台占用；原任务不可恢复。已提交的平台稿件不会被撤回。
         </p>
         <label class="v4-field"
-          >取消原因（选填）<t-textarea
+          >终止原因<t-textarea
             v-model="form.reason"
             :maxlength="500" /></label
       ></template>
@@ -150,9 +151,7 @@ defineExpose({ open });
                 ? [{ label: '确认已发布', value: '已发布' }]
                 : [
                     { label: '确认已发布', value: '已发布' },
-                    ...(task.batchId
-                      ? []
-                      : [{ label: '已提交平台审核中', value: '平台审核中' }]),
+                    { label: '已提交平台审核中', value: '平台审核中' },
                     { label: '确认未发布', value: '执行失败' },
                     { label: '仍无法判断', value: '结果待确认' },
                   ]
@@ -165,9 +164,9 @@ defineExpose({ open });
           /><small
             >请填写具体作品的公开链接，不能使用账号主页或审核页面。</small
           ></label
-        ><label v-if="form.status === '已发布' && task.batchId" class="v4-field"
+        ><label v-if="form.status === '已发布'" class="v4-field"
           ><RequiredLabel>实际发布时间</RequiredLabel
-          ><t-input v-model="form.publicAt" type="datetime-local" /></label
+          ><ResourceDateTime v-model:value="form.publicAt" aria-label="实际发布时间" /></label
         ><label v-if="form.status === '执行失败'" class="v4-field"
           ><RequiredLabel>失败原因</RequiredLabel
           ><t-input v-model="form.reason" /></label
@@ -179,7 +178,7 @@ defineExpose({ open });
                 ? "投稿编号或有效审核证据"
                 : form.status === "执行失败"
                   ? "核实依据"
-                  : "核实备注（选填）"
+                  : "核实备注"
             }}</RequiredLabel
           ><t-textarea v-model="form.evidence" :maxlength="2000" /></label
       ></template> </template
@@ -197,14 +196,16 @@ defineExpose({ open });
         @click="submit"
         >{{
           action === "cancel"
-            ? "确认取消任务"
+            ? "确认终止任务"
             : action === "retry"
               ? "确认重试"
               : action === "human"
                 ? "确认处理结果"
                 : action === "start"
                   ? "确认执行任务"
-                  : "保存核实结果"
+                  : action === "supplement"
+                    ? "确认补录"
+                    : "保存核实结果"
         }}</t-button
       ></template
     ></Overlay

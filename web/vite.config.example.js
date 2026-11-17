@@ -12,5 +12,5 @@ export default defineConfig({
   plugins: [vue(), examplePreviewPlugin({ webRoot, workspaceRoot: process.env.WT_MEDIA_WORKSPACE_ROOT })],
   server: { host: '127.0.0.1', port: 8768, strictPort: true },
   preview: { host: '127.0.0.1', port: 8768, strictPort: true },
-  build: { outDir: 'dist-example', emptyOutDir: true, rollupOptions: { input: fileURLToPath(new URL('./example/index.html', import.meta.url)) } },
+  build: { outDir: 'dist-example', emptyOutDir: true, rollupOptions: { input: { example: fileURLToPath(new URL('./example/index.html', import.meta.url)), publishingPlan: fileURLToPath(new URL('./example/proto/publishing-design/plan/index.html', import.meta.url)) } } },
 })

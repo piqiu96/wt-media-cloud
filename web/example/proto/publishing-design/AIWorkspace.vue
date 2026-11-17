@@ -13,6 +13,7 @@ import { ensureCoverResults, coverSignature, coverSpecs } from "./covers.js";
 import { clone } from "./relationships.js";
 import { feedback } from "../../../src/shared/ui/feedback/index.js";
 import { declarationOptions } from "./model.js";
+import PublishingExecutionSettings from "./PublishingExecutionSettings.vue";
 const props = defineProps({ rows: Array, db: Object, single: Boolean });
 const emit = defineEmits(["preview"]);
 const scope = ref("全部"),
@@ -259,7 +260,7 @@ if (props.single) active.value = props.rows[0] || null;
         />只看问题项</label
       >
     </div>
-    <div class="ai-table-wrap">
+    <div class="ai-table-wrap resource-data-table resource-embedded-table is-editable">
       <table class="ai-table">
         <thead>
           <tr>
@@ -369,7 +370,7 @@ if (props.single) active.value = props.rows[0] || null;
           >重生{{ labels[f] }}</t-button
         >
       </div>
-      <div v-if="single" class="single-platform-fields"><h3>平台设置与发布时间</h3><div class="single-platform-grid"><label>创作声明 *<t-select :value="active.declaration" :options="declarationOptions(active.platform)" placeholder="按内容事实选择" @change="(value) => editField(active, 'declaration', value)" /></label><label v-if="active.platform === 'B站'">分区 *<t-select :value="active.partition" :options="[{ label: '游戏', value: '游戏' }]" @change="(value) => editField(active, 'partition', value)" /></label><label v-if="active.platform !== '百家号'">可见范围<t-select :value="active.visibility || '公开'" :options="[{ label: '公开', value: '公开' }, { label: '仅自己可见', value: '仅自己可见' }]" @change="(value) => editField(active, 'visibility', value)" /></label><label>指定发布时间（可选）<input type="datetime-local" :value="active.schedule || ''" @change="editField(active, 'schedule', $event.target.value)" /></label></div></div>
+      <div v-if="single" class="single-platform-fields"><h3>平台设置</h3><div class="single-platform-grid"><label>创作声明 *<t-select :value="active.declaration" :options="declarationOptions(active.platform)" placeholder="按内容事实选择" @change="(value) => editField(active, 'declaration', value)" /></label><label v-if="active.platform === 'B站'">分区 *<t-select :value="active.partition" :options="[{ label: '游戏', value: '游戏' }]" @change="(value) => editField(active, 'partition', value)" /></label><label v-if="active.platform !== '百家号'">可见范围<t-select :value="active.visibility || '公开'" :options="[{ label: '公开', value: '公开' }, { label: '仅自己可见', value: '仅自己可见' }]" @change="(value) => editField(active, 'visibility', value)" /></label></div></div>
       <div class="ai-tools">
         <label
           >封面模式<select
@@ -442,6 +443,7 @@ if (props.single) active.value = props.rows[0] || null;
           >确认内容与封面已审核</t-button
         >
       </div>
+      <PublishingExecutionSettings v-if="single" :row="active" @change="(field, value) => editField(active, field, value)" />
     </div>
   </section>
 </template>

@@ -1,9 +1,10 @@
 <script setup>
-import { ref, computed, watch, onMounted } from "vue";
+import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from "vue";
 import MediaPreview from "./MediaPreview.vue";
 import ResourceNotice from "../resource/ResourceNotice.vue";
+import { BrowseIcon, BrowseOffIcon, LockOnIcon, LockOffIcon, ChevronUpIcon, ChevronDownIcon } from "tdesign-icons-vue-next";
 import { layoutText } from "./textLayout.js";
-const props = defineProps({ modelValue: Object, fixedSize: Boolean });
+const props = defineProps({ modelValue: Object, fixedSize: Boolean, templateMode: Boolean, backgroundPreview: String });
 const emit = defineEmits(["update:modelValue", "export", "ready"]);
 const base = () => ({
   width: 1200,
@@ -40,10 +41,11 @@ const base = () => ({
   ],
 });
 const doc = ref(base()),
-  selected = ref("title"),
+  selected = ref(props.templateMode ? "background" : "title"),
   history = ref([]),
   future = ref([]),
   svg = ref(null),
+  propertyPanel = ref(null),
   error = ref(""),
   resize = ref(1);
 let external = false;
@@ -55,7 +57,7 @@ watch(
       doc.value = clone(v);
       history.value = [];
       future.value = [];
-      selected.value = v.layers?.[0]?.id;
+      selected.value = props.templateMode ? (selected.value === "background" || v.layers?.some(l=>l.id===selected.value) ? selected.value : null) : v.layers?.[0]?.id;
     }
   },
   { immediate: true },
@@ -72,6 +74,11 @@ function textLayout(l) {
     ctx.font = `${l.weight || 400} ${size}px ${l.fontFamily || "sans-serif"}`;
     return ctx.measureText(s).width;
   });
+}
+function layerProblem(l) {
+ if (!props.templateMode || l.kind!=='text') return false;
+ const safe=Number(doc.value.safe)||0;
+ return textLayout(l).overflow || l.x<safe || l.y<safe || l.x+l.w>doc.value.width-safe || l.y+l.h>doc.value.height-safe;
 }
 const overflow = computed(() =>
   doc.value.layers.some(
@@ -125,13 +132,15 @@ function redo() {
   doc.value = future.value.pop();
   publish();
 }
-function add(kind) {
+function add(kind, slot = "fixed") {
+  if (slot === "main_title" && doc.value.layers.some(l => l.slot === "main_title")) return;
   change(() => {
     const id = crypto.randomUUID();
     doc.value.layers.push({
       id,
       kind,
-      name: kind === "text" ? "文字区域" : "固定装饰",
+      slot,
+      name: slot === "main_title" ? "动态主标题" : kind === "text" ? "固定文字" : "固定装饰",
       text: "新的文字",
       x: 80,
       y: 80,
@@ -152,9 +161,10 @@ function add(kind) {
     selected.value = id;
   });
 }
+const guides = ref({x:false,y:false});
 function pointer(e, l, mode) {
-  if (l.locked) return;
   selected.value = l.id;
+  if (l.locked) return;
   snapshot();
   const rect = svg.value.getBoundingClientRect(),
     start = { x: e.clientX, y: e.clientY, l: clone(l) };
@@ -172,9 +182,15 @@ function pointer(e, l, mode) {
       l.y = Math.round(
         Math.max(0, Math.min(doc.value.height - l.h, start.l.y + dy)),
       );
+      if (props.templateMode) {
+        guides.value={x:Math.abs(l.x+l.w/2-doc.value.width/2)<8,y:Math.abs(l.y+l.h/2-doc.value.height/2)<8};
+        if(guides.value.x)l.x=Math.round((doc.value.width-l.w)/2);
+        if(guides.value.y)l.y=Math.round((doc.value.height-l.h)/2);
+      }
     }
   };
   const end = () => {
+    guides.value={x:false,y:false};
     e.target.removeEventListener("pointermove", move);
     e.target.removeEventListener("pointerup", end);
     e.target.removeEventListener("pointercancel", end);
@@ -301,6 +317,10 @@ function changeCanvas(value) {
   });
 }
 function editorKey(e) {
+  if (!e.target.closest("input,textarea,[contenteditable=true]")) {
+    const steps={ArrowLeft:[-1,0],ArrowRight:[1,0],ArrowUp:[0,-1],ArrowDown:[0,1]};
+    if (steps[e.key] && layer.value && !layer.value.locked) {e.preventDefault();const [x,y]=steps[e.key],n=e.shiftKey?10:1;change(()=>{layer.value.x+=x*n;layer.value.y+=y*n;});}
+  }
   if (
     (e.ctrlKey || e.metaKey) &&
     e.key.toLowerCase() === "z" &&
@@ -310,17 +330,48 @@ function editorKey(e) {
     e.shiftKey ? redo() : undo();
   }
 }
-defineExpose({ exportPng, hasOverflow: overflow, setBackground, showPreview });
+function selectLayer(id, field) {
+ selected.value = id;
+ advanced.value = true;
+ if (field) nextTick(() => {
+  const target = propertyPanel.value?.querySelector(`[data-property="${field}"]`);
+  if (!target) return;
+  const section = target.closest("details");
+  if (section) section.open = true;
+  target.scrollIntoView({block:"nearest"});
+  target.querySelector("input")?.focus({preventScroll:true});
+ });
+}
+function duplicateLayer() {
+ if (!layer.value || layer.value.locked || layer.value.slot === 'main_title') return;
+ change(()=>{const next=clone(layer.value);next.id=crypto.randomUUID();next.name+=' 副本';next.x+=10;next.y+=10;doc.value.layers.push(next);selected.value=next.id;});
+}
+const showSafe = ref(true), collapsed = ref(false), editorGrid=ref(null), stageHeight=ref(null);
+function fitWorkspace() {
+ if (!props.templateMode || !editorGrid.value?.getClientRects().length) return;
+ const footer=editorGrid.value.closest('.resource-detail-page')?.querySelector('.resource-detail-page__footer');
+ stageHeight.value=Math.max(320,window.innerHeight-editorGrid.value.getBoundingClientRect().top-(footer?.getBoundingClientRect().height||69)-20);
+}
+watch([overflow,error],()=>nextTick(fitWorkspace));
+let layoutObserver;
+onBeforeUnmount(()=>{window.removeEventListener('resize',fitWorkspace);layoutObserver?.disconnect();});
+defineExpose({ exportPng, hasOverflow: overflow, setBackground, showPreview, selectLayer });
 
 onMounted(async () => {
+  if(props.templateMode){
+   await nextTick();fitWorkspace();
+   window.addEventListener('resize',fitWorkspace);
+   layoutObserver=new ResizeObserver(fitWorkspace);layoutObserver.observe(editorGrid.value.closest('.resource-overlay__body') || editorGrid.value.parentElement);
+  }
   await document.fonts.ready;
   publish();
   emit("ready", clone(doc.value));
 });
 </script>
 <template>
-  <div class="image-editor" @keydown="editorKey">
+  <div class="image-editor" :class="{ 'template-editor-engine': templateMode, 'layers-collapsed': collapsed }" tabindex="0" @keydown="editorKey">
     <div class="editor-toolbar">
+      <t-button v-if="templateMode" theme="default" variant="text" @click="collapsed = !collapsed">{{ collapsed ? "展开图层" : "折叠图层" }}</t-button>
       <div class="editor-history">
         <t-button
           theme="default"
@@ -336,9 +387,9 @@ onMounted(async () => {
           >重做</t-button
         >
       </div>
-      <span v-if="fixedSize">{{ doc.width }} × {{ doc.height }} px</span
+      <span v-if="fixedSize && !templateMode">{{ doc.width }} × {{ doc.height }} px</span
       ><t-select
-        v-else
+        v-else-if="!fixedSize"
         :value="`${doc.width}x${doc.height}`"
         aria-label="画布尺寸"
         class="canvas-size-select"
@@ -362,7 +413,7 @@ onMounted(async () => {
           { label: '100%', value: '1' },
         ]"
       />
-      <div class="editor-export">
+      <div v-if="!templateMode" class="editor-export">
         <t-button variant="outline" :loading="rendering" @click="showPreview"
           >成品预览</t-button
         ><t-button theme="default" variant="text" @click="exportPng(true)"
@@ -376,7 +427,7 @@ onMounted(async () => {
       :message="error || '文字超出区域或字数限制，请在文字属性中调整。'"
       class="editor-warning"
     />
-    <div class="editor-grid">
+    <div ref="editorGrid" class="editor-grid" :style="templateMode && stageHeight ? {height:`${stageHeight}px`} : undefined">
       <aside class="editor-layers">
         <div class="editor-panel-title">
           <h3>图层</h3>
@@ -393,42 +444,29 @@ onMounted(async () => {
             :aria-pressed="selected === l.id"
             @click="selected = l.id"
           >
-            <span class="layer-kind">{{ l.kind === "text" ? "T" : "▰" }}</span
-            >{{ l.name }}
+            <span class="layer-kind">{{ l.kind === "text" ? "T" : "▰" }}</span><span class="layer-label" :title="l.name">{{ l.name }}<small v-if="templateMode">{{l.slot==='main_title'?'动态字段':l.kind==='text'?'固定文字':'装饰'}}</small></span>
           </button>
-          <div class="layer-actions">
-            <t-checkbox
-              :checked="l.visible"
-              @change="change(() => (l.visible = !l.visible))"
-              :aria-label="`显示${l.name}`"
-            /><t-button
-              size="small"
-              variant="text"
-              @click="change(() => (l.locked = !l.locked))"
-              >{{ l.locked ? "解锁" : "锁定" }}</t-button
-            ><t-button
-              size="small"
-              variant="text"
-              :disabled="doc.layers.indexOf(l) === doc.layers.length - 1"
-              @click="reorder(l, 1)"
-              :aria-label="`上移${l.name}`"
-              >↑</t-button
-            ><t-button
-              size="small"
-              variant="text"
-              :disabled="doc.layers.indexOf(l) === 0"
-              @click="reorder(l, -1)"
-              :aria-label="`下移${l.name}`"
-              >↓</t-button
-            >
+          <div v-if="templateMode" class="layer-actions compact-layer-actions">
+            <t-button shape="square" theme="default" variant="text" :aria-label="`显示${l.name}`" :aria-pressed="l.visible" :title="l.visible?'隐藏图层':'显示图层'" @click="change(()=>l.visible=!l.visible)"><BrowseIcon v-if="l.visible"/><BrowseOffIcon v-else/></t-button>
+            <t-button shape="square" theme="default" variant="text" :aria-label="l.locked?'解锁':'锁定'" :aria-pressed="l.locked" :title="l.locked?'解锁图层':'锁定图层'" @click="change(()=>l.locked=!l.locked)"><LockOnIcon v-if="l.locked"/><LockOffIcon v-else/></t-button>
+            <t-button shape="square" theme="default" variant="text" :disabled="doc.layers.indexOf(l)===doc.layers.length-1" :aria-label="`上移${l.name}`" title="上移图层" @click="reorder(l,1)"><ChevronUpIcon/></t-button>
+            <t-button shape="square" theme="default" variant="text" :disabled="doc.layers.indexOf(l)===0" :aria-label="`下移${l.name}`" title="下移图层" @click="reorder(l,-1)"><ChevronDownIcon/></t-button>
+          </div>
+          <div v-else class="layer-actions">
+            <t-checkbox :checked="l.visible" @change="change(() => (l.visible = !l.visible))" :aria-label="`显示${l.name}`" />
+            <t-button size="small" variant="text" @click="change(() => (l.locked = !l.locked))">{{ l.locked ? "解锁" : "锁定" }}</t-button>
+            <t-button size="small" variant="text" :disabled="doc.layers.indexOf(l) === doc.layers.length - 1" @click="reorder(l, 1)" :aria-label="`上移${l.name}`">↑</t-button>
+            <t-button size="small" variant="text" :disabled="doc.layers.indexOf(l) === 0" @click="reorder(l, -1)" :aria-label="`下移${l.name}`">↓</t-button>
           </div>
         </div>
         <div v-if="!doc.layers.length" class="editor-empty-layers">
           当前只有底图，可直接调整填充或添加文字。
         </div>
+        <button v-if="templateMode" class="editor-layer layer-name background-layer" :class="{'is-selected': selected === 'background'}" :aria-pressed="selected==='background'" @click="selected = 'background'"><span class="layer-kind">▧</span><span class="layer-label">背景<small>固定底层</small></span></button>
         <div class="editor-add">
+          <t-button v-if="templateMode && !doc.layers.some(l=>l.slot==='main_title')" theme="default" variant="outline" @click="add('text','main_title')">动态主标题</t-button>
           <t-button theme="default" variant="outline" @click="add('text')"
-            >添加文字</t-button
+            >{{ templateMode ? "固定文字" : "添加文字" }}</t-button
           ><t-button
             theme="default"
             variant="outline"
@@ -436,7 +474,7 @@ onMounted(async () => {
             >添加装饰</t-button
           >
         </div>
-        <div class="editor-background">
+        <div v-if="!templateMode" class="editor-background">
           <h3>背景</h3>
           <div class="editor-field">
             背景颜色<input
@@ -496,12 +534,14 @@ onMounted(async () => {
           :class="{ 'is-zoomed': zoom !== 'fit' }"
         >
           <svg
+            @pointerdown.self="selected = null"
             ref="svg"
             :style="
               zoom === 'fit'
                 ? {}
                 : {
                     width: `${doc.width * Number(zoom)}px`,
+                    height: `${doc.height * Number(zoom)}px`,
                     maxWidth: 'none',
                     maxHeight: 'none',
                   }
@@ -517,18 +557,22 @@ onMounted(async () => {
               :width="doc.width"
               :height="doc.height"
               :fill="doc.background"
+              @pointerdown="templateMode && (selected='background')"
             />
             <image
-              v-if="doc.image"
-              :href="doc.image"
+              v-if="backgroundPreview ?? doc.image"
+              :href="backgroundPreview ?? doc.image"
               :width="doc.width"
               :height="doc.height"
               :preserveAspectRatio="`${doc.imageAnchor || 'xMidYMid'} ${doc.imageFit || 'slice'}`"
+              @pointerdown="templateMode && (selected='background')"
             />
+            <rect v-if="templateMode && showSafe" data-editor :x="doc.safe" :y="doc.safe" :width="doc.width - doc.safe * 2" :height="doc.height - doc.safe * 2" fill="none" stroke="#f5b553" stroke-dasharray="10 8" :stroke-width="2" pointer-events="none" />
             <g
               v-for="l in doc.layers.filter((l) => l.visible)"
               :key="l.id"
               @pointerdown.prevent="pointer($event, l, 'move')"
+              @dblclick="!l.locked && l.kind === 'text' && $el.querySelector('.editor-properties-panel textarea')?.focus()"
               :style="{ cursor: l.locked ? 'default' : 'move' }"
             >
               <rect
@@ -538,6 +582,7 @@ onMounted(async () => {
                 :width="l.w"
                 :height="l.h"
                 :fill="l.color"
+                :opacity="l.opacity ?? 1"
               />
               <text
                 v-else
@@ -578,6 +623,7 @@ onMounted(async () => {
                   {{ line }}
                 </tspan>
               </text>
+              <rect v-if="templateMode && selected!==l.id && layerProblem(l)" data-editor :x="l.x" :y="l.y" :width="l.w" :height="l.h" fill="none" stroke="var(--wt-danger)" stroke-width="3" stroke-dasharray="8 6" pointer-events="none" />
               <g v-if="selected === l.id" data-editor>
                 <rect
                   :x="l.x"
@@ -585,7 +631,7 @@ onMounted(async () => {
                   :width="l.w"
                   :height="l.h"
                   fill="transparent"
-                  stroke="#3c8cff"
+                  :stroke="layerProblem(l)?'var(--wt-danger)':'#3c8cff'"
                   :stroke-width="3"
                 />
                 <rect
@@ -600,6 +646,8 @@ onMounted(async () => {
                 />
               </g>
             </g>
+            <path v-if="templateMode && guides.x" data-editor :d="`M ${doc.width/2} 0 V ${doc.height}`" stroke="#3c8cff" stroke-width="2" stroke-dasharray="8 6" pointer-events="none" />
+            <path v-if="templateMode && guides.y" data-editor :d="`M 0 ${doc.height/2} H ${doc.width}`" stroke="#3c8cff" stroke-width="2" stroke-dasharray="8 6" pointer-events="none" />
           </svg>
         </div>
         <div class="editor-stage-caption">
@@ -607,162 +655,67 @@ onMounted(async () => {
           ><span>拖动图层 · 右下角调整区域</span>
         </div>
       </div>
-      <aside class="editor-properties-panel">
+      <aside ref="propertyPanel" class="editor-properties-panel">
         <template v-if="layer">
           <div class="editor-panel-title">
-            <h3>{{ layer.name }}</h3>
+            <h3>{{ layer.slot === "main_title" ? "动态主标题" : layer.kind === "text" ? "固定文字" : "装饰元素" }}</h3>
             <t-tag v-if="layer.locked" size="small">已锁定</t-tag>
           </div>
           <ResourceNotice v-if="layer.locked"
             >在左侧解锁后可调整此图层。</ResourceNotice
           >
           <fieldset :disabled="layer.locked">
-            <template v-if="layer.kind === 'text'">
-              <label class="editor-field"
-                >文字内容<t-textarea
-                  :value="layer.text"
-                  :disabled="layer.locked"
-                  :autosize="{ minRows: 2, maxRows: 4 }"
-                  @change="(v) => patch('text', v)"
-              /></label>
-              <div class="editor-field">
-                字体<t-select
-                  :value="layer.fontFamily"
-                  :disabled="layer.locked"
-                  @change="(v) => patch('fontFamily', v)"
-                  :options="[
-                    { label: '系统黑体', value: 'sans-serif' },
-                    { label: '系统宋体', value: 'serif' },
-                    { label: '等宽字体', value: 'monospace' },
-                  ]"
-                />
-              </div>
-              <div class="editor-property-pair">
-                <div class="editor-field">
-                  字号<t-input-number
-                    :value="layer.fontSize"
-                    :min="8"
-                    :max="600"
-                    :disabled="layer.locked"
-                    @change="(v) => patch('fontSize', v)"
-                  />
-                </div>
-                <div class="editor-field">
-                  字重<t-select
-                    :value="String(layer.weight)"
-                    :disabled="layer.locked"
-                    @change="(v) => patch('weight', v)"
-                    :options="[
-                      { label: '常规', value: '400' },
-                      { label: '加粗', value: '700' },
-                    ]"
-                  />
-                </div>
-              </div>
-              <div class="editor-field">
-                对齐<t-radio-group
-                  :value="layer.align"
-                  :disabled="layer.locked"
-                  variant="default-filled"
-                  @change="(v) => patch('align', v)"
-                  ><t-radio-button value="left">左</t-radio-button
-                  ><t-radio-button value="center">中</t-radio-button
-                  ><t-radio-button value="right"
-                    >右</t-radio-button
-                  ></t-radio-group
-                >
-              </div>
+            <h4 v-if="templateMode" class="editor-property-heading">内容</h4>
+            <div v-if="templateMode && layer.slot==='main_title'" class="editor-binding">绑定字段<span>封面标题</span></div>
+            <t-button v-if="templateMode && layer.slot==='sub_title'" theme="default" variant="outline" :disabled="layer.locked" @click="patch('slot','fixed')">转为固定文字</t-button>
+            <label v-if="layer.kind==='text'" class="editor-field">{{templateMode && layer.slot==='main_title'?'预览样例':'文字内容'}}<t-textarea :value="layer.text" :disabled="layer.locked" :autosize="{minRows:2,maxRows:4}" @change="v=>patch('text',v)" /><small v-if="templateMode && layer.slot==='main_title'" class="editor-property-hint">正式生成时替换为业务封面标题</small></label>
+            <h4 v-if="templateMode" class="editor-property-heading">样式</h4>
+            <template v-if="layer.kind==='text'">
+             <label class="editor-field">字体<t-select :value="layer.fontFamily" :disabled="layer.locked" @change="v=>patch('fontFamily',v)" :options="[{label:'系统黑体',value:'sans-serif'},{label:'系统宋体',value:'serif'},{label:'等宽字体',value:'monospace'}]" /></label>
+             <div class="editor-property-pair">
+              <label class="editor-field">字号<t-input-number :theme="templateMode ? 'column' : 'row'" :value="layer.fontSize" :min="8" :max="600" :disabled="layer.locked" @change="v=>patch('fontSize',v)" /></label>
+              <label class="editor-field">字重<t-select :value="String(layer.weight)" :disabled="layer.locked" @change="v=>patch('weight',v)" :options="[{label:'常规',value:'400'},{label:'加粗',value:'700'}]" /></label>
+             </div>
+             <label class="editor-field">对齐<t-radio-group :value="layer.align" :disabled="layer.locked" :variant="templateMode ? 'outline' : 'default-filled'" @change="v=>patch('align',v)"><t-radio-button value="left">左</t-radio-button><t-radio-button value="center">中</t-radio-button><t-radio-button value="right">右</t-radio-button></t-radio-group></label>
             </template>
-            <div class="editor-field editor-color-field">
-              {{ layer.kind === "text" ? "文字颜色" : "装饰颜色"
-              }}<input
-                type="color"
-                :value="layer.color"
-                :disabled="layer.locked"
-                @change="patch('color', $event.target.value)"
-              /><span>{{ layer.color }}</span>
-            </div>
-            <t-button
-              theme="default"
-              variant="text"
-              class="advanced-properties-toggle"
-              @click="advanced = !advanced"
-              >{{ advanced ? "收起" : "展开" }}精确位置与排版</t-button
-            >
-            <template v-if="advanced">
-              <div class="editor-property-pair">
-                <div
-                  class="editor-field"
-                  v-for="[key, name] in [
-                    ['x', 'X 坐标'],
-                    ['y', 'Y 坐标'],
-                    ['w', '区域宽度'],
-                    ['h', '区域高度'],
-                  ]"
-                  :key="key"
-                >
-                  {{ name
-                  }}<t-input-number
-                    :value="layer[key]"
-                    :min="0"
-                    :disabled="layer.locked"
-                    @change="(v) => patch(key, v)"
-                  />
-                </div>
-              </div>
-              <template v-if="layer.kind === 'text'"
-                ><div class="editor-property-pair">
-                  <div
-                    class="editor-field"
-                    v-for="[key, name, min, step] in [
-                      ['minFont', '最小字号', 8, 1],
-                      ['maxLines', '最多行数', 1, 1],
-                      ['maxChars', '最多字数', 0, 1],
-                      ['lineHeight', '行高', 1, 0.1],
-                      ['spacing', '字间距', 0, 0.5],
-                      ['stroke', '描边宽度', 0, 1],
-                    ]"
-                    :key="key"
-                  >
-                    {{ name
-                    }}<t-input-number
-                      :value="layer[key] || 0"
-                      :min="min"
-                      :step="step"
-                      :disabled="layer.locked"
-                      @change="(v) => patch(key, v)"
-                    />
-                  </div>
-                </div>
-                <t-checkbox
-                  v-for="[key, name] in [
-                    ['autoShrink', '自动缩小字号'],
-                    ['wrap', '自动换行'],
-                    ['shadow', '文字阴影'],
-                  ]"
-                  :key="key"
-                  :checked="layer[key]"
-                  :disabled="layer.locked"
-                  @change="(v) => patch(key, v)"
-                  >{{ name }}</t-checkbox
-                >
-                <div class="editor-field">
-                  描边颜色<input
-                    type="color"
-                    :value="layer.strokeColor || '#000000'"
-                    @change="patch('strokeColor', $event.target.value)"
-                  /></div
-              ></template>
+            <label class="editor-field editor-color-field">{{layer.kind==='text'?'文字颜色':'装饰颜色'}}<input type="color" :value="layer.color" :disabled="layer.locked" @change="patch('color',$event.target.value)"/><span>{{layer.color}}</span></label>
+            <label v-if="templateMode && layer.kind==='decoration'" class="editor-field">透明度<t-input-number :theme="templateMode ? 'column' : 'row'" :value="layer.opacity ?? 1" :min="0" :max="1" :step="0.1" :disabled="layer.locked" @change="v=>patch('opacity',v)" /></label>
+            <t-button v-if="!templateMode" theme="default" variant="text" class="advanced-properties-toggle" @click="advanced=!advanced">{{advanced?'收起':'展开'}}精确位置与排版</t-button>
+            <template v-if="templateMode || advanced">
+             <h4 v-if="templateMode" class="editor-property-heading">位置与尺寸</h4>
+             <div class="editor-property-pair">
+              <label v-for="[key,name] in [['x','X 坐标'],['y','Y 坐标'],['w','区域宽度'],['h','区域高度']]" :key="key" class="editor-field">{{name}}<t-input-number :theme="templateMode ? 'column' : 'row'" :value="layer[key]" :min="0" :disabled="layer.locked" @change="v=>patch(key,v)" /></label>
+             </div>
+             <template v-if="layer.kind==='text'">
+              <component :is="templateMode?'details':'div'" class="editor-property-section">
+               <summary v-if="templateMode">排版规则</summary>
+               <div class="editor-property-pair">
+                <label v-for="[key,name,min,step] in [['minFont','最小字号',8,1],['maxLines','最多行数',1,1],['maxChars','最多字数',0,1],['lineHeight','行高',1,0.1],['spacing','字间距',0,0.5]]" :key="key" :data-property="key" class="editor-field">{{name}}<t-input-number :theme="templateMode ? 'column' : 'row'" :value="layer[key] || 0" :min="min" :step="step" :disabled="layer.locked" @change="v=>patch(key,v)" /><small v-if="templateMode && key==='maxChars'" class="editor-property-hint">0 表示不限字数</small></label>
+               </div>
+               <t-checkbox v-for="[key,name] in [['autoShrink','自动缩小字号'],['wrap','自动换行']]" :key="key" :checked="layer[key]" :disabled="layer.locked" @change="v=>patch(key,v)">{{name}}</t-checkbox>
+              </component>
+              <component :is="templateMode?'details':'div'" class="editor-property-section">
+               <summary v-if="templateMode">文字效果</summary>
+               <label class="editor-field">描边宽度<t-input-number :theme="templateMode ? 'column' : 'row'" :value="layer.stroke || 0" :min="0" :disabled="layer.locked" @change="v=>patch('stroke',v)" /></label>
+               <label class="editor-field">描边颜色<input type="color" :value="layer.strokeColor || '#000000'" :disabled="layer.locked" @change="patch('strokeColor',$event.target.value)" /></label>
+               <t-checkbox :checked="layer.shadow" :disabled="layer.locked" @change="v=>patch('shadow',v)">文字阴影</t-checkbox>
+              </component>
+             </template>
+             <details v-if="templateMode" class="editor-property-section"><summary>图层名称</summary><t-input :value="layer.name" :disabled="layer.locked" @change="v=>patch('name',v)" /></details>
             </template>
           </fieldset>
-          <t-button
-            theme="danger"
-            variant="text"
-            :disabled="layer.locked"
-            @click="removeLayer"
-            >删除此图层</t-button
-          >
+          <div class="editor-property-actions">
+            <t-button v-if="templateMode && layer.slot !== 'main_title'" theme="default" variant="text" :disabled="layer.locked" @click="duplicateLayer">复制图层</t-button>
+            <t-button
+              theme="danger"
+              variant="text"
+              :disabled="layer.locked"
+              @click="removeLayer"
+              >删除此图层</t-button
+            >
+          </div>
         </template>
+        <slot v-else-if="templateMode" name="settings" :selected="selected" :show-safe="showSafe" :set-show-safe="v=>showSafe=v" />
         <div v-else class="editor-empty-layers">
           选择左侧图层，或添加文字后开始排版。
         </div>
@@ -1067,4 +1020,54 @@ onMounted(async () => {
     width: 100%;
   }
 }
+
+.template-editor-engine { outline:none; }
+.template-editor-engine .editor-grid {grid-template-columns:220px minmax(260px,1fr) 280px;gap:0;margin-top:0;height:max(380px,calc(100dvh - 294px));box-sizing:border-box;border:1px solid var(--wt-border);border-radius:4px;overflow:hidden;background:var(--wt-bg-card);}
+.template-editor-engine .editor-grid aside {height:100%;padding:16px 12px;min-width:0;}
+.template-editor-engine .editor-layers{border-right:1px solid var(--wt-border);}
+.template-editor-engine .editor-properties-panel{border-left:1px solid var(--wt-border);}
+.template-editor-engine .editor-stage{min-height:0;height:100%;border:0;border-radius:0;background:var(--wt-bg-page);}
+.template-editor-engine .editor-canvas-viewport{min-height:0;box-sizing:border-box;padding:24px;}
+.template-editor-engine .editor-stage-caption{padding:8px 12px;font-size:12px;line-height:20px;flex-wrap:nowrap;}
+.template-editor-engine .editor-stage-caption span:last-child{font-size:11px;}
+.template-editor-engine .editor-toolbar{padding:0 0 12px;gap:8px;border:0;}
+.template-editor-engine .canvas-zoom-select{margin-left:auto;width:140px;}
+.template-editor-engine .editor-warning{margin:0 0 12px;}
+.template-editor-engine .editor-panel-title{margin-bottom:12px;}
+.template-editor-engine .editor-layer{display:flex;align-items:center;gap:2px;border:1px solid transparent;border-radius:4px;margin-bottom:4px;min-height:52px;}
+.template-editor-engine .editor-layer:hover{background:var(--wt-color-bg-hover);}
+.template-editor-engine .editor-layer.is-selected{border-color:var(--wt-primary);background:var(--wt-info-bg);}
+.template-editor-engine .layer-name{padding:6px 4px;gap:6px;min-width:0;flex:1;}
+.template-editor-engine .layer-kind{font-size:14px;flex-shrink:0;}
+.template-editor-engine .layer-label{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;line-height:20px;font-size:13px;}
+.template-editor-engine .layer-label small{display:block;color:var(--wt-text-tertiary);font-size:12px;line-height:16px;font-weight:400;}
+.template-editor-engine .compact-layer-actions{padding:0 2px 0 0;gap:0;flex-shrink:0;}
+.template-editor-engine .compact-layer-actions>.t-button{width:22px;min-width:22px;height:28px;padding:0;}
+.template-editor-engine .compact-layer-actions :deep(.t-icon){font-size:14px;}
+.template-editor-engine .background-layer{padding:6px 8px;width:100%;box-sizing:border-box;}
+.template-editor-engine .editor-add{gap:8px;margin-top:16px;}
+.template-editor-engine .editor-add>.t-button{flex:1 1 80px;font-size:13px;}
+.template-editor-engine .editor-field{font-size:13px;gap:6px;}
+.template-editor-engine fieldset{gap:12px;}
+.template-editor-engine .editor-property-pair{gap:12px;}
+.template-editor-engine .editor-property-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px;}
+.template-editor-engine .editor-property-heading{margin:4px 0 0;padding-top:12px;border-top:1px solid var(--wt-border);font-size:13px;font-weight:500;color:var(--wt-text-primary);}
+.template-editor-engine .editor-property-heading:first-child{padding-top:0;border:0;}
+.template-editor-engine .editor-binding{display:flex;justify-content:space-between;color:var(--wt-text-tertiary);font-size:12px;}
+.template-editor-engine .editor-binding span{color:var(--wt-text-secondary);}
+.template-editor-engine .editor-property-hint{font-size:12px;line-height:18px;color:var(--wt-text-tertiary);}
+.editor-property-section summary{cursor:pointer;font-size:13px;font-weight:500;color:var(--wt-text-primary);padding:8px 0;}
+.editor-property-section>.editor-field,.editor-property-section>.editor-property-pair{margin:8px 0 12px;}
+.editor-property-section>.t-checkbox{margin:4px 12px 4px 0;}
+.template-editor-engine.layers-collapsed .editor-grid{grid-template-columns:minmax(300px,1fr) 280px;}
+.template-editor-engine.layers-collapsed .editor-layers{display:none;}
+@media(max-width:1280px){.template-editor-engine .editor-grid{grid-template-columns:210px minmax(220px,1fr) 260px;}.template-editor-engine.layers-collapsed .editor-grid{grid-template-columns:minmax(300px,1fr) 260px;}.template-editor-engine .editor-canvas-viewport{padding:20px;}.template-editor-engine .editor-stage-caption span:last-child{display:none;}}
+@media(max-width:1000px){.template-editor-engine .editor-grid{grid-template-columns:190px minmax(220px,1fr) 250px;}.template-editor-engine .editor-grid aside{padding:12px 8px;}.template-editor-engine .compact-layer-actions>.t-button{width:20px;min-width:20px;}}
+@media(max-width:760px){
+ .template-editor-engine .editor-grid,.template-editor-engine.layers-collapsed .editor-grid{grid-template-columns:minmax(0,1fr);height:auto;gap:16px;overflow:visible;}
+ .template-editor-engine .editor-grid aside{height:auto;max-height:none;}
+ .template-editor-engine .editor-stage{height:340px!important;min-width:0;order:0;}
+ .template-editor-engine .editor-layers{order:1;}.template-editor-engine .editor-properties-panel{order:2;}
+}
+
 </style>

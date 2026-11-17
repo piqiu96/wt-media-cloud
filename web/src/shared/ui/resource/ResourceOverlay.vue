@@ -26,6 +26,9 @@ function higherModal() {
 function focusInside() {
  const root=focusRoot()
  if(!root)return
+ root.setAttribute('role', 'dialog')
+ root.setAttribute('aria-modal', 'true')
+ root.setAttribute('aria-label', props.title)
  root.tabIndex=-1
  nextOverlayFocus(root, null, false)?.focus?.({preventScroll:true})
 }
@@ -95,7 +98,7 @@ function close() {
 </template>
 
 <style scoped>
-.resource-overlay__body { min-width: 0; color: var(--wt-text-secondary); }
+.resource-overlay__body { min-width: 0; color: var(--wt-text-secondary); font-family: var(--wt-font-family); font-size: 14px; line-height: 24px; }
 .resource-overlay__footer { display: flex; justify-content: flex-end; align-items: center; flex-wrap: wrap; gap: 8px; }
 .resource-overlay__body :deep(.t-descriptions__label) { color: var(--wt-text-tertiary); }
 .resource-overlay__body :deep(.t-descriptions__content) { overflow-wrap: anywhere; }

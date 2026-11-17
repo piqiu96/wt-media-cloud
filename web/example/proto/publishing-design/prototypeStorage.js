@@ -19,24 +19,44 @@ function open() {
   return connection;
 }
 export async function loadPrototype() {
+  const controller = new AbortController();
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      const error = new Error("任务记录读取超时，请检查本地预览服务后重试");
+      controller.abort(error);
+      reject(error);
+    }, 15000);
+  });
+  try {
+    return await Promise.race([readPrototype(controller.signal), timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+async function readPrototype(signal) {
   const db = await open();
   const saved = await new Promise((resolve, reject) => {
     const request = db.transaction(STORE).objectStore(STORE).get("publishing");
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
   });
-  if (saved?.version === 1) return await loadBatchSnapshot(saved.data);
+  // A late storage response must not start a migration after timeout.
+  signal.throwIfAborted();
+  if (saved?.version === 1) return await loadBatchSnapshot(saved.data, signal);
   const legacy = JSON.parse(
     localStorage.getItem("wt-publishing-design-v1") || "null",
   );
-  return await loadBatchSnapshot(legacy?.version === 1 ? legacy.data : null);
+  return await loadBatchSnapshot(legacy?.version === 1 ? legacy.data : null, signal);
 }
 export async function savePrototype(data) {
-  await saveBatchSnapshot(data);
+  const snapshot = { ...data };
+  delete snapshot.publishingConfig; // Discard the retired prototype configuration page data.
+  await saveBatchSnapshot(snapshot);
   const db = await open();
   await new Promise((resolve, reject) => {
     const tx = db.transaction(STORE, "readwrite");
-    tx.objectStore(STORE).put({ version: 1, data }, "publishing");
+    tx.objectStore(STORE).put({ version: 1, data: snapshot }, "publishing");
     tx.oncomplete = resolve;
     tx.onerror = () => reject(tx.error);
     tx.onabort = () => reject(tx.error || new Error("保存已中断"));

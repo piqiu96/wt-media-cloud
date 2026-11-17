@@ -1,7 +1,13 @@
+import { pendingContentEditable, batchTaskActions } from "./batchLifecycle.js";
 import { canRetry, validate } from "./model.js";
 export const displayStatus = (t) =>
   t.status === "执行失败" ? "发布失败" : t.status;
-export const canEditTask = (t) => t.status === "待执行" && !t.claimed && !t.batchConfigLocked && !t.batchStopped;
+export const canEditTask = (t, db) => pendingContentEditable(t, db?.batches?.find(b => b.id === t.batchId));
+export const taskContent = t => t.status === "待执行" ? t : t.attemptHistory?.at(-1)?.snapshot || t.snapshot || t;
+export const taskTitle = t => {
+  const content = taskContent(t);
+  return (t.platform === "百家号" ? content.description : content.title) || "未填写发布标题";
+};
 export const canCancelTask = (t) => {
   if (
     t.submittedAt ||
@@ -18,12 +24,19 @@ export const canCancelTask = (t) => {
     !t.submittedAt
   );
 };
-export function allowedActions(t) {
+export function allowedActions(t, db) {
+  const batch = db?.batches?.find(b => b.id === t.batchId);
+  if (batch) {
+    const actions = batchTaskActions(db, batch, t).filter(a =>
+      a === "cancel" ? canCancelTask(t) : a === "start" ? !t.claimed : true);
+    return ["detail", ...(canEditTask(t, db) ? ["edit"] : []), ...actions];
+  }
   const actions = ["detail"];
-  if (canEditTask(t)) actions.push("edit", "start");
+  if (canEditTask(t, db)) actions.push("edit", "start");
   if (canCancelTask(t)) actions.push("cancel");
   if (t.status === "等待人工") actions.push("human");
   if (t.status === "结果待确认") actions.push("verify");
+  if (["平台审核中", "待补链接"].includes(t.status)) actions.push("supplement");
   if (canRetry(t)) actions.push("retry");
   if (["执行失败", "已发布", "已取消", "已放弃"].includes(t.status))
     actions.push("copy");
@@ -33,11 +46,14 @@ export const actionLabels = {
   detail: "详情",
   edit: "编辑",
   start: "执行",
-  cancel: "取消",
+  cancel: "终止",
   human: "去处理",
   verify: "核实结果",
   retry: "重试",
   copy: "复制",
+  supplement: "补录结果",
+  repair: "恢复原资源",
+  abandon: "放弃",
 };
 export const canReleaseTask = (t) =>
   !t.claimed &&
@@ -53,9 +69,9 @@ export function taskChecks(t, db) {
 }
 export function taskPresentation(t, db) {
   const checks = taskChecks(t, db),
-    actions = allowedActions(t);
+    actions = allowedActions(t, db);
   const action =
-    ["start", "human", "verify", "retry", "cancel"].find((a) =>
+    ["start", "human", "verify", "retry", "supplement", "repair", "cancel"].find((a) =>
       actions.includes(a),
     ) || "detail";
   const descriptions = {
@@ -78,4 +94,18 @@ export function taskPresentation(t, db) {
     checks,
     disabled: action === "start" && checks.length > 0,
   };
+}
+
+// A single projection for the task list and every embedded task table.
+export function taskActionItems(t, db) {
+  const actions = allowedActions(t, db), presentation = taskPresentation(t, db);
+  const primary = ["start", "human", "verify", "retry", "supplement", "repair"].includes(presentation.action)
+    ? presentation.action : null;
+  const order = [primary, "detail", "edit", ...actions, "cancel", "abandon"].filter(Boolean);
+  return [...new Set(order)].filter(a => actions.includes(a) && !["cancel", "abandon"].includes(a))
+    .concat(actions.filter(a => ["cancel", "abandon"].includes(a)))
+    .map(key => ({ key, label: actionLabels[key], primary: key === primary,
+      danger: ["cancel", "abandon"].includes(key),
+      disabled: key === "start" && presentation.disabled,
+      reason: key === "start" && presentation.disabled ? presentation.checks.join("；") : "" }));
 }

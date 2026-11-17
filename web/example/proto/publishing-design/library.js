@@ -1,7 +1,7 @@
 export function imageReferences(db, im) {
   return [
     ...db.templates
-      .filter((t) => t.imageId === im.id || t.document?.image === im.src)
+      .filter((t) => t.imageId === im.id || t.document?.image === im.src || t.draft?.document?.image === im.src)
       .map((t) => ({ kind: "模板", id: t.id, name: t.name })),
     ...db.tasks
       .filter(

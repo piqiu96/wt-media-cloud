@@ -5,9 +5,9 @@ defineProps({
 });
 </script>
 <template>
-  <div class="resource-wizard-steps">
+  <div class="resource-wizard-steps" aria-label="配置步骤">
     <t-steps class="wizard-steps-wide" :current="current" readonly
-      ><t-step-item v-for="step in steps" :key="step.title" :title="step.title"
+      ><t-step-item v-for="step in steps" :key="step.title" :title="step.title" :content="step.description || undefined"
     /></t-steps>
     <div class="wizard-steps-compact">
       <div>
@@ -31,6 +31,8 @@ defineProps({
   </div>
 </template>
 <style scoped>
+.wizard-steps-wide :deep(.t-steps-item__title) { font-size: 14px; font-weight: 500; }
+.wizard-steps-wide :deep(.t-steps-item__description) { font-size: 12px; line-height: 20px; color: var(--wt-text-tertiary); }
 .wizard-steps-compact {
   display: none;
 }

@@ -33,7 +33,8 @@ export function publicWork(platform, value) {
   };
 }
 export function verifyResult(db, t, input, actor) {
-  if (t.status !== "结果待确认") throw Error("任务状态已变化，请重新打开");
+  if (!["结果待确认", "平台审核中", "待补链接"].includes(t.status)) throw Error("任务状态已变化，请重新打开");
+  if (t.status !== "结果待确认" && input.status !== "已发布") throw Error("仅能补录公开发布结果");
   if (!actor) throw Error("缺少已认证核实人，无法提交");
   const attempt = t.attemptHistory?.at(-1);
   if (
@@ -47,7 +48,10 @@ export function verifyResult(db, t, input, actor) {
   if (!["已发布", "平台审核中", "执行失败", "结果待确认"].includes(status))
     throw Error("请选择核实结论");
   let work;
-  if (status === "已发布") work = publicWork(t.platform, url);
+  if (status === "已发布") {
+    if (!input.publicAt || !Number.isFinite(Date.parse(input.publicAt)) || Date.parse(input.publicAt) > Date.now()) throw Error("请选择有效的实际发布时间");
+    work = publicWork(t.platform, url);
+  }
   if (status === "平台审核中" && !evidence.trim())
     throw Error("请填写投稿编号或有效审核证据");
   if (
@@ -96,6 +100,7 @@ export function verifyResult(db, t, input, actor) {
   t.verifiedAt = at;
   t.verifiedBy = actor;
   setResult(t, status, {
+    publicAt: status === "已发布" ? new Date(input.publicAt).toISOString() : null,
     evidence: reason
       ? `${reason}；${evidence}`
       : evidence || work?.url || "仍无法判断",
@@ -105,11 +110,11 @@ export function verifyResult(db, t, input, actor) {
 export function cancelPublication(t, reason = "") {
   if (!canCancelTask(t))
     throw Error(
-      "无法证明执行已安全停止，未取消任务；请等待执行器证据或核实结果",
+      "无法证明执行已安全停止，未终止任务；请等待执行器证据或核实结果",
     );
   t.cancelReason = reason;
   t.cancelledAt = new Date().toISOString();
-  setResult(t, "已取消", { evidence: reason || "取消任务；保留资源占用" });
+  setResult(t, "已取消", { evidence: reason || "终止任务；保留资源占用" });
 }
 export function processHuman(t, result) {
   if (t.status !== "等待人工") throw Error("任务状态已变化");

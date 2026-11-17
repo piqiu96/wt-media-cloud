@@ -1,28 +1,48 @@
 <script setup>
-import { computed, ref, nextTick, onMounted, onBeforeUnmount } from "vue";
+import TaskRowActions from "./TaskRowActions.vue";
+import { taskActionItems } from "./taskExperience.js";
+import { opColumnWidth } from "../../../src/shared/ui/resource/opColumnWidth.js";
+import ResourceNameLink from '../../../src/shared/ui/resource/ResourceNameLink.vue';
+import ResourceId from '../../../src/shared/ui/resource/ResourceId.vue';
+import {formatDateTime} from '../../../src/shared/utils/datetime.js';
+import {readOperationRoute,operationURL,updateOperationURL} from "./routes.js";
+import { computed, ref, nextTick, watch, onMounted, onBeforeUnmount, h } from "vue";
 import { useMediaQuery } from "../../../src/shared/composables/useMediaQuery.js";
+import { DescriptionsItem as Field } from "tdesign-vue-next";
+import ResourceFieldHelp from "../../../src/shared/ui/resource/ResourceFieldHelp.vue";
+import ResourceSection from "../../../src/shared/ui/resource/ResourceSection.vue";
+import ResourceDescriptions from "../../../src/shared/ui/resource/ResourceDescriptions.vue";
+import ResourceStatusBadge from "../../../src/shared/ui/resource/ResourceStatusBadge.vue";
+import "../../../src/shared/styles/resource-data-table.css";
+import ResourceProgress from "../../../src/shared/ui/resource/ResourceProgress.vue";
+import ResourceStatGrid from "../../../src/shared/ui/resource/ResourceStatGrid.vue";
+import ResourceNotice from "../../../src/shared/ui/resource/ResourceNotice.vue";
 import ResourceCard from "../../../src/shared/ui/resource/ResourceCard.vue";
 import ResourceFilterBar from "../../../src/shared/ui/resource/ResourceFilterBar.vue";
 import ResourceRowActions from "../../../src/shared/ui/resource/ResourceRowActions.vue";
 import ResourceEmptyState from "../../../src/shared/ui/resource/ResourceEmptyState.vue";
 import Overlay from "./PrototypeOverlay.vue";
+import ResourceDetailPage from "../../../src/shared/ui/resource/ResourceDetailPage.vue";
 import RequiredLabel from "./RequiredLabel.vue";
 import BatchContentWorkspace from "./BatchContentWorkspace.vue";
 import TaskActionDialog from "./TaskActionDialog.vue";
 import { feedback } from "../../../src/shared/ui/feedback/index.js";
 import {
   batchState,
+  formalBatch,
   batchMetrics,
   batchActions,
   rowsFor,
   executionPreview,
   contentEditable,
   executionChecks,
-  batchTaskActions,
+  isPendingTask,
 } from "./batchLifecycle.js";
 import { batchCommand } from "./batchApi.js";
 const props = defineProps({ db: Object, persist: Function, active: Boolean });
-const emit = defineEmits(["configure", "task", "preview"]);
+const emit = defineEmits(["configure", "recover", "copy-batch", "task", "edit-task", "preview", "detail-change", "navigate"]);
+const taskSection = ref(null);
+function showPending() { taskFilter.value = "待处理"; nextTick(() => taskSection.value?.$el?.scrollIntoView({ block: "start" })); }
 const narrow = useMediaQuery("(max-width: 900px)");
 const query = ref(""),
   search = ref(""),
@@ -50,24 +70,30 @@ const query = ref(""),
 const labels = {
   configure: "继续配置",
   execute: "执行",
-  edit: "编辑内容",
+  edit: "编辑",
   detail: "详情",
   process: "去处理",
   stop: "停止发布",
-  cancel: "取消",
+  cancel: "终止",
   copy: "复制",
 };
-const states = ["草稿", "待执行", "执行中", "待处理", "已结束", "已取消"];
+const progressHelp = "已公开发布数 / 发布目标数。";
+const successHelp = "已确认发布成功的任务数 / 发布目标数。取消、放弃和结果待确认的任务不计入发布成功数。";
+const states = ["待执行", "执行中", "待处理", "已结束", "已取消"];
 const batch = computed(() =>
   props.db.batches.find((b) => b.id === current.value),
 );
 const metrics = computed(() =>
   batch.value ? batchMetrics(props.db, batch.value) : {},
 );
+const detailActions = computed(() => batch.value
+  ? batchActions(props.db, batch.value).filter((a) => !["detail", "process", "copy", "cancel", "edit"].includes(a))
+  : []);
 const records = computed(() =>
   props.db.batches
     .filter(
       (b) =>
+        formalBatch(props.db, b) &&
         (!search.value ||
           `${b.name} B-${b.id}`
             .toLowerCase()
@@ -94,14 +120,7 @@ const tasks = computed(() =>
         )) &&
       (!taskFilter.value ||
         (taskFilter.value === "待处理"
-          ? [
-              "执行失败",
-              "结果待确认",
-              "等待人工",
-              "平台审核中",
-              "待补链接",
-              "待执行",
-            ].includes(t.status)
+          ? isPendingTask(t, batch.value)
           : t.status === taskFilter.value)),
   ),
 );
@@ -116,20 +135,14 @@ const account = (id) =>
   props.db.accounts.find((a) => a.id === id)?.name || "原账号不存在";
 const asset = (id) =>
   props.db.assets.find((a) => a.id === id)?.title || "原成片不存在";
-const date = (v) =>
-  v ? new Date(v).toLocaleString("zh-CN", { hour12: false }) : "暂无更新";
-const dateParts = (v) =>
-  v
-    ? [
-        new Date(v).toLocaleDateString("zh-CN"),
-        new Date(v).toLocaleTimeString("zh-CN", { hour12: false }),
-      ]
-    : ["暂无更新", ""];
+const date = formatDateTime;
 const columns = computed(() => [
-  { colKey: "identity", title: "批次名称 / 编号", width: 220 },
+  { colKey: "id", title: "批次ID", width: 115 },
+  { colKey: "identity", title: "批次名称", width: 220 },
+  { colKey: "platform", title: "发布平台", width: 105 },
   { colKey: "plan", title: "所属计划", width: 125 },
   { colKey: "target", title: "发布目标", width: 125 },
-  { colKey: "progress", title: "执行进度", width: 172 },
+  { colKey: "progress", title: () => h("span", { class: "batch-progress-column-title" }, ["发布进度", h(ResourceFieldHelp, { label: "发布进度", content: progressHelp })]), width: 172 },
   { colKey: "state", title: "批次状态", width: 108 },
   { colKey: "pending", title: "待处理", width: 72 },
   { colKey: "updated", title: "最近更新", width: 132 },
@@ -140,26 +153,56 @@ const columns = computed(() => [
     ...(narrow.value ? {} : { fixed: "right" }),
   },
 ]);
-const taskColumns = [
+const taskColumns = computed(() => [
   { colKey: "identity", title: "任务 / 发布内容", minWidth: 220 },
   { colKey: "resource", title: "账号 / 成片", minWidth: 175 },
   { colKey: "status", title: "任务状态", width: 115 },
   { colKey: "issue", title: "异常原因", minWidth: 200 },
-  { colKey: "operation", title: "操作", minWidth: 280 },
-];
-function open(b, process = false) {
+  { colKey: "operation", title: "操作", fixed: "right", width: Math.max(100, ...rows.value.map(t => {
+    const a = taskActionItems(t, props.db);
+    return opColumnWidth(a.length > 5 ? [...a.slice(0, 4).map(x => x.label), '更多⌄'] : a.map(x => x.label), { variant: 'text', primary: a.some(x => x.primary) });
+  })) },
+]);
+function open(b, process = false, updateURL = true, restore = false) {
+  if (!formalBatch(props.db, b)) {
+    detailOpen.value = false;
+    const skeleton = b.planId || props.db.plans.some(p => p.items?.some(i => i.kind === 'batch' && i.id === b.id));
+    emit(skeleton ? "configure" : "recover", b);
+    return;
+  }
   current.value = b.id;
   detailOpen.value = true;
-  taskFilter.value = process ? "待处理" : "";
-  taskSearch.value = "";
+  if(restore){try{const saved=JSON.parse(sessionStorage.getItem('publishing-batch-view:'+b.id)||'null');if(saved){taskSearch.value=saved.search;taskFilter.value=saved.filter;nextTick(()=>window.scrollTo(0,saved.scroll||0));}}catch{}}
+  if(!restore){taskFilter.value = process ? "待处理" : "";
+  taskSearch.value = "";}
   error.value = "";
+  if (updateURL) {
+    updateOperationURL("batches",{batchId:b.id,pending:process});
+    if(!restore)window.scrollTo(0, 0);
+  }
 }
+function returnToList() {
+  const fromPlan=new URL(location.href).searchParams.get('fromPlan');
+  const p=props.db.plans.find(p=>String(p.id)===fromPlan&&p.items?.some(i=>i.id===current.value));
+  if(p){detailOpen.value=false;emit('navigate',operationURL('plans',{planId:p.id}));return;}
+  detailOpen.value = false;
+  updateOperationURL("batches");
+  window.scrollTo(0, 0);
+}
+watch(detailOpen, (visible) => emit("detail-change", visible), { flush: "sync" });
+watch(() => props.active, (active) => {
+  if (!active) detailOpen.value = false;
+});
 async function action(b, a) {
   current.value = b.id;
   error.value = "";
   if (a === "detail" || a === "process") return open(b, a === "process");
   if (a === "configure") return emit("configure", b);
   if (a === "edit") return edit(b);
+  if (a === "copy") {
+    if (!batchActions(props.db, b).includes("copy")) return;
+    return emit("copy-batch", b);
+  }
   op.value = a;
   partial.value = false;
   takeover.value = false;
@@ -196,9 +239,9 @@ async function submit() {
     opOpen.value = false;
     feedback.toast.success(
       {
-        execute: "批次执行请求已接受，所有发布配置永久锁定",
+        execute: "批次执行请求已接受，结构与资源映射已锁定",
         stop: "已停止未启动任务；在途任务继续回传结果",
-        cancel: "批次已取消",
+        cancel: "批次已终止",
         copy: "已生成新草稿，请重新匹配账号与成片",
         abandon: "任务已放弃，请通过新批次补足目标",
         repair: "原资源演示可用性已恢复，请重新检查任务",
@@ -255,6 +298,8 @@ async function saveContent() {
 }
 const pendingTask = ref(null);
 function taskOp(t, a) {
+  if (a === "detail") {try{sessionStorage.setItem('publishing-batch-view:'+t.batchId,JSON.stringify({search:taskSearch.value,filter:taskFilter.value,scroll:window.scrollY}));}catch{}return emit('task',t);}
+  if (a === "edit") return emit("edit-task", t);
   if (["abandon", "repair"].includes(a)) {
     pendingTask.value = t;
     op.value = a;
@@ -265,19 +310,10 @@ function taskOp(t, a) {
     opOpen.value = true;
   } else taskAction.value.open(t, a);
 }
-function taskActions(t) {
-  return batchTaskActions(props.db, batch.value, t);
+function operateTask(t, a) {
+  current.value = t.batchId;
+  taskOp(t, a);
 }
-const taskLabels = {
-  supplement: "补录公开结果",
-  start: "执行任务",
-  verify: "核实结果",
-  human: "去处理",
-  retry: "重试",
-  cancel: "取消任务",
-  abandon: "放弃任务",
-  repair: "恢复原资源",
-};
 const history = computed(() =>
   batch.value
     ? [
@@ -299,36 +335,31 @@ const history = computed(() =>
     : [],
 );
 function directURL() {
-  const raw = location.hash.slice(1),
-    [section, params] = raw.split("?");
-  if (section !== "batches" || !params) return;
-  const q = new URLSearchParams(params),
-    b = props.db.batches.find((x) => x.id === Number(q.get("batch")));
-  if (!b) return;
-  open(b);
+  const route=readOperationRoute(new URL(location.href));
+  if(route.page!=='batches'||!route.batchId){detailOpen.value=false;return;}
+  const q=new URLSearchParams(location.search),b=props.db.batches.find(x=>x.id===route.batchId);
+  if (!b) {
+    detailOpen.value = false;
+    return;
+  }
+  open(b, q.get("pending") === "1", false, current.value === b.id);
   if (q.get("edit") === "content") edit(b);
 }
 onMounted(() => {
-  window.addEventListener("hashchange", directURL);
+  window.addEventListener("popstate", directURL);
   nextTick(directURL);
 });
-onBeforeUnmount(() => window.removeEventListener("hashchange", directURL));
-defineExpose({ open, action, edit, directURL });
+onBeforeUnmount(() => window.removeEventListener("popstate", directURL));
+defineExpose({ open, action, edit, directURL, operateTask });
 </script>
 <template>
-  <ResourceCard v-if="active" class="batch-v12-list">
-    <div class="batch-v12-list-heading">
-      <h2>
-        全部批次 <span>{{ db.batches.length }}</span>
-      </h2>
-      <span class="batch-list-caption">按批次跟进配置、执行与处理结果</span>
-    </div>
+  <ResourceCard v-if="active" v-show="!detailOpen" class="batch-v12-list resource-list-panel">
     <ResourceFilterBar>
       <label class="wt-filter-field wt-filter-field--wide"
-        ><span class="wt-filter-field__label">搜索批次</span
+        ><span class="wt-filter-field__label">综合搜索</span
         ><t-input
           v-model="query"
-          aria-label="搜索批次"
+          aria-label="综合搜索"
           placeholder="批次名称或编号"
           clearable
           @enter="search = query"
@@ -338,7 +369,7 @@ defineExpose({ open, action, edit, directURL });
         ><t-select
           v-model="platform"
           clearable
-          placeholder="全部平台"
+          placeholder="全部"
           :options="
             ['小红书', 'B站', '百家号'].map((x) => ({ label: x, value: x }))
           "
@@ -348,7 +379,7 @@ defineExpose({ open, action, edit, directURL });
         ><t-select
           v-model="stateFilter"
           clearable
-          placeholder="全部状态"
+          placeholder="全部"
           :options="states.map((x) => ({ label: x, value: x }))"
       /></label>
       <div class="wt-filter-actions">
@@ -367,34 +398,28 @@ defineExpose({ open, action, edit, directURL });
       </div>
     </ResourceFilterBar>
     <t-table
+      class="resource-data-table"
       row-key="id"
       :data="records"
       :columns="columns"
       table-layout="fixed"
       :pagination="{
         defaultCurrent: 1,
-        defaultPageSize: 8,
-        pageSizeOptions: [8, 16, 32],
+        defaultPageSize: 10,
+        pageSizeOptions: [10, 20, 50],
         total: records.length,
         showJumper: false,
       }"
       :hover="true"
     >
-      <template #identity="{ row }"
-        ><button
-          class="batch-link batch-name"
-          :title="row.name"
-          @click="open(row)"
-        >
-          {{ row.name }}</button
-        ><small>B-{{ row.id }} · {{ row.platform }}</small></template
-      >
+      <template #id="{ row }"><ResourceId :value="row.id" label="批次ID" /></template>
+      <template #identity="{ row }"><ResourceNameLink class="batch-name" :title="row.name" @click="open(row)">{{row.name}}</ResourceNameLink></template>
       <template #plan="{ row }"
         ><span class="batch-cell-text" :title="plan(row)?.name || '独立批次'">{{
           plan(row)?.name || "独立批次"
         }}</span
         ><small v-if="row.sourceBatchId"
-          >复制自 B-{{ row.sourceBatchId }}</small
+          >复制自 {{ row.sourceBatchId }}</small
         ></template
       >
       <template #target="{ row }"
@@ -412,19 +437,14 @@ defineExpose({ open, action, edit, directURL });
         }}</span>
         <template v-else
           ><div class="batch-progress-title">
-            已处置 {{ batchMetrics(db, row).disposed }} /
-            {{ batchMetrics(db, row).total
-            }}<span>{{ batchMetrics(db, row).progress }}%</span>
+            <span>{{ batchMetrics(db, row).published }} / {{ batchMetrics(db, row).target }}</span><span>{{ batchMetrics(db, row).progress }}%</span>
           </div>
           <t-progress
             color="var(--wt-color-primary)"
             :percentage="batchMetrics(db, row).progress"
             :label="false"
-            size="small"
-          /><small
-            >已发布 {{ batchMetrics(db, row).published }} · 达成
-            {{ batchMetrics(db, row).achievement }}%</small
-          ></template
+            :stroke-width="6"
+          /></template
         ></template
       >
       <template #state="{ row }"
@@ -438,10 +458,7 @@ defineExpose({ open, action, edit, directURL });
           "
           variant="light"
           >{{ batchState(db, row) }}</t-tag
-        ><small v-if="batchState(db, row) === '已结束'">{{
-          batchMetrics(db, row).result
-        }}</small
-        ><small v-if="row.stoppedAt">已停止发布</small></template
+        ><small v-if="batchState(db, row) === '已结束' && !batchMetrics(db, row).published">未发布</small><small v-else-if="row.stoppedAt">已停止发布</small></template
       >
       <template #pending="{ row }"
         ><button
@@ -452,14 +469,7 @@ defineExpose({ open, action, edit, directURL });
           {{ batchMetrics(db, row).pending }} 项</button
         ><span v-else>—</span></template
       >
-      <template #updated="{ row }"
-        ><span class="batch-date">{{
-          dateParts(row.updatedAt || row.created)[0]
-        }}</span
-        ><small class="batch-date">{{
-          dateParts(row.updatedAt || row.created)[1]
-        }}</small></template
-      >
+      <template #updated="{ row }"><span>{{formatDateTime(row.updatedAt || row.created)}}</span></template>
       <template #operation="{ row }"
         ><ResourceRowActions
           ><t-button
@@ -485,113 +495,44 @@ defineExpose({ open, action, edit, directURL });
       左右滑动表格，查看完整进度与操作。
     </p>
   </ResourceCard>
-  <Overlay
-    v-model:visible="detailOpen"
-    title="批次详情"
-    kind="drawer"
-    :width="1180"
-    workspace
+  <ResourceDetailPage
+    v-if="active && detailOpen && batch"
+    title="发布批次详情"
+    back-label="返回发布批次列表"
+    @back="returnToList"
   >
-    <div v-if="batch" class="batch-v12-detail">
-      <section aria-labelledby="batch-info">
-        <div class="batch-section-title">
-          <h2 id="batch-info"><span>01</span> 批次信息</h2>
-          <ResourceRowActions
-            ><t-button
-              v-for="(a, i) in batchActions(db, batch).filter(
-                (x) => !['detail', 'process'].includes(x),
-              )"
-              :key="a"
-              variant="text"
-              :class="{
-                'is-primary': i === 0,
-                'is-danger': ['cancel', 'stop'].includes(a),
-              }"
-              @click="action(batch, a)"
-              >{{ labels[a] }}</t-button
-            ></ResourceRowActions
-          >
+    <div v-if="batch" class="batch-detail">
+      <ResourceNotice v-if="metrics.pending" tone="warning" class="batch-pending-notice">
+        有 {{ metrics.pending }} 条任务待处理
+        <template #actions><t-button theme="primary" variant="text" size="small" @click="showPending">查看待处理任务</t-button></template>
+      </ResourceNotice>
+      <ResourceCard class="detail-card"><ResourceSection title="批次信息">
+        <ResourceDescriptions>
+          <Field label="批次名称">{{ batch.name }}</Field>
+          <Field label="批次ID">{{ batch.id }}</Field>
+          <Field label="批次状态"><ResourceStatusBadge :label="batchState(db, batch)" :tone="batchState(db, batch) === '待处理' ? 'warning' : batchState(db, batch) === '执行中' ? 'info' : 'neutral'" /></Field>
+          <Field label="发布平台">{{ batch.platform }}</Field>
+          <Field label="所属计划">{{ plan(batch)?.name || "独立批次" }}</Field>
+          <Field label="创建人">{{ batch.createdBy || "历史记录未提供" }}</Field>
+          <Field label="创建时间">{{ date(batch.created) }}</Field>
+          <Field label="最近更新">{{ date(batch.updatedAt || batch.created) }}</Field>
+          <Field v-if="batchState(db, batch) === '已结束'" label="发布结果">{{ metrics.result }}</Field>
+        </ResourceDescriptions>
+        <ResourceNotice v-if="batch.stoppedAt">已停止发布。未启动任务已取消，在途任务继续回传结果；不能重新启动。</ResourceNotice>
+      </ResourceSection></ResourceCard>
+      <ResourceCard class="detail-card"><ResourceSection title="执行情况">
+        <ResourceStatGrid :items="[
+          { key: 'target', label: '发布目标', value: metrics.target },
+          { key: 'published', label: '已发布', value: metrics.published, tone: 'success' },
+          { key: 'failed', label: '发布失败', value: metrics.failed, tone: metrics.failed ? 'danger' : 'neutral', help: '当前明确失败的任务，不含已取消、已放弃和结果待确认。未处置的失败同时计入待处理。' },
+          { key: 'pending', label: '待处理', value: metrics.pending, tone: metrics.pending ? 'warning' : 'neutral' },
+        ]" />
+        <div class="batch-success-progress">
+          <ResourceProgress label="发布成功率" :percentage="metrics.achievement" :value-text="`${metrics.published} / ${metrics.target} ·`" :help="successHelp" />
         </div>
-        <div class="batch-overview">
-          <div>
-            <h3>
-              {{ batch.name }}
-              <t-tag variant="light">{{ batchState(db, batch) }}</t-tag>
-            </h3>
-            <p>
-              B-{{ batch.id }} · {{ batch.platform }} ·
-              {{ plan(batch)?.name || "独立批次" }}
-            </p>
-            <p>
-              {{
-                (batch.targets || [])
-                  .map((t) => `${t.category} ${t.count} 条`)
-                  .join(" / ")
-              }}
-            </p>
-            <small
-              >创建人 {{ batch.createdBy || "历史记录未提供" }} · 创建
-              {{ date(batch.created) }} · 最近更新
-              {{ date(batch.updatedAt || batch.created) }}</small
-            >
-            <p v-if="batchState(db, batch) === '已结束'">
-              发布结果：<b>{{ metrics.result }}</b>
-            </p>
-            <p v-if="batch.stoppedAt">
-              已停止发布。未启动任务已取消，在途任务继续回传结果；不能重新启动。
-            </p>
-          </div>
-          <div class="batch-progress-panel">
-            <div class="batch-counts">
-              <div>
-                <strong>{{ metrics.target }}</strong><small>发布目标</small>
-              </div>
-              <div>
-                <strong>{{ metrics.published }}</strong><small>已发布</small>
-              </div>
-              <div>
-                <strong>{{ metrics.pending }}</strong><small>待处理</small>
-              </div>
-            </div>
-            <div class="batch-progress-title">
-              已处置进度
-              <span
-                >{{ metrics.disposed }} / {{ metrics.total }} ·
-                {{ metrics.progress }}%</span
-              >
-            </div>
-            <t-progress
-              :percentage="metrics.progress"
-              color="var(--wt-color-primary)"
-              :label="false"
-              size="small"
-            />
-            <div class="batch-progress-title">
-              发布达成率
-              <span
-                >{{ metrics.published }} / {{ metrics.target }} ·
-                {{ metrics.achievement }}%</span
-              >
-            </div>
-            <t-progress
-              :percentage="metrics.achievement"
-              :label="false"
-              size="small"
-            /><small>已处置仅包含已发布、已取消和已放弃。</small>
-          </div>
-        </div>
-      </section>
-      <section aria-labelledby="batch-tasks">
-        <div class="batch-section-title">
-          <h2 id="batch-tasks">
-            <span>02</span> 批次任务 <small>{{ rows.length }} 条</small>
-          </h2>
-        </div>
-        <t-alert
-          v-if="batch.firstStartedAt"
-          theme="info"
-          message="首次执行后，全部发布配置永久只读。资源异常仅可恢复原资源；永久不可用请取消或放弃任务，再用新批次补足。"
-        />
+      </ResourceSection></ResourceCard>
+      <ResourceCard class="detail-card"><ResourceSection ref="taskSection" id="batch-tasks" title="批次任务">
+        <template #title-extra><span class="batch-section-count">{{ rows.length }} 条</span></template>
         <ResourceFilterBar
           ><label class="wt-filter-field wt-filter-field--wide"
             ><span class="wt-filter-field__label">搜索任务</span
@@ -604,7 +545,7 @@ defineExpose({ open, action, edit, directURL });
             ><t-select
               v-model="taskFilter"
               clearable
-              placeholder="全部任务"
+              placeholder="全部"
               :options="
                 [
                   '待处理',
@@ -623,15 +564,17 @@ defineExpose({ open, action, edit, directURL });
               " /></label
         ></ResourceFilterBar>
         <t-table
-          :key="`tasks-${current}-${tasks.length > 8}`"
+          class="resource-data-table resource-embedded-table is-summary"
+          :key="`tasks-${current}-${tasks.length > 10}`"
           row-key="id"
           :data="tasks"
           :columns="taskColumns"
           :pagination="
-            tasks.length > 8
+            tasks.length > 10
               ? {
                   defaultCurrent: 1,
-                  defaultPageSize: 8,
+                  defaultPageSize: 10,
+                  pageSizeOptions: [10, 20, 50],
                   total: tasks.length,
                   showJumper: false,
                 }
@@ -687,17 +630,8 @@ defineExpose({ open, action, edit, directURL });
             }}</span></template
           >
           <template #operation="{ row }"
-            ><ResourceRowActions
-              ><t-button variant="text" @click="emit('task', row)"
-                >详情</t-button
-              ><t-button
-                v-for="a in taskActions(row)"
-                :key="a"
-                variant="text"
-                @click="taskOp(row, a)"
-                >{{ taskLabels[a] }}</t-button
-              ></ResourceRowActions
-            ></template
+            ><TaskRowActions :task="row" :db="db" @action="taskOp(row, $event)" />
+            </template
           >
           <template #empty
             ><ResourceEmptyState
@@ -709,106 +643,11 @@ defineExpose({ open, action, edit, directURL });
               "
           /></template>
         </t-table>
-      </section>
-      <section aria-labelledby="batch-snapshot">
-        <div class="batch-section-title">
-          <h2 id="batch-snapshot"><span>03</span> 批次快照</h2>
-          <small>{{
-            batch.firstStartedAt
-              ? "冻结于 " + date(batch.firstStartedAt)
-              : "首次执行时冻结；当前为配置预览"
-          }}</small>
-        </div>
-        <t-alert
-          v-if="batch.legacySnapshot"
-          theme="warning"
-          message="历史批次没有保存原始执行快照，以下为迁移时保留的配置，不能作为原执行时完整证据。"
-        />
-        <div class="batch-snapshot-meta">
-          <div>
-            <small>发布目标</small
-            >{{
-              (batch.frozenSnapshot?.targets || batch.targets || [])
-                .map((t) => `${t.category} ${t.count} 条`)
-                .join(" / ") || "待配置"
-            }}
-          </div>
-          <div>
-            <small>资源规则</small
-            >{{
-              batch.firstStartedAt
-                ? "原账号与原成片永久锁定"
-                : "进入内容配置后资源锁定"
-            }}
-          </div>
-          <div>
-            <small>内容规则</small
-            >{{
-              batch.control === "已取消"
-                ? "批次已取消，内容不可编辑"
-                : batch.firstStartedAt
-                  ? "全部发布配置永久只读"
-                  : "仅首次执行前允许编辑内容"
-            }}
-          </div>
-        </div>
-        <p
-          v-if="batch.frozenSnapshot?.rules?.accountOrder?.length"
-          class="batch-rule-text"
-        >
-          账号顺序：{{
-            batch.frozenSnapshot.rules.accountOrder.map(account).join(" → ")
-          }}
-        </p>
-        <p
-          v-if="
-            batch.frozenSnapshot?.rules?.accountLimits &&
-            Object.keys(batch.frozenSnapshot.rules.accountLimits).length
-          "
-          class="batch-rule-text"
-        >
-          账号上限：{{
-            Object.entries(batch.frozenSnapshot.rules.accountLimits)
-              .map(([id, limit]) => `${account(Number(id))} ${limit} 条`)
-              .join(" / ")
-          }}
-        </p>
-        <t-collapse
-          ><t-collapse-panel value="mapping" header="查看账号成片映射与内容配置"
-            ><div
-              v-for="t in batch.frozenSnapshot?.tasks || rows"
-              :key="t.id"
-              class="batch-frozen-row"
-            >
-              <b
-                >T-{{ t.id }} · {{ account(t.accountId) }} → V-{{
-                  t.assetId
-                }}</b
-              >
-              <p>{{ t.title || "未配置标题" }}</p>
-              <small
-                >{{ t.description || "未设置简介" }} · 标签：{{
-                  t.tags || t.topics || "未设置"
-                }}
-                · {{ t.declaration || "未设置声明" }}</small
-              ><button
-                v-if="t.cover"
-                class="batch-cover"
-                @click="
-                  emit('preview', { kind: 'cover', row: t, readOnly: true })
-                "
-              >
-                <img :src="t.cover" alt="冻结封面" />
-              </button></div></t-collapse-panel
-        ></t-collapse>
-      </section>
-      <section aria-labelledby="batch-history">
-        <div class="batch-section-title">
-          <h2 id="batch-history"><span>04</span> 执行记录</h2>
-          <small>按操作时间倒序</small>
-        </div>
+      </ResourceSection></ResourceCard>
+      <ResourceCard class="detail-card"><ResourceSection title="执行记录" description="按操作时间倒序">
         <t-table
-          :key="`history-${current}-${history.length > 8}`"
+          class="resource-data-table resource-embedded-table"
+          :key="`history-${current}-${history.length > 10}`"
           row-key="rowKey"
           :data="history"
           :columns="[
@@ -818,10 +657,11 @@ defineExpose({ open, action, edit, directURL });
             { colKey: 'text', title: '结果与异常记录', minWidth: 250 },
           ]"
           :pagination="
-            history.length > 8
+            history.length > 10
               ? {
                   defaultCurrent: 1,
-                  defaultPageSize: 8,
+                  defaultPageSize: 10,
+                  pageSizeOptions: [10, 20, 50],
                   total: history.length,
                   showJumper: false,
                 }
@@ -839,14 +679,19 @@ defineExpose({ open, action, edit, directURL });
               title="暂无执行记录"
               description="配置保存、执行与异常处理后会记录操作。" /></template
         ></t-table>
-      </section>
+      </ResourceSection></ResourceCard>
     </div>
-    <template #footer
-      ><t-button theme="default" variant="outline" @click="detailOpen = false"
-        >关闭</t-button
-      ></template
-    >
-  </Overlay>
+    <template v-if="detailActions.length" #footer>
+      <t-button
+        v-for="a in [...detailActions].reverse()"
+        :key="a"
+        :class="{ 'is-danger': ['cancel', 'stop'].includes(a) }"
+        :theme="a === detailActions[0] && !['cancel', 'stop'].includes(a) ? 'primary' : 'default'"
+        :variant="['cancel', 'stop'].includes(a) ? 'text' : a === detailActions[0] ? 'base' : 'outline'"
+        @click="action(batch, a)"
+      >{{ labels[a] }}</t-button>
+    </template>
+  </ResourceDetailPage>
   <Overlay
     v-model:visible="opOpen"
     :title="
@@ -864,7 +709,7 @@ defineExpose({ open, action, edit, directURL });
     <template v-if="batch"
       ><div class="batch-dialog-identity">
         <h3>{{ batch.name }}</h3>
-        <small>B-{{ batch.id }} · {{ batch.platform }}</small>
+        <small>{{ batch.id }} · {{ batch.platform }}</small>
       </div>
       <t-alert v-if="error" theme="warning" :message="error" />
       <template v-if="op === 'execute'"
@@ -880,7 +725,7 @@ defineExpose({ open, action, edit, directURL });
           </div>
         </div>
         <p>
-          系统成功接受后，全部任务的发布配置将永久锁定，包括本次未执行的任务。
+          系统成功接受后，批次结构与资源映射锁定。尚未领取的待执行任务仍可在发布任务页单独编辑内容。
         </p>
         <t-alert
           v-if="!usable.length"
@@ -910,30 +755,13 @@ defineExpose({ open, action, edit, directURL });
       >
       <template v-else-if="op === 'cancel'"
         ><p>
-          批次尚未执行。取消后原批次不可恢复，已配置的任务一并取消；可从终态批次复制为新草稿。
+          批次尚未执行。终止后原批次不可恢复，已配置的任务一并取消；可从终态批次复制新建。
         </p>
         <label class="batch-form-field"
-          >取消原因（选填）<t-textarea
+          >终止原因<t-textarea
             v-model="reason"
             :maxlength="500" /></label
       ></template>
-      <template v-else-if="op === 'copy'"
-        ><p>
-          复制目标、类目及资源策略，生成新草稿。账号和成片将重新匹配，不复制任务、执行结果与记录。
-        </p>
-        <label class="batch-form-field"
-          ><RequiredLabel>新批次名称</RequiredLabel>
-          <t-input
-            v-model="name"
-            aria-label="新批次名称"
-            :maxlength="80"
-            placeholder="请输入新批次名称" /></label
-        ><small
-          >来源计划：{{
-            sourcePlan(batch)?.name || plan(batch)?.name || "独立批次"
-          }}。保留来源，不改变已确认计划的拆批关系。</small
-        ></template
-      >
       <template v-else-if="op === 'repair'"
         ><p>仅恢复原账号和原成片的演示可用性，不替换账号、成片或映射。</p>
         <p>
@@ -980,9 +808,7 @@ defineExpose({ open, action, edit, directURL });
             ? blocked.length
               ? "仅执行可用任务"
               : "确认执行"
-            : op === "copy"
-              ? "创建新草稿"
-              : op === "abandon"
+            : op === "abandon"
                 ? "确认放弃"
                 : op === "repair"
                   ? "确认恢复原资源"
@@ -995,28 +821,27 @@ defineExpose({ open, action, edit, directURL });
     :visible="editOpen"
     @update:visible="
       (value) => {
-        if (!value) closeEdit();
+        if (!value) return closeEdit();
       }
     "
     title="编辑批次内容"
     kind="drawer"
-    workspace
+    page
+    back-label="返回发布批次"
     :width="1180"
     :busy="busy || working"
     ><template v-if="batch"
       ><div class="batch-editor-header">
         <div>
-          <h2>{{ batch.name }}</h2>
+          <h2>{{ batch.name }} <ResourceFieldHelp label="批次内容编辑" content="可编辑文案与封面，批次目标和资源映射已锁定。首次执行后内容只读。" /></h2>
           <small
-            >B-{{ batch.id }} · {{ batch.platform }} · {{ rows.length }} 条任务
+            >{{ batch.id }} · {{ batch.platform }} · {{ rows.length }} 条任务
             · 目标 {{ metrics.target }} 条</small
           >
         </div>
         <t-tag variant="light">仅编辑内容</t-tag>
       </div>
-      <t-alert
-        theme="info"
-        message="可编辑文案与封面；批次目标和资源映射已锁定。首次执行后全部内容永久只读。" /><t-alert
+<t-alert
         v-if="error"
         theme="warning"
         :message="error" /><BatchContentWorkspace
@@ -1026,16 +851,10 @@ defineExpose({ open, action, edit, directURL });
         @preview="emit('preview', $event)" /></template
     ><template #footer
       ><t-button
-        theme="default"
-        variant="outline"
-        :disabled="busy || working"
-        @click="closeEdit"
-        >返回</t-button
-      ><t-button
         :loading="busy"
         :disabled="working || !contentEditable(db, batch)"
         @click="saveContent"
-        >保存内容</t-button
+        >保存</t-button
       ></template
     ></Overlay
   >
@@ -1047,12 +866,12 @@ defineExpose({ open, action, edit, directURL });
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  padding: 20px 24px 0;
+  padding: 20px 20px 0;
 }
 .batch-v12-list-heading h2 {
   margin: 0;
-  font-size: 16px;
-  font-weight: 500;
+  font-size: 14px;
+  font-weight: 600;
   line-height: 24px;
 }
 .batch-v12-list-heading h2 span {
@@ -1085,21 +904,7 @@ defineExpose({ open, action, edit, directURL });
 .batch-v12-list :deep(.t-table__content table) {
   min-width: 1170px;
 }
-.batch-v12-list :deep(.t-table th) {
-  height: 44px;
-  padding: 10px 16px;
-  white-space: nowrap;
-  font-size: 13px;
-  font-weight: 400;
-  color: var(--wt-color-text-secondary);
-  background: var(--wt-color-bg-subtle);
-}
-.batch-v12-list :deep(.t-table td) {
-  padding: 12px 16px;
-  height: 78px;
-  box-sizing: border-box;
-  vertical-align: middle;
-}
+
 small {
   display: block;
   color: var(--wt-color-text-secondary);
@@ -1121,8 +926,7 @@ small {
 .batch-link:hover {
   text-decoration: underline;
 }
-.batch-link:focus-visible,
-.batch-cover:focus-visible {
+.batch-link:focus-visible {
   outline: 2px solid var(--wt-color-primary);
   outline-offset: 3px;
   border-radius: 4px;
@@ -1136,7 +940,7 @@ small {
   overflow-wrap: anywhere;
 }
 .batch-name {
-  font-weight: 500;
+  font-weight: 400;
 }
 .batch-date {
   display: block;
@@ -1149,15 +953,14 @@ small {
 }
 .batch-target-value {
   font-size: 16px;
-  font-weight: 500;
+  font-weight: 400;
   font-variant-numeric: tabular-nums;
 }
 .batch-target-value > span {
   font-size: 12px;
   font-weight: 400;
 }
-.batch-v12-list .batch-progress-title,
-.batch-v12-list .batch-progress-title + .t-progress + small {
+.batch-v12-list .batch-progress-title {
   white-space: nowrap;
 }
 .batch-progress-title {
@@ -1165,127 +968,32 @@ small {
   justify-content: space-between;
   align-items: center;
   gap: 12px;
-  font-size: 12px;
-  line-height: 20px;
+  font-size: 13px;
+  line-height: 22px;
   margin: 0 0 6px;
   font-variant-numeric: tabular-nums;
 }
 .batch-progress-title span {
   white-space: nowrap;
-  color: var(--wt-color-text-secondary);
-}
-.batch-v12-detail {
-  display: flex;
-  flex-direction: column;
-  gap: 28px;
-  max-width: 1120px;
-  margin-inline: auto;
   color: var(--wt-color-text-primary);
-  font-size: 13px;
 }
-.batch-v12-detail > section {
-  padding: 0 0 28px;
-  border-bottom: 1px solid var(--wt-color-border);
-  min-width: 0;
-}
-.batch-v12-detail > section:last-child {
-  padding-bottom: 0;
-  border: 0;
-}
-.batch-section-title {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 12px;
-  margin-bottom: 20px;
-}
-.batch-section-title h2 {
-  margin: 0;
-  font-size: 14px;
-  font-weight: 600;
-  line-height: 24px;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-.batch-section-title h2 > span {
-  display: grid;
-  place-items: center;
-  width: 24px;
-  height: 24px;
-  font-size: 12px;
-  font-weight: 500;
-  border-radius: 4px;
-  color: var(--wt-color-primary);
-  background: var(--wt-color-primary-light);
-}
-.batch-section-title h2 small {
-  display: inline;
-  margin: 0;
-}
-.batch-overview {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 340px;
-  gap: 32px;
-}
-.batch-overview h3 {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 10px;
-  margin: 0 0 12px;
-  font-size: 18px;
-  font-weight: 500;
-  line-height: 28px;
-  overflow-wrap: anywhere;
-}
-.batch-overview p {
-  line-height: 1.7;
-  font-size: 13px;
-  color: var(--wt-color-text-secondary);
-  margin: 8px 0;
-}
-.batch-overview > div {
-  min-width: 0;
-}
-.batch-progress-panel {
-  padding: 16px 20px;
-  background: var(--wt-color-bg-subtle);
-  border: 1px solid var(--wt-color-border);
-  border-radius: 6px;
-}
-.batch-progress-panel > .batch-progress-title:not(:first-child) {
-  margin-top: 14px;
-}
-.batch-counts,
-.batch-dialog-counts {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 16px;
-  margin-bottom: 18px;
-}
-.batch-counts strong,
-.batch-dialog-counts strong {
-  font-size: 24px;
-  line-height: 32px;
-  font-weight: 500;
-  font-variant-numeric: tabular-nums;
-}
-.batch-v12-detail :deep(.t-table) {
-  font-size: 13px;
-  line-height: 1.7;
-}
-.batch-v12-detail :deep(.t-table td) {
-  padding: 12px 16px;
-  vertical-align: middle;
-}
-.batch-v12-detail :deep(.t-table th) {
-  background: var(--wt-color-bg-subtle);
-  font-weight: 400;
-  color: var(--wt-color-text-secondary);
-  white-space: nowrap;
-}
+.batch-progress-title span:last-child { color: var(--wt-color-text-secondary); }
+.batch-progress-column-title { display: inline-flex; align-items: center; gap: 4px; }
+.batch-metric-label { display: inline-flex; align-items: center; gap: 4px; }
+.batch-detail { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.batch-detail > .resource-notice { margin: 0; }
+.batch-section-count { color: var(--wt-text-tertiary); font-size: 12px; font-weight: 400; margin-left: 6px; }
+.batch-progress-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; }
+.batch-dialog-counts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin-bottom: 18px; }
+.batch-dialog-counts strong { font-size: 24px; line-height: 32px; font-weight: 400; font-variant-numeric: tabular-nums; }
+@media (max-width: 680px) { .batch-progress-grid { grid-template-columns: 1fr; gap: 16px; } }
+.batch-detail :deep(.resource-section .resource-filter-bar) { padding: 16px 0; gap: 16px; margin: 0; }
+.batch-detail :deep(.resource-section .resource-filter-bar > .wt-filter-field) { flex: 0 1 180px; max-width: 180px; }
+.batch-detail :deep(.resource-section .resource-filter-bar > .wt-filter-field--wide) { flex: 0 1 320px; max-width: 360px; }
+.batch-detail :deep(.resource-section .resource-filter-bar .wt-filter-field__label) { font-size: 13px; font-weight: 400; color: var(--wt-text-tertiary); }
+.batch-detail :deep(.resource-data-table .t-table__empty) { padding: 0; }
+.batch-detail .batch-name { max-width: 280px; font-weight: 400; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; text-align: left; }
+@media (max-width: 680px) { .batch-detail :deep(.resource-section .resource-filter-bar > .wt-filter-field) { flex-basis: 100%; max-width: none; } }
 .batch-task-identity {
   display: flex;
   align-items: center;
@@ -1303,44 +1011,12 @@ small {
 .batch-task-identity > div {
   min-width: 0;
 }
-.batch-snapshot-meta {
-  display: grid;
-  grid-template-columns: 1.2fr 1fr 1fr;
-  gap: 20px;
-  margin-bottom: 20px;
-  font-size: 13px;
-  padding: 16px 20px;
-  background: var(--wt-color-bg-subtle);
-  border-radius: 6px;
-}
-.batch-frozen-row {
-  padding: 16px 0;
-  border-bottom: 1px solid var(--wt-color-border);
-  font-size: 13px;
-  line-height: 1.7;
-}
-.batch-frozen-row b {
-  font-weight: 500;
-}
-.batch-cover {
-  border: 0;
-  background: none;
-  padding: 0;
-  margin-top: 10px;
-  cursor: zoom-in;
-}
-.batch-cover img {
-  width: 140px;
-  max-height: 100px;
-  object-fit: contain;
-  border-radius: 4px;
-}
 .batch-form-field {
   display: grid;
   gap: 8px;
   margin: 20px 0;
   font-size: 13px;
-  font-weight: 500;
+  font-weight: 400;
 }
 .batch-blocked {
   max-height: 200px;
@@ -1360,7 +1036,7 @@ small {
 .batch-dialog-identity h3 {
   margin: 0;
   font-size: 16px;
-  font-weight: 500;
+  font-weight: 400;
   line-height: 26px;
 }
 .batch-dialog-counts {
@@ -1379,44 +1055,29 @@ small {
 }
 .batch-editor-header h2 {
   font-size: 18px;
-  font-weight: 500;
+  font-weight: 400;
   line-height: 28px;
   margin: 0;
 }
-.batch-v12-detail :deep(.t-alert) {
+.batch-detail :deep(.t-alert) {
   margin-bottom: 20px;
   font-size: 13px;
   line-height: 1.7;
 }
 @media (max-width: 900px) {
-  .batch-overview {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 20px;
-  }
-  .batch-snapshot-meta {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 16px;
-  }
   .batch-list-caption {
     display: none;
-  }
-  .batch-v12-detail {
-    gap: 24px;
-  }
-  .batch-v12-detail > section {
-    padding-bottom: 24px;
   }
 }
 @media (max-width: 540px) {
   .batch-v12-list-heading {
     padding: 16px 20px 0;
   }
-  .batch-progress-panel {
-    padding: 16px;
-  }
-  .batch-counts,
   .batch-dialog-counts {
     gap: 12px;
   }
 }
+.batch-pending-notice { align-items: center; }
+.batch-pending-notice :deep(.resource-notice__actions .t-button) { font-size: 13px; }
+.batch-editor-header h2 {display:flex;align-items:center;gap:8px;margin:0;font-size:16px;line-height:24px;font-weight:500;}
 </style>

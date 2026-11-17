@@ -1,0 +1,21 @@
+/* Local filter geometry for the two operations-tool libraries. */
+.wt-resource-page.resource-visual-approved .resource-list-panel .operations-tool-filters > .wt-filter-field,
+.wt-resource-page.resource-visual-approved .resource-list-panel .operations-tool-filters .wt-advanced-filters > .wt-filter-field {
+  flex: 0 1 160px;
+  max-width: 160px;
+  min-width: 140px;
+}
+.wt-resource-page.resource-visual-approved .resource-list-panel .operations-tool-filters > .wt-filter-field--wide {
+  flex: 0 1 240px;
+  max-width: 240px;
+}
+.wt-resource-page.resource-visual-approved .resource-list-panel .operations-tool-filters .wt-advanced-filters {
+  border: 0;
+  margin: 0;
+  padding: 0 !important;
+  gap: 20px 24px;
+}
+@media(max-width:680px){
+ .wt-resource-page.resource-visual-approved .resource-list-panel .operations-tool-filters > .wt-filter-field,
+ .wt-resource-page.resource-visual-approved .resource-list-panel .operations-tool-filters .wt-advanced-filters > .wt-filter-field{flex:1 1 160px;max-width:none;}
+}

@@ -26,6 +26,7 @@ export function initCandidate(r) {
 }
 export function editField(r, field, value) {
   initCandidate(r);
+  if (JSON.stringify(r[field]) === JSON.stringify(value)) return;
   r[field] = value;
   r.fieldVersions[field] = (r.fieldVersions[field] || 0) + 1;
   r.version = (r.version || 0) + 1;

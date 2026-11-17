@@ -64,7 +64,7 @@ describe("批次 V1.2 生命周期", () => {
       published: 1,
       pending: 3,
       achievement: 25,
-      progress: 50,
+      progress: 25,
     });
   });
   it("只提供六个主状态与终态结果", () => {
@@ -139,9 +139,11 @@ describe("批次 V1.2 生命周期", () => {
     expect(() => runBatchCommand(d, b, "copy", { name: "副本" })).toThrow();
     runBatchCommand(d, b, "cancel");
     const copy = runBatchCommand(d, b, "copy", { name: "副本" });
-    expect(copy.candidates).toEqual([]);
+    expect(copy.rows).toEqual([]);
+    expect(d.batches).toHaveLength(1);
+    expect(d.publishDraft).toEqual(copy);
     expect(d.tasks.filter((t) => t.batchId === copy.id)).toHaveLength(0);
-    expect(batchState(d, copy)).toBe("草稿");
+    expect(copy.batchId).toBeNull();
   });
   it("拒绝映射篡改、首次执行后的旧窗口保存和版本冲突", () => {
     const d = fixture(),
@@ -249,7 +251,7 @@ it.each([
   expect(batchMetrics(d, b)).toMatchObject({
     result,
     achievement,
-    progress: 100,
+    progress: achievement,
   });
 });
 it("内容阶段草稿禁止变更类目配额与账号顺序", () => {

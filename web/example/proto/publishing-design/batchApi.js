@@ -1,8 +1,9 @@
 let revision = null;
-async function request(route, method = "GET", body) {
+async function request(route, method = "GET", body, signal) {
   const response = await fetch("/__example/publishing/" + route, {
     method,
     headers: { "Content-Type": "application/json" },
+    ...(signal ? { signal } : {}),
     ...(body ? { body: JSON.stringify(body) } : {}),
   });
   if (!response.headers.get("content-type")?.includes("application/json"))
@@ -12,10 +13,10 @@ async function request(route, method = "GET", body) {
   if (result) revision = result.revision;
   return result;
 }
-export async function loadBatchSnapshot(legacy) {
-  let result = await request("snapshot");
+export async function loadBatchSnapshot(legacy, signal) {
+  let result = await request("snapshot", "GET", undefined, signal);
   if (!result && legacy)
-    result = await request("bootstrap", "POST", { data: legacy });
+    result = await request("bootstrap", "POST", { data: legacy }, signal);
   return result?.data || null;
 }
 export async function saveBatchSnapshot(data) {

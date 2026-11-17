@@ -98,10 +98,10 @@ describe("task experience safety", () => {
     expect(canEditTask(t)).toBe(false);
     expect(canCancelTask(t)).toBe(false);
   });
-  it("reviewing is not public success and is read only", () => {
+  it("reviewing can supplement a public result without counting as public success", () => {
     const { db, t } = fixture("平台审核中");
     const p = taskPresentation(t, db);
-    expect(p.action).toBe("detail");
+    expect(p.action).toBe("supplement");
     expect(p.description).toContain("不计入已发布目标");
   });
 });

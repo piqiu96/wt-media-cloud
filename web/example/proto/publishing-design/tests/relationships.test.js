@@ -214,7 +214,7 @@ describe("D05 D07 D09 D10 D11 dispatch and cancellation", () => {
     setResult(db.tasks[0], "已发布");
     syncPlan(db, p);
     expect(db.tasks[1].attempts).toBe(0);
-    cancelPlan(p);
+    cancelPlan(p, db);
     expect(() => dispatchPlan(db, p)).toThrow("终结");
     expect(() => advance(db, p, true)).toThrow();
     expect(db.tasks[1].attempts).toBe(0);
@@ -280,13 +280,14 @@ describe("D05 D07 D09 D10 D11 dispatch and cancellation", () => {
     expect(claimTask(db, tasks[1])).toBe(false);
     expect(claimTask(db, tasks[2])).toBe(true);
   });
-  it("plan cancellation keeps existing task states and reservations intact", () => {
+  it("plan cancellation cancels unstarted tasks and preserves identities and reservations", () => {
     const db = fresh(),
       p = prepare(db);
     dispatchPlan(db, p);
     const before = clone(db.tasks);
-    cancelPlan(p);
-    expect(db.tasks).toEqual(before);
+    cancelPlan(p, db);
+    expect(db.tasks.every(t => t.status === '已取消')).toBe(true);
+    expect(db.tasks.map(t => [t.id,t.assetId,t.platform,t.attempts])).toEqual(before.map(t => [t.id,t.assetId,t.platform,t.attempts]));
     expect(p.control).toBe("已取消");
   });
   it("scheduled future tasks cannot be claimed", () => {
@@ -554,4 +555,13 @@ it("D04 zero-target categories and target ordering do not falsely modify a final
   expect(planImpact(db, p, d).every((c) => !c.changed)).toBe(true);
   expect(() => confirmPlan(db, d)).not.toThrow();
   expect(db.tasks).toHaveLength(2);
+});
+
+it('copied creation preserves provenance without attaching to or starting the source plan',()=>{
+ const db=fresh(),input={platform:'B站',rows:[row(db,'B站',128)],name:'副本',targets:[{category:'三角洲行动',count:1}],sourceBatchId:203,sourcePlanId:999,creationKey:'copy-create-once'};
+ const result=createPublication(db,input);
+ expect(result.batch).toMatchObject({sourceBatchId:203,sourcePlanId:999,planId:null,control:'待执行'});
+ expect(result.batch.firstStartedAt).toBeUndefined();
+ expect(createPublication(db,input).batch.id).toBe(result.batch.id);
+ expect(db.batches).toHaveLength(1);expect(db.tasks).toHaveLength(1);
 });

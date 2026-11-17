@@ -21,12 +21,38 @@ export function coverTextFields(doc) {
   );
   return Object.values(templateSlots).filter((field) => keys.has(field.key));
 }
+export function coverTextFieldsForRow(row) {
+  return [...new Map([row.templateDocument,...Object.values(row.templateDocuments || {})].flatMap(coverTextFields).map(field=>[field.key,field])).values()];
+}
 export function coverTextErrors(row) {
   if (!["模板合成", "规则生成封面"].includes(row.coverMode)) return [];
   if (!row.templateDocument) return ["请选择封面模板"];
-  return coverTextFields(row.templateDocument)
+  return coverTextFieldsForRow(row)
     .filter((field) => !row[field.key]?.trim())
     .map((field) => `请填写${field.label}`);
+}
+export const isTemplateCover = row => ['模板合成', '规则生成封面'].includes(row.coverMode);
+export function coverReadinessIssues(row) {
+  if (!row.cover) return ['请选择封面'];
+  if (row.coverError) return [row.coverError];
+  if (isTemplateCover(row)) {
+    const specs = coverSpecs(row.platform);
+    const keys = specs.length ? specs.map(spec => spec.key) : ['source'];
+    if (row.coverSignature !== coverSignature(row) || keys.some(key => !row.coverVariants?.[key]))
+      return ['请先生成当前配置的全部封面'];
+  } else if (row.coverSource && row.cover !== row.coverSource && row.coverRender === '待重新合成') {
+    return ['请重新选用当前封面图片'];
+  }
+  return [];
+}
+export function inspectCoverImage(src) {
+  return new Promise((resolve,reject) => {
+    const image = new Image();
+    const timer=setTimeout(()=>reject(Error('图片读取超时，请重试或更换图片')),10000);
+    image.onload=()=>{clearTimeout(timer);image.naturalWidth && image.naturalHeight ? resolve({width:image.naturalWidth,height:image.naturalHeight}) : reject(Error('图片尺寸无效'));};
+    image.onerror=()=>{clearTimeout(timer);reject(Error('图片读取失败，请更换图片'));};
+    image.src=src;
+  });
 }
 export const coverSpecs = (p) =>
   p === "B站"
@@ -89,7 +115,7 @@ export function defaultDocument(width = 1200, height = 900, image = "") {
 }
 export const supportedFonts = ["sans-serif", "serif", "monospace", "system-ui"];
 export function validateDocument(doc) {
-  if (!doc.image) throw Error("缺少底图，请从图片库选择或使用已有封面");
+  if (!doc.image && !["solid", "business"].includes(doc.backgroundMode)) throw Error("缺少底图，请从图片库选择或使用已有封面");
   if (
     !Number.isFinite(doc.width) ||
     !Number.isFinite(doc.height) ||
@@ -104,10 +130,10 @@ export function validateDocument(doc) {
       ![l.x, l.y, l.w, l.h].every(Number.isFinite) ||
       l.w <= 0 ||
       l.h <= 0 ||
-      l.x < safe ||
+      (l.kind !== "decoration" && (l.x < safe ||
       l.y < safe ||
       l.x + l.w > doc.width - safe ||
-      l.y + l.h > doc.height - safe
+      l.y + l.h > doc.height - safe))
     )
       throw Error(l.name + " 超出安全区");
     if (
@@ -141,7 +167,6 @@ export async function renderDocument(
 ) {
   validateDocument(doc);
   await document.fonts.ready;
-  if (!doc.image) throw Error("缺少底图，请从图片库选择或使用已有封面");
   if (Math.abs(width / height - doc.width / doc.height) > 0.01)
     throw Error("模板比例不匹配，请选择对应比例模板");
   const ctx = document.createElement("canvas").getContext("2d");
@@ -154,15 +179,15 @@ export async function renderDocument(
     if (field?.key === "subTitle") l.text = subTitle ?? l.text;
     const safe = doc.safe ?? 16;
     if (
-      l.x < safe ||
+      (l.kind !== "decoration" && (l.x < safe ||
       l.y < safe ||
       l.x + l.w > doc.width - safe ||
-      l.y + l.h > doc.height - safe
+      l.y + l.h > doc.height - safe))
     )
       throw Error(l.name + " 超出安全区");
     if (l.kind === "decoration") {
       layers.push(
-        `<rect x="${l.x}" y="${l.y}" width="${l.w}" height="${l.h}" fill="${esc(l.color)}"/>`,
+        `<rect x="${l.x}" y="${l.y}" width="${l.w}" height="${l.h}" fill="${esc(l.color)}" opacity="${l.opacity ?? 1}"/>`,
       );
       continue;
     }
@@ -191,7 +216,7 @@ export async function renderDocument(
       `<text font-family="${esc(family)}" font-size="${result.size}" font-weight="${esc(l.weight)}" fill="${esc(l.color)}" stroke="${l.stroke ? esc(l.strokeColor || "#000") : "none"}" stroke-width="${l.stroke || 0}" paint-order="stroke" letter-spacing="${l.spacing || 0}" style="${l.shadow ? "filter:drop-shadow(3px 3px 4px #0009)" : ""}">${result.lines.map((line, i) => `<tspan x="${x}" y="${l.y + result.size + i * result.lineHeight}" text-anchor="${l.align === "center" ? "middle" : l.align === "right" ? "end" : "start"}">${esc(line)}</tspan>`).join("")}</text>`,
     );
   }
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${doc.width} ${doc.height}"><rect width="${doc.width}" height="${doc.height}" fill="${esc(doc.background)}"/><image href="${esc(doc.image)}" width="${doc.width}" height="${doc.height}" preserveAspectRatio="${esc(doc.imageAnchor || "xMidYMid")} ${esc(doc.imageFit || "slice")}"/>${layers.join("")}</svg>`;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${doc.width} ${doc.height}"><rect width="${doc.width}" height="${doc.height}" fill="${esc(doc.background)}"/>${doc.image ? `${doc.image ? `${doc.image ? `${doc.image ? `${doc.image ? `${doc.image ? `${doc.image ? `${doc.image ? `${doc.image ? `${doc.image ? `${doc.image ? `${doc.image ? `${doc.image ? `${doc.image ? `<image href="${esc(doc.image)}" width="${doc.width}" height="${doc.height}" preserveAspectRatio="${esc(doc.imageAnchor || "xMidYMid")} ${esc(doc.imageFit || "slice")}"/>` : ""}` : ""}` : ""}` : ""}` : ""}` : ""}` : ""}` : ""}` : ""}` : ""}` : ""}` : ""}` : ""}` : ""}${layers.join("")}</svg>`;
   return fitImage(
     "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg),
     width,
@@ -201,8 +226,14 @@ export async function renderDocument(
 export async function ensureCoverResults(row) {
   row.coverSource ||= row.cover;
   if (!row.coverSource) throw Error("缺少封面或底图");
+  if (!isTemplateCover(row)) {
+    await inspectCoverImage(row.coverSource);
+    if (row.cover !== row.coverSource) {row.coverApproved=false;row.contentApproved=false;}
+    row.cover=row.coverSource;row.coverVariants={};row.coverSignature=null;row.coverRender='已选用';row.coverError='';
+    return;
+  }
   const sig = coverSignature(row);
-  if (row.coverSignature === sig && Object.keys(row.coverVariants || {}).length)
+  if (row.coverSignature === sig && !coverReadinessIssues(row).length)
     return;
   row.coverApproved = false;
   row.coverRender = "合成中";
@@ -213,7 +244,7 @@ export async function ensureCoverResults(row) {
       const errors = coverTextErrors(row);
       if (errors.length) throw Error(errors.join("；"));
       const doc = clone(row.templateDocument);
-      doc.image = row.coverSource;
+      doc.image = doc.backgroundMode === "solid" ? "" : doc.backgroundMode === "fixed" ? doc.image : row.coverSource;
       const targets = specs.length
         ? specs
         : [{ key: "source", width: doc.width, height: doc.height }];
@@ -221,7 +252,7 @@ export async function ensureCoverResults(row) {
         const matching = row.templateDocuments?.[spec.key] || doc;
         try {
           outputs[spec.key] = await renderDocument(
-            { ...matching, image: row.coverSource },
+            { ...matching, image: matching.backgroundMode === "solid" ? "" : matching.backgroundMode === "fixed" ? matching.image : row.coverSource },
             {
               shortTitle: row.shortTitle,
               subTitle: row.subTitle,

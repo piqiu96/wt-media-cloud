@@ -9,6 +9,7 @@
 .resource-row-actions :deep(.t-button--variant-text:hover:not(:disabled)) { background: var(--wt-info-bg); color: var(--wt-primary-hover); }
 .resource-row-actions :deep(.t-button--variant-text.t-is-disabled) { background: transparent; color: var(--td-text-color-disabled); }
 .resource-row-actions :deep(.is-primary) { padding-inline: 10px; background: var(--wt-info-bg); font-weight: 500; }
-.resource-row-actions :deep(.is-danger) { color: var(--wt-text-primary); }
-.resource-row-actions :deep(.is-danger:hover:not(:disabled)) { color: var(--wt-danger); background: var(--wt-danger-bg); }
+.resource-row-actions :deep(:is(.is-danger, .t-button--theme-danger):not(:disabled):not(.t-is-disabled)) { color: var(--wt-danger); }
+.resource-row-actions :deep(:is(.is-danger, .t-button--theme-danger):hover:not(:disabled):not(.t-is-disabled)),
+.resource-row-actions :deep(:is(.is-danger, .t-button--theme-danger):focus-visible:not(:disabled):not(.t-is-disabled)) { color: var(--wt-danger); background: var(--wt-danger-bg); }
 </style>

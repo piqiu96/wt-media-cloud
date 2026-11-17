@@ -2,13 +2,16 @@
 import { onMounted, ref } from 'vue'
 import ComponentDemo from './common/ComponentDemo.vue'
 import PublishingDesign from './proto/publishing-design/App.vue'
-const publishing = new URLSearchParams(location.search).get('view') === 'publishing'
+import {legacyOperationURL,operationsBase,operationURL} from './proto/publishing-design/routes.js'
+const legacy=legacyOperationURL(new URL(location.href));
+if(legacy)history.replaceState(null,'',legacy);
+const publishing=location.pathname.startsWith(operationsBase)
 const localWorkspace = ref(false)
 onMounted(async () => { try { localWorkspace.value = (await (await fetch('/__example/context')).json()).localWorkspace } catch {} })
 const prototypes = [
   ['浏览器窗口与代理', 'browser-proxy/'], ['社媒账号', 'social-accounts/'],
-  ['内容运营工作台', 'content-operations/'], ['内容挖掘', 'content-mining/'],
-  ['发布管理新版原型', '../?view=publishing'],
+  ['内容运营工作台', '../operations/production/materials'], ['内容挖掘', 'content-mining/'],
+  ['发布管理新版原型', '../operations/publishing/tasks'],
   ['发布管理已有评审意见', 'content-operations/publishing-review.html'],
   ['内容生产评审', 'content-operations/review.html?scope=production#page-review'],
 ]

@@ -1,0 +1,85 @@
+/* Explicit adapters for TDesign tables and legacy native prototype tables.
+   Importing this file does not change tables outside the opt-in containers. */
+.resource-data-table { min-width: 0; max-width: 100%; border: 1px solid var(--wt-border); border-radius: var(--wt-radius-md); overflow: hidden; background: var(--wt-bg-card); }
+.resource-data-table.table-wrap { overflow-x: auto; }
+:is(.resource-data-table, .resource-table-scope) table:not(.t-descriptions__body) { width: 100%; border-collapse: separate; border-spacing: 0; color: var(--wt-text-primary); font-size: 13px; line-height: 22px; }
+:is(.resource-data-table, .resource-table-scope) table:not(.t-descriptions__body) th { height: 44px; padding: 10px 16px; border-bottom: 1px solid var(--wt-border); background: var(--wt-color-bg-table-header); color: var(--wt-text-secondary); font-size: 13px; font-weight: 500; line-height: 22px; text-align: left; vertical-align: middle; white-space: nowrap; }
+:is(.resource-data-table, .resource-table-scope) table:not(.t-descriptions__body) td { height: 64px; padding: 10px 16px; border-bottom: 1px solid var(--wt-border); color: var(--wt-text-primary); font-size: 13px; font-weight: 400; line-height: 22px; vertical-align: middle; }
+:is(.resource-data-table, .resource-table-scope) table:not(.t-descriptions__body) tbody tr:last-child > td { border-bottom: 0; }
+:is(.resource-data-table, .resource-table-scope) table:not(.t-descriptions__body) tbody tr:hover > td { background: var(--wt-color-bg-hover); }
+:is(.resource-data-table, .resource-table-scope) table:not(.t-descriptions__body) td small { display: block; margin-top: 3px; color: var(--wt-text-tertiary); font-size: 12px; font-weight: 400; line-height: 20px; }
+:is(.resource-data-table, .resource-table-scope) table:not(.t-descriptions__body) :is(td, th).resource-table-number,
+.resource-table-scope table.matrix :is(td, th):not(:first-child) { text-align: right; font-variant-numeric: tabular-nums; }
+.resource-table-scope table.matrix input, .resource-table-scope .batch-count { text-align: right; font-variant-numeric: tabular-nums; }
+:is(.resource-data-table, .resource-table-scope) table:not(.t-descriptions__body) :is(td, th).resource-table-operation { white-space: nowrap; }
+.resource-data-table .t-table__pagination { border-top: 1px solid var(--wt-border); }
+.resource-data-table .t-pagination { padding: 12px 16px; }
+.resource-data-table :focus-visible { outline-color: var(--wt-primary); }
+
+.resource-table-scope .inline-actions { display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; }
+.resource-table-scope .inline-actions button, .resource-table-scope .btn-link { min-width: 0; min-height: 32px; height: 32px; padding: 0 4px; border: 0; border-radius: 4px; color: var(--wt-primary); background: transparent; font-size: 13px; font-weight: 400; text-decoration: none; }
+.resource-table-scope .inline-actions button:hover:not(:disabled), .resource-table-scope .btn-link:hover:not(:disabled) { color: var(--wt-primary-hover); background: var(--wt-info-bg); text-decoration: none; }
+.resource-table-scope .inline-actions button.red { color: var(--wt-text-primary); }
+.resource-table-scope .inline-actions button.red:hover:not(:disabled) { color: var(--wt-danger); background: var(--wt-danger-bg); }
+.resource-table-scope table b { font-weight: 500; }
+
+/* Embedded tables explicitly opt in. The list adapter excludes this variant. */
+.resource-data-table.resource-embedded-table {
+  border: 1px solid var(--wt-border);
+  border-radius: var(--wt-radius-md);
+  background: var(--wt-bg-card);
+  box-shadow: none;
+  isolation: isolate;
+  overflow-x: auto;
+}
+/* A table joined to a panel or used as a dialog body shares that surface's perimeter.
+   Inset tables retain the single light frame above. Never stack two touching frames. */
+.resource-data-table.resource-embedded-table.is-flush {
+  border: 0;
+  border-radius: 0;
+}
+.resource-data-table.resource-embedded-table table:not(.t-descriptions__body) {
+  width: 100%; border-collapse: separate; border-spacing: 0; font-size: 13px; line-height: 22px;
+}
+.resource-data-table.resource-embedded-table table:not(.t-descriptions__body) thead th {
+  box-sizing: border-box; height: 44px; padding: 10px 16px;
+  background: var(--wt-color-bg-table-header); color: var(--wt-text-primary);
+  border-top: 0; border-bottom: 1px solid var(--wt-border);
+  border-radius: 0; font-size: 13px; font-weight: 500; line-height: 22px;
+}
+.resource-data-table.resource-embedded-table table:not(.t-descriptions__body) tbody :is(td, th) {
+  box-sizing: border-box; height: 48px; padding: 10px 16px;
+  background: var(--wt-bg-card); color: var(--wt-text-primary);
+  border-bottom: 1px solid var(--wt-border); font-size: 13px; font-weight: 400; line-height: 22px;
+}
+.resource-data-table.resource-embedded-table:is(.is-summary, .is-editable) table:not(.t-descriptions__body) tbody :is(td, th) { height: 64px; }
+.resource-data-table.resource-embedded-table table:not(.t-descriptions__body) tbody tr:last-child > :is(td, th) { border-bottom: 0; }
+.resource-data-table.resource-embedded-table table:not(.t-descriptions__body) tbody tr:hover > :is(td, th) { background: var(--wt-color-bg-hover); }
+.resource-data-table.resource-embedded-table :is(td, th).resource-table-number { text-align: right; font-variant-numeric: tabular-nums; }
+.resource-data-table.resource-embedded-table .t-input-number { width: 128px; max-width: 100%; vertical-align: middle; }
+.resource-data-table.resource-embedded-table .t-tag { font-size: 12px; font-weight: 400; }
+.resource-data-table.resource-embedded-table td small { font-size: 12px; line-height: 20px; font-weight: 400; color: var(--wt-text-secondary); }
+.resource-data-table.resource-embedded-table td.batch-warning-text { color: var(--wt-warning); }
+.resource-data-table.resource-embedded-table .t-table__content { border-radius: 0; }
+.resource-data-table.resource-embedded-table .t-table__pagination { margin: 0; border-top: 1px solid var(--wt-border); }
+.resource-data-table.resource-embedded-table .t-pagination { padding: 12px 16px; }
+/* Data links stay lightweight inside both forms and dialogs. Row actions keep their own hierarchy. */
+.resource-data-table.resource-embedded-table .t-button--variant-text:not(:where(.resource-row-actions *, .resource-field-help, .resource-field-help *)) {
+  height: 32px; min-height: 32px; padding: 0 4px; border: 0; border-radius: 4px;
+  background: transparent; color: var(--wt-primary); font-size: 13px; font-weight: 400;
+}
+.resource-data-table.resource-embedded-table .t-button--variant-text:hover:not(:disabled):not(.t-is-disabled):not(:where(.resource-row-actions *, .resource-field-help, .resource-field-help *)) { background: var(--wt-info-bg); color: var(--wt-primary-hover); }
+.resource-data-table.resource-embedded-table .t-button--variant-text.t-is-disabled { color: var(--td-text-color-disabled); background: transparent; }
+.resource-data-table.resource-embedded-table:focus-visible { outline: 2px solid var(--wt-primary); outline-offset: 2px; }
+@media (max-width: 680px) {
+  .resource-data-table.resource-embedded-table table:not(.t-descriptions__body) :is(td, th) { padding-inline: 12px; }
+  .resource-data-table.resource-embedded-table .t-pagination { flex-wrap: wrap; gap: 12px; }
+}
+
+.resource-data-table.resource-embedded-table table:not(.t-descriptions__body) tbody tr.t-table__row--active > :is(td, th) { background: var(--wt-info-bg); }
+
+.resource-data-table.resource-embedded-table table.resource-numeric-columns :is(td,th):not(:first-child) { text-align:right; font-variant-numeric:tabular-nums; }
+
+.resource-data-table.resource-embedded-table.is-flush table:not(.t-descriptions__body) thead tr:first-child > th {
+  border-top: 1px solid var(--wt-border);
+}

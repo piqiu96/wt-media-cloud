@@ -1,0 +1,9 @@
+/* Deliberate object-name entry to details. Row actions keep ResourceRowActions. */
+.resource-name-link {
+  padding:0; border:0; border-radius:2px; background:transparent;
+  color:var(--wt-primary, var(--td-brand-color)); font:inherit; font-weight:400;
+  line-height:inherit; text-align:left; text-decoration:none; cursor:pointer;
+  transition:color .15s;
+}
+.resource-name-link:hover { color:var(--wt-primary-hover, var(--td-brand-color-hover)); text-decoration:underline; text-underline-offset:3px; }
+.resource-name-link:focus-visible { color:var(--wt-primary-hover, var(--td-brand-color-hover)); outline:2px solid var(--wt-primary, var(--td-brand-color)); outline-offset:3px; }

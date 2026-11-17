@@ -1,3 +1,4 @@
+import {createOperationsMiddleware} from './operations-preview.mjs'
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { mkdtemp, mkdir, writeFile, symlink, rm } from 'node:fs/promises'
@@ -63,3 +64,12 @@ test('missing Workspace is explicit rather than silently serving a remote revisi
   assert.equal(response.status, 503)
   assert.match(await response.text(), /未挂载/)
 })
+
+test('工作台深层路径在开发和构建预览可解析，资源及API不被重写',()=>{
+ const run=createOperationsMiddleware();
+ for(const route of ['/example/operations/production/materials','/example/operations/publishing/tasks/1001','/example/operations/tools/templates/5/edit']){
+  const req={method:'GET',url:route};let next=false;run(req,{},()=>next=true);assert.equal(req.url,'/example/index.html');assert.equal(next,true);
+ }
+ const plan={method:'GET',url:'/example/operations/publishing/plans/PL-1'};run(plan,{},()=>{});assert.equal(plan.url,'/example/index.html');
+ for(const route of ['/api/files','/__example/publishing/snapshot','/example/proto/publishing-design/routes.js']){const req={method:'GET',url:route};run(req,{},()=>{});assert.equal(req.url,route);}
+});
