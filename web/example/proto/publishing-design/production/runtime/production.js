@@ -43,7 +43,10 @@
   };
   C.open = opts => {
     const d=document.createElement('dialog'),trigger=document.activeElement;
-    d.className='production-scope ex-overlay '+(opts.kind||'')+(opts.form?' production-form':'');d.setAttribute('aria-label',opts.title);d.dirty=false;d.discardMessage=opts.discardMessage;
+    // The scope must wrap the dialog: scoped descendant rules do not style the scope root.
+    const scope=document.createElement('div');scope.className='production-scope production-overlay-host';
+    scope.append(d);d.productionScope=scope;
+    d.className='ex-overlay '+(opts.kind||'')+(opts.form?' production-form':'');d.setAttribute('aria-label',opts.title);d.dirty=false;d.discardMessage=opts.discardMessage;
     d.paint=()=>{
       // Rebuilding the body must not reset the user's position in a long form.
       const previous=d.querySelector(':scope > .ex-overlay-body'),top=previous?.scrollTop||0,left=previous?.scrollLeft||0;
@@ -53,13 +56,13 @@
     d.addEventListener('cancel',e=>{e.preventDefault();C.close(d);});
     const change=e=>{if(opts.form)d.dirty=true;const n=e.target.dataset.field;if(n)opts.change?.(n,e.target.value,e.type,d);};
     d.addEventListener('input',change);d.addEventListener('change',change);
-    d.addEventListener('close',()=>{C.dialogs=C.dialogs.filter(x=>x!==d);d.remove();C.dialogs.forEach((x,i)=>x.classList.toggle('ex-underlay',i<C.dialogs.length-1));document.body.style.overflow=C.dialogs.length?'hidden':'';if(trigger?.isConnected)trigger.focus();});
-    C.dialogs.push(d);C.dialogs.forEach((x,i)=>x.classList.toggle('ex-underlay',i<C.dialogs.length-1));document.body.append(d);document.body.style.overflow='hidden';d.paint();d.showModal();return d;
+    d.addEventListener('close',()=>{C.dialogs=C.dialogs.filter(x=>x!==d);scope.remove();C.dialogs.forEach((x,i)=>x.classList.toggle('ex-underlay',i<C.dialogs.length-1));document.body.style.overflow=C.dialogs.length?'hidden':'';if(trigger?.isConnected)trigger.focus();});
+    C.dialogs.push(d);C.dialogs.forEach((x,i)=>x.classList.toggle('ex-underlay',i<C.dialogs.length-1));document.body.append(scope);document.body.style.overflow='hidden';d.paint();d.showModal();return d;
   };
   C.close = (d=C.dialogs.at(-1),force=false) => {
     if(!d)return;
     if(d.dirty&&!force){let confirm;confirm=C.open({title:'放弃未保存的修改？',body:()=>'<p>'+C.e(d.discardMessage||'本次输入还没有保存。')+'</p>',footer:()=>C.btn('继续编辑',()=>C.close(confirm,true))+C.btn('放弃修改',()=>{C.close(confirm,true);C.close(d,true);},'primary')});return;}
-    WTControls.dismiss();d.close();d.remove();C.dialogs=C.dialogs.filter(x=>x!==d);
+    WTControls.dismiss();d.close();d.productionScope.remove();C.dialogs=C.dialogs.filter(x=>x!==d);
     C.dialogs.forEach((x,i)=>x.classList.toggle('ex-underlay',i<C.dialogs.length-1));
     document.body.style.overflow=C.dialogs.length?'hidden':'';
   };
