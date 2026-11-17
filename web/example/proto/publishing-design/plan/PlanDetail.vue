@@ -60,7 +60,7 @@ defineEmits(['back'])
             <td>{{ row.batch.configured ? '已锁定' : '未配置' }}</td><td><ResourceStatusBadge :label="row.statusLabel" :tone="row.statusTone" /></td>
             <td class="resource-table-number">{{ ['ended', 'running', 'stopping'].includes(row.batch.phase) ? `${row.batch.success} / ${row.target}` : '—' }}</td>
             <td><span :class="{ 'plan-detail-pending': row.count }">{{ row.pendingLabel }}</span></td>
-            <td><span v-if="plan.legacyReadOnly">—</span><ResourceRowActions v-else><Button v-if="row.count" class="is-primary" variant="text" data-act="workbench" :data-id="plan.id" :data-batch="row.batch.id">去处理</Button><Button v-else-if="row.batch.phase === 'draft' && plan.status !== 'ended'" class="is-primary" variant="text" data-act="view-batch" :data-id="plan.id" :data-batch="row.batch.id">去配置</Button><Button variant="text" data-act="view-batch" :data-id="plan.id" :data-batch="row.batch.id">详情</Button></ResourceRowActions></td>
+            <td><span v-if="plan.legacyReadOnly">—</span><ResourceRowActions v-else><Button v-if="row.count" class="is-primary" variant="text" data-act="workbench" :data-id="plan.id" :data-batch="row.batch.id">去处理</Button><Button v-else-if="row.batch.phase === 'draft' && plan.status !== 'ended'" class="is-primary" variant="text" data-act="configure-batch" :data-id="plan.id" :data-batch="row.batch.id">去配置</Button><Button variant="text" data-act="view-batch" :data-id="plan.id" :data-batch="row.batch.id">详情</Button></ResourceRowActions></td>
           </tr>
         </tbody></table>
       </div>

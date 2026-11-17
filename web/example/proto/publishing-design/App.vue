@@ -1488,6 +1488,7 @@ function cloneTask(t) {
     class="publish-shell wt-resource-page resource-visual-approved"
   >
     <OperationsNavigation :page="page" :actor="prototypeSession.actor" @navigate="navigate" @actor-change="changePrototypeActor" />
+    <div id="operations-detail-layer" class="operations-detail-layer"></div>
     <main
       v-show="!editorPages.length"
       class="publish-main"
@@ -1561,6 +1562,7 @@ function cloneTask(t) {
 
         <ResourceStatGrid v-if="page === 'tasks'" :items="taskMetricItems" interactive :active-key="appliedFilters.status" @select="selectTaskMetric" />
       </template>
+      <div v-if="batchDetailOpen" class="breadcrumbs" aria-label="当前位置">内容运营 / 发布批次 / 详情</div>
       <BatchManager
         ref="batchManagerRef"
         :db="db"
@@ -2629,5 +2631,4 @@ function cloneTask(t) {
 <style scoped src="./publishing.css"></style>
 <style scoped src="./taskList.css"></style>
 <style scoped>
-.resource-page-host .breadcrumbs { height: 56px; margin-bottom: 24px; color: var(--wt-text-secondary); font-size: 14px; font-weight: 400; }
 </style>

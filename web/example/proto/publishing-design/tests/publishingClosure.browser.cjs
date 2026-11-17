@@ -19,6 +19,7 @@ test('plan, batch and task navigation preserves context and new plan data', {tim
  const b=db.batches[0],asset=db.assets.find(a=>a.id===128);
  createPublication(db,{platform:b.platform,name:b.name,planId:plan.id,batchId:b.id,rows:[{platform:b.platform,assetId:asset.id,category:asset.category,accountId:db.accounts.find(a=>a.enabled&&a.platform===b.platform&&a.categories.includes(asset.category)).id,...defaults(b.platform,asset),declaration:declarationOptions(b.platform)[0].value}]});
  dispatchPlan(db,plan);
+ db.tasks.find(t=>t.batchId===b.id).status='结果待确认';
  const store=createBatchStore();await store.bootstrap(db);
  const browser=await chromium.launch({headless:true,executablePath:process.env.CHROMIUM_EXECUTABLE});
  const page=await browser.newPage({viewport:{width:1440,height:1050}});page.setDefaultTimeout(10000);const errors=[];page.on('pageerror',e=>errors.push(e.message));
@@ -37,7 +38,12 @@ test('plan, batch and task navigation preserves context and new plan data', {tim
   if(await page.getByRole('button',{name:'放弃修改',exact:true}).isVisible())await page.getByRole('button',{name:'放弃修改',exact:true}).click();
   await page.locator('tr').filter({hasText:'闭环验收批次1'}).waitFor();
   const first=page.locator('tr').filter({hasText:'闭环验收批次1'});await first.getByRole('button',{name:'详情',exact:true}).click();
-  await page.getByText('发布批次详情',{exact:true}).waitFor();
+  const preview=page.getByRole('dialog',{name:'发布批次详情',exact:true});await preview.waitFor();
+  assert(page.url().includes('/plans/'+plan.id));
+  assert.equal(await preview.getByRole('button',{name:'详情',exact:true}).count(),0);
+  await preview.getByRole('button',{name:'关闭发布批次详情',exact:true}).click();await preview.waitFor({state:'hidden'});
+  await first.getByRole('button',{name:'去处理',exact:true}).click();
+  await page.getByRole('heading',{name:'发布批次详情',exact:true}).waitFor();
   await page.getByRole('button',{name:'详情',exact:true}).first().click();
   await page.getByText('发布任务详情',{exact:true}).waitFor();
   assert(page.url().includes('fromBatch='+b.id));

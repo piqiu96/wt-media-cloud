@@ -1,3 +1,48 @@
-.publish-shell .breadcrumbs{display:flex;align-items:center;gap:8px;box-sizing:border-box;height:72px;margin:0 -28px 28px;padding:0 28px;background:var(--wt-color-bg-container);border-bottom:1px solid var(--wt-color-border);font-size:13px;line-height:20px;color:var(--wt-color-text-primary)}
-@media(max-width:900px){.publish-shell .breadcrumbs{margin-inline:-20px;padding-inline:20px}}
-@media(max-width:680px){.publish-shell .breadcrumbs{height:56px;margin-inline:-16px;padding-inline:56px 16px}}
+.publish-shell {
+  --operations-sidebar-width: 216px;
+  --operations-header-height: 72px;
+  --operations-content-gap: 28px;
+}
+.publish-shell main.publish-main {
+  padding-top: calc(var(--operations-header-height) + var(--operations-content-gap));
+}
+.publish-shell .publish-main .breadcrumbs,
+.publish-shell .production-page .production-context {
+  position: fixed;
+  z-index: 100;
+  top: 0;
+  left: var(--operations-sidebar-width);
+  right: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  box-sizing: border-box;
+  height: var(--operations-header-height);
+  margin: 0;
+  padding: 0 28px;
+  background: var(--wt-color-bg-container);
+  border-bottom: 1px solid var(--wt-color-border);
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--wt-color-text-primary);
+}
+.publish-shell .publish-main .resource-section {
+  scroll-margin-top: calc(var(--operations-header-height) + 16px);
+}
+.operations-detail-layer {
+  position: fixed;
+  z-index: 1800;
+  top: var(--operations-header-height);
+  left: var(--operations-sidebar-width);
+  right: 0;
+  bottom: 0;
+  pointer-events: none;
+}
+@media(max-width:900px) {
+  .publish-shell { --operations-sidebar-width: 184px; --operations-content-gap: 20px; }
+  .publish-shell .publish-main .breadcrumbs, .publish-shell .production-page .production-context { padding-inline: 20px; }
+}
+@media(max-width:680px) {
+  .publish-shell { --operations-sidebar-width: 0px; --operations-header-height: 56px; }
+  .publish-shell .publish-main .breadcrumbs, .publish-shell .production-page .production-context { padding-inline: 56px 16px; }
+}

@@ -833,11 +833,9 @@ defineExpose({
                 </tr>
               </tbody>
             </table></div>
-            <t-alert
-              v-if="gap"
-              theme="warning"
-              :message="`目标 ${target} 条，当前可匹配 ${suggested.length} 条，缺口 ${gap} 条。可调整账号池与数量；保留缺口继续时，最终创建需要明确确认。`"
-            />
+            <ResourceNotice v-if="gap" tone="warning">
+              目标 {{ target }} 条，可匹配 {{ suggested.length }} 条，缺口 {{ gap }} 条。{{ state.planId ? '可调整账号选择，或补充可用资源。' : '可调整账号选择、数量或补充可用资源。' }}
+            </ResourceNotice>
           </div>
         </section>
         <section v-if="platform && state.categories.length" ref="matchingSection" class="batch-section" data-section="batch-matching">

@@ -420,9 +420,9 @@ function detailView(p) {
   notice=null;
   if(p.control==='等待继续确认'||p.control==='等待跳过确认'){
    const skip=p.control==='等待跳过确认';notice={tone:'warning',title:skip?'当前批次没有可计算的发布结果':'当前批次失败率超过 10%',actions:[action('workbench','去处理',active?.id)]};footer.push(action('continue-plan',skip?'确认跳过当前批次':'确认进入下一批',null,{primary:true}));
-  }else if(p.control==='等待配置')notice={tone:'info',title:'下一批待配置',actions:[action('view-batch','去配置',following?.id)]};
-  else if(p.control==='已暂停'){notice={tone:'info',title:active?.type==='makeup'?'补量批次待执行':'计划已暂停',actions:active?[action('view-batch',active.phase==='draft'?'去配置':'查看批次',active.id)]:[]};if(active?.phase==='ready'||active?.phase==='ended')footer.push(action('resume-plan',active?.type==='makeup'?'执行':'恢复计划',null,{primary:true}));}
-  else if(p.status==='ready'){notice={tone:'info',title:'等待启动计划',actions:active?[action('view-batch',active.phase==='draft'?'配置首批':'查看首批',active.id)]:[]};if(active?.phase==='ready'&&!executionIssue(p,active))footer.push(action('execute','启动计划',active.id,{primary:true}));}
+  }else if(p.control==='等待配置')notice={tone:'info',title:'下一批待配置',actions:[action('configure-batch','去配置',following?.id)]};
+  else if(p.control==='已暂停'){notice={tone:'info',title:active?.type==='makeup'?'补量批次待执行':'计划已暂停',actions:active?[action(active.phase==='draft'?'configure-batch':'view-batch',active.phase==='draft'?'去配置':'查看批次',active.id)]:[]};if(active?.phase==='ready'||active?.phase==='ended')footer.push(action('resume-plan',active?.type==='makeup'?'执行':'恢复计划',null,{primary:true}));}
+  else if(p.status==='ready'){notice={tone:'info',title:'等待启动计划',actions:active?[action(active.phase==='draft'?'configure-batch':'view-batch',active.phase==='draft'?'配置首批':'查看首批',active.id)]:[]};if(active?.phase==='ready'&&!executionIssue(p,active))footer.push(action('execute','启动计划',active.id,{primary:true}));}
   else if(p.control==='执行中'||(p.status==='running'&&p.control==='规划中')){const destination=pending[0]?.batchId||active?.id;notice={tone:pending.length?'warning':'info',title:pending.length?'有待处理任务':p.control==='执行中'?'按批次顺序自动发布':'批次处理中',actions:destination?[action('workbench',pending.length?'查看待处理批次':'查看当前批次',destination)]:[]};}
   if(['执行中','等待配置'].includes(p.control))footer.push(action('pause-plan','暂停计划'));
   if(p.control==='执行已结束'&&p.status!=='ended'){
@@ -573,7 +573,14 @@ function taskDone(m,st,extra={}){const {p,b,t}=findTask(m);
 
 function onAction(act,el){const id=el.dataset.id,idx=Number(el.dataset.idx),p=id?getPlan(id):null;
  if(adapters.loadPlans){
-  if(['view-batch','workbench'].includes(act)){const b=p?.batches.find(b=>b.id===el.dataset.batch);if(b)adapters.navigate(routes.operationURL('batches',{batchId:b.id,pending:act==='workbench',fromPlan:p.id}));return false;}
+  if(['view-batch','configure-batch','workbench'].includes(act)){
+   const b=p?.batches.find(b=>b.id===el.dataset.batch);
+   if(b){
+    if(act==='view-batch')adapters.previewBatch(b.id);
+    else adapters.navigate(routes.operationURL('batches',{batchId:b.id,pending:act==='workbench',fromPlan:p.id}));
+   }
+   return false;
+  }
   const operations={'do-execute-batch':'execute','continue-plan':'continue','resume-plan':'resume','pause-plan':'pause','do-cancel-plan':'cancel','do-end-plan':'finish','create-makeup':'makeup'};
   if(operations[act]){
    if(act==='do-cancel-plan'&&!state.modal?.reason?.trim()){setToast('请填写终止原因','error');return false;}
