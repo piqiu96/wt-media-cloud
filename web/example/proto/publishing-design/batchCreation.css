@@ -1088,15 +1088,9 @@
   }
 }
 
-.batch-created-result {
-  max-width: 820px;
-  margin: 35px auto;
-  text-align: center;
-  padding: 42px;
-  background: #fff;
-  border: 1px solid var(--batch-line);
-  border-radius: 12px;
-}
+.batch-created-summary { padding: 16px 0; text-align: center; }
+.batch-created-summary strong { font-size: 16px; color: var(--wt-text-primary); }
+.batch-created-summary p { margin: 8px 0 0; color: var(--wt-text-tertiary); }
 .batch-created-check {
   display: grid;
   place-items: center;
@@ -1108,41 +1102,6 @@
   color: #1a9d68;
   font-size: 34px;
 }
-.batch-created-result h2 {
-  font-size: 25px;
-  margin-bottom: 12px;
-}
-.batch-created-result > p:not(.batch-inline-note) {
-  font-size: 14px;
-  color: #8192a8;
-  margin-bottom: 14px;
-}
-.batch-created-metrics {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 15px;
-  margin: 30px 0;
-}
-.batch-created-metrics > div {
-  border-right: 1px solid var(--batch-line);
-}
-.batch-created-metrics > div:last-child {
-  border: 0;
-}
-.batch-created-metrics small {
-  display: block;
-  color: #8696ad;
-  font-size: 12px;
-}
-.batch-created-metrics strong {
-  display: block;
-  font-size: 30px;
-  margin-top: 10px;
-}
-.batch-created-result .batch-inline-note {
-  text-align: left;
-}
-
 /* Adapter for the shared section rhythm; the batch workflow owns its steps. */
 .batch-section-head:last-child{padding-bottom:24px;margin-bottom:0;}
 .batch-stagebar{margin-bottom:var(--wt-space-block,16px);}

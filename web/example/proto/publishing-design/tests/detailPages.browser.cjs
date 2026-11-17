@@ -1,3 +1,4 @@
+const {requestBody}=require('./previewFixture.cjs');
 // Run against the example service, with Playwright available in NODE_PATH.
 const { test, before, after } = require('node:test');
 const assert = require('node:assert/strict');
@@ -22,7 +23,7 @@ async function isolatedPage(t, viewport = { width: 1440, height: 1000 }) {
   // Keep all prototype persistence isolated from the reviewer's saved records.
   await page.route('**/__example/publishing/**', route => {
     if (route.request().method() !== 'GET') {
-      const input = route.request().postDataJSON();
+      const input = requestBody(route.request());
       snapshot = { revision: snapshot.revision + 1, data: input.data };
     }
     return route.fulfill({ contentType: 'application/json', body: JSON.stringify(snapshot) });

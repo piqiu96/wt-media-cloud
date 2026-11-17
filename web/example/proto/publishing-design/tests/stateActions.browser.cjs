@@ -1,3 +1,4 @@
+const {requestBody}=require('./previewFixture.cjs');
 const {test,before,after}=require('node:test');
 const assert=require('node:assert/strict');
 const {chromium}=require('playwright');
@@ -20,7 +21,7 @@ async function setup(t,mutate=()=>{}){
  const p=await c.newPage();p.setDefaultTimeout(7000);const errors=[];p.on('pageerror',e=>errors.push(e.message));t.after(()=>assert.deepEqual(errors,[]));
  const db=seed();await mutate(db);migrateRelationships(db);const store=createBatchStore();await store.bootstrap(db);
  await p.route('**/__example/publishing/**',async r=>{
-  try {const q=r.request(),body=q.method()==='GET'?null:q.postDataJSON();let result;
+  try {const q=r.request(),body=q.method()==='GET'?null:requestBody(q);let result;
    if(q.url().endsWith('/command'))result=await store.command(body);
    else if(q.method()==='GET')result=await store.get();
    else if(q.url().endsWith('/bootstrap'))result=await store.bootstrap(body.data);

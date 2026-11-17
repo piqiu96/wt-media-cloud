@@ -1,3 +1,4 @@
+const {requestBody}=require('./previewFixture.cjs');
 const { test, before, after } = require('node:test');
 const assert = require('node:assert/strict');
 const { chromium } = require('playwright');
@@ -21,7 +22,7 @@ async function pageFor(t, viewport = { width: 1440, height: 1000 }, mutate = () 
   const {createBatchStore}=await import(pathToFileURL(path.join(__dirname,'../../../publishing-preview.mjs')));
   const store=createBatchStore();await store.bootstrap(data);
   await page.route('**/__example/publishing/**',async route=>{
-    try{const q=route.request(),body=q.method()==='GET'?null:q.postDataJSON();const result=q.method()==='GET'?await store.get():q.url().endsWith('/command')?await store.command(body):await store.save(body.data,body.revision);await route.fulfill({json:result});}
+    try{const q=route.request(),body=q.method()==='GET'?null:requestBody(q);const result=q.method()==='GET'?await store.get():q.url().endsWith('/command')?await store.command(body):await store.save(body.data,body.revision);await route.fulfill({json:result});}
     catch(e){await route.fulfill({status:409,json:{error:e.message}});}
   });
   return page;

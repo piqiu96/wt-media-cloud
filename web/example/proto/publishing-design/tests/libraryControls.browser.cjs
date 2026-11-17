@@ -1,3 +1,4 @@
+const {requestBody}=require('./previewFixture.cjs');
 const { chromium } = require('playwright');
 const assert = require('node:assert/strict');
 const path = require('node:path');
@@ -24,7 +25,7 @@ fs.mkdirSync(evidence, { recursive: true });
       const write = route.request().method() !== 'GET';
       if (write && delay) await new Promise(r => setTimeout(r, delay));
       if (write && fail) return route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ message: '走查模拟保存失败' }) });
-      if (write) snapshot = { revision: snapshot.revision + 1, data: route.request().postDataJSON().data };
+      if (write) snapshot = { revision: snapshot.revision + 1, data: requestBody(route.request()).data };
       return route.fulfill({ contentType: 'application/json', body: JSON.stringify(snapshot) });
     });
     const pass = name => { passed.push(name); console.log('PASS', name); };

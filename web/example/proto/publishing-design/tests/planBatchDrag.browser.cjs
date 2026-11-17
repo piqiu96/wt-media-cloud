@@ -1,3 +1,4 @@
+const {requestBody}=require('./previewFixture.cjs');
 const {test,before,after}=require('node:test');
 const assert=require('node:assert/strict');
 const {chromium}=require('playwright');
@@ -14,7 +15,7 @@ const handle=(p,id)=>p.locator(`[data-plan-batch-handle="${id}"]`);
 const row=(p,id)=>p.locator(`[data-plan-batch-row="${id}"]`);
 async function ids(p){return rows(p).evaluateAll(rows=>rows.map(row=>row.dataset.planBatchRow));}
 async function saved(p){const {planViews}=await import(pathToFileURL(path.join(source,'planBridge.js')));return {plans:planViews((await p.store.get()).data)};}
-function orderSaved(p,id,expected){return p.waitForResponse(response=>{const request=response.request();if(!response.url().endsWith('/publishing/snapshot')||request.method()!=='PUT'||!response.ok())return false;const plan=request.postDataJSON()?.data?.plans.find(plan=>String(plan.id)===String(id));return JSON.stringify(plan?.items.map(item=>String(item.id)))===JSON.stringify(expected);});}
+function orderSaved(p,id,expected){return p.waitForResponse(response=>{const request=response.request();if(!response.url().endsWith('/publishing/snapshot')||request.method()!=='PUT'||!response.ok())return false;const plan=requestBody(request)?.data?.plans.find(plan=>String(plan.id)===String(id));return JSON.stringify(plan?.items.map(item=>String(item.id)))===JSON.stringify(expected);});}
 async function shot(p,name){await p.mouse.move(5,5);await p.locator('.batches-table').scrollIntoViewIfNeeded();await p.screenshot({path:path.join(shots,name+'.png')});}
 async function setup(t,{locked=false}={}){
  const context=await browser.newContext({viewport:{width:1440,height:1000}});t.after(()=>context.close());const p=await context.newPage();p.setDefaultTimeout(7000);

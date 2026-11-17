@@ -1,6 +1,10 @@
 import { readFile, writeFile, rename, mkdir } from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
+import { gunzip } from "node:zlib";
+import { promisify } from "node:util";
+const unzip = promisify(gunzip);
+import { unpackSnapshot } from "./proto/publishing-design/snapshotTransport.js";
 import { createHash } from "node:crypto";
 import {
   cancelPublication,
@@ -262,13 +266,23 @@ export function createPublishingMiddleware({ webRoot }) {
       const store = stores.get(hash);
       let body = {};
       if (req.method !== "GET") {
-        let raw = "";
+        const encoding = req.headers["content-encoding"];
+        if (encoding && encoding !== "identity" && encoding !== "gzip")
+          throw Error("不支持的内容编码");
+        const chunks = [];
+        let length = 0;
         for await (const part of req) {
-          raw += part;
-          if (raw.length > 40 * 1024 * 1024)
-            throw Error("内容过大，请缩小图片后重试");
+          length += part.length;
+          if (length > 40 * 1024 * 1024)
+            throw Error("保存内容超过预览传输上限");
+          chunks.push(part);
         }
-        body = JSON.parse(raw || "{}");
+        const encoded = Buffer.concat(chunks);
+        // The expanded limit is bounded independently to reject compressed bombs.
+        const raw = encoding === "gzip"
+          ? await unzip(encoded, { maxOutputLength: 256 * 1024 * 1024 })
+          : encoded;
+        body = unpackSnapshot(JSON.parse(raw.toString("utf8") || "{}"));
       }
       const route = url.pathname.split("/").at(-1);
       let result;
@@ -276,8 +290,10 @@ export function createPublishingMiddleware({ webRoot }) {
         result = await store.get();
       else if (req.method === "POST" && route === "bootstrap")
         result = await store.bootstrap(body.data);
-      else if (req.method === "PUT" && route === "snapshot")
-        result = await store.save(body.data, body.revision);
+      else if (req.method === "PUT" && route === "snapshot") {
+        const saved = await store.save(body.data, body.revision);
+        result = { revision: saved.revision };
+      }
       else if (req.method === "POST" && route === "command")
         result = await store.command(body);
       else {

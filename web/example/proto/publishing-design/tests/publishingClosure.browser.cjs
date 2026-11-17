@@ -1,3 +1,4 @@
+const {requestBody}=require('./previewFixture.cjs');
 const {chromium}=require('playwright');
 const fs=require('fs'),assert=require('assert/strict');
 const path=require('node:path');
@@ -21,7 +22,7 @@ test('plan, batch and task navigation preserves context and new plan data', {tim
  const store=createBatchStore();await store.bootstrap(db);
  const browser=await chromium.launch({headless:true,executablePath:process.env.CHROMIUM_EXECUTABLE});
  const page=await browser.newPage({viewport:{width:1440,height:1050}});page.setDefaultTimeout(10000);const errors=[];page.on('pageerror',e=>errors.push(e.message));
- await page.route('**/__example/publishing/**',async r=>{try{const req=r.request(),body=req.method()==='GET'?null:req.postDataJSON();const value=req.url().endsWith('/command')?await store.command(body):req.method()==='GET'?await store.get():req.url().endsWith('/bootstrap')?await store.bootstrap(body.data):await store.save(body.data,body.revision);await r.fulfill({json:value});}catch(e){console.log('APIERROR',e.message);await r.fulfill({status:409,json:{error:e.message}});}});
+ await page.route('**/__example/publishing/**',async r=>{try{const req=r.request(),body=req.method()==='GET'?null:requestBody(req);const value=req.url().endsWith('/command')?await store.command(body):req.method()==='GET'?await store.get():req.url().endsWith('/bootstrap')?await store.bootstrap(body.data):await store.save(body.data,body.revision);await r.fulfill({json:value});}catch(e){console.log('APIERROR',e.message);await r.fulfill({status:409,json:{error:e.message}});}});
  try{
   await page.goto(base+'/example/operations/publishing/plans/'+plan.id);
   await page.locator('tr').filter({hasText:'闭环验收批次2'}).waitFor();
@@ -93,7 +94,7 @@ test('legacy planning metadata cannot hide started batches or mislabel cross-bat
   const page=await browser.newPage({viewport:{width:1440,height:1050}});page.setDefaultTimeout(7000);
   const errors=[];page.on('pageerror',e=>errors.push(e.message));
   await page.route('**/__example/publishing/**',async r=>{try{
-   const q=r.request(),body=q.method()==='GET'?null:q.postDataJSON();
+   const q=r.request(),body=q.method()==='GET'?null:requestBody(q);
    const result=q.method()==='GET'?await store.get():q.url().endsWith('/command')?await store.command(body):await store.save(body.data,body.revision);
    await r.fulfill({json:result});
   }catch(e){await r.fulfill({status:409,json:{error:e.message}});}});
