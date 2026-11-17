@@ -149,6 +149,9 @@ func TestVerifiedFileHasIDNameStableURLAndRenameKeepsObject(t *testing.T) {
 		t.Fatal(err)
 	}
 	stored := r.records[f.ID]
+	if stored.DeleteState != "ready" {
+		t.Fatalf("uploaded file state=%q", stored.DeleteState)
+	}
 	if stored.ObjectKey != "s3://wt-media/file-ku/files/1_%E5%BC%80%E5%A4%B4%E5%9B%BE%E7%89%87.png" || f.Filename != "开头图片.png" || !strings.HasPrefix(f.ResourcePath, "/api/v1/file-resources/") {
 		t.Fatalf("file=%+v stored=%+v", f, stored)
 	}

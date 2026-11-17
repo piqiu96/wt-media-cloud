@@ -273,7 +273,7 @@ func (s *Service) Upload(ctx context.Context, actor identity.PublicUser, name, o
 		return model.View{}, err
 	}
 	now := time.Now().UTC()
-	f := model.File{OwnerID: int64(actor.ID), Name: name, Extension: ext, Type: kind, ContentType: contentType, ResourceToken: hex.EncodeToString(token[:]), CreatedAt: now, UpdatedAt: now, OwnerName: actor.Nickname, TeamName: actor.TeamName}
+	f := model.File{DeleteState: "ready", OwnerID: int64(actor.ID), Name: name, Extension: ext, Type: kind, ContentType: contentType, ResourceToken: hex.EncodeToString(token[:]), CreatedAt: now, UpdatedAt: now, OwnerName: actor.Nickname, TeamName: actor.TeamName}
 	if f.OwnerName == "" {
 		f.OwnerName = actor.Username
 	}

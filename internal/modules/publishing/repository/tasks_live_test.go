@@ -7,6 +7,7 @@ import (
 	driver "github.com/go-sql-driver/mysql"
 	"github.com/wt-media/wt-media-cloud/internal/config"
 	"github.com/wt-media/wt-media-cloud/internal/infra/database/migration"
+	filemodel "github.com/wt-media/wt-media-cloud/internal/modules/files/model"
 	filesrepo "github.com/wt-media/wt-media-cloud/internal/modules/files/repository"
 	files "github.com/wt-media/wt-media-cloud/internal/modules/files/service"
 	identity "github.com/wt-media/wt-media-cloud/internal/modules/identity/service"
@@ -363,5 +364,62 @@ func TestLiveTaskListFiltersScopeAndRealSummary(t *testing.T) {
 	_, total, err = s.List(f)
 	if err != nil || total != 0 {
 		t.Fatalf("date filter total=%d err=%v", total, err)
+	}
+}
+
+// Upload constructs a File without a deletion state. GORM must preserve the
+// database's ready default instead of writing an empty string that listing hides.
+func TestLiveUploadedFileDefaultsToReadyAndCanBeReferenced(t *testing.T) {
+	db := isolated(t)
+	now := time.Now().UTC()
+	f := filemodel.File{OwnerID: 9, Name: "new-upload", Extension: "png", Type: "image", ContentType: "image/png", ObjectKey: "fresh-upload", SizeBytes: 3, SHA256: fmt.Sprintf("%064d", 8), ResourceToken: fmt.Sprintf("%064d", 8), UploadedAt: &now, CreatedAt: now, UpdatedAt: now}
+	if err := (filesrepo.Store{DB: db}).Insert(&f); err != nil {
+		t.Fatal(err)
+	}
+	var saved filemodel.File
+	if err := db.First(&saved, f.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if saved.DeleteState != "ready" {
+		t.Fatalf("new upload persisted delete_state=%q", saved.DeleteState)
+	}
+	if _, err := store(db).Create(task("fresh-upload", 42, f.ID)); err != nil {
+		t.Fatalf("reference fresh upload: %v", err)
+	}
+	if err := fileStore(db).BeginDelete(f.ID); !errors.Is(err, files.ErrInUse) {
+		t.Fatalf("referenced fresh upload deletion: %v", err)
+	}
+}
+
+func TestLiveFileStateMigrationRepairsBlankWithoutRevivingDeleting(t *testing.T) {
+	db := isolated(t)
+	if err := db.Exec("UPDATE operations_files SET delete_state='' WHERE id=1").Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec("UPDATE operations_files SET delete_state='deleting' WHERE id=2").Error; err != nil {
+		t.Fatal(err)
+	}
+	sql, err := os.ReadFile(config.GetRuntimePaths().Migrations + "/20261118_103_operations_file_delete_state.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	migrations := []migration.Migration{{Version: "file_state_repair", Name: "file_state_repair", SQL: string(sql)}}
+	if applied, err := migration.Apply(context.Background(), db, migrations); err != nil || len(applied) != 1 {
+		t.Fatalf("repair applied=%v err=%v", applied, err)
+	}
+	for id, want := range map[int64]string{1: "ready", 2: "deleting", 3: "ready"} {
+		var f filemodel.File
+		if err := db.First(&f, id).Error; err != nil {
+			t.Fatal(err)
+		}
+		if f.DeleteState != want {
+			t.Fatalf("file %d state=%q want=%q", id, f.DeleteState, want)
+		}
+	}
+	if applied, err := migration.Apply(context.Background(), db, migrations); err != nil || len(applied) != 0 {
+		t.Fatalf("repair replay=%v err=%v", applied, err)
+	}
+	if err := db.Exec("UPDATE operations_files SET delete_state='' WHERE id=3").Error; err == nil {
+		t.Fatal("empty state accepted after repair")
 	}
 }

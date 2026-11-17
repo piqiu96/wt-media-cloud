@@ -152,6 +152,7 @@ function query() {
   load();
 }
 function invalidate() {
+  formError.value = "";
   if (form.value) form.value.content.confirmed = false;
 }
 async function changeCategory(category) {

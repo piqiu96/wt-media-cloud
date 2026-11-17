@@ -3,7 +3,7 @@ package model
 import "time"
 
 type File struct {
-	DeleteState   string
+	DeleteState   string `gorm:"not null;default:ready"`
 	ID            int64
 	OwnerID       int64
 	TeamID        *int64
