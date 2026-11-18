@@ -6,10 +6,12 @@ import path from 'node:path'
 import {chromium} from 'playwright'
 const base=process.env.WT_MEDIA_BROWSER_BASE_URL,stateFile=process.env.WT_MEDIA_BROWSER_STATE,
  evidence=process.env.WT_MEDIA_BROWSER_EVIDENCE,id=process.env.WT_MEDIA_BROWSER_TASK_ID,
- conclusion=process.env.WT_MEDIA_BROWSER_RESOLVE,basis=process.env.WT_MEDIA_BROWSER_BASIS
+ conclusion=process.env.WT_MEDIA_BROWSER_RESOLVE,basis=process.env.WT_MEDIA_BROWSER_BASIS,
+ retry=process.env.WT_MEDIA_BROWSER_RETRY==='1'
 assert(base&&stateFile&&evidence&&id,'Current service address, session, evidence directory and task ID are required')
 assert(!conclusion||['uncertain','failed'].includes(conclusion),'Unsupported verification conclusion')
 assert(!conclusion||(basis&&basis.trim().length>=10),'Actual verification evidence is required before a write')
+assert(!retry||!conclusion,'Resolve and retry require separate runs and read-back')
 const state=JSON.parse(await fs.readFile(stateFile,'utf8'))
 state.cookies=state.cookies.map(c=>({...c,expires:c.expires??-1,httpOnly:c.httpOnly??false,secure:c.secure??false,sameSite:c.sameSite??'Lax'}))
 await fs.mkdir(evidence,{recursive:true})
@@ -33,6 +35,17 @@ try{
   await confirmation.getByRole('button',{name:'取消',exact:true}).click();await confirmation.waitFor({state:'hidden'})
   assert.deepEqual(await get(),before,'Cancel retry must preserve authorization, revision and occupancy')
   assert.deepEqual(await get('/attempts'),original,'Cancel retry must preserve original attempts')
+  if(retry){
+   await detail.getByRole('button',{name:'重试',exact:true}).click();await confirmation.waitFor()
+   const response=page.waitForResponse(r=>r.request().method()==='POST'&&new URL(r.url()).pathname===route+'/retry')
+   await confirmation.getByRole('button',{name:'确认重试',exact:true}).click()
+   assert.equal((await response).status(),200);await confirmation.waitFor({state:'hidden'})
+   const after=await get();assert.equal(after.status,'queued');assert.equal(after.id,before.id)
+   assert.equal(after.current_attempt_id,null);assert.equal(after.attempt_count,before.attempt_count)
+   assert.equal(BigInt(after.revision),BigInt(before.revision)+1n)
+   assert.deepEqual(after.content,before.content);assert.deepEqual(after.resources,before.resources)
+   assert.deepEqual(await get('/attempts'),original,'Retry must preserve the original attempts')
+  }
  }else{
  await detail.getByRole('button',{name:'核实结果',exact:true}).click()
  const dialog=page.getByRole('dialog',{name:'核实发布结果',exact:true})
@@ -64,5 +77,5 @@ try{
  await page.screenshot({path:path.join(evidence,'02-original-attempt-preserved.png'),fullPage:true})
  assert.deepEqual(errors,[]);assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false)
  const current=await get();await fs.writeFile(path.join(evidence,'readback.json'),JSON.stringify({task_id:id,status:current.status,revision:current.revision,attempt_count:current.attempt_count,conclusion:conclusion||'read_only',page_errors:errors,platform_submit:false},null,2))
- console.log(JSON.stringify({status:current.status,attempt_count:current.attempt_count,cancel_unchanged:true,invalid_evidence_rejected:before.status==='uncertain',retry_cancelled:before.status==='failed',original_preserved:true,page_errors:errors,platform_submit:false}))
+ console.log(JSON.stringify({status:current.status,attempt_count:current.attempt_count,cancel_unchanged:true,invalid_evidence_rejected:before.status==='uncertain',retry_cancelled:before.status==='failed',retry_confirmed:retry,original_preserved:true,page_errors:errors,platform_submit:false}))
 }catch(e){await page.screenshot({path:path.join(evidence,'failure.png'),fullPage:true}).catch(()=>{});throw e}finally{await browser.close()}
