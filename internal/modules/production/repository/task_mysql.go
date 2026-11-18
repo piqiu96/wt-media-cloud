@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/wt-media/wt-media-cloud/internal/infra/database"
-	fileservice "github.com/wt-media/wt-media-cloud/internal/modules/files/service"
 	"github.com/wt-media/wt-media-cloud/internal/modules/production/model"
 	"github.com/wt-media/wt-media-cloud/internal/shared/id"
 	identity "github.com/wt-media/wt-media-cloud/internal/shared/identity"
@@ -96,9 +95,6 @@ const composeAutoRetryQuota = 3
 // insert inside a larger transaction (CreateForUsage) share the same shape.
 // It takes a pointer because GORM fills the generated ID back into the row.
 func composeTaskInsertWithAudit(tx *gorm.DB, item *model.ComposeTask, action string, actorID int64, now time.Time) error {
-	if err := fileservice.LockJSONReferences(tx, item.ConfigSnapshot, item.TechnicalConfig, item.ExecutionManifest); err != nil {
-		return err
-	}
 	// GORM writes every column explicitly, so the column DEFAULT 3 would never
 	// fire and a zero MaxAttempts would be persisted as "no retries allowed".
 	if item.MaxAttempts <= 0 {

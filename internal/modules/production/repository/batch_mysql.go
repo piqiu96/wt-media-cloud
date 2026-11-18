@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"github.com/wt-media/wt-media-cloud/internal/infra/database"
-	fileservice "github.com/wt-media/wt-media-cloud/internal/modules/files/service"
 	"github.com/wt-media/wt-media-cloud/internal/modules/production/model"
 	"gorm.io/gorm"
 	"time"
@@ -56,9 +55,6 @@ func (ComposeTaskStore) FindBatch(id int64) (model.ComposeTaskBatch, bool, error
 	return findComposeTaskBatch(database.DB(), id)
 }
 func insertComposeTaskBatch(tx *gorm.DB, b *model.ComposeTaskBatch, now time.Time) error {
-	if err := fileservice.LockJSONReferences(tx, b.ConfigSnapshot); err != nil {
-		return err
-	}
 	b.CreatedAt = now
 	return tx.Create(b).Error
 }

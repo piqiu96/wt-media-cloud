@@ -14,7 +14,7 @@ import ResourceRowActions from "../../../shared/ui/resource/ResourceRowActions.v
 import ResourceStatusBadge from "../../../shared/ui/resource/ResourceStatusBadge.vue";
 import FeedbackAlert from "../../../shared/ui/feedback/FeedbackAlert.vue";
 import { feedback } from "../../../shared/ui/feedback/index.js";
-import { createPublicationsClient } from "../../../shared/api/publications.js";
+import { createPublicationClient } from "../../../shared/api/publication.js";
 import { createComposeClient } from "../../../shared/api/compose.js";
 import { createMediaAccountClient } from "../../../shared/api/mediaAccounts.js";
 import { createFilesClient } from "../../../shared/api/files.js";
@@ -27,7 +27,7 @@ import {
 } from "../eligibility.js";
 import PublishingResourcePicker from "../components/PublishingResourcePicker.vue";
 import PublishingRecoveryDialog from "../components/PublishingRecoveryDialog.vue";
-const client = createPublicationsClient(),
+const client = createPublicationClient(),
   compose = createComposeClient(),
   accounts = createMediaAccountClient(),
   files = createFilesClient(),
@@ -70,7 +70,6 @@ const rows = ref([]),
   pageSize = ref(20),
   filters = ref(blankFilters()),
   applied = ref({ ...filters.value }),
-  enabled = ref(false),
   loading = ref(false),
   error = ref("");
 const view = ref("list"),
@@ -142,7 +141,6 @@ async function load() {
     rows.value = data.items;
     total.value = data.total;
     summary.value = data.summary;
-    enabled.value = data.preparation_enabled;
     executionEnabled.value = data.execution_enabled === true;
   } catch (e) {
     if (n === loadSequence) error.value = e.message;
@@ -403,7 +401,7 @@ onMounted(async () => {
       enabled: true,
     });
     const id = String(route.query.output_id || "");
-    if (enabled.value && /^[1-9][0-9]*$/.test(id)) {
+    if (/^[1-9][0-9]*$/.test(id)) {
       const data = await compose.getComposeOutput(id);
       openCreate();
       source.value = true;
@@ -421,7 +419,7 @@ onMounted(async () => {
     <template v-if="view === 'list'">
       <ResourcePageHeader title="发布任务"
         ><template #actions
-          ><t-button v-if="enabled" @click="openCreate"
+          ><t-button @click="openCreate"
             >快速发布</t-button
           ></template
         ></ResourcePageHeader

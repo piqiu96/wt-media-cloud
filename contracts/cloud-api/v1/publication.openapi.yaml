@@ -1,0 +1,158 @@
+openapi: 3.1.0
+info:
+  title: WT Media Single Publication Preparation
+  version: 2026.11.19.2
+  description: Creating never authorizes execution or submits a platform post. Separate revision-bound start requires the publishing_baidu_execution switch; public opening remains subject to real platform acceptance. Baidu task preparation is available. IDs and revisions are decimal strings; timestamps RFC3339. Uses errcode/message/data/logid.
+paths:
+  /api/v1/publication:
+    get:
+      operationId: listPublications
+      security: [{sessionCookie: []}]
+      parameters:
+        - {in: query, name: page, schema: {type: integer, minimum: 1, default: 1}}
+        - {in: query, name: page_size, schema: {type: integer, minimum: 1, maximum: 100, default: 20}}
+        - {in: query, name: search, schema: {type: string, maxLength: 100}}
+        - {in: query, name: platform, schema: {type: string, enum: [baidu, bilibili, xiaohongshu]}}
+        - {in: query, name: category_id, schema: {$ref: '#/components/schemas/ID'}}
+        - {in: query, name: created_from, schema: {type: string, format: date-time}}
+        - {in: query, name: created_before, schema: {type: string, format: date-time}}
+        - {in: query, name: status, schema: {type: string, enum: [pending, queued, running, awaiting_human, uncertain, reviewing, failed, published, cancelled, abandoned]}}
+      responses:
+        '200': {description: '{items:[Publication],total,page,page_size,summary:{all,awaiting_human,running,uncertain}}. Summary uses the same non-status filters and actor scope, independent of pagination. Scope uses account owner, team and category; creator is audit only.'}
+        '400': {description: Invalid query.}
+    post:
+      operationId: createPublication
+      security: [{sessionCookie: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [request_key, platform, category_id, media_account_id, composite_output_id, content]
+              properties:
+                request_key: {type: string, minLength: 1, maxLength: 64}
+                platform: {type: string, enum: [baidu]}
+                category_id: {$ref: '#/components/schemas/ID'}
+                media_account_id: {$ref: '#/components/schemas/ID'}
+                composite_output_id: {$ref: '#/components/schemas/ID'}
+                content: {$ref: '#/components/schemas/Content'}
+                not_before: {type: [string, 'null'], format: date-time}
+      responses:
+        '201': {description: Pending Publication, without authorization or attempt. Same creator/key/input returns the original record even if resources later change.}
+        '400': {description: Invalid content or unavailable resource.}
+        '404': {description: Resource missing or outside actor scope.}
+        '409': {description: Same key with different input, output occupied on this platform, or unsupported platform.}
+        '503': {description: Storage or persistence unavailable; retry with the same key and input.}
+  /api/v1/publication/{id}:
+    parameters:
+      - {in: path, name: id, required: true, schema: {$ref: '#/components/schemas/ID'}}
+    get:
+      operationId: getPublication
+      security: [{sessionCookie: []}]
+      responses:
+        '200': {description: Publication with saved content and safe resource snapshot. No cookies, signed grants or bucket secrets.}
+        '404': {description: Task absent or outside actor scope.}
+  /api/v1/publication/{id}/content:
+    parameters:
+      - {in: path, name: id, required: true, schema: {$ref: '#/components/schemas/ID'}}
+    put:
+      operationId: editPublicationContent
+      security: [{sessionCookie: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expected_revision, content]
+              properties:
+                expected_revision: {$ref: '#/components/schemas/ID'}
+                content: {$ref: '#/components/schemas/Content'}
+                not_before: {type: [string, 'null'], format: date-time}
+      responses:
+        '200': {description: Updated Publication, revision incremented. Platform/account/output/category remain fixed.}
+        '400': {description: Invalid or unconfirmed content.}
+        '404': {description: Task absent or outside actor scope.}
+        '409': {description: Revision changed, task claimed/authorized or no longer pending. Reload before editing.}
+  /api/v1/publication/{id}/start:
+    post:
+      operationId: startPublication
+      security: [{sessionCookie: []}]
+      parameters: [{in: path, name: id, required: true, schema: {$ref: '#/components/schemas/ID'}}]
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [expected_revision], additionalProperties: false, properties: {expected_revision: {$ref: '#/components/schemas/ID'}}}}}}
+      responses:
+        '200': {description: 'Authorized task, pending until not_before or queued when due. Never creates an attempt; frozen inputs cannot subsequently be edited.'}
+        '409': {description: 'Revision/state conflict, unavailable resource or platform not open for execution.'}
+  /api/v1/publication/{id}/attempts:
+    get:
+      operationId: listPublicationAttempts
+      security: [{sessionCookie: []}]
+      parameters: [{in: path, name: id, required: true, schema: {$ref: '#/components/schemas/ID'}}]
+      responses:
+        '200': {description: 'Owner-scoped attempt history without credentials, signed grants or mutable old input.'}
+  /api/v1/publication/{id}/resolve:
+    post:
+      operationId: resolvePublication
+      security: [{sessionCookie: []}]
+      parameters: [{in: path, name: id, required: true, schema: {$ref: '#/components/schemas/ID'}}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/FailureResolution'}}}}
+      responses:
+        '200': {description: 'Revision-checked current-attempt verification, preserving the original result. This revision supports confirmed failure or still uncertain only; no public-success inference. Failure requires explicit no-publishable-work and closed-scene evidence from the original account, not merely a missing submit flag.'}
+        '409': {description: 'Stale revision/attempt, active scene, unsafe or unsupported conclusion. No input, occupancy or original result is changed.'}
+  /api/v1/publication/{id}/retry:
+    post:
+      operationId: retryPublication
+      security: [{sessionCookie: []}]
+      parameters: [{in: path, name: id, required: true, schema: {$ref: '#/components/schemas/ID'}}]
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [expected_revision], additionalProperties: false, properties: {expected_revision: {$ref: '#/components/schemas/ID'}}}}}}
+      responses:
+        '200': {description: 'Same failed task queued after current resource and safe-resolution checks; keeps input, output occupancy and history. Only claim creates the next attempt. No editing, replacement resources or implicit retry of unknown work.'}
+        '409': {description: 'Stale revision, unresolved/publishable old scene, stopped task or unavailable original resources.'}
+components:
+  securitySchemes:
+    sessionCookie: {type: apiKey, in: cookie, name: wt_media_session}
+  schemas:
+    FailureResolution:
+      type: object
+      additionalProperties: false
+      required: [attempt_id, expected_revision, conclusion, evidence]
+      properties:
+        attempt_id: {$ref: '#/components/schemas/ID'}
+        expected_revision: {$ref: '#/components/schemas/ID'}
+        conclusion: {type: string, enum: [failed, uncertain]}
+        evidence:
+          type: object
+          additionalProperties: false
+          required: [platform_uid, reason, basis, scene_closed, no_publishable_work]
+          properties:
+            platform_uid: {type: string, minLength: 1, maxLength: 255}
+            reason: {type: string, minLength: 1, maxLength: 200}
+            basis: {type: string, minLength: 10, maxLength: 2000}
+            scene_closed: {type: boolean}
+            no_publishable_work: {type: boolean}
+    ID: {type: string, pattern: '^[1-9][0-9]*$'}
+    Content:
+      type: object
+      additionalProperties: false
+      required: [description, cover_file_id, declaration, confirmed]
+      properties:
+        description: {type: string, minLength: 1, maxLength: 1000}
+        cover_file_id: {$ref: '#/components/schemas/ID'}
+        topics: {type: string, maxLength: 200}
+        declaration: {type: string, enum: [无需声明]}
+        confirmed: {type: boolean, const: true}
+    Publication:
+      type: object
+      required: [id, platform, status, revision, content, resources, operator_id, composite_output_id]
+      properties:
+        id: {$ref: '#/components/schemas/ID'}
+        platform: {type: string}
+        status: {type: string}
+        revision: {$ref: '#/components/schemas/ID'}
+        operator_id: {$ref: '#/components/schemas/ID'}
+        composite_output_id: {$ref: '#/components/schemas/ID'}
+        content: {$ref: '#/components/schemas/Content'}
+        resources: {type: object}

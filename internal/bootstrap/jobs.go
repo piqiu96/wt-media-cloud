@@ -2,7 +2,7 @@ package bootstrap
 
 import (
 	"context"
-	publishing "github.com/wt-media/wt-media-cloud/internal/modules/publishing/service"
+	publishing "github.com/wt-media/wt-media-cloud/internal/modules/publish/service"
 	"os/signal"
 	"syscall"
 	"time"
