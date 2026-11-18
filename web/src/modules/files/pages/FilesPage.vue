@@ -97,7 +97,7 @@ async function copy(file) {
 async function remove(file) {
   if (!await feedback.confirmWarning({ title: '删除文件', message: `删除「${file.filename}」后，其链接将无法继续使用。`, confirmText: '删除', danger: true })) return
   try { await client.delete(file.id); feedback.toast.success('文件已删除'); if (items.value.length === 1 && page.value > 1) page.value--; await load() }
-  catch (e) { feedback.toast.error(e.message) }
+  catch (e) { feedback.toast.error(e.message); await load() }
 }
 onMounted(load)
 </script>
@@ -121,11 +121,11 @@ onMounted(load)
         <template #team_name="{row}">{{ row.team_name || '—' }}</template>
         <template #created_at="{row}">{{ formatDateTime(row.created_at) }}</template>
         <template #op="{row}"><ResourceRowActions>
-          <t-button tag="a" size="small" variant="text" :href="client.resourceURL(row)" target="_blank" rel="noopener noreferrer">预览</t-button>
-          <t-button tag="a" size="small" variant="text" :href="`${client.resourceURL(row)}?download=1`" target="_blank" rel="noopener noreferrer">下载</t-button>
-          <t-button size="small" variant="text" @click="copy(row)">复制链接</t-button>
-          <t-button size="small" variant="text" @click="openRename(row)">改名</t-button>
-          <t-button size="small" variant="text" class="is-danger" @click="remove(row)">删除</t-button>
+          <t-button v-if="!row.deleted_at" tag="a" size="small" variant="text" :href="client.resourceURL(row)" target="_blank" rel="noopener noreferrer">预览</t-button>
+          <t-button v-if="!row.deleted_at" tag="a" size="small" variant="text" :href="`${client.resourceURL(row)}?download=1`" target="_blank" rel="noopener noreferrer">下载</t-button>
+          <t-button v-if="!row.deleted_at" size="small" variant="text" @click="copy(row)">复制链接</t-button>
+          <t-button v-if="!row.deleted_at" size="small" variant="text" @click="openRename(row)">改名</t-button>
+          <t-button size="small" variant="text" class="is-danger" @click="remove(row)">{{row.deleted_at?'重试删除':'删除'}}</t-button>
         </ResourceRowActions></template>
       </t-table></div>
       <div class="pagination-bar"><t-pagination v-model:current="page" v-model:page-size="pageSize" :total="total" :show-jumper="false" :page-size-options="[10,20,50]" @current-change="load" @page-size-change="query" /></div>

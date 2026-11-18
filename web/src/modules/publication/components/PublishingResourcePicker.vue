@@ -1,0 +1,199 @@
+<script setup>
+import { computed, ref, watch } from "vue";
+import ResourceOverlay from "../../../shared/ui/resource/ResourceOverlay.vue";
+import ResourceFilterBar from "../../../shared/ui/resource/ResourceFilterBar.vue";
+import FeedbackAlert from "../../../shared/ui/feedback/FeedbackAlert.vue";
+import { createMediaAccountClient } from "../../../shared/api/mediaAccounts.js";
+import { createComposeClient } from "../../../shared/api/compose.js";
+import { createFilesClient } from "../../../shared/api/files.js";
+import { accountUnavailable, outputUnavailable } from "../eligibility.js";
+const props = defineProps({
+  visible: Boolean,
+  kind: String,
+  category: String,
+  account: Object,
+});
+const emit = defineEmits(["update:visible", "selected"]);
+const accounts = createMediaAccountClient(),
+  compose = createComposeClient(),
+  files = createFilesClient();
+const rows = ref([]),
+  total = ref(0),
+  page = ref(1),
+  search = ref(""),
+  busy = ref(false),
+  error = ref("");
+const titles = {
+  account: "选择发布账号",
+  output: "选择成片",
+  image: "选择发布封面",
+};
+const columns = computed(() => [
+  { colKey: "id", title: "ID", width: 80 },
+  {
+    colKey: "name",
+    title: props.kind === "account" ? "发布账号" : "名称",
+    width: 240,
+  },
+  {
+    colKey: "scope",
+    title: props.kind === "account" ? "账号所属用户 / 真实 UID" : "资源信息",
+    width: 200,
+  },
+  { colKey: "op", title: "选择", width: 240 },
+]);
+let sequence = 0;
+async function load() {
+  const n = ++sequence;
+  busy.value = true;
+  error.value = "";
+  try {
+    const params = { page: page.value, page_size: 10, search: search.value };
+    let data;
+    if (props.kind === "account")
+      data = await accounts.listPage({ ...params, platform: "baidu" });
+    else if (props.kind === "output")
+      data = await compose.listComposeOutputs(params);
+    else data = await files.list({ ...params, type: "image" });
+    if (n !== sequence) return;
+    rows.value = data.items || [];
+    total.value = data.total || 0;
+  } catch (e) {
+    if (n === sequence) error.value = e.message;
+  } finally {
+    if (n === sequence) busy.value = false;
+  }
+}
+function reason(row) {
+  return props.kind === "account"
+    ? accountUnavailable(row, props.category)
+    : props.kind === "output"
+      ? outputUnavailable(row, props.category, props.account)
+      : row.deleted_at
+        ? "文件正在删除"
+        : "";
+}
+function select(row) {
+  if (busy.value || reason(row)) return;
+  emit("selected", row);
+  emit("update:visible", false);
+}
+watch(
+  () => [props.visible, props.kind],
+  () => {
+    if (props.visible) {
+      page.value = 1;
+      search.value = "";
+      rows.value = [];
+      total.value = 0;
+      load();
+    } else sequence++;
+  },
+);
+</script>
+<template>
+  <ResourceOverlay
+    :visible="visible"
+    :title="titles[kind] || '选择资源'"
+    :width="1000"
+    :footer="false"
+    @update:visible="emit('update:visible', $event)"
+  >
+    <ResourceFilterBar
+      ><label class="wt-filter-field wt-filter-field--wide"
+        ><span class="wt-filter-field__label">搜索名称或 ID</span><t-input
+          v-model="search"
+          aria-label="搜索资源"
+          @enter="
+            page = 1;
+            load();
+          "
+      /></label>
+      <div class="wt-filter-actions">
+        <t-button
+          theme="primary"
+          @click="
+            page = 1;
+            load();
+          "
+          >查询</t-button
+        ><t-button
+          variant="outline"
+          @click="
+            search = '';
+            page = 1;
+            load();
+          "
+          >重置</t-button
+        >
+      </div></ResourceFilterBar
+    >
+    <FeedbackAlert v-if="error" theme="error" :message="error" />
+    <div class="table-scroll-wrap">
+      <t-table
+        class="wt-resource-table"
+        :data="rows"
+        :columns="columns"
+        row-key="id"
+        :loading="busy"
+        empty="没有符合当前范围的资源"
+        :scroll="{ x: '800px' }"
+      >
+        <template #name="{ row }">{{
+          kind === "account"
+            ? row.platform_name || "未识别账号"
+            : row.name || row.file_name || "未命名"
+        }}</template>
+        <template #scope="{ row }"
+          ><span v-if="kind === 'account'"
+            >{{ row.user_name || "—" }} ·
+            {{ row.platform_account_id || "未识别" }}</span><span v-else-if="kind === 'output'"
+            >类目 {{ row.category_id }} ·
+            {{
+              row.video?.status === "ready" ? "视频可读" : "视频不可用"
+            }}</span><img
+            v-else-if="!row.deleted_at"
+            :src="files.resourceURL(row)"
+            alt="封面预览"
+            class="picker-cover"
+        /></template>
+        <template #op="{ row }"
+          ><span v-if="reason(row)" class="picker-reason">{{
+            reason(row)
+          }}</span><t-button
+            v-else
+            :disabled="busy"
+            size="small"
+            variant="text"
+            @click="select(row)"
+            >选择</t-button
+          ></template
+        >
+      </t-table>
+    </div>
+    <div class="pagination-bar">
+      <t-pagination
+        :current="page"
+        :page-size="10"
+        :total="total"
+        :show-jumper="false"
+        :show-page-size="false"
+        @current-change="
+          page = $event;
+          load();
+        "
+      />
+    </div>
+  </ResourceOverlay>
+</template>
+<style scoped>
+.picker-cover {
+  width: 72px;
+  height: 45px;
+  object-fit: contain;
+}
+.picker-reason {
+  color: var(--wt-text-tertiary);
+  font-size: 13px;
+}
+</style>

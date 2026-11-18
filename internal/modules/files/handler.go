@@ -25,6 +25,8 @@ func fail(c *hertzapp.RequestContext, err error) {
 	switch {
 	case errors.Is(err, fileservice.ErrInvalid):
 		api.FailureNamed(c, consts.StatusBadRequest, 17001, "请填写有效文件名并选择可读取的图片或视频", "file_invalid")
+	case errors.Is(err, fileservice.ErrInUse):
+		api.FailureNamed(c, consts.StatusConflict, 17006, "文件正在被使用，不能删除", "file_in_use")
 	case errors.Is(err, fileservice.ErrTooLarge):
 		api.FailureNamed(c, consts.StatusRequestEntityTooLarge, 17002, "文件超过上传大小限制", "file_too_large")
 	case errors.Is(err, fileservice.ErrNotFound):

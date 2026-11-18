@@ -6,7 +6,8 @@ import ResourceOverlay from '../../../shared/ui/resource/ResourceOverlay.vue'
 import ResourceRowActions from '../../../shared/ui/resource/ResourceRowActions.vue'
 import ResourceSelectionToolbar from '../../../shared/ui/resource/ResourceSelectionToolbar.vue'
 import { computed,onMounted,onUnmounted,ref } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute,useRouter } from 'vue-router'
+import { outputUnavailable } from '../../publication/eligibility.js'
 import BusinessSelect from '../../../shared/ui/fields/BusinessSelect.vue'
 import FeedbackAlert from '../../../shared/ui/feedback/FeedbackAlert.vue'
 import { feedback } from '../../../shared/ui/feedback/index.js'
@@ -36,7 +37,7 @@ import ComposeOutputDetail from '../components/ComposeOutputDetail.vue'
 import ComposeTaskCreateDialog from '../components/ComposeTaskCreateDialog.vue'
 import ComposeStrategySummary from '../components/ComposeStrategySummary.vue'
 import MaterialDetailDrawer from '../../materials/MaterialDetailDrawer.vue'
-const client=createComposeClient(),materialsClient=createMaterialsClient(),transferClient=createFileTransferClient(),sessionClient=createSessionClient(),downloadCentre=useDownloadCentre(),route=useRoute()
+const client=createComposeClient(),materialsClient=createMaterialsClient(),transferClient=createFileTransferClient(),sessionClient=createSessionClient(),downloadCentre=useDownloadCentre(),route=useRoute(),router=useRouter()
 const related=ref({visible:false,kind:'task',id:null})
 const activeView=ref('batches'),rows=ref([]),total=ref(0),loading=ref(false),error=ref('')
 const pages=ref({batches:{current:1,pageSize:20},outputs:{current:1,pageSize:20}}),pagination=computed(()=>pages.value[activeView.value])
@@ -51,7 +52,9 @@ const isAdmin=computed(()=>currentUser.value?.role==='admin'),isSenior=computed(
 const operatorFilterOptions=computed(()=>operatorOptions.value.map(option=>({value:`op:${option.id}`,label:option.display_name})))
 const categoryFilterOptions=computed(()=>{const own=new Set(currentUser.value?.category_ids||[]);return enabledCategories.value.filter(category=>isAdmin.value||isSenior.value||own.has(category.id)).map(row=>({value:row.id,label:row.name}))})
 const selectedRows=computed(()=>selectedRowKeys.value.map(id=>knownRows.value[id]).filter(Boolean))
-const publishingReason='发布能力尚未交付，暂不能创建发布任务。'
+function publicationReason(targets){if(targets.length!==1)return '当前支持选择一条成片创建单任务';return outputUnavailable(targets[0],targets[0].category_id)}
+const publishingReason=computed(()=>publicationReason(selectedRows.value))
+async function goPublish(targets){const reason=publicationReason(targets);if(reason){feedback.toast.info(reason);return}await router.push({path:'/publish',query:{output_id:String(targets[0].id)}})}
 const videoOptions=[{value:'ready',label:'可用'},{value:'failed',label:'失败'},{value:'unknown',label:'未核验'}]
 const columns = computed(() => [
  {colKey:'material_id',title:'素材 ID',width:90},
@@ -154,12 +157,12 @@ onUnmounted(()=>{loadSequence++;detailSequence++;if(downloadPoller)clearInterval
    <div class="wt-filter-actions"><t-button theme="primary" @click="query">查询</t-button><t-button variant="outline" class="wt-secondary-button" @click="reset">重置</t-button></div>
 </ResourceFilterBar>
    <FeedbackAlert v-if="batchResult" theme="info" :message="batchResult" closable @close="batchResult=''" />
-   <ResourceSelectionToolbar v-if="activeView==='outputs'" :count="selectedRowKeys.length" unit="个成片" @clear="selectedRowKeys=[]"><t-button variant="outline" :loading="batchDownloading" :disabled="!selectedRows.some(canDownload)" :title="localDownloadReason(currentUser)" @click="batchDownload(selectedRows)">下载（{{ selectedRowKeys.length }}）</t-button><span :title="publishingReason"><t-button variant="outline" disabled>去发布</t-button></span></ResourceSelectionToolbar>
+   <ResourceSelectionToolbar v-if="activeView==='outputs'" :count="selectedRowKeys.length" unit="个成片" @clear="selectedRowKeys=[]"><t-button variant="outline" :loading="batchDownloading" :disabled="!selectedRows.some(canDownload)" :title="localDownloadReason(currentUser)" @click="batchDownload(selectedRows)">下载（{{ selectedRowKeys.length }}）</t-button><span :title="publishingReason"><t-button variant="outline" :disabled="!!publishingReason" @click="goPublish(selectedRows)">去发布</t-button></span></ResourceSelectionToolbar>
    <template v-if="activeView==='batches'"><div class="table-scroll-wrap"><t-table class="wt-resource-table" :data="rows" :columns="columns" row-key="material_id" :scroll="tableScroll" size="small" hover empty="暂无成片"><template #material="{row}"><div class="output-related"><strong :title="row.material_title">{{ row.material_title||'—' }}</strong><span>{{ row.author_name||'—' }}</span></div></template><template #category="{row}">{{ categoryName(row.category_id) }}</template><template #strategies="{row}"><div class="output-related"><span v-for="strategy in (row.strategies||[]).slice(0,2)" :key="strategy.id" :title="strategy.name">{{ strategy.name||'—' }}</span><t-tooltip v-if="row.strategies?.length>2" :content="row.strategies.map(item=>item.name).join('、')"><span>共 {{ row.strategies.length }} 个策略</span></t-tooltip></div></template><template #latest_created_at="{row}">{{ formatDateTime(row.latest_created_at) }}</template><template #op="{row}"><ResourceRowActions><t-button size="small" variant="text" @click="openMaterialGroup(row)">详情</t-button></ResourceRowActions></template></t-table></div></template>
    <ComposeOutputTable v-else :rows="rows" v-model:selected-keys="selectedRowKeys" :video-state="videoFor" :can-download="canDownload" :download-reason="downloadReason" :downloading-id="downloadingID" :category-name="categoryName" @detail="openDetail" @download="download" @remake="remake" @material="openMaterial" />
    <div class="pagination-bar"><t-pagination :show-jumper="false" :current="pagination.current" :page-size="pagination.pageSize" :total="total" :page-size-options="[10,20,50]" @change="paginate" /></div>
   </ResourceCard>
-  <ComposeOutputMaterialDetail v-model:visible="materialGroupVisible" :material="materialGroup" :scope="appliedScope" :video-state="row=>outputVideoState(row)" :can-download="canDownload" :download-reason="downloadReason" :category-name="categoryName" :downloading-id="downloadingID" :busy="batchDownloading" :publishing-reason="publishingReason" :result="batchResult" @detail="openDetail" @download="download" @downloads="batchDownload" @remake="remake" @batch="openBatch" />
+  <ComposeOutputMaterialDetail v-model:visible="materialGroupVisible" :material="materialGroup" :scope="appliedScope" :video-state="row=>outputVideoState(row)" :can-download="canDownload" :download-reason="downloadReason" :category-name="categoryName" :downloading-id="downloadingID" :busy="batchDownloading" :publication-reason="publicationReason" :result="batchResult" @detail="openDetail" @download="download" @downloads="batchDownload" @publish="goPublish" @remake="remake" @batch="openBatch" />
   <ResourceOverlay v-model:visible="detailVisible" kind="drawer" title="成片详情" :width="800" :footer="false"><t-loading :loading="detailLoading"><ComposeOutputDetail v-if="detail" :detail="detail" :preview-url="previewUrl" :preview-loading="previewLoading" :download-state="downloadFor(detail.output)" management linkable @retry-preview="retryPreview" @open-file="openLocalFile" @open-material="openMaterial" @open-strategy="openStrategy" @open-task="openTask" @open-batch="openBatch" /></t-loading></ResourceOverlay>
   <ComposeTaskCreateDialog v-model:visible="createVisible" :source-output="createSource" @created="onCreated" />
   <ComposeRelatedDetail v-model:visible="related.visible" :kind="related.kind" :entity-id="related.id" :can-retry="isAdmin||isSenior" />

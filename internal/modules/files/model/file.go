@@ -19,6 +19,7 @@ type File struct {
 	UpdatedAt     time.Time
 	OwnerName     string `gorm:"->"`
 	TeamName      string `gorm:"->"`
+	DeletedAt     *time.Time
 }
 
 func (File) TableName() string { return "operations_files" }
@@ -28,19 +29,20 @@ type Scope struct {
 	OwnerID, TeamID int64
 }
 
-type View struct {
-	ID           int64     `json:"id"`
-	Name         string    `json:"name"`
-	Filename     string    `json:"filename"`
-	Type         string    `json:"type"`
-	ContentType  string    `json:"content_type"`
-	SizeBytes    int64     `json:"size_bytes"`
-	SHA256       string    `json:"sha256"`
-	OwnerID      int64     `json:"owner_id"`
-	OwnerName    string    `json:"owner_name"`
-	TeamID       *int64    `json:"team_id"`
-	TeamName     string    `json:"team_name"`
-	CreatedAt    time.Time `json:"created_at"`
-	PublicURL    string    `json:"public_url"`
-	ResourcePath string    `json:"resource_path"`
+type FileView struct {
+	ID           int64      `json:"id"`
+	Name         string     `json:"name"`
+	Filename     string     `json:"filename"`
+	Type         string     `json:"type"`
+	ContentType  string     `json:"content_type"`
+	SizeBytes    int64      `json:"size_bytes"`
+	SHA256       string     `json:"sha256"`
+	OwnerID      int64      `json:"owner_id"`
+	OwnerName    string     `json:"owner_name"`
+	TeamID       *int64     `json:"team_id"`
+	TeamName     string     `json:"team_name"`
+	CreatedAt    time.Time  `json:"created_at"`
+	PublicURL    string     `json:"public_url"`
+	ResourcePath string     `json:"resource_path"`
+	DeletedAt    *time.Time `json:"deleted_at"`
 }

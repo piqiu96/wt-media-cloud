@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/url"
@@ -52,6 +53,15 @@ func (m *memoryFiles) FindToken(token string) (model.File, error) {
 func (m *memoryFiles) Rename(id int64, name string) error {
 	f := m.records[id]
 	f.Name = name
+	m.records[id] = f
+	return nil
+}
+func (m *memoryFiles) BeginDelete(id int64) error {
+	f := m.records[id]
+	if f.DeletedAt == nil {
+		now := time.Now().UTC()
+		f.DeletedAt = &now
+	}
 	m.records[id] = f
 	return nil
 }
@@ -143,6 +153,9 @@ func TestVerifiedFileHasIDNameStableURLAndRenameKeepsObject(t *testing.T) {
 		t.Fatal(err)
 	}
 	stored := r.records[f.ID]
+	if stored.DeletedAt != nil {
+		t.Fatalf("uploaded file deleted_at=%v", stored.DeletedAt)
+	}
 	if stored.ObjectKey != "s3://wt-media/file-ku/files/1_%E5%BC%80%E5%A4%B4%E5%9B%BE%E7%89%87.png" || f.Filename != "开头图片.png" || !strings.HasPrefix(f.ResourcePath, "/api/v1/file-resources/") {
 		t.Fatalf("file=%+v stored=%+v", f, stored)
 	}
@@ -175,8 +188,8 @@ func TestFileScopeAndDeleteRevokeResource(t *testing.T) {
 	if err := s.Delete(context.Background(), a, f.ID); err == nil {
 		t.Fatal("failed delete claimed success")
 	}
-	if _, err := s.Resource(context.Background(), token, false); err != nil {
-		t.Fatal("failed delete silently revoked a live file")
+	if _, err := s.Resource(context.Background(), token, false); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("deleting file still accessible: %v", err)
 	}
 	o.removeErr = nil
 	if err := s.Delete(context.Background(), a, f.ID); err != nil {
@@ -238,5 +251,83 @@ func TestInvalidPublicConfigurationDoesNotAllocateOrUpload(t *testing.T) {
 	s.Bucket = "other-bucket"
 	if _, err := s.Upload(context.Background(), operator(1, 10, identity.RoleOperator), "开头", "a.png", strings.NewReader("png")); err == nil || len(r.records) != 0 {
 		t.Fatal("wrong bucket accepted")
+	}
+}
+
+func TestDeletingFileNeverBecomesReadableAfterStorageFailure(t *testing.T) {
+	s, r, o := testService()
+	a := operator(1, 10, identity.RoleOperator)
+	f, err := s.Upload(context.Background(), a, "封面", "a.png", strings.NewReader("png"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	o.removeErr = errors.New("storage unavailable")
+	if err := s.Delete(context.Background(), a, f.ID); err == nil {
+		t.Fatal("failed delete claimed success")
+	}
+	if r.records[f.ID].DeletedAt == nil {
+		t.Fatal("failed delete lost durable recovery state")
+	}
+	if _, err := s.Read(a, f.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("deleting file selectable: %v", err)
+	}
+	token := strings.TrimPrefix(f.ResourcePath, "/api/v1/file-resources/")
+	if _, err := s.Resource(context.Background(), token, false); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("deleting file still grants access: %v", err)
+	}
+	items, _, err := s.List(a, "", "", 1, 20)
+	if err != nil || len(items) != 1 || items[0].DeletedAt == nil || items[0].ResourcePath != "" || items[0].PublicURL != "" {
+		t.Fatalf("deletion recovery row=%+v err=%v", items, err)
+	}
+	o.removeErr = nil
+	if err := s.Delete(context.Background(), a, f.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := r.records[f.ID]; ok {
+		t.Fatal("retry did not finish deletion")
+	}
+}
+
+func TestDeletionTimestampSurvivesFailedRetries(t *testing.T) {
+	s, _, objects := testService()
+	actor := operator(1, 10, identity.RoleOperator)
+	file, err := s.Upload(context.Background(), actor, "封面", "a.png", strings.NewReader("png"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	objects.removeErr = errors.New("storage unavailable")
+	var first string
+	for i := 0; i < 2; i++ {
+		if err := s.Delete(context.Background(), actor, file.ID); err == nil {
+			t.Fatal("failed deletion claimed success")
+		}
+		items, _, err := s.List(actor, "", "", 1, 20)
+		if err != nil || len(items) != 1 {
+			t.Fatalf("recovery listing: %v %v", items, err)
+		}
+		raw, _ := json.Marshal(items[0])
+		var view map[string]any
+		if err := json.Unmarshal(raw, &view); err != nil {
+			t.Fatal(err)
+		}
+		timestamp, ok := view["deleted_at"].(string)
+		if !ok || timestamp == "" {
+			t.Fatalf("missing deletion time: %s", raw)
+		}
+		if _, err := time.Parse(time.RFC3339Nano, timestamp); err != nil {
+			t.Fatal(err)
+		}
+		if _, exists := view["delete_state"]; exists {
+			t.Fatal("separate deletion state still exposed")
+		}
+		if i == 0 {
+			first = timestamp
+		} else if timestamp != first {
+			t.Fatal("retry changed original deletion time")
+		}
+	}
+	objects.removeErr = nil
+	if err := s.Delete(context.Background(), actor, file.ID); err != nil {
+		t.Fatal(err)
 	}
 }

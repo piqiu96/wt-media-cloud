@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: WT Media Operations Files API
-  version: 2026.11.07.2
+  version: 2026.11.19.1
   description: Independent image/video uploads. JSON responses use errcode/message/data/logid. Ordinary operators manage their own uploads, senior operators their team, administrators all files. Only verified uploads are visible. Stored objects are immutable; renaming changes display/download names only.
 paths:
   /api/v1/files:
@@ -55,7 +55,8 @@ paths:
       responses:
         '200': {description: Object and file record removed. Origin object and capability removed; cached copies follow cache policy.}
         '404': {description: File missing or outside actor scope.}
-        '503': {description: Deletion incomplete; request may be retried.}
+        '409': {description: File referenced by a saved file_id; no deletion started. URL-only production inputs do not block deletion.}
+        '503': {description: Deletion incomplete; deletion timestamp is retained and unavailable for new references or grants. Retry the same DELETE.}
   /api/v1/file-resources/{token}:
     get:
       operationId: openOperationsFileResource
@@ -75,6 +76,7 @@ components:
       type: object
       required: [id, name, filename, type, content_type, size_bytes, sha256, owner_id, created_at, resource_path, public_url]
       properties:
+        deleted_at: {type: [string, 'null'], format: date-time, description: Logical deletion time; non-null files cannot be selected or accessed and allow DELETE retry.}
         id: {type: integer, format: int64}
         name: {type: string}
         filename: {type: string}

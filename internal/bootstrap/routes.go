@@ -13,6 +13,7 @@ import (
 	"github.com/wt-media/wt-media-cloud/internal/modules/cloudagent"
 	"github.com/wt-media/wt-media-cloud/internal/modules/contentpool"
 	"github.com/wt-media/wt-media-cloud/internal/modules/files"
+	fileservice "github.com/wt-media/wt-media-cloud/internal/modules/files/service"
 	"github.com/wt-media/wt-media-cloud/internal/modules/filetransfer"
 	"github.com/wt-media/wt-media-cloud/internal/modules/identity"
 	identityservice "github.com/wt-media/wt-media-cloud/internal/modules/identity/service"
@@ -21,6 +22,8 @@ import (
 	"github.com/wt-media/wt-media-cloud/internal/modules/production"
 	"github.com/wt-media/wt-media-cloud/internal/modules/profilebinding"
 	"github.com/wt-media/wt-media-cloud/internal/modules/proxy"
+	"github.com/wt-media/wt-media-cloud/internal/modules/publish"
+	publishservice "github.com/wt-media/wt-media-cloud/internal/modules/publish/service"
 	api "github.com/wt-media/wt-media-cloud/internal/shared/api"
 )
 
@@ -53,7 +56,9 @@ func registerModuleRoutes(engine *server.Hertz) {
 	contentpool.RegisterRoutes(engine)
 	production.RegisterRoutes(engine)
 	filetransfer.RegisterRoutes(engine)
+	fileservice.SetReferenceCheck(publishservice.CheckFileReferences)
 	files.RegisterRoutes(engine)
+	publish.RegisterRoutes(engine)
 }
 
 func bootstrapIdentity(username, password string) error {

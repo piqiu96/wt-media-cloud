@@ -27,12 +27,12 @@ describe('output asset workspace',()=>{
   expect(table).not.toContain('<video')
   expect(table).not.toContain('>去发布<')
  })
- it('preserves cross-page selection with narrow checkboxes and truthful disabled publishing',()=>{
+ it('preserves cross-page selection with narrow checkboxes and single-output publication preparation',()=>{
   expect(table).toContain("type:'multiple', width:44")
   expect(table).toContain('reserve-selected-row-on-paginate')
   expect(source).toContain('knownRows.value[row.id]=row')
-  for(const text of [source,material]){expect(text).toContain('<ResourceSelectionToolbar');expect(text).toContain('<t-button variant="outline" disabled>去发布</t-button>')}
-  expect(source).toContain('发布能力尚未交付')
+  for(const text of [source,material]){expect(text).toContain('<ResourceSelectionToolbar');expect(text).toContain(':disabled="!!publishingReason"')}
+  expect(source).toContain('targets.length!==1');expect(source).toContain('outputUnavailable(targets[0]');expect(source).toContain("query:{output_id:String(targets[0].id)}")
  })
  it('keeps role category boundaries and basic date/video filters without local-page filtering',()=>{
   expect(source).toContain('isAdmin.value||isSenior.value||own.has(category.id)')
@@ -51,7 +51,7 @@ describe('output asset workspace',()=>{
   expect(source).toContain(':source-output="createSource"')
   expect(source).toContain('createSource.value=data')
   expect(source).toContain('<ComposeRelatedDetail')
-  expect(source).not.toContain('router.push')
+  expect(source).toContain("router.push({path:'/publish'")
   expect(source).not.toContain('archiveComposeOutput')
  })
 })
