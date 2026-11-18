@@ -14,7 +14,7 @@ import ResourceRowActions from "../../../shared/ui/resource/ResourceRowActions.v
 import ResourceStatusBadge from "../../../shared/ui/resource/ResourceStatusBadge.vue";
 import FeedbackAlert from "../../../shared/ui/feedback/FeedbackAlert.vue";
 import { feedback } from "../../../shared/ui/feedback/index.js";
-import { createPublishClient } from "../../../shared/api/publish.js";
+import { createPublicationClient } from "../../../shared/api/publication.js";
 import { createComposeClient } from "../../../shared/api/compose.js";
 import { createMediaAccountClient } from "../../../shared/api/mediaAccounts.js";
 import { createFilesClient } from "../../../shared/api/files.js";
@@ -26,7 +26,7 @@ import {
   outputUnavailable,
 } from "../eligibility.js";
 import PublishingResourcePicker from "../components/PublishingResourcePicker.vue";
-const client = createPublishClient(),
+const client = createPublicationClient(),
   compose = createComposeClient(),
   accounts = createMediaAccountClient(),
   files = createFilesClient(),

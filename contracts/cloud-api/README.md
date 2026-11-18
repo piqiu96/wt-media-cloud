@@ -12,4 +12,4 @@ Cloud-owned public HTTPS JSON API contracts for Web and Desktop consumers.
 - `v1/file-transfer.openapi.yaml`: M4-A executor-neutral transfer-task list and cancellation endpoints.
 - `v1/files.openapi.yaml`: Independent operations image/video uploads, permanent public bucket URLs, and compatible Cloud preview/attachment URLs.
 
-- `v1/publish.openapi.yaml`: M6-A formal single-task preparation, scoped read-back and revision-checked content edits; no execution authorization.
+- `v1/publication.openapi.yaml`: M6-A formal single-task preparation, scoped read-back and revision-checked content edits; no execution authorization.

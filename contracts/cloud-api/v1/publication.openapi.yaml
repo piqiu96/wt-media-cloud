@@ -4,7 +4,7 @@ info:
   version: 2026.11.19.1
   description: Formal pending tasks only. Creating never authorizes execution or submits a platform post. Baidu task preparation is available; execution endpoints are not provided by this contract. IDs and revisions are decimal strings; timestamps RFC3339. Uses errcode/message/data/logid.
 paths:
-  /api/v1/publish:
+  /api/v1/publication:
     get:
       operationId: listPublications
       security: [{sessionCookie: []}]
@@ -45,7 +45,7 @@ paths:
         '404': {description: Resource missing or outside actor scope.}
         '409': {description: Same key with different input, output occupied on this platform, or unsupported platform.}
         '503': {description: Storage or persistence unavailable; retry with the same key and input.}
-  /api/v1/publish/{id}:
+  /api/v1/publication/{id}:
     parameters:
       - {in: path, name: id, required: true, schema: {$ref: '#/components/schemas/ID'}}
     get:
@@ -54,7 +54,7 @@ paths:
       responses:
         '200': {description: Publication with saved content and safe resource snapshot. No cookies, signed grants or bucket secrets.}
         '404': {description: Task absent or outside actor scope.}
-  /api/v1/publish/{id}/content:
+  /api/v1/publication/{id}/content:
     parameters:
       - {in: path, name: id, required: true, schema: {$ref: '#/components/schemas/ID'}}
     put:

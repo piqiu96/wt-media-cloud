@@ -29,7 +29,7 @@ type Scope struct {
 	OwnerID, TeamID int64
 }
 
-type View struct {
+type FileView struct {
 	ID           int64      `json:"id"`
 	Name         string     `json:"name"`
 	Filename     string     `json:"filename"`

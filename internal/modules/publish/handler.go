@@ -21,10 +21,10 @@ import (
 )
 
 func RegisterRoutes(h *server.Hertz) {
-	h.GET("/api/v1/publish", List)
-	h.POST("/api/v1/publish", Create)
-	h.GET("/api/v1/publish/:id", Get)
-	h.PUT("/api/v1/publish/:id/content", Edit)
+	h.GET("/api/v1/publication", List)
+	h.POST("/api/v1/publication", Create)
+	h.GET("/api/v1/publication/:id", Get)
+	h.PUT("/api/v1/publication/:id/content", Edit)
 }
 func fail(c *app.RequestContext, err error) {
 	switch {

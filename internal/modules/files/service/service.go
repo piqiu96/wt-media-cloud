@@ -166,15 +166,15 @@ func scope(actor identity.PublicUser) (model.Scope, error) {
 func canRead(sc model.Scope, f model.File) bool {
 	return sc.All || (sc.OwnerID > 0 && sc.OwnerID == f.OwnerID) || (sc.TeamID > 0 && f.TeamID != nil && sc.TeamID == *f.TeamID)
 }
-func (s *Service) view(f model.File) (model.View, error) {
+func (s *Service) view(f model.File) (model.FileView, error) {
 	if f.DeletedAt != nil {
-		return model.View{DeletedAt: f.DeletedAt, ID: f.ID, Name: f.Name, Filename: f.Name + "." + f.Extension, Type: f.Type, SizeBytes: f.SizeBytes, OwnerID: f.OwnerID, OwnerName: f.OwnerName, TeamID: f.TeamID, TeamName: f.TeamName, CreatedAt: f.CreatedAt}, nil
+		return model.FileView{DeletedAt: f.DeletedAt, ID: f.ID, Name: f.Name, Filename: f.Name + "." + f.Extension, Type: f.Type, SizeBytes: f.SizeBytes, OwnerID: f.OwnerID, OwnerName: f.OwnerName, TeamID: f.TeamID, TeamName: f.TeamName, CreatedAt: f.CreatedAt}, nil
 	}
 	publicURL, err := storage.PublicObjectURL(s.PublicBaseURL, s.Bucket, f.ObjectKey)
 	if err != nil {
-		return model.View{}, err
+		return model.FileView{}, err
 	}
-	return model.View{PublicURL: publicURL, ID: f.ID, Name: f.Name, Filename: f.Name + "." + f.Extension, Type: f.Type, ContentType: f.ContentType, SizeBytes: f.SizeBytes, SHA256: f.SHA256, OwnerID: f.OwnerID, OwnerName: f.OwnerName, TeamID: f.TeamID, TeamName: f.TeamName, CreatedAt: f.CreatedAt, ResourcePath: "/api/v1/file-resources/" + f.ResourceToken}, nil
+	return model.FileView{PublicURL: publicURL, ID: f.ID, Name: f.Name, Filename: f.Name + "." + f.Extension, Type: f.Type, ContentType: f.ContentType, SizeBytes: f.SizeBytes, SHA256: f.SHA256, OwnerID: f.OwnerID, OwnerName: f.OwnerName, TeamID: f.TeamID, TeamName: f.TeamName, CreatedAt: f.CreatedAt, ResourcePath: "/api/v1/file-resources/" + f.ResourceToken}, nil
 }
 func (s *Service) Read(actor identity.PublicUser, id int64) (model.File, error) {
 	sc, err := scope(actor)
@@ -200,7 +200,7 @@ func (s *Service) ReadSavedReference(ctx context.Context, id int64) (model.File,
 	}
 	return s.ResolveToken(ctx, f.ResourceToken)
 }
-func (s *Service) List(actor identity.PublicUser, kind, search string, page, size int) ([]model.View, int64, error) {
+func (s *Service) List(actor identity.PublicUser, kind, search string, page, size int) ([]model.FileView, int64, error) {
 	sc, err := scope(actor)
 	if err != nil {
 		return nil, 0, err
@@ -209,7 +209,7 @@ func (s *Service) List(actor identity.PublicUser, kind, search string, page, siz
 		return nil, 0, ErrInvalid
 	}
 	items, total, err := s.Repo.List(sc, kind, strings.TrimSpace(search), page, size)
-	out := make([]model.View, 0, len(items))
+	out := make([]model.FileView, 0, len(items))
 	for _, f := range items {
 		item, viewErr := s.view(f)
 		if viewErr != nil {
@@ -220,57 +220,57 @@ func (s *Service) List(actor identity.PublicUser, kind, search string, page, siz
 	return out, total, err
 }
 
-func (s *Service) Upload(ctx context.Context, actor identity.PublicUser, name, original string, body io.Reader) (model.View, error) {
+func (s *Service) Upload(ctx context.Context, actor identity.PublicUser, name, original string, body io.Reader) (model.FileView, error) {
 	if _, err := scope(actor); err != nil {
-		return model.View{}, err
+		return model.FileView{}, err
 	}
 	// Validate the public origin and adapter binding before any upload allocation.
 	probe, err := storage.Reference(s.Objects, "file-ku/files/_configuration-check")
 	if err != nil {
-		return model.View{}, err
+		return model.FileView{}, err
 	}
 	if _, err = storage.PublicObjectURL(s.PublicBaseURL, s.Bucket, probe); err != nil {
-		return model.View{}, err
+		return model.FileView{}, err
 	}
 	ext := strings.TrimPrefix(strings.ToLower(filepath.Ext(original)), ".")
 	kind, contentType := mediaType(ext)
 	if kind == "" {
-		return model.View{}, ErrInvalid
+		return model.FileView{}, ErrInvalid
 	}
 	name, err = filename(name, ext)
 	if err != nil {
-		return model.View{}, err
+		return model.FileView{}, err
 	}
 	if s.MaxBytes <= 0 {
-		return model.View{}, errors.New("file upload limit is not configured")
+		return model.FileView{}, errors.New("file upload limit is not configured")
 	}
 	local, err := os.CreateTemp("", "wt-media-file-*."+ext)
 	if err != nil {
-		return model.View{}, err
+		return model.FileView{}, err
 	}
 	defer os.Remove(local.Name())
 	defer local.Close()
 	hash := sha256.New()
 	size, err := io.Copy(io.MultiWriter(local, hash), io.LimitReader(body, s.MaxBytes+1))
 	if err != nil {
-		return model.View{}, err
+		return model.FileView{}, err
 	}
 	if size > s.MaxBytes {
-		return model.View{}, ErrTooLarge
+		return model.FileView{}, ErrTooLarge
 	}
 	if size <= 0 {
-		return model.View{}, ErrInvalid
+		return model.FileView{}, ErrInvalid
 	}
 	actualKind, actualType, err := s.Inspect(ctx, local.Name(), ext)
 	if err != nil {
-		return model.View{}, err
+		return model.FileView{}, err
 	}
 	if actualKind != kind || actualType != contentType {
-		return model.View{}, ErrInvalid
+		return model.FileView{}, ErrInvalid
 	}
 	var token [32]byte
 	if _, err := rand.Read(token[:]); err != nil {
-		return model.View{}, err
+		return model.FileView{}, err
 	}
 	now := time.Now().UTC()
 	f := model.File{OwnerID: int64(actor.ID), Name: name, Extension: ext, Type: kind, ContentType: contentType, ResourceToken: hex.EncodeToString(token[:]), CreatedAt: now, UpdatedAt: now, OwnerName: actor.Nickname, TeamName: actor.TeamName}
@@ -282,60 +282,60 @@ func (s *Service) Upload(ctx context.Context, actor identity.PublicUser, name, o
 		f.TeamID = &team
 	}
 	if err := s.Repo.Insert(&f); err != nil {
-		return model.View{}, err
+		return model.FileView{}, err
 	}
 	f.ObjectKey, err = storage.Reference(s.Objects, fmt.Sprintf("file-ku/files/%d_%s.%s", f.ID, f.Name, ext))
 	if err != nil {
-		return model.View{}, err
+		return model.FileView{}, err
 	}
 	if err := s.Repo.SetLocation(f.ID, f.ObjectKey); err != nil {
-		return model.View{}, err
+		return model.FileView{}, err
 	}
 	f.SizeBytes, f.SHA256 = size, hex.EncodeToString(hash.Sum(nil))
 	result, err := s.view(f)
 	if err != nil {
-		return model.View{}, err
+		return model.FileView{}, err
 	}
 	if _, err := local.Seek(0, io.SeekStart); err != nil {
-		return model.View{}, err
+		return model.FileView{}, err
 	}
 	// An interrupted upload is never listed as ready. Never delete on an uncertain write or
 	// Ready response: the server may have committed even when the reply was lost.
 	if err := s.Objects.PutImmutable(ctx, f.ObjectKey, local, size, contentType, f.SHA256); err != nil {
-		return model.View{}, fmt.Errorf("upload file %d: %w", f.ID, err)
+		return model.FileView{}, fmt.Errorf("upload file %d: %w", f.ID, err)
 	}
 	info, err := s.Objects.Stat(ctx, f.ObjectKey)
 	if err != nil {
-		return model.View{}, err
+		return model.FileView{}, err
 	}
 	if info.Size != size {
-		return model.View{}, errors.New("uploaded file size verification failed")
+		return model.FileView{}, errors.New("uploaded file size verification failed")
 	}
 	f.UploadedAt = &now
 	if err := s.Repo.Ready(f); err != nil {
-		return model.View{}, err
+		return model.FileView{}, err
 	}
 	return result, nil
 }
 
-func (s *Service) Rename(actor identity.PublicUser, id int64, name string) (model.View, error) {
+func (s *Service) Rename(actor identity.PublicUser, id int64, name string) (model.FileView, error) {
 	f, err := s.Read(actor, id)
 	if err != nil {
-		return model.View{}, err
+		return model.FileView{}, err
 	}
 	name, err = filename(name, f.Extension)
 	if err != nil {
-		return model.View{}, err
+		return model.FileView{}, err
 	}
 	updated := f
 	updated.Name = name
 	result, err := s.view(updated)
 	if err != nil {
-		return model.View{}, err
+		return model.FileView{}, err
 	}
 	if name != f.Name {
 		if err := s.Repo.Rename(id, name); err != nil {
-			return model.View{}, err
+			return model.FileView{}, err
 		}
 	}
 	return result, nil
