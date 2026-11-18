@@ -167,14 +167,14 @@ func canRead(sc model.Scope, f model.File) bool {
 	return sc.All || (sc.OwnerID > 0 && sc.OwnerID == f.OwnerID) || (sc.TeamID > 0 && f.TeamID != nil && sc.TeamID == *f.TeamID)
 }
 func (s *Service) view(f model.File) (model.View, error) {
-	if f.DeleteState == "deleting" {
-		return model.View{DeleteState: "deleting", ID: f.ID, Name: f.Name, Filename: f.Name + "." + f.Extension, Type: f.Type, SizeBytes: f.SizeBytes, OwnerID: f.OwnerID, OwnerName: f.OwnerName, TeamID: f.TeamID, TeamName: f.TeamName, CreatedAt: f.CreatedAt}, nil
+	if f.DeletedAt != nil {
+		return model.View{DeletedAt: f.DeletedAt, ID: f.ID, Name: f.Name, Filename: f.Name + "." + f.Extension, Type: f.Type, SizeBytes: f.SizeBytes, OwnerID: f.OwnerID, OwnerName: f.OwnerName, TeamID: f.TeamID, TeamName: f.TeamName, CreatedAt: f.CreatedAt}, nil
 	}
 	publicURL, err := storage.PublicObjectURL(s.PublicBaseURL, s.Bucket, f.ObjectKey)
 	if err != nil {
 		return model.View{}, err
 	}
-	return model.View{DeleteState: "ready", PublicURL: publicURL, ID: f.ID, Name: f.Name, Filename: f.Name + "." + f.Extension, Type: f.Type, ContentType: f.ContentType, SizeBytes: f.SizeBytes, SHA256: f.SHA256, OwnerID: f.OwnerID, OwnerName: f.OwnerName, TeamID: f.TeamID, TeamName: f.TeamName, CreatedAt: f.CreatedAt, ResourcePath: "/api/v1/file-resources/" + f.ResourceToken}, nil
+	return model.View{PublicURL: publicURL, ID: f.ID, Name: f.Name, Filename: f.Name + "." + f.Extension, Type: f.Type, ContentType: f.ContentType, SizeBytes: f.SizeBytes, SHA256: f.SHA256, OwnerID: f.OwnerID, OwnerName: f.OwnerName, TeamID: f.TeamID, TeamName: f.TeamName, CreatedAt: f.CreatedAt, ResourcePath: "/api/v1/file-resources/" + f.ResourceToken}, nil
 }
 func (s *Service) Read(actor identity.PublicUser, id int64) (model.File, error) {
 	sc, err := scope(actor)
@@ -185,7 +185,7 @@ func (s *Service) Read(actor identity.PublicUser, id int64) (model.File, error) 
 	if err != nil {
 		return f, err
 	}
-	if !canRead(sc, f) || f.DeleteState == "deleting" {
+	if !canRead(sc, f) || f.DeletedAt != nil {
 		return model.File{}, ErrNotFound
 	}
 	return f, nil
@@ -273,7 +273,7 @@ func (s *Service) Upload(ctx context.Context, actor identity.PublicUser, name, o
 		return model.View{}, err
 	}
 	now := time.Now().UTC()
-	f := model.File{DeleteState: "ready", OwnerID: int64(actor.ID), Name: name, Extension: ext, Type: kind, ContentType: contentType, ResourceToken: hex.EncodeToString(token[:]), CreatedAt: now, UpdatedAt: now, OwnerName: actor.Nickname, TeamName: actor.TeamName}
+	f := model.File{OwnerID: int64(actor.ID), Name: name, Extension: ext, Type: kind, ContentType: contentType, ResourceToken: hex.EncodeToString(token[:]), CreatedAt: now, UpdatedAt: now, OwnerName: actor.Nickname, TeamName: actor.TeamName}
 	if f.OwnerName == "" {
 		f.OwnerName = actor.Username
 	}
@@ -371,7 +371,7 @@ func (s *Service) ResolveToken(ctx context.Context, token string) (model.File, e
 		return model.File{}, ErrNotFound
 	}
 	f, err := s.Repo.FindToken(token)
-	if err == nil && f.DeleteState == "deleting" {
+	if err == nil && f.DeletedAt != nil {
 		return f, ErrNotFound
 	}
 	if err != nil {
@@ -398,11 +398,4 @@ func (s *Service) Resource(ctx context.Context, token string, download bool) (st
 		return storage.PresignDownload(ctx, s.Objects, f.ObjectKey, f.Name+"."+f.Extension, s.GrantTTL)
 	}
 	return s.Objects.PresignGet(ctx, f.ObjectKey, s.GrantTTL)
-}
-
-// ReferenceToken exposes only the fixed resource identifier to trusted business
-// reference checkers in the same transaction; the caller already holds its row lock.
-func ReferenceToken(tx *gorm.DB, id int64) (string, error) {
-	f, err := (repository.Store{DB: tx}).Find(id)
-	return f.ResourceToken, err
 }

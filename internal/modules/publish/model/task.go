@@ -25,7 +25,7 @@ type Task struct {
 	CoverFileID        int64           `json:"-"`
 	ResourceSnapshot   json.RawMessage `json:"resources" gorm:"column:resource_snapshot_json"`
 	Content            Content         `json:"content" gorm:"column:content_json;serializer:json"`
-	Status             string          `json:"status"`
+	Status             Status          `json:"status"`
 	CurrentAttemptID   *uint64         `json:"current_attempt_id,string"`
 	AttemptCount       uint32          `json:"attempt_count"`
 	NotBefore          *time.Time      `json:"not_before"`

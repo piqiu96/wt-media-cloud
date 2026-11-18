@@ -1,8 +1,8 @@
 import { it, expect } from "vitest";
-import { createPublicationsClient } from "./publications.js";
+import { createPublishClient } from "./publish.js";
 it("preserves string IDs, request key and expected revision across create/read/edit", async () => {
   const calls = [];
-  const client = createPublicationsClient({
+  const client = createPublishClient({
     fetch: async (url, init = {}) => {
       calls.push({ url, init });
       return {
@@ -33,6 +33,6 @@ it("preserves string IDs, request key and expected revision across create/read/e
     content: input.content,
   });
   expect(JSON.parse(calls[0].init.body)).toEqual(input);
-  expect(calls[1].url).toContain("/publications/9007199254740993");
+  expect(calls[1].url).toContain("/publish/9007199254740993");
   expect(JSON.parse(calls[2].init.body).expected_revision).toBe("1");
 });

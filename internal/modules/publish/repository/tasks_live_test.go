@@ -11,9 +11,8 @@ import (
 	filesrepo "github.com/wt-media/wt-media-cloud/internal/modules/files/repository"
 	files "github.com/wt-media/wt-media-cloud/internal/modules/files/service"
 	identity "github.com/wt-media/wt-media-cloud/internal/modules/identity/service"
-	productionrepo "github.com/wt-media/wt-media-cloud/internal/modules/production/repository"
-	"github.com/wt-media/wt-media-cloud/internal/modules/publishing/model"
-	repo "github.com/wt-media/wt-media-cloud/internal/modules/publishing/repository"
+	"github.com/wt-media/wt-media-cloud/internal/modules/publish/model"
+	repo "github.com/wt-media/wt-media-cloud/internal/modules/publish/repository"
 	gormmysql "gorm.io/driver/mysql"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
@@ -24,7 +23,27 @@ import (
 )
 
 // This creates an isolated, disposable schema, never test task rows in the live queue.
-func isolated(t *testing.T) *gorm.DB { return isolatedDB(t, true) }
+func isolated(t *testing.T) *gorm.DB {
+	db := isolatedDB(t, true)
+	for _, name := range []string{"20261118_103_operations_file_delete_state.sql", "20261119_106_operations_file_deleted_at.sql"} {
+		applyFileMigration(t, db, name)
+	}
+	return db
+}
+func applyFileMigration(t *testing.T, db *gorm.DB, name string) {
+	t.Helper()
+	body, err := os.ReadFile(config.GetRuntimePaths().Migrations + "/" + name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	migrations := []migration.Migration{{Version: name, Name: name, SQL: string(body)}}
+	if _, err := migration.Apply(context.Background(), db, migrations); err != nil {
+		t.Fatal(err)
+	}
+	if applied, err := migration.Apply(context.Background(), db, migrations); err != nil || len(applied) != 0 {
+		t.Fatalf("migration replay: %v %v", applied, err)
+	}
+}
 func isolatedDB(t *testing.T, fixtures bool) *gorm.DB {
 	t.Helper()
 	if os.Getenv("WT_MEDIA_TEST_LIVE_DB") != "1" {
@@ -198,8 +217,22 @@ func TestLiveReferenceCreationAndDeleteSerialize(t *testing.T) {
 	if _, err := store(db).Create(task("delete-first", 44, 3)); !errors.Is(err, files.ErrNotFound) {
 		t.Fatalf("reference created after deleting marker: %v", err)
 	}
+	var before filemodel.File
+	if err := db.First(&before, 3).Error; err != nil {
+		t.Fatal(err)
+	}
+	if before.DeletedAt == nil {
+		t.Fatal("deletion time not recorded")
+	}
 	if err := fileStore(db).BeginDelete(3); err != nil {
 		t.Fatalf("deletion retry: %v", err)
+	}
+	var after filemodel.File
+	if err := db.First(&after, 3).Error; err != nil {
+		t.Fatal(err)
+	}
+	if after.DeletedAt == nil || !before.DeletedAt.Equal(*after.DeletedAt) {
+		t.Fatal("retry changed deletion time")
 	}
 	if err := fileStore(db).Delete(3); err != nil {
 		t.Fatal(err)
@@ -234,66 +267,24 @@ func TestLiveEditRevisionAndAuditRollback(t *testing.T) {
 	}
 }
 
-func TestLiveSavedProductionJSONReferenceAndDelete(t *testing.T) {
+// URL inputs do not create file_id references. Only saved publication covers block deletion.
+func TestLiveURLOnlyProductionInputDoesNotBlockDeletion(t *testing.T) {
 	db := isolated(t)
-	for _, q := range []string{
-		"CREATE TABLE compose_strategies(id BIGINT PRIMARY KEY, config_json JSON,output_settings_json JSON)",
-		"CREATE TABLE compose_tasks(id BIGINT PRIMARY KEY,config_snapshot_json JSON,execution_manifest_json JSON,technical_config_json JSON)",
-		"CREATE TABLE compose_task_batches(id BIGINT PRIMARY KEY,config_snapshot_json JSON)",
-	} {
-		if err := db.Exec(q).Error; err != nil {
-			t.Fatal(err)
-		}
-	}
-	token := fmt.Sprintf("%064d", 1)
-	fs := filesrepo.Store{DB: db, CheckReferences: func(tx *gorm.DB, id int64) error {
-		used, err := productionrepo.OperationsFileReferenced(tx, token)
-		if err != nil {
-			return err
-		}
-		if used {
-			return files.ErrInUse
-		}
-		return nil
-	}}
-	// An actual writer holds the same file lock through its JSON insert.
-	locked, release, finished := make(chan struct{}), make(chan struct{}), make(chan error, 1)
-	go func() {
-		finished <- db.Transaction(func(tx *gorm.DB) error {
-			raw := []byte(fmt.Sprintf(`{"intro_video_url":"http://localhost/api/v1/file-resources/%s?preview=1"}`, token))
-			if err := files.LockJSONReferences(tx, raw); err != nil {
-				return err
-			}
-			close(locked)
-			<-release
-			return tx.Exec("INSERT INTO compose_strategies(id,config_json) VALUES(1,?)", string(raw)).Error
-		})
-	}()
-	<-locked
-	deleting := make(chan error, 1)
-	go func() { deleting <- fs.BeginDelete(1) }()
-	select {
-	case err := <-deleting:
-		t.Fatalf("deletion bypassed writer lock: %v", err)
-	case <-time.After(100 * time.Millisecond):
-	}
-	close(release)
-	if err := <-finished; err != nil {
+	if err := db.Exec("CREATE TABLE compose_strategies(id BIGINT PRIMARY KEY, config_json JSON)").Error; err != nil {
 		t.Fatal(err)
 	}
-	if err := <-deleting; !errors.Is(err, files.ErrInUse) {
-		t.Fatalf("saved reference lost: %v", err)
-	}
-	// Once deletion is marked first, a JSON writer is rejected, not silently saved.
-	fs.CheckReferences = func(*gorm.DB, int64) error { return nil }
-	if err := fs.BeginDelete(2); err != nil {
+	raw := fmt.Sprintf(`{"intro_video_url":"http://localhost/api/v1/file-resources/%064d","external":"https://example.com/intro.mp4"}`, 1)
+	if err := db.Exec("INSERT INTO compose_strategies VALUES(1,?)", raw).Error; err != nil {
 		t.Fatal(err)
 	}
-	err := db.Transaction(func(tx *gorm.DB) error {
-		return files.LockJSONReferences(tx, []byte(fmt.Sprintf(`{"cover":"/api/v1/file-resources/%064d"}`, 2)))
-	})
-	if !errors.Is(err, files.ErrNotFound) {
-		t.Fatalf("deleting file referenced: %v", err)
+	if err := fileStore(db).BeginDelete(1); err != nil {
+		t.Fatal(err)
+	}
+	if err := fileStore(db).Delete(1); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := (filesrepo.Store{DB: db}).Find(1); !errors.Is(err, files.ErrNotFound) {
+		t.Fatalf("URL-only file deletion: %v", err)
 	}
 }
 
@@ -367,9 +358,8 @@ func TestLiveTaskListFiltersScopeAndRealSummary(t *testing.T) {
 	}
 }
 
-// Upload constructs a File without a deletion state. GORM must preserve the
-// database's ready default instead of writing an empty string that listing hides.
-func TestLiveUploadedFileDefaultsToReadyAndCanBeReferenced(t *testing.T) {
+// A fresh upload has no deletion time and can be referenced immediately.
+func TestLiveUploadedFileHasNoDeletionTimeAndCanBeReferenced(t *testing.T) {
 	db := isolated(t)
 	now := time.Now().UTC()
 	f := filemodel.File{OwnerID: 9, Name: "new-upload", Extension: "png", Type: "image", ContentType: "image/png", ObjectKey: "fresh-upload", SizeBytes: 3, SHA256: fmt.Sprintf("%064d", 8), ResourceToken: fmt.Sprintf("%064d", 8), UploadedAt: &now, CreatedAt: now, UpdatedAt: now}
@@ -380,8 +370,8 @@ func TestLiveUploadedFileDefaultsToReadyAndCanBeReferenced(t *testing.T) {
 	if err := db.First(&saved, f.ID).Error; err != nil {
 		t.Fatal(err)
 	}
-	if saved.DeleteState != "ready" {
-		t.Fatalf("new upload persisted delete_state=%q", saved.DeleteState)
+	if saved.DeletedAt != nil {
+		t.Fatalf("new upload persisted deleted_at=%v", saved.DeletedAt)
 	}
 	if _, err := store(db).Create(task("fresh-upload", 42, f.ID)); err != nil {
 		t.Fatalf("reference fresh upload: %v", err)
@@ -391,8 +381,8 @@ func TestLiveUploadedFileDefaultsToReadyAndCanBeReferenced(t *testing.T) {
 	}
 }
 
-func TestLiveFileStateMigrationRepairsBlankWithoutRevivingDeleting(t *testing.T) {
-	db := isolated(t)
+func TestLiveFileDeletionMigrationPreservesPendingDeletion(t *testing.T) {
+	db := isolatedDB(t, true)
 	if err := db.Exec("UPDATE operations_files SET delete_state='' WHERE id=1").Error; err != nil {
 		t.Fatal(err)
 	}
@@ -408,12 +398,12 @@ func TestLiveFileStateMigrationRepairsBlankWithoutRevivingDeleting(t *testing.T)
 		t.Fatalf("repair applied=%v err=%v", applied, err)
 	}
 	for id, want := range map[int64]string{1: "ready", 2: "deleting", 3: "ready"} {
-		var f filemodel.File
-		if err := db.First(&f, id).Error; err != nil {
+		var state string
+		if err := db.Raw("SELECT delete_state FROM operations_files WHERE id=?", id).Scan(&state).Error; err != nil {
 			t.Fatal(err)
 		}
-		if f.DeleteState != want {
-			t.Fatalf("file %d state=%q want=%q", id, f.DeleteState, want)
+		if state != want {
+			t.Fatalf("file %d state=%s want=%s", id, state, want)
 		}
 	}
 	if applied, err := migration.Apply(context.Background(), db, migrations); err != nil || len(applied) != 0 {
@@ -422,4 +412,21 @@ func TestLiveFileStateMigrationRepairsBlankWithoutRevivingDeleting(t *testing.T)
 	if err := db.Exec("UPDATE operations_files SET delete_state='' WHERE id=3").Error; err == nil {
 		t.Fatal("empty state accepted after repair")
 	}
+	applyFileMigration(t, db, "20261119_106_operations_file_deleted_at.sql")
+	for id := int64(1); id <= 3; id++ {
+		var f filemodel.File
+		if err := db.First(&f, id).Error; err != nil {
+			t.Fatal(err)
+		}
+		if (f.DeletedAt != nil) != (id == 2) {
+			t.Fatalf("file %d deleted_at=%v", id, f.DeletedAt)
+		}
+	}
+	if err := fileStore(db).BeginDelete(2); err != nil {
+		t.Fatal(err)
+	}
+	if err := fileStore(db).Delete(2); err != nil {
+		t.Fatal(err)
+	}
+
 }

@@ -7,7 +7,6 @@ import ResourceRowActions from '../../../shared/ui/resource/ResourceRowActions.v
 import ResourceSelectionToolbar from '../../../shared/ui/resource/ResourceSelectionToolbar.vue'
 import { computed,onMounted,onUnmounted,ref } from 'vue'
 import { useRoute,useRouter } from 'vue-router'
-import { createPublicationsClient } from '../../../shared/api/publications.js'
 import { outputUnavailable } from '../../publication/eligibility.js'
 import BusinessSelect from '../../../shared/ui/fields/BusinessSelect.vue'
 import FeedbackAlert from '../../../shared/ui/feedback/FeedbackAlert.vue'
@@ -38,7 +37,7 @@ import ComposeOutputDetail from '../components/ComposeOutputDetail.vue'
 import ComposeTaskCreateDialog from '../components/ComposeTaskCreateDialog.vue'
 import ComposeStrategySummary from '../components/ComposeStrategySummary.vue'
 import MaterialDetailDrawer from '../../materials/MaterialDetailDrawer.vue'
-const client=createComposeClient(),materialsClient=createMaterialsClient(),transferClient=createFileTransferClient(),sessionClient=createSessionClient(),downloadCentre=useDownloadCentre(),route=useRoute(),router=useRouter(),publications=createPublicationsClient()
+const client=createComposeClient(),materialsClient=createMaterialsClient(),transferClient=createFileTransferClient(),sessionClient=createSessionClient(),downloadCentre=useDownloadCentre(),route=useRoute(),router=useRouter()
 const related=ref({visible:false,kind:'task',id:null})
 const activeView=ref('batches'),rows=ref([]),total=ref(0),loading=ref(false),error=ref('')
 const pages=ref({batches:{current:1,pageSize:20},outputs:{current:1,pageSize:20}}),pagination=computed(()=>pages.value[activeView.value])
@@ -53,8 +52,7 @@ const isAdmin=computed(()=>currentUser.value?.role==='admin'),isSenior=computed(
 const operatorFilterOptions=computed(()=>operatorOptions.value.map(option=>({value:`op:${option.id}`,label:option.display_name})))
 const categoryFilterOptions=computed(()=>{const own=new Set(currentUser.value?.category_ids||[]);return enabledCategories.value.filter(category=>isAdmin.value||isSenior.value||own.has(category.id)).map(row=>({value:row.id,label:row.name}))})
 const selectedRows=computed(()=>selectedRowKeys.value.map(id=>knownRows.value[id]).filter(Boolean))
-const preparationEnabled=ref(false)
-function publicationReason(targets){if(!preparationEnabled.value)return '当前尚未开放发布任务准备';if(targets.length!==1)return '当前支持选择一条成片创建单任务';return outputUnavailable(targets[0],targets[0].category_id)}
+function publicationReason(targets){if(targets.length!==1)return '当前支持选择一条成片创建单任务';return outputUnavailable(targets[0],targets[0].category_id)}
 const publishingReason=computed(()=>publicationReason(selectedRows.value))
 async function goPublish(targets){const reason=publicationReason(targets);if(reason){feedback.toast.info(reason);return}await router.push({path:'/publish',query:{output_id:String(targets[0].id)}})}
 const videoOptions=[{value:'ready',label:'可用'},{value:'failed',label:'失败'},{value:'unknown',label:'未核验'}]
@@ -130,7 +128,7 @@ async function download(row){if(downloadingID.value!==null||!canDownload(row))re
 async function batchDownload(targets){if(batchDownloading.value)return;batchDownloading.value=true;let submitted=0,skipped=0;const failures=[];try{for(const row of targets){if(!canDownload(row)){skipped++;continue}try{await client.createOutputDownload(row.id);submitted++}catch(e){failures.push(`成片 ${row.id}：${createDownloadFailureMessage(e)}`)}}batchResult.value=`共 ${targets.length} 项：已提交 ${submitted} 个下载任务，跳过 ${skipped} 项，失败 ${failures.length} 项。${failures.join('；')}`;if(submitted)downloadCentre.open();await refreshDownloadFacts()}finally{batchDownloading.value=false}}
 async function remake(row){try{const data=await client.getComposeOutput(row.id);if(!data.output?.actions?.remake){feedback.toast.error(data.output?.actions?.remake_reason||'暂不能再次制作');return}createSource.value=data;createVisible.value=true}catch(e){feedback.toast.error(e?.message||'读取原制作配置失败')}}
 function onCreated(result){if(result.created?.length){feedback.toast.success(`已创建 ${result.created.length} 个新任务，原成片保留`);if(result.batch?.id)openBatch(result.batch.id)}}
-onMounted(async()=>{try{const [me,teamRows,categoryRows,enabledRows]=await Promise.all([sessionClient.me(),client.listTeams(),client.listCategories({scope:'all'}),client.listCategories({scope:'all',enabled:true})]);currentUser.value=me;teams.value=teamRows||[];categories.value=categoryRows||[];enabledCategories.value=enabledRows||[];loadOperators().catch(()=>{})}catch(e){error.value=e?.message||'读取筛选项失败'}await Promise.all([load(),refreshDownloadFacts(),publications.list({page:1,page_size:1}).then(data=>{preparationEnabled.value=data.preparation_enabled}).catch(()=>{preparationEnabled.value=false})]);downloadPoller=setInterval(()=>{if(downloadTasks.value.some(row=>['pending','running'].includes(row.status)))refreshDownloadFacts()},5000);const id=String(route.query.output_id||'');if(/^\d+$/.test(id))openDetail({ id: Number(id) })})
+onMounted(async()=>{try{const [me,teamRows,categoryRows,enabledRows]=await Promise.all([sessionClient.me(),client.listTeams(),client.listCategories({scope:'all'}),client.listCategories({scope:'all',enabled:true})]);currentUser.value=me;teams.value=teamRows||[];categories.value=categoryRows||[];enabledCategories.value=enabledRows||[];loadOperators().catch(()=>{})}catch(e){error.value=e?.message||'读取筛选项失败'}await Promise.all([load(),refreshDownloadFacts()]);downloadPoller=setInterval(()=>{if(downloadTasks.value.some(row=>['pending','running'].includes(row.status)))refreshDownloadFacts()},5000);const id=String(route.query.output_id||'');if(/^\d+$/.test(id))openDetail({ id: Number(id) })})
 onUnmounted(()=>{loadSequence++;detailSequence++;if(downloadPoller)clearInterval(downloadPoller)})
 </script>
 <template>

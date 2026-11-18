@@ -7,15 +7,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/wt-media/wt-media-cloud/internal/config"
 	"github.com/wt-media/wt-media-cloud/internal/infra/database"
 	filemodel "github.com/wt-media/wt-media-cloud/internal/modules/files/model"
 	files "github.com/wt-media/wt-media-cloud/internal/modules/files/service"
 	identity "github.com/wt-media/wt-media-cloud/internal/modules/identity/service"
 	accounts "github.com/wt-media/wt-media-cloud/internal/modules/mediaaccount/service"
 	production "github.com/wt-media/wt-media-cloud/internal/modules/production/service"
-	"github.com/wt-media/wt-media-cloud/internal/modules/publishing/model"
-	"github.com/wt-media/wt-media-cloud/internal/modules/publishing/repository"
+	"github.com/wt-media/wt-media-cloud/internal/modules/publish/model"
+	"github.com/wt-media/wt-media-cloud/internal/modules/publish/repository"
 	"gorm.io/gorm"
 	"strings"
 	"time"
@@ -41,12 +40,11 @@ type Repository interface {
 	Edit(model.Task, uint64) (model.Task, error)
 }
 type Service struct {
-	SavedFile          func(context.Context, int64) (filemodel.File, error)
-	PreparationEnabled bool
-	Repo               Repository
-	Account            func(identity.PublicUser, string) (accounts.Account, error)
-	Output             func(identity.PublicUser, int64) (production.ComposeOutputDetail, error)
-	File               func(context.Context, identity.PublicUser, int64) (filemodel.File, error)
+	SavedFile func(context.Context, int64) (filemodel.File, error)
+	Repo      Repository
+	Account   func(identity.PublicUser, string) (accounts.Account, error)
+	Output    func(identity.PublicUser, int64) (production.ComposeOutputDetail, error)
+	File      func(context.Context, identity.PublicUser, int64) (filemodel.File, error)
 }
 
 func Wired() *Service {
@@ -56,7 +54,7 @@ func Wired() *Service {
 			return filemodel.File{}, e
 		}
 		return s.ReadSavedReference(ctx, id)
-	}, PreparationEnabled: config.Get().App.PublishingBaiduPreparation, Repo: repository.Store{DB: database.DB(), LockFiles: files.LockAvailable}, Account: accounts.GetAccount, Output: production.GetComposeOutput, File: func(ctx context.Context, a identity.PublicUser, id int64) (filemodel.File, error) {
+	}, Repo: repository.Store{DB: database.DB(), LockFiles: files.LockAvailable}, Account: accounts.GetAccount, Output: production.GetComposeOutput, File: func(ctx context.Context, a identity.PublicUser, id int64) (filemodel.File, error) {
 		s, e := files.Wired()
 		if e != nil {
 			return filemodel.File{}, e
@@ -115,16 +113,8 @@ func validateFilter(a identity.PublicUser, f Filter) error {
 	if f.CategoryID < 0 || f.Platform != "" && f.Platform != "baidu" && f.Platform != "bilibili" && f.Platform != "xiaohongshu" || f.CreatedFrom != nil && f.CreatedBefore != nil && !f.CreatedFrom.Before(*f.CreatedBefore) || f.Page < 1 || f.PageSize < 1 || f.PageSize > 100 || utf8.RuneCountInString(f.Search) > 100 {
 		return ErrInvalid
 	}
-	if f.Status != "" {
-		valid := false
-		for _, status := range []string{"pending", "queued", "running", "awaiting_human", "uncertain", "reviewing", "failed", "published", "cancelled", "abandoned"} {
-			if f.Status == status {
-				valid = true
-			}
-		}
-		if !valid {
-			return ErrInvalid
-		}
+	if f.Status != "" && !model.Status(f.Status).Valid() {
+		return ErrInvalid
 	}
 	return nil
 }
@@ -168,7 +158,7 @@ func (s *Service) Create(ctx context.Context, a identity.PublicUser, in CreateIn
 	} else if !errors.Is(err, ErrNotFound) {
 		return model.Task{}, err
 	}
-	if !s.PreparationEnabled || in.Platform != "baidu" {
+	if in.Platform != "baidu" {
 		return model.Task{}, ErrClosed
 	}
 	account, err := s.Account(a, fmt.Sprint(in.MediaAccountID))
@@ -213,7 +203,7 @@ func (s *Service) Create(ctx context.Context, a identity.PublicUser, in CreateIn
 	}
 	snapshot, _ := json.Marshal(map[string]any{"account_name": account.PlatformName, "account_owner": account.UserName, "browser_profile_id": account.BrowserProfileID, "output_name": o.Name, "video_sha256": o.SHA256, "video_size": o.FileSizeBytes, "cover_sha256": cover.SHA256, "cover_name": cover.Name, "cover_resource_path": "/api/v1/file-resources/" + cover.ResourceToken})
 	now := time.Now().UTC()
-	v := model.Task{TeamID: int64(*account.TeamID), OperatorID: int64(account.UserID), Platform: in.Platform, CategoryID: in.CategoryID, MediaAccountID: in.MediaAccountID, CompositeOutputID: in.CompositeOutputID, PlatformAccountUID: account.PlatformAccountID, CoverFileID: cover.ID, ResourceSnapshot: snapshot, Content: in.Content, Status: "pending", NotBefore: in.NotBefore, Revision: 1, CreatedBy: int64(a.ID), RequestKey: in.RequestKey, RequestHash: digest, CreatedAt: now, UpdatedAt: now}
+	v := model.Task{TeamID: int64(*account.TeamID), OperatorID: int64(account.UserID), Platform: in.Platform, CategoryID: in.CategoryID, MediaAccountID: in.MediaAccountID, CompositeOutputID: in.CompositeOutputID, PlatformAccountUID: account.PlatformAccountID, CoverFileID: cover.ID, ResourceSnapshot: snapshot, Content: in.Content, Status: model.StatusPending, NotBefore: in.NotBefore, Revision: 1, CreatedBy: int64(a.ID), RequestKey: in.RequestKey, RequestHash: digest, CreatedAt: now, UpdatedAt: now}
 	return s.Repo.Create(v)
 }
 func (s *Service) Edit(ctx context.Context, a identity.PublicUser, id uint64, in EditInput) (model.Task, error) {
@@ -221,7 +211,7 @@ func (s *Service) Edit(ctx context.Context, a identity.PublicUser, id uint64, in
 	if err != nil {
 		return v, err
 	}
-	if v.Status != "pending" || v.CurrentAttemptID != nil || v.AuthorizedAt != nil || v.Revision != in.ExpectedRevision {
+	if v.Status != model.StatusPending || v.CurrentAttemptID != nil || v.AuthorizedAt != nil || v.Revision != in.ExpectedRevision {
 		return model.Task{}, &ConflictError{TaskID: v.ID, Revision: v.Revision}
 	}
 	if !contentValid(in.Content) {

@@ -20,13 +20,11 @@ import (
 	"github.com/wt-media/wt-media-cloud/internal/modules/localagent"
 	"github.com/wt-media/wt-media-cloud/internal/modules/mediaaccount"
 	"github.com/wt-media/wt-media-cloud/internal/modules/production"
-	productionservice "github.com/wt-media/wt-media-cloud/internal/modules/production/service"
 	"github.com/wt-media/wt-media-cloud/internal/modules/profilebinding"
 	"github.com/wt-media/wt-media-cloud/internal/modules/proxy"
-	"github.com/wt-media/wt-media-cloud/internal/modules/publishing"
-	publishingservice "github.com/wt-media/wt-media-cloud/internal/modules/publishing/service"
+	"github.com/wt-media/wt-media-cloud/internal/modules/publish"
+	publishservice "github.com/wt-media/wt-media-cloud/internal/modules/publish/service"
 	api "github.com/wt-media/wt-media-cloud/internal/shared/api"
-	"gorm.io/gorm"
 )
 
 func registerRoutes(engine *server.Hertz) error {
@@ -58,25 +56,9 @@ func registerModuleRoutes(engine *server.Hertz) {
 	contentpool.RegisterRoutes(engine)
 	production.RegisterRoutes(engine)
 	filetransfer.RegisterRoutes(engine)
-	fileservice.SetReferenceCheck(func(tx *gorm.DB, id int64) error {
-		if err := publishingservice.CheckFileReferences(tx, id); err != nil {
-			return err
-		}
-		token, err := fileservice.ReferenceToken(tx, id)
-		if err != nil {
-			return err
-		}
-		used, err := productionservice.OperationsFileReferenced(tx, token)
-		if err != nil {
-			return err
-		}
-		if used {
-			return fileservice.ErrInUse
-		}
-		return nil
-	})
+	fileservice.SetReferenceCheck(publishservice.CheckFileReferences)
 	files.RegisterRoutes(engine)
-	publishing.RegisterRoutes(engine)
+	publish.RegisterRoutes(engine)
 }
 
 func bootstrapIdentity(username, password string) error {

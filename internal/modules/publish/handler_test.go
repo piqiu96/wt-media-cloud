@@ -1,4 +1,4 @@
-package publishing
+package publish
 
 import (
 	"context"
@@ -6,7 +6,7 @@ import (
 	app "github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/app/server"
 	"github.com/cloudwego/hertz/pkg/common/ut"
-	"github.com/wt-media/wt-media-cloud/internal/modules/publishing/service"
+	"github.com/wt-media/wt-media-cloud/internal/modules/publish/service"
 	"gopkg.in/yaml.v3"
 	"os"
 	"path/filepath"
@@ -19,7 +19,7 @@ func TestPublicationRoutesAndContractRequireSession(t *testing.T) {
 	h := server.New()
 	RegisterRoutes(h)
 	_, file, _, _ := runtime.Caller(0)
-	raw, err := os.ReadFile(filepath.Join(filepath.Dir(file), "../../../contracts/cloud-api/v1/publications.openapi.yaml"))
+	raw, err := os.ReadFile(filepath.Join(filepath.Dir(file), "../../../contracts/cloud-api/v1/publish.openapi.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,7 +47,7 @@ func TestPublicationRoutesAndContractRequireSession(t *testing.T) {
 		t.Fatalf("route/contract count=%d", count)
 	}
 	for _, action := range []string{"execute", "authorize", "retry"} {
-		if got := ut.PerformRequest(h.Engine, "POST", "/api/v1/publications/1/"+action, nil).Result().StatusCode(); got != 404 {
+		if got := ut.PerformRequest(h.Engine, "POST", "/api/v1/publish/1/"+action, nil).Result().StatusCode(); got != 404 {
 			t.Fatalf("premature execution endpoint %s=%d", action, got)
 		}
 	}
@@ -93,5 +93,15 @@ func TestRevisionConflictIncludesCurrentVersion(t *testing.T) {
 	}
 	if r.Result().StatusCode() != 409 || body.Errcode != 18003 || body.Error.Details.TaskID != "9007199254740993" || body.Error.Details.Revision != "7" {
 		t.Fatalf("conflict response %s", r.Result().Body())
+	}
+}
+
+func TestSingularPublishRouteRequiresSession(t *testing.T) {
+	h := server.New()
+	RegisterRoutes(h)
+	for _, method := range []string{"GET", "POST"} {
+		if got := ut.PerformRequest(h.Engine, method, "/api/v1/publish", nil).Result().StatusCode(); got != 401 {
+			t.Fatalf("%s publish status=%d", method, got)
+		}
 	}
 }

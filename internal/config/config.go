@@ -40,11 +40,10 @@ type Config struct {
 }
 
 type AppConfig struct {
-	PublishingBaiduPreparation bool               `toml:"publishing_baidu_preparation"`
-	Name                       string             `toml:"name"`
-	Server                     ServerConfig       `toml:"server"`
-	InitialAdmin               InitialAdminConfig `toml:"initial_admin"`
-	BitBrowser                 BitBrowserConfig   `toml:"bitbrowser"`
+	Name         string             `toml:"name"`
+	Server       ServerConfig       `toml:"server"`
+	InitialAdmin InitialAdminConfig `toml:"initial_admin"`
+	BitBrowser   BitBrowserConfig   `toml:"bitbrowser"`
 }
 
 type ServerConfig struct {

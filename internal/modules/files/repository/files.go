@@ -42,7 +42,7 @@ func (s Store) FindToken(token string) (model.File, error) {
 	return f, missing(err)
 }
 func (s Store) Rename(id int64, name string) error {
-	return s.DB.Exec(`UPDATE operations_files SET name=?,updated_at=? WHERE id=? AND uploaded_at IS NOT NULL AND delete_state='ready'`, name, time.Now(), id).Error
+	return s.DB.Exec(`UPDATE operations_files SET name=?,updated_at=? WHERE id=? AND uploaded_at IS NOT NULL AND deleted_at IS NULL`, name, time.Now(), id).Error
 }
 
 // BeginDelete serializes reference creation and deletion on the file row.
@@ -52,7 +52,7 @@ func (s Store) BeginDelete(id int64) error {
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id=? AND uploaded_at IS NOT NULL", id).First(&f).Error; err != nil {
 			return missing(err)
 		}
-		if f.DeleteState == "deleting" {
+		if f.DeletedAt != nil {
 			return nil
 		}
 		if s.CheckReferences == nil {
@@ -61,18 +61,18 @@ func (s Store) BeginDelete(id int64) error {
 		if err := s.CheckReferences(tx, id); err != nil {
 			return err
 		}
-		return tx.Model(&model.File{}).Where("id=?", id).Update("delete_state", "deleting").Error
+		return tx.Model(&model.File{}).Where("id=?", id).Update("deleted_at", time.Now().UTC()).Error
 	})
 }
 func (s Store) Delete(id int64) error {
-	return s.DB.Exec(`DELETE FROM operations_files WHERE id=? AND delete_state='deleting'`, id).Error
+	return s.DB.Exec(`DELETE FROM operations_files WHERE id=? AND deleted_at IS NOT NULL`, id).Error
 }
 
 // LockAvailable is called in the reference writer's transaction, before saving IDs.
 func LockAvailable(tx *gorm.DB, ids []int64) error {
 	for _, id := range ids {
 		var f model.File
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id=? AND uploaded_at IS NOT NULL AND delete_state='ready'", id).First(&f).Error; err != nil {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id=? AND uploaded_at IS NOT NULL AND deleted_at IS NULL", id).First(&f).Error; err != nil {
 			return missing(err)
 		}
 	}

@@ -69,7 +69,7 @@ function reason(row) {
     ? accountUnavailable(row, props.category)
     : props.kind === "output"
       ? outputUnavailable(row, props.category, props.account)
-      : row.delete_state === "deleting"
+      : row.deleted_at
         ? "文件正在删除"
         : "";
 }
@@ -152,7 +152,7 @@ watch(
             {{
               row.video?.status === "ready" ? "视频可读" : "视频不可用"
             }}</span><img
-            v-else-if="row.delete_state !== 'deleting'"
+            v-else-if="!row.deleted_at"
             :src="files.resourceURL(row)"
             alt="封面预览"
             class="picker-cover"
