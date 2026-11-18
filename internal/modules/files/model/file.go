@@ -3,7 +3,6 @@ package model
 import "time"
 
 type File struct {
-	DeletedAt     *time.Time
 	ID            int64
 	OwnerID       int64
 	TeamID        *int64
@@ -20,6 +19,7 @@ type File struct {
 	UpdatedAt     time.Time
 	OwnerName     string `gorm:"->"`
 	TeamName      string `gorm:"->"`
+	DeletedAt     *time.Time
 }
 
 func (File) TableName() string { return "operations_files" }
@@ -30,7 +30,6 @@ type Scope struct {
 }
 
 type View struct {
-	DeletedAt    *time.Time `json:"deleted_at"`
 	ID           int64      `json:"id"`
 	Name         string     `json:"name"`
 	Filename     string     `json:"filename"`
@@ -45,4 +44,5 @@ type View struct {
 	CreatedAt    time.Time  `json:"created_at"`
 	PublicURL    string     `json:"public_url"`
 	ResourcePath string     `json:"resource_path"`
+	DeletedAt    *time.Time `json:"deleted_at"`
 }
