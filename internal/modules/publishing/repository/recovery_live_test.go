@@ -3,6 +3,7 @@ package repository_test
 import (
 	"encoding/json"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -160,5 +161,28 @@ func TestLiveResolutionAuditFailureRollsBackAndUncertainKeepsHold(t *testing.T) 
 	attempts, _ := s.Attempts(v.ID)
 	if after.Status != "uncertain" || after.Revision != waiting.Revision || attempts[0].ResolvedAt != nil || attempts[0].ResultHash == nil || *attempts[0].ResultHash != original.ResultHash {
 		t.Fatalf("failed audit changed original state: %+v %+v", after, attempts)
+	}
+}
+
+func TestLiveVerificationPreservesMaximumAllowedEvidence(t *testing.T) {
+	s, c, _ := unresolvedPublication(t)
+	v, _ := s.Get(c.Task.ID)
+	in := resolution(c, v)
+	in.Evidence.Reason = strings.Repeat("因", 200)
+	in.Evidence.Basis = strings.Repeat("💡", 2000)
+	if !in.Valid() {
+		t.Fatal("contract-valid maximum evidence rejected")
+	}
+	failed, e := s.ResolveFailure(v, 9, in, time.Now().UTC())
+	if e != nil || failed.Status != "failed" {
+		t.Fatalf("valid evidence did not persist: %v", e)
+	}
+	attempts, e := s.Attempts(v.ID)
+	if e != nil || attempts[0].ResolutionNote == nil {
+		t.Fatal(e)
+	}
+	var saved model.FailureResolution
+	if e = json.Unmarshal([]byte(*attempts[0].ResolutionNote), &saved); e != nil || saved != in {
+		t.Fatalf("verification evidence truncated: %v", e)
 	}
 }
