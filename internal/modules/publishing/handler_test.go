@@ -43,10 +43,10 @@ func TestPublicationRoutesAndContractRequireSession(t *testing.T) {
 			}
 		}
 	}
-	if count != 6 {
+	if count != 8 {
 		t.Fatalf("route/contract count=%d", count)
 	}
-	for _, action := range []string{"execute", "authorize", "retry"} {
+	for _, action := range []string{"execute", "authorize"} {
 		if got := ut.PerformRequest(h.Engine, "POST", "/api/v1/publications/1/"+action, nil).Result().StatusCode(); got != 404 {
 			t.Fatalf("premature execution endpoint %s=%d", action, got)
 		}
@@ -97,6 +97,11 @@ func TestRevisionConflictIncludesCurrentVersion(t *testing.T) {
 }
 
 func TestPublicationAgentRoutesRequireBearer(t *testing.T) {
+	h0 := server.New()
+	RegisterRoutes(h0)
+	if r := ut.PerformRequest(h0.Engine, "GET", "/api/v1/cloud-agent/publication-tasks/1/attempts/2", nil); r.Result().StatusCode() != 401 {
+		t.Fatal("original attempt read must require bearer")
+	}
 	h := server.New()
 	RegisterRoutes(h)
 	for _, path := range []string{"claim", "1/heartbeat", "1/progress", "1/complete"} {

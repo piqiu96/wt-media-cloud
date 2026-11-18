@@ -53,7 +53,9 @@ func ExecutionStore() repository.ExecutionStore {
 	return NewExecutionStore(database.DB())
 }
 func NewExecutionStore(db *gorm.DB) repository.ExecutionStore {
-	return repository.ExecutionStore{Store: repository.Store{DB: db, LockFiles: files.LockAvailable}, LockInput: lockExecutionInput}
+	return repository.ExecutionStore{Store: repository.Store{DB: db, LockFiles: files.LockAvailable}, LockInput: lockExecutionInput, LockScene: func(tx *gorm.DB, profile uint64, owner int64) error {
+		return profiles.LockPublicationScene(tx, strconv.FormatUint(profile, 10), owner)
+	}}
 }
 func WiredExecution() *ExecutionService {
 	return &ExecutionService{Repo: ExecutionStore(), Enabled: config.Get().App.PublishingBaiduExecution, Grant: grantExecutionFiles}

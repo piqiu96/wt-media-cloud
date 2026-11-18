@@ -166,11 +166,14 @@ func (s Store) List(f Filter) ([]model.Task, int64, error) {
 	return out, total, err
 }
 func audit(tx *gorm.DB, actor int64, task uint64, action string, revision uint64) error {
+	return auditDetails(tx, actor, task, action, map[string]any{"revision": revision})
+}
+func auditDetails(tx *gorm.DB, actor int64, task uint64, action string, details any) error {
 	var actorValue any
 	if actor > 0 {
 		actorValue = actor
 	}
-	return tx.Exec(`INSERT INTO audit_logs(id,actor_user_id,action,target_type,target_id,summary_json,created_at) VALUES(?,?,?,'publication',?,?,?)`, id.NewID("audit"), actorValue, action, fmt.Sprint(task), fmt.Sprintf(`{"revision":%d}`, revision), time.Now().UTC()).Error
+	return tx.Exec(`INSERT INTO audit_logs(id,actor_user_id,action,target_type,target_id,summary_json,created_at) VALUES(?,?,?,'publication',?,?,?)`, id.NewID("audit"), actorValue, action, fmt.Sprint(task), mustJSON(details), time.Now().UTC()).Error
 }
 
 func mustJSON(v any) string { b, _ := json.Marshal(v); return string(b) }

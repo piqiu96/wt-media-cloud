@@ -26,6 +26,7 @@ import {
   outputUnavailable,
 } from "../eligibility.js";
 import PublishingResourcePicker from "../components/PublishingResourcePicker.vue";
+import PublishingRecoveryDialog from "../components/PublishingRecoveryDialog.vue";
 const client = createPublicationsClient(),
   compose = createComposeClient(),
   accounts = createMediaAccountClient(),
@@ -40,6 +41,7 @@ const blankFilters = () => ({
   created_range: [],
 });
 const executionEnabled = ref(false), attempts = ref([]);
+const recoveryVisible=ref(false),recoveryTask=ref(null),recoveryError=ref("");
 const summary = ref(null),
   advanced = ref(false);
 const metricItems = computed(() => [
@@ -204,6 +206,7 @@ async function openDetail(row) {
     loading.value = false;
   }
 }
+function resolutionLabel(note){try {const r=JSON.parse(note);return `${r.conclusion==='failed'?'确认未发布':'仍无法判断'} · ${r.evidence.reason} · ${r.evidence.basis}`;}catch{return note;}}
 const phaseLabel = (value) => ({claimed:"已领取",preparing:"准备资源",ready:"资源及账号已核对",submitting:"正在提交",awaiting_human:"等待人工",connection_lost:"连接中断，等待核实",finished:"执行已结束"})[value] || "等待执行器反馈";
 async function startExecution() {
   const task = detail.value;
@@ -221,6 +224,38 @@ async function startExecution() {
     await openDetail(task);
     error.value = message;
   } finally { busy.value = false; }
+}
+function openVerification() {
+  if(busy.value || detail.value?.status!=='uncertain')return;
+  recoveryTask.value=JSON.parse(JSON.stringify(detail.value));
+  recoveryError.value='';recoveryVisible.value=true;
+}
+async function saveVerification(input) {
+  if(busy.value || !recoveryTask.value)return;
+  busy.value=true;recoveryError.value='';
+  const task=recoveryTask.value;
+  try {
+    await client.resolve(task.id,input);
+    recoveryVisible.value=false;
+    await openDetail(task);
+    feedback.toast.success('已保存核实结果，原尝试与资源占用保留');
+  } catch(e) {
+    // Preserve the form. A missing response is not a reason to resend a write.
+    recoveryError.value=e.message+'；请保留依据，关闭后刷新进展核对结果。';
+  } finally {busy.value=false;}
+}
+async function retryExecution() {
+  const task=detail.value;
+  if(busy.value || !task || task.status!=='failed' || !executionEnabled.value)return;
+  busy.value=true;error.value='';
+  try {
+    if(!(await feedback.confirmWarning({title:'重试任务',message:'确认原尝试无可发布稿件、执行现场已结束。将复查原账号、成片、封面与内容，沿用本任务重新执行；历史尝试与占用保留。',confirmText:'确认重试'})))return;
+    await client.retry(task.id,{expected_revision:task.revision});
+    await openDetail(task);
+    feedback.toast.success('原任务已重新排队，等待所属用户的 Agent 领取');
+  } catch(e) {
+    const message=e.message;await openDetail(task);error.value=message;
+  } finally {busy.value=false;}
 }
 async function edit(row) {
   busy.value = true;
@@ -735,6 +770,7 @@ onMounted(async () => {
           <p>开始：{{formatDateTime(attempt.started_at)}} · 最近反馈：{{formatDateTime(attempt.heartbeat_at)}}</p>
           <p v-for="step in attempt.steps" :key="step.seq">{{formatDateTime(step.at)}} · {{phaseLabel(step.report.stage)}}</p>
           <p v-if="attempt.error_message">{{attempt.error_message}}</p>
+          <p v-if="attempt.resolution_note">核实记录：{{resolutionLabel(attempt.resolution_note)}}</p>
         </section>
         <t-button variant="text" :loading="loading" @click="openDetail(detail)">刷新进展</t-button>
         <p>
@@ -750,6 +786,8 @@ onMounted(async () => {
         </p></ResourceCard
       >
       <template #footer>
+        <t-button v-if="detail.status === 'uncertain'" theme="primary" :disabled="busy" @click="openVerification">核实结果</t-button>
+        <t-button v-if="detail.status === 'failed' && !detail.cancel_requested_at && executionEnabled" theme="primary" :loading="busy" @click="retryExecution">重试</t-button>
         <t-button v-if="detail.status === 'pending' && !detail.current_attempt_id && !detail.authorized_at && executionEnabled" theme="primary" :loading="busy" @click="startExecution">确认执行</t-button>
         <t-button
           v-if="
@@ -763,6 +801,7 @@ onMounted(async () => {
         ></template
       >
     </ResourceDetailPage>
+    <PublishingRecoveryDialog v-model:visible="recoveryVisible" :task="recoveryTask" :busy="busy" :error="recoveryError" @submit="saveVerification" />
     <PublishingResourcePicker
       :visible="!!picker"
       :kind="picker"

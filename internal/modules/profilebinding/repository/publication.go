@@ -26,3 +26,13 @@ func LockPublicationProfile(tx *gorm.DB, id string, owner int64) (model.BrowserP
 	}
 	return p, nil
 }
+
+// Reconciliation locks the original owner's scene even if execution eligibility
+// later changed. It grants no browser action or new execution permission.
+func LockPublicationScene(tx *gorm.DB, id string, owner int64) error {
+	_, e := scanProfile(queryRow(tx, `SELECT `+profileColumnsWithPrefix("bp")+` FROM browser_profiles bp WHERE bp.id=? AND bp.user_id=? FOR UPDATE`, id, owner))
+	if errors.Is(e, sql.ErrNoRows) {
+		return model.ErrProfileNotFound
+	}
+	return e
+}

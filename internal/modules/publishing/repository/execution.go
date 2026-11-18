@@ -14,6 +14,7 @@ import (
 type ExecutionStore struct {
 	Store
 	LockInput func(*gorm.DB, model.Task) (model.ExecutionInput, error)
+	LockScene func(*gorm.DB, uint64, int64) error
 }
 
 func lockedTask(tx *gorm.DB, id uint64) (model.Task, error) {
