@@ -39,7 +39,7 @@ const blankFilters = () => ({
   category_id: "",
   created_range: [],
 });
-const attempts = ref([]);
+const attemptHistory = ref([]);
 const summary = ref(null),
   advanced = ref(false);
 const metricItems = computed(() => [
@@ -193,7 +193,7 @@ async function openDetail(row) {
   try {
     const [task, history] = await Promise.all([client.get(row.id), client.attempt(row.id)]);
     detail.value = task;
-    attempts.value = history;
+    attemptHistory.value = history;
     view.value = "detail";
   } catch (e) {
     error.value = e.message;
@@ -722,12 +722,12 @@ onMounted(async () => {
       >
       <ResourceCard
         ><h3>执行历史</h3>
-        <p v-if="!attempts.length">任务尚未执行</p>
+        <p v-if="!attemptHistory.length">任务尚未执行</p>
         <p v-if="detail.authorized_at">已确认执行：{{formatDateTime(detail.authorized_at)}} · 仅由账号所属用户的 Agent 执行</p>
         <p v-if="detail.status === PublicationStatus.Uncertain">结果尚未确认，请保留现场，避免重复发布。</p>
         <p v-if="detail.status === PublicationStatus.Reviewing">平台已接收，正在审核；尚未确认为公开作品。</p>
         <p v-if="detail.failure_message">平台反馈：{{detail.failure_message}}</p>
-        <section v-for="attempt in attempts" :key="attempt.id" class="resource-editor-section">
+        <section v-for="attempt in attemptHistory" :key="attempt.id" class="resource-editor-section">
           <h4>尝试 {{attempt.attempt_no}} · {{phaseLabel(attempt.stage)}}</h4>
           <p>开始：{{formatDateTime(attempt.started_at)}} · 最近反馈：{{formatDateTime(attempt.heartbeat_at)}}</p>
           <p v-for="step in attempt.steps" :key="step.seq">{{formatDateTime(step.at)}} · {{phaseLabel(step.report.stage)}}</p>
