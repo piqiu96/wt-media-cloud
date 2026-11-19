@@ -19,7 +19,7 @@ func executionStore(t *testing.T) (repo.ExecutionStore, func(string, int64, stri
 	if e := db.Exec("INSERT INTO browser_profiles VALUES(37),(38)").Error; e != nil {
 		t.Fatal(e)
 	}
-	s := repo.ExecutionStore{Store: store(db), LockInput: func(tx *gorm.DB, v model.Task) (model.ExecutionInput, error) {
+	s := repo.ExecutionStore{Store: store(db), ReadInput: func(tx *gorm.DB, v model.Task) (model.ExecutionInput, error) {
 		var snap struct {
 			ProfileID uint64 `json:"profile_id"`
 		}
@@ -27,7 +27,7 @@ func executionStore(t *testing.T) (repo.ExecutionStore, func(string, int64, stri
 			return model.ExecutionInput{}, e
 		}
 		var id uint64
-		if e := tx.Raw("SELECT id FROM browser_profiles WHERE id=? FOR UPDATE", snap.ProfileID).Scan(&id).Error; e != nil {
+		if e := tx.Raw("SELECT id FROM browser_profiles WHERE id=?", snap.ProfileID).Scan(&id).Error; e != nil {
 			return model.ExecutionInput{}, e
 		}
 		if id == 0 {

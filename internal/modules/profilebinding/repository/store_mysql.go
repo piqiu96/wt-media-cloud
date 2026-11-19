@@ -251,22 +251,24 @@ func getProfile(db *gorm.DB, profileID string) (model.BrowserProfile, bool, erro
 
 // GetProfileInScope 只在 Profile 仍属于其所有者当前绑定的 BitBrowser 主账号时返回。
 // 旧主账号下的行保留在表中，但正常读取不可见。
-func GetProfileInScope(profileID string) (model.BrowserProfile, bool, error) {
+func GetProfileInScope(profileID string, db ...*gorm.DB) (model.BrowserProfile, bool, error) {
+	if len(db) > 0 {
+		return getProfileInScope(db[0], profileID)
+	}
 	return getProfileInScope(database.DB(), profileID)
 }
 
 func getProfileInScope(db *gorm.DB, profileID string) (model.BrowserProfile, bool, error) {
-	row := queryRow(db,
-		`SELECT `+profileColumnsWithPrefix("bp")+` FROM browser_profiles bp JOIN users u ON u.id = bp.user_id WHERE bp.id = ? AND bp.bit_main_user_id = u.bit_main_user_id`,
-		profileID,
-	)
-	profile, err := scanProfile(row)
+	var cookie sql.NullString
+	row := queryRow(db, `SELECT `+profileColumnsWithPrefix("bp")+`, bp.cookie_operation_id FROM browser_profiles bp JOIN users u ON u.id = bp.user_id WHERE bp.id = ? AND bp.bit_main_user_id = u.bit_main_user_id`, profileID)
+	profile, err := scanProfile(row, &cookie)
 	if errors.Is(err, sql.ErrNoRows) {
 		return model.BrowserProfile{}, false, nil
 	}
 	if err != nil {
 		return model.BrowserProfile{}, false, err
 	}
+	profile.CookieOperationID = cookie.String
 	return profile, true, nil
 }
 
@@ -552,17 +554,18 @@ func applyScan(db *gorm.DB, scan model.ProfileScan, observedBitProfileIDs []stri
 
 type scanner interface{ Scan(...any) error }
 
-func scanProfile(row scanner) (model.BrowserProfile, error) {
+func scanProfile(row scanner, extra ...any) (model.BrowserProfile, error) {
 	var profile model.BrowserProfile
 	var groupID, groupName, bitStatus, bitUpdatedAt, proxyType, proxyHost, proxyID, reservedProxyID, bitRemark, remark sql.NullString
 	var proxyPort sql.NullInt64
 	var reservedSince sql.NullTime
-	err := row.Scan(
+	dest := []any{
 		&profile.ID, &profile.UserID, &profile.TeamID, &profile.BitProfileID, &profile.BitMainUserID, &profile.BitUserID,
 		&profile.BitName, &profile.BitSeq, &groupID, &groupName, &bitStatus, &bitUpdatedAt,
 		&proxyType, &proxyHost, &proxyPort, &proxyID, &reservedProxyID, &reservedSince,
 		&bitRemark, &remark, &profile.Enabled, &profile.LocalState, &profile.LastSyncedAt, &profile.CreatedAt, &profile.UpdatedAt,
-	)
+	}
+	err := row.Scan(append(dest, extra...)...)
 	if err != nil {
 		return model.BrowserProfile{}, err
 	}

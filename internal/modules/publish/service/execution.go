@@ -4,7 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	accountmodel "github.com/wt-media/wt-media-cloud/internal/modules/mediaaccount/model"
+	profilemodel "github.com/wt-media/wt-media-cloud/internal/modules/profilebinding/model"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -51,12 +54,12 @@ func ExecutionStore() repository.ExecutionStore {
 	return NewExecutionStore(database.DB())
 }
 func NewExecutionStore(db *gorm.DB) repository.ExecutionStore {
-	return repository.ExecutionStore{Store: repository.Store{DB: db, LockFiles: files.LockAvailable}, LockInput: lockExecutionInput}
+	return repository.ExecutionStore{Store: repository.Store{DB: db, LockFiles: files.LockAvailable}, ReadInput: readExecutionInput}
 }
 func WiredExecution() *ExecutionService {
 	return &ExecutionService{Repo: ExecutionStore(), Grant: grantExecutionFiles}
 }
-func lockExecutionInput(tx *gorm.DB, v model.Task) (model.ExecutionInput, error) {
+func readExecutionInput(tx *gorm.DB, v model.Task) (model.ExecutionInput, error) {
 	var snap struct {
 		Profile   string `json:"browser_profile_id"`
 		VideoSHA  string `json:"video_sha256"`
@@ -71,35 +74,45 @@ func lockExecutionInput(tx *gorm.DB, v model.Task) (model.ExecutionInput, error)
 	if e != nil || id == 0 {
 		return out, repository.ErrInputChanged
 	}
-	p, e := profiles.LockPublicationProfile(tx, snap.Profile, v.OperatorID)
-	if errors.Is(e, profiles.ErrProfileNotFound) || errors.Is(e, profiles.ErrProfileInactive) {
+	p, found, e := profiles.GetProfileInScope(snap.Profile, tx)
+	if e == nil && (!found || int64(p.UserID) != v.OperatorID || !p.Enabled || p.LocalState != profilemodel.ProfileActive || p.ReservedProxyID != "" || p.CookieOperationID != "") {
 		return out, repository.ErrInputChanged
 	}
 	if e != nil {
 		return out, e
 	}
-	f, e := files.LockSavedPublicationFile(tx, v.CoverFileID)
+	f, e := files.ReadSavedReference(tx, v.CoverFileID)
 	if errors.Is(e, files.ErrNotFound) {
 		return out, repository.ErrInputChanged
 	}
 	if e != nil {
 		return out, e
 	}
-	eligible, e := identity.CheckPublicationScope(tx, v.OperatorID, v.TeamID, v.CategoryID)
+	owner, found, e := identity.ResolveUserIn(tx, identity.UserID(v.OperatorID))
 	if e != nil {
 		return out, e
 	}
-	if !eligible {
+	if !found || owner.Status != identity.UserStatusEnabled || (owner.Role != identity.RoleAdmin && ((owner.Role != identity.RoleOperator && owner.Role != identity.RoleSeniorOperator) || owner.TeamID == nil || int64(*owner.TeamID) != v.TeamID || !slices.Contains(owner.CategoryIDs, identity.CategoryID(v.CategoryID)))) {
 		return out, repository.ErrInputChanged
 	}
-	eligible, e = accounts.CheckPublicationBinding(tx, accounts.PublicationBinding{ID: v.MediaAccountID, Owner: v.OperatorID, Team: v.TeamID, Category: v.CategoryID, Platform: v.Platform, UID: v.PlatformAccountUID, Profile: snap.Profile})
+	category, found, e := identity.ResolveCategoryIn(tx, identity.CategoryID(v.CategoryID))
 	if e != nil {
 		return out, e
 	}
-	if !eligible {
+	if !found || !category.Enabled {
 		return out, repository.ErrInputChanged
 	}
-	o, found, e := production.LockSavedPublicationOutput(tx, v.CompositeOutputID)
+	account, e := accounts.GetOwnedAccountRecord(owner, strconv.FormatUint(v.MediaAccountID, 10), tx)
+	if errors.Is(e, accounts.ErrNotFound) || errors.Is(e, accounts.ErrForbidden) {
+		return out, repository.ErrInputChanged
+	}
+	if e != nil {
+		return out, e
+	}
+	if account.TeamID == nil || int64(*account.TeamID) != v.TeamID || string(account.Platform) != v.Platform || account.PlatformAccountID != v.PlatformAccountUID || account.BrowserProfileID != snap.Profile || !account.Enabled || account.IdentificationStatus != accountmodel.IdentificationIdentified || account.PlatformLoginStatus != accountmodel.PlatformLoginNormal || !slices.Contains(account.CategoryIDs, identity.CategoryID(v.CategoryID)) {
+		return out, repository.ErrInputChanged
+	}
+	o, found, e := production.ReadSavedOutput(tx, v.CompositeOutputID)
 	if e != nil {
 		return out, e
 	}
@@ -117,7 +130,7 @@ func lockExecutionInput(tx *gorm.DB, v model.Task) (model.ExecutionInput, error)
 func grantExecutionFiles(ctx context.Context, c model.Claim) (FileGrants, error) {
 	var out FileGrants
 	i := c.Attempt.Input
-	video, e := production.SavedPublicationOutputURL(ctx, c.Task.CompositeOutputID, i.VideoSHA256, i.VideoSize)
+	video, e := production.SavedOutputURL(ctx, c.Task.CompositeOutputID, i.VideoSHA256, i.VideoSize)
 	if e != nil {
 		return out, e
 	}

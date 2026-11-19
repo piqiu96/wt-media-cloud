@@ -17,6 +17,7 @@ type ExecutionInput struct {
 	CoverSize     int64   `json:"cover_size"`
 }
 type Attempt struct {
+	AdmissionSlot   uint8           `json:"-" gorm:"default:1"`
 	ID              uint64          `json:"id,string"`
 	PublicationID   uint64          `json:"publication_id,string"`
 	AttemptNo       uint32          `json:"attempt_no"`

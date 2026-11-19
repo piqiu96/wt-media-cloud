@@ -6,6 +6,7 @@ require (
 	github.com/DATA-DOG/go-sqlmock v1.5.2
 	github.com/cloudwego/hertz v0.10.5
 	github.com/go-sql-driver/mysql v1.9.3
+	github.com/goccy/go-json v0.11.2
 	github.com/hertz-contrib/logger/zap v1.1.0
 	github.com/minio/minio-go/v7 v7.0.98
 	github.com/pelletier/go-toml/v2 v2.4.3

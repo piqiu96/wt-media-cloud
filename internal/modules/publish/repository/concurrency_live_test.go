@@ -297,8 +297,8 @@ func TestLiveReportKeepaliveDoesNotRecordProgressOrRepeatPermission(t *testing.T
 	if e = s.DB.First(&original, c.Attempt.ID).Error; e != nil {
 		t.Fatal(e)
 	}
-	lockInput := s.LockInput
-	s.LockInput = func(*gorm.DB, model.Task) (model.ExecutionInput, error) {
+	lockInput := s.ReadInput
+	s.ReadInput = func(*gorm.DB, model.Task) (model.ExecutionInput, error) {
 		return model.ExecutionInput{}, errors.New("keepalive must not recheck resources")
 	}
 	keepalive := model.ExecutionReport{AttemptID: c.Attempt.ID, Seq: 2}
@@ -330,7 +330,7 @@ func TestLiveReportKeepaliveDoesNotRecordProgressOrRepeatPermission(t *testing.T
 	if _, e = s.Report(c.Task, 10, keepalive, false, now); !errors.Is(e, repo.ErrNotFound) {
 		t.Fatalf("foreign report=%v", e)
 	}
-	s.LockInput = lockInput
+	s.ReadInput = lockInput
 	r.Seq = 3
 	r.Stage = model.AttemptStageSubmitting
 	if _, e = s.Report(c.Task, 9, r, false, now); !errors.Is(e, repo.ErrConflict) {
@@ -353,7 +353,7 @@ func TestLiveReportKeepaliveDoesNotRecordProgressOrRepeatPermission(t *testing.T
 
 func TestLiveInputChangeStopsWithoutGrantAndSurvivesKeepalive(t *testing.T) {
 	s, c, now := runningClaim(t)
-	s.LockInput = func(*gorm.DB, model.Task) (model.ExecutionInput, error) {
+	s.ReadInput = func(*gorm.DB, model.Task) (model.ExecutionInput, error) {
 		return model.ExecutionInput{}, repo.ErrInputChanged
 	}
 	report := model.ExecutionReport{AttemptID: c.Attempt.ID, Seq: 1, Stage: model.AttemptStagePreparing}
@@ -361,7 +361,7 @@ func TestLiveInputChangeStopsWithoutGrantAndSurvivesKeepalive(t *testing.T) {
 	if e != nil || !feedback.StopRequested || feedback.AllowSubmit || feedback.StopReason != model.ExecutionInputChanged {
 		t.Fatalf("stop=%+v error=%v", feedback, e)
 	}
-	s.LockInput = func(*gorm.DB, model.Task) (model.ExecutionInput, error) {
+	s.ReadInput = func(*gorm.DB, model.Task) (model.ExecutionInput, error) {
 		t.Fatal("keepalive rechecked input")
 		return model.ExecutionInput{}, nil
 	}

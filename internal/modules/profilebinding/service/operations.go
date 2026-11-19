@@ -1,6 +1,7 @@
 package service
 
 import (
+	"gorm.io/gorm"
 	"time"
 
 	"github.com/wt-media/wt-media-cloud/internal/modules/identity/service"
@@ -95,4 +96,9 @@ func ConfirmCurrentSync(actor service.PublicUser, adoptBitProfileIDs []string) (
 
 func RejectCurrentSync(actor service.PublicUser) error {
 	return newService(mysqlStore{}).RejectCurrentSync(actor)
+}
+
+// GetProfileInScope returns current owner binding and local operation facts.
+func GetProfileInScope(id string, db ...*gorm.DB) (model.BrowserProfile, bool, error) {
+	return repository.GetProfileInScope(id, db...)
 }
