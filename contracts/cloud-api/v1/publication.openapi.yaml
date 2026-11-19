@@ -1,8 +1,8 @@
 openapi: 3.1.0
 info:
   title: WT Media Single Publication Preparation
-  version: 2026.11.19.1
-  description: Formal pending tasks only. Creating never authorizes execution or submits a platform post. Baidu task preparation is available; execution endpoints are not provided by this contract. IDs and revisions are decimal strings; timestamps RFC3339. Uses errcode/message/data/logid.
+  version: 2026.11.19.3
+  description: Creating never authorizes execution or submits a platform post. Execution requires separate revision-bound start authorization. Baidu task preparation is available. IDs and revisions are decimal strings; timestamps RFC3339. Uses errcode/message/data/logid.
 paths:
   /api/v1/publication:
     get:
@@ -77,6 +77,22 @@ paths:
         '400': {description: Invalid or unconfirmed content.}
         '404': {description: Task absent or outside actor scope.}
         '409': {description: Revision changed, task claimed/authorized or no longer pending. Reload before editing.}
+  /api/v1/publication/{id}/start:
+    post:
+      operationId: startPublication
+      security: [{sessionCookie: []}]
+      parameters: [{in: path, name: id, required: true, schema: {$ref: '#/components/schemas/ID'}}]
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [expected_revision], additionalProperties: false, properties: {expected_revision: {$ref: '#/components/schemas/ID'}}}}}}
+      responses:
+        '200': {description: 'Authorized task, pending until not_before or queued when due. Never creates an attempt; frozen inputs cannot subsequently be edited.'}
+        '409': {description: 'Revision/state conflict, unavailable resource or platform not open for execution.'}
+  /api/v1/publication/{id}/attempt:
+    get:
+      operationId: getPublicationAttemptHistory
+      security: [{sessionCookie: []}]
+      parameters: [{in: path, name: id, required: true, schema: {$ref: '#/components/schemas/ID'}}]
+      responses:
+        '200': {description: 'Owner-scoped attempt history without credentials, signed grants or mutable old input.'}
 components:
   securitySchemes:
     sessionCookie: {type: apiKey, in: cookie, name: wt_media_session}

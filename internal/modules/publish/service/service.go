@@ -12,6 +12,7 @@ import (
 	files "github.com/wt-media/wt-media-cloud/internal/modules/files/service"
 	identity "github.com/wt-media/wt-media-cloud/internal/modules/identity/service"
 	accounts "github.com/wt-media/wt-media-cloud/internal/modules/mediaaccount/service"
+	productionmodel "github.com/wt-media/wt-media-cloud/internal/modules/production/model"
 	production "github.com/wt-media/wt-media-cloud/internal/modules/production/service"
 	"github.com/wt-media/wt-media-cloud/internal/modules/publish/model"
 	"github.com/wt-media/wt-media-cloud/internal/modules/publish/repository"
@@ -165,7 +166,7 @@ func (s *Service) Create(ctx context.Context, a identity.PublicUser, in CreateIn
 	if err != nil {
 		return model.Task{}, err
 	}
-	if string(account.Platform) != in.Platform || !account.Enabled || account.IdentificationStatus != "identified" || account.PlatformLoginStatus != "normal" || account.PlatformAccountID == "" || account.BrowserProfileID == "" || account.TeamID == nil {
+	if string(account.Platform) != in.Platform || !account.Enabled || account.IdentificationStatus != accounts.IdentificationIdentified || account.PlatformLoginStatus != accounts.PlatformLoginNormal || account.PlatformAccountID == "" || account.BrowserProfileID == "" || account.TeamID == nil {
 		return model.Task{}, ErrInvalid
 	}
 	category := false
@@ -191,7 +192,7 @@ func (s *Service) Create(ctx context.Context, a identity.PublicUser, in CreateIn
 	if !platformOK {
 		return model.Task{}, ErrInvalid
 	}
-	if int64(o.CategoryID) != in.CategoryID || o.TeamID != int64(*account.TeamID) || o.PublishStatus == "archived" || o.Video.Status != "ready" || o.FileSizeBytes <= 0 || len(o.SHA256) != 64 {
+	if int64(o.CategoryID) != in.CategoryID || o.TeamID != int64(*account.TeamID) || o.PublishStatus == productionmodel.OutputPublishArchived || o.Video.Status != string(productionmodel.VideoReady) || o.FileSizeBytes <= 0 || len(o.SHA256) != 64 {
 		return model.Task{}, ErrInvalid
 	}
 	cover, err := s.File(ctx, a, in.Content.CoverFileID)

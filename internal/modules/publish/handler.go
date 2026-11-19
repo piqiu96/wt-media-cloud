@@ -10,6 +10,7 @@ import (
 	"github.com/cloudwego/hertz/pkg/protocol/consts"
 	"github.com/wt-media/wt-media-cloud/internal/middleware"
 	files "github.com/wt-media/wt-media-cloud/internal/modules/files/service"
+	"github.com/wt-media/wt-media-cloud/internal/modules/localagent"
 	accounts "github.com/wt-media/wt-media-cloud/internal/modules/mediaaccount/service"
 	production "github.com/wt-media/wt-media-cloud/internal/modules/production/service"
 	"github.com/wt-media/wt-media-cloud/internal/modules/publish/service"
@@ -25,6 +26,11 @@ func RegisterRoutes(h *server.Hertz) {
 	h.POST("/api/v1/publication", Create)
 	h.GET("/api/v1/publication/:id", Get)
 	h.PUT("/api/v1/publication/:id/content", Edit)
+	h.POST("/api/v1/publication/:id/start", Start)
+	h.GET("/api/v1/publication/:id/attempt", Attempt)
+	h.POST("/api/v1/cloud-agent/publication-task/claim", localagent.RequireAgent(localagent.StrictMode), Claim)
+	h.POST("/api/v1/cloud-agent/publication-task/:id/report", localagent.RequireAgent(localagent.ReportSafeMode), Report)
+	h.POST("/api/v1/cloud-agent/publication-task/:id/complete", localagent.RequireAgent(localagent.ReportSafeMode), Complete)
 }
 func fail(c *app.RequestContext, err error) {
 	switch {
@@ -42,7 +48,7 @@ func fail(c *app.RequestContext, err error) {
 	case errors.Is(err, service.ErrOccupied):
 		api.FailureNamed(c, consts.StatusConflict, errcode.PublishOutputOccupied, "该成片已被当前平台的任务占用", "publication_output_occupied")
 	case errors.Is(err, service.ErrClosed):
-		api.FailureNamed(c, consts.StatusConflict, errcode.PublishPlatformClosed, "当前平台尚未开放任务准备", "publication_platform_closed")
+		api.FailureNamed(c, consts.StatusConflict, errcode.PublishPlatformClosed, "当前平台尚未开放该操作", "publication_platform_closed")
 	default:
 		api.FailureNamed(c, consts.StatusServiceUnavailable, errcode.PublishUnavailable, "操作尚未完成，请保留当前内容并重试", "publication_unavailable")
 	}

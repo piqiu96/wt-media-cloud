@@ -94,6 +94,7 @@ type Store interface {
 
 type Service struct {
 	store            Store
+	referenceCheck   func(string) (bool, error)
 	now              func() time.Time
 	newID            func(string) string
 	scanTTL          time.Duration
@@ -124,6 +125,7 @@ const defaultObservedFreshFor = 120 * time.Second
 func newService(store Store, options ...Option) *Service {
 	service := &Service{
 		store:            store,
+		referenceCheck:   referenceCheck,
 		now:              func() time.Time { return time.Now().UTC() },
 		newID:            id.NewID,
 		scanTTL:          15 * time.Minute,
@@ -513,6 +515,9 @@ func (s *Service) DeleteProfile(actor identityservice.PublicUser, profileID stri
 	// 核对，防止同步恢复与清理并发时误删正常窗口。
 	if profile.LocalState != ProfileLocalMissing {
 		return ErrProfileNotMissing
+	}
+	if err := s.checkDeleteReferences(profile.ID); err != nil {
+		return err
 	}
 	return s.store.DeleteProfile(profile.ID, actor.ID, s.now())
 }

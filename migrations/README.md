@@ -64,3 +64,27 @@ Before applying this migration to a non-empty environment:
 4. verify that every numeric user reference resolves to `users.id` and that the row counts are unchanged.
 
 The original string user identifier remains in `users.legacy_id`. It is the recovery mapping source if an operator must rebuild the old string relationships. A rollback must recreate shadow string columns from `users.legacy_id`, validate all mappings, swap the foreign keys in reverse order, and only then restore the old primary key. Never drop the numeric columns or `legacy_id` before that validation succeeds.
+
+## Migration 107 Safety
+
+`20261119_107_publication_attempt_revision.sql` is owned by Publish and adds an
+internal optimistic concurrency token to `publication_attempt`. Existing rows
+receive revision 1; task status, report sequences and evidence are preserved.
+Apply this migration before deploying code that reads/writes attempt revisions.
+The migration runner records the version and skips replay. Verify the column's
+non-null/default properties, unchanged row count and the concurrent report tests
+in `internal/modules/publish/repository`. Roll back the application first; then
+`ALTER TABLE publication_attempt DROP COLUMN revision` removes only the token.
+
+`20261120_108_publication_task_profile_reference.sql` is owned by Publish. It
+adds a stored generated Profile ID from the already-frozen task JSON and a
+restrictive foreign key. Task save and Profile deletion now serialize through
+InnoDB reference integrity without ordinary-mutation publication callbacks.
+Before rollout, existing non-empty Profile IDs must be valid numeric references;
+this migration deliberately fails on orphaned/invalid saved inputs rather than
+silently deleting or rewriting history. Rows without a saved Profile ID derive
+NULL (legacy task data only). Re-run through the migration ledger is a no-op.
+Rollback requires removing the foreign key, index and generated column; it
+reopens the save/delete race, so do not roll back while task creation is active.
+Verified by both orderings of create/delete and fresh/full migration replay in
+isolated MySQL tests.

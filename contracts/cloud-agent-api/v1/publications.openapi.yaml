@@ -1,0 +1,124 @@
+openapi: 3.1.0
+info:
+  title: WT Media Cloud-Agent Publication Execution
+  version: 2026.11.20.1
+  description: >-
+    Additive single-task execution. Agent bearer identifies the account owner; no device identity or
+    generic lease. Claim requires a current Desktop session. Reports are report-safe only for the same
+    owner and current attempt; starting new work, including submitting, rechecks the Desktop session.
+    Task/attempt ids and revisions are decimal strings. Responses use errcode/message/data/logid.
+    Download grants appear only in responses, never in frozen snapshots, evidence or logs.
+paths:
+  /api/v1/cloud-agent/publication-task/claim:
+    post:
+      operationId: claimPublication
+      security: [{agentBearer: []}]
+      requestBody:
+        required: true
+        content: {application/json: {schema: {type: object, required: [request_key], additionalProperties: false, properties: {request_key: {type: string, minLength: 1, maxLength: 64}}}}}
+      responses:
+        '200':
+          description: >-
+            data is null when no task is available, otherwise Claim. A repeated owner/request key returns
+            the original attempt with replayed=true, never a new task. A replay without a local record
+            must preserve the scene for verification, not re-enter the browser. No-task creates no row.
+          content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}
+        '401': {description: Invalid bearer or Desktop session no longer current.}
+        '409': {description: Input changed, owner/Profile busy, or platform unavailable.}
+  /api/v1/cloud-agent/publication-task/{id}/report:
+    post:
+      operationId: reportPublication
+      security: [{agentBearer: []}]
+      parameters: [{$ref: '#/components/parameters/TaskID'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/Report'}}}}
+      responses:
+        '200': {description: '{task_status,attempt_status,attempt_id,report_seq,stop_requested,stop_reason?,allow_submit}. Omit stage for lightweight keepalive: no history append, resource revalidation or submit permission. Supply stage for progress and pre-submit checks. Invalidated execution input persists stop_reason=PUBLICATION_INPUT_CHANGED without advancing the stage; keepalive returns this stop until the executor safely completes or the attempt is reconciled. Only a fresh submitting report can grant one click; replay never grants it again.'}
+        '409': {description: Stale/conflicting report, invalid transition, changed input or unsafe scene.}
+  /api/v1/cloud-agent/publication-task/{id}/complete:
+    post:
+      operationId: completePublication
+      security: [{agentBearer: []}]
+      parameters: [{$ref: '#/components/parameters/TaskID'}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/Completion'}}}}
+      responses:
+        '200': {description: '{task_status,attempt_status,attempt_id,result_hash}. Exact same result/sequence acknowledges the original write without another state change. Reviewing requires a matching real receipt; public success is verified separately, never inferred from this endpoint.'}
+        '409': {description: Foreign/non-current attempt, stale sequence, conflicting result, or an already resolved scene.}
+components:
+  securitySchemes:
+    agentBearer: {type: http, scheme: bearer}
+  parameters:
+    TaskID: {in: path, name: id, required: true, schema: {$ref: '#/components/schemas/ID'}}
+  schemas:
+    ID: {type: string, pattern: '^[1-9][0-9]*$'}
+    Report:
+      type: object
+      required: [attempt_id, report_seq]
+      additionalProperties: false
+      description: >-
+        A single sequence covers keepalive and progress. Omit stage and all evidence fields for
+        keepalive; it remains report-safe after the Desktop session is replaced. Progress with stage
+        requires the current Desktop session, except awaiting_human. Retry with the original packet;
+        repeated packets never replay submit permission. Each new report uses an increasing sequence.
+      properties:
+        attempt_id: {$ref: '#/components/schemas/ID'}
+        report_seq: {type: integer, minimum: 1}
+        stage: {type: string, enum: [preparing, ready, submitting, awaiting_human]}
+        platform_uid: {type: string, maxLength: 255}
+        bit_profile_id: {type: string, maxLength: 255}
+        video_sha256: {type: string, pattern: '^[a-f0-9]{64}$'}
+        cover_sha256: {type: string, pattern: '^[a-f0-9]{64}$'}
+      allOf:
+        - if: {not: {required: [stage]}}
+          then:
+            not:
+              anyOf:
+                - {required: [platform_uid]}
+                - {required: [bit_profile_id]}
+                - {required: [video_sha256]}
+                - {required: [cover_sha256]}
+    Completion:
+      type: object
+      required: [attempt_id, report_seq, result_hash, result]
+      additionalProperties: false
+      properties:
+        attempt_id: {$ref: '#/components/schemas/ID'}
+        report_seq: {type: integer, minimum: 1}
+        result_hash: {type: string, pattern: '^[a-f0-9]{64}$', description: 'SHA256 of canonical UTF-8 JSON {report_seq,result}: keys sorted, no whitespace, unescaped Unicode; strings use JSON control escapes, numbers are integers. Persist and resend the original packet.'}
+        result: {$ref: '#/components/schemas/Result'}
+    Result:
+      type: object
+      required: [status, evidence]
+      additionalProperties: false
+      properties:
+        status: {type: string, enum: [reviewing, uncertain, failed]}
+        platform_work_id: {type: string, maxLength: 255}
+        work_url: {type: string, maxLength: 2048}
+        error_code: {type: string, maxLength: 64}
+        error_message: {type: string, maxLength: 1000}
+        evidence:
+          type: object
+          additionalProperties: false
+          properties:
+            platform_uid: {type: string, maxLength: 255}
+            bit_profile_id: {type: string, maxLength: 255}
+            video_sha256: {type: string, pattern: '^[a-f0-9]{64}$'}
+            cover_sha256: {type: string, pattern: '^[a-f0-9]{64}$'}
+            receipt_id: {type: string, maxLength: 255}
+            not_submitted: {type: boolean}
+            scene_closed: {type: boolean}
+    Claim:
+      type: object
+      required: [task, attempt, replayed]
+      properties:
+        task: {type: object, description: 'Formal task with decimal-string IDs; ownership and fixed content.'}
+        attempt: {type: object, description: 'Attempt with frozen input, owner, Cloud/BitBrowser Profile IDs and file sizes/digests; no grants or secrets.'}
+        replayed: {type: boolean}
+        files: {type: object, description: 'video and cover short-lived single-object grants, each {url,size,sha256}; never persist. Omitted on replay of finished/lost work.'}
+    Envelope:
+      type: object
+      required: [errcode, message, data, logid]
+      properties:
+        errcode: {type: integer}
+        message: {type: string}
+        logid: {type: string}
+        data: {oneOf: [{type: 'null'}, {$ref: '#/components/schemas/Claim'}]}

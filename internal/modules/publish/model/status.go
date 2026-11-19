@@ -23,3 +23,26 @@ func (s Status) Valid() bool {
 	}
 	return false
 }
+
+// AttemptStatus describes one execution attempt, independently of task status.
+type AttemptStatus string
+
+const (
+	AttemptStatusRunning       AttemptStatus = "running"
+	AttemptStatusAwaitingHuman AttemptStatus = "awaiting_human"
+	AttemptStatusCompleted     AttemptStatus = "completed"
+	AttemptStatusInterrupted   AttemptStatus = "interrupted"
+)
+
+// AttemptStage records progress within an execution attempt.
+type AttemptStage string
+
+const (
+	AttemptStageClaimed        AttemptStage = "claimed"
+	AttemptStagePreparing      AttemptStage = "preparing"
+	AttemptStageReady          AttemptStage = "ready"
+	AttemptStageSubmitting     AttemptStage = "submitting"
+	AttemptStageAwaitingHuman  AttemptStage = "awaiting_human"
+	AttemptStageConnectionLost AttemptStage = "connection_lost"
+	AttemptStageFinished       AttemptStage = "finished"
+)

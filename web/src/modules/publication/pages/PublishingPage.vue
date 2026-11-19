@@ -22,9 +22,9 @@ import { formatDateTime } from "../../../shared/utils/datetime.js";
 import {
   definitivePublicationRejection,
   contentProblem,
-  publicationStatuses,
   outputUnavailable,
 } from "../eligibility.js";
+import { PublicationStatus, publicationStatuses, attemptStageLabels } from "../status.js";
 import PublishingResourcePicker from "../components/PublishingResourcePicker.vue";
 const client = createPublicationClient(),
   compose = createComposeClient(),
@@ -39,21 +39,22 @@ const blankFilters = () => ({
   category_id: "",
   created_range: [],
 });
+const attemptHistory = ref([]);
 const summary = ref(null),
   advanced = ref(false);
 const metricItems = computed(() => [
   { key: "", label: "全部任务", value: summary.value?.all ?? "—" },
   {
-    key: "awaiting_human",
+    key: PublicationStatus.AwaitingHuman,
     label: "等待人工",
-    value: summary.value?.awaiting_human ?? "—",
+    value: summary.value?.[PublicationStatus.AwaitingHuman] ?? "—",
     tone: "warning",
   },
-  { key: "running", label: "执行中", value: summary.value?.running ?? "—" },
+  { key: PublicationStatus.Running, label: "执行中", value: summary.value?.[PublicationStatus.Running] ?? "—" },
   {
-    key: "uncertain",
+    key: PublicationStatus.Uncertain,
     label: "结果待确认",
-    value: summary.value?.uncertain ?? "—",
+    value: summary.value?.[PublicationStatus.Uncertain] ?? "—",
     tone: "warning",
   },
 ]);
@@ -190,7 +191,9 @@ async function openDetail(row) {
   loading.value = true;
   error.value = "";
   try {
-    detail.value = await client.get(row.id);
+    const [task, history] = await Promise.all([client.get(row.id), client.attempt(row.id)]);
+    detail.value = task;
+    attemptHistory.value = history;
     view.value = "detail";
   } catch (e) {
     error.value = e.message;
@@ -198,12 +201,30 @@ async function openDetail(row) {
     loading.value = false;
   }
 }
+const phaseLabel = (value) => attemptStageLabels[value] || "等待执行器反馈";
+async function startExecution() {
+  const task = detail.value;
+  if (busy.value || !task) return;
+  busy.value = true;
+  error.value = "";
+  try {
+    if (!(await feedback.confirmWarning({title:"确认执行发布",message:`将使用账号「${task.resources.account_name}」自动发布此任务。请确认文案、封面和声明；执行后不能再编辑。`,confirmText:"确认执行"}))) return;
+    await client.start(task.id, {expected_revision: task.revision});
+    await openDetail(task);
+    feedback.toast.success("已授权执行，等待所属用户的 Agent 领取");
+  } catch(e) {
+    const message = e.message;
+    // Resolve a lost response by reading state; never resend authorization.
+    await openDetail(task);
+    error.value = message;
+  } finally { busy.value = false; }
+}
 async function edit(row) {
   busy.value = true;
   error.value = "";
   try {
     const v = await client.get(row.id);
-    if (v.status !== "pending" || v.current_attempt_id || v.authorized_at)
+    if (v.status !== PublicationStatus.Pending || v.current_attempt_id || v.authorized_at)
       throw Error("当前任务已不能编辑，请刷新列表");
     const [a, o] = await Promise.all([
       accounts.get(v.media_account_id),
@@ -325,6 +346,7 @@ async function canLeave() {
   });
 }
 async function back() {
+  if (busy.value) return;
   if (view.value === "form" && !(await canLeave())) return;
   if (source.value || detailReturn.value === "source") {
     view.value = "list";
@@ -334,7 +356,7 @@ async function back() {
   view.value = "list";
   detail.value = null;
 }
-onBeforeRouteLeave(async () => view.value !== "form" || (await canLeave()));
+onBeforeRouteLeave(async () => !busy.value && (view.value !== "form" || (await canLeave())));
 onMounted(async () => {
   await load();
   try {
@@ -482,7 +504,7 @@ onMounted(async () => {
                   >详情</t-button
                 ><t-button
                   v-if="
-                    row.status === 'pending' &&
+                    row.status === PublicationStatus.Pending &&
                     !row.current_attempt_id &&
                     !row.authorized_at
                   "
@@ -649,11 +671,13 @@ onMounted(async () => {
     <ResourceDetailPage
       v-else-if="detail"
       title="发布任务详情"
+      :busy="busy"
       :back-label="
         detailReturn === 'source' ? '返回成片管理' : '返回发布任务列表'
       "
       @back="back"
     >
+      <FeedbackAlert v-if="error" theme="error" :message="error" />
       <ResourceCard
         ><h3>
           任务 {{ detail.id }}
@@ -697,8 +721,19 @@ onMounted(async () => {
         <p>创作声明：{{ detail.content.declaration }}</p></ResourceCard
       >
       <ResourceCard
-        ><h3>执行与记录</h3>
-        <p>执行次数：{{ detail.attempt_count }} · 尚无执行记录</p>
+        ><h3>执行历史</h3>
+        <p v-if="!attemptHistory.length">任务尚未执行</p>
+        <p v-if="detail.authorized_at">已确认执行：{{formatDateTime(detail.authorized_at)}} · 仅由账号所属用户的 Agent 执行</p>
+        <p v-if="detail.status === PublicationStatus.Uncertain">结果尚未确认，请保留现场，避免重复发布。</p>
+        <p v-if="detail.status === PublicationStatus.Reviewing">平台已接收，正在审核；尚未确认为公开作品。</p>
+        <p v-if="detail.failure_message">平台反馈：{{detail.failure_message}}</p>
+        <section v-for="attempt in attemptHistory" :key="attempt.id" class="resource-editor-section">
+          <h4>尝试 {{attempt.attempt_no}} · {{phaseLabel(attempt.stage)}}</h4>
+          <p>开始：{{formatDateTime(attempt.started_at)}} · 最近反馈：{{formatDateTime(attempt.heartbeat_at)}}</p>
+          <p v-for="step in attempt.steps" :key="step.seq">{{formatDateTime(step.at)}} · {{phaseLabel(step.report.stage)}}</p>
+          <p v-if="attempt.error_message">{{attempt.error_message}}</p>
+        </section>
+        <t-button variant="text" :loading="loading" @click="openDetail(detail)">刷新进展</t-button>
         <p>
           创建时间：{{ formatDateTime(detail.created_at) }} · 修订
           {{ detail.revision }}
@@ -707,17 +742,19 @@ onMounted(async () => {
           最早执行时间：{{
             detail.not_before
               ? formatDateTime(detail.not_before)
-              : "立即（需单独确认执行）"
+              : detail.authorized_at ? "立即" : "立即（需单独确认执行）"
           }}
         </p></ResourceCard
       >
-      <template #footer
-        ><t-button
+      <template #footer>
+        <t-button v-if="detail.status === PublicationStatus.Pending && !detail.current_attempt_id && !detail.authorized_at" theme="primary" :loading="busy" @click="startExecution">确认执行</t-button>
+        <t-button
           v-if="
-            detail.status === 'pending' &&
+            detail.status === PublicationStatus.Pending &&
             !detail.current_attempt_id &&
             !detail.authorized_at
           "
+          :disabled="busy"
           @click="edit(detail)"
           >编辑</t-button
         ></template

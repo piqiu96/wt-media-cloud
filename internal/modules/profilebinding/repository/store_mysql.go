@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	driver "github.com/go-sql-driver/mysql"
 	"github.com/wt-media/wt-media-cloud/internal/infra/database"
 	"github.com/wt-media/wt-media-cloud/internal/modules/profilebinding/model"
 	"github.com/wt-media/wt-media-cloud/internal/shared/id"
@@ -250,22 +251,24 @@ func getProfile(db *gorm.DB, profileID string) (model.BrowserProfile, bool, erro
 
 // GetProfileInScope 只在 Profile 仍属于其所有者当前绑定的 BitBrowser 主账号时返回。
 // 旧主账号下的行保留在表中，但正常读取不可见。
-func GetProfileInScope(profileID string) (model.BrowserProfile, bool, error) {
+func GetProfileInScope(profileID string, db ...*gorm.DB) (model.BrowserProfile, bool, error) {
+	if len(db) > 0 {
+		return getProfileInScope(db[0], profileID)
+	}
 	return getProfileInScope(database.DB(), profileID)
 }
 
 func getProfileInScope(db *gorm.DB, profileID string) (model.BrowserProfile, bool, error) {
-	row := queryRow(db,
-		`SELECT `+profileColumnsWithPrefix("bp")+` FROM browser_profiles bp JOIN users u ON u.id = bp.user_id WHERE bp.id = ? AND bp.bit_main_user_id = u.bit_main_user_id`,
-		profileID,
-	)
-	profile, err := scanProfile(row)
+	var cookie sql.NullString
+	row := queryRow(db, `SELECT `+profileColumnsWithPrefix("bp")+`, bp.cookie_operation_id FROM browser_profiles bp JOIN users u ON u.id = bp.user_id WHERE bp.id = ? AND bp.bit_main_user_id = u.bit_main_user_id`, profileID)
+	profile, err := scanProfile(row, &cookie)
 	if errors.Is(err, sql.ErrNoRows) {
 		return model.BrowserProfile{}, false, nil
 	}
 	if err != nil {
 		return model.BrowserProfile{}, false, err
 	}
+	profile.CookieOperationID = cookie.String
 	return profile, true, nil
 }
 
@@ -551,17 +554,18 @@ func applyScan(db *gorm.DB, scan model.ProfileScan, observedBitProfileIDs []stri
 
 type scanner interface{ Scan(...any) error }
 
-func scanProfile(row scanner) (model.BrowserProfile, error) {
+func scanProfile(row scanner, extra ...any) (model.BrowserProfile, error) {
 	var profile model.BrowserProfile
 	var groupID, groupName, bitStatus, bitUpdatedAt, proxyType, proxyHost, proxyID, reservedProxyID, bitRemark, remark sql.NullString
 	var proxyPort sql.NullInt64
 	var reservedSince sql.NullTime
-	err := row.Scan(
+	dest := []any{
 		&profile.ID, &profile.UserID, &profile.TeamID, &profile.BitProfileID, &profile.BitMainUserID, &profile.BitUserID,
 		&profile.BitName, &profile.BitSeq, &groupID, &groupName, &bitStatus, &bitUpdatedAt,
 		&proxyType, &proxyHost, &proxyPort, &proxyID, &reservedProxyID, &reservedSince,
 		&bitRemark, &remark, &profile.Enabled, &profile.LocalState, &profile.LastSyncedAt, &profile.CreatedAt, &profile.UpdatedAt,
-	)
+	}
+	err := row.Scan(append(dest, extra...)...)
 	if err != nil {
 		return model.BrowserProfile{}, err
 	}
@@ -633,6 +637,10 @@ func deleteProfile(db *gorm.DB, profileID string, actorID sharedidentity.UserID,
 		}
 		rows, err := execSQL(tx, `DELETE FROM browser_profiles WHERE id = ? AND local_state = 'local_missing' AND reserved_proxy_id IS NULL AND cookie_operation_id IS NULL`, profileID)
 		if err != nil {
+			var constraint *driver.MySQLError
+			if errors.As(err, &constraint) && constraint.Number == 1451 {
+				return model.ErrProfileReferenced
+			}
 			return err
 		}
 		if rows != 1 {
@@ -666,6 +674,9 @@ func UpdateProfile(profileID string, remark *string, enabled *bool, at time.Time
 }
 
 func updateProfile(db *gorm.DB, profileID string, remark *string, enabled *bool, at time.Time) error {
+	return updateProfileUnchecked(db, profileID, remark, enabled, at)
+}
+func updateProfileUnchecked(db *gorm.DB, profileID string, remark *string, enabled *bool, at time.Time) error {
 	var sets []string
 	var args []any
 	if remark != nil {
@@ -709,7 +720,10 @@ func BindProxy(profileID, proxyID, proxyType, proxyHost string, proxyPort int) (
 	return bindProxy(database.DB(), profileID, proxyID, proxyType, proxyHost, proxyPort)
 }
 
-func bindProxy(db *gorm.DB, profileID, proxyID, proxyType, proxyHost string, proxyPort int) (model.BrowserProfile, error) {
+func bindProxy(db *gorm.DB, profileID, proxyID, proxyType, proxyHost string, proxyPort int) (out model.BrowserProfile, err error) {
+	return bindProxyUnchecked(db, profileID, proxyID, proxyType, proxyHost, proxyPort)
+}
+func bindProxyUnchecked(db *gorm.DB, profileID, proxyID, proxyType, proxyHost string, proxyPort int) (model.BrowserProfile, error) {
 	result, err := execSQL(db,
 		`UPDATE browser_profiles SET proxy_id = ?, bit_proxy_type = ?, bit_proxy_host = ?, bit_proxy_port = ?, updated_at = ? WHERE id = ?`,
 		proxyID, nullIfEmpty(proxyType), nullIfEmpty(proxyHost), proxyPort, time.Now(), profileID,
@@ -735,7 +749,10 @@ func UnbindProxy(profileID, expectedProxyID string) (model.BrowserProfile, error
 	return unbindProxy(database.DB(), profileID, expectedProxyID)
 }
 
-func unbindProxy(db *gorm.DB, profileID, expectedProxyID string) (model.BrowserProfile, error) {
+func unbindProxy(db *gorm.DB, profileID, expectedProxyID string) (out model.BrowserProfile, err error) {
+	return unbindProxyUnchecked(db, profileID, expectedProxyID)
+}
+func unbindProxyUnchecked(db *gorm.DB, profileID, expectedProxyID string) (model.BrowserProfile, error) {
 	result, err := execSQL(db,
 		`UPDATE browser_profiles SET proxy_id = NULL, bit_proxy_type = NULL, bit_proxy_host = NULL, bit_proxy_port = 0, updated_at = ? WHERE id = ? AND proxy_id = ?`,
 		time.Now(), profileID, expectedProxyID,
@@ -759,8 +776,11 @@ func unbindProxy(db *gorm.DB, profileID, expectedProxyID string) (model.BrowserP
 
 // ReleaseProxy 只解除正式托管关系，保留窗口的观测代理配置，也就是「改为比特自管」：
 // 比特继续使用该地址，代理资源不再占用窗口配额。
-func ReleaseProxy(profileID, expectedProxyID string) (model.BrowserProfile, error) {
-	result, err := execSQL(database.DB(),
+func ReleaseProxy(profileID, expectedProxyID string) (out model.BrowserProfile, err error) {
+	return releaseProxy(database.DB(), profileID, expectedProxyID)
+}
+func releaseProxy(db *gorm.DB, profileID, expectedProxyID string) (model.BrowserProfile, error) {
+	result, err := execSQL(db,
 		`UPDATE browser_profiles SET proxy_id = NULL, updated_at = ? WHERE id = ? AND proxy_id = ?`,
 		time.Now(), profileID, expectedProxyID,
 	)
@@ -770,7 +790,7 @@ func ReleaseProxy(profileID, expectedProxyID string) (model.BrowserProfile, erro
 	if result == 0 {
 		return model.BrowserProfile{}, model.ErrProfileNotFound
 	}
-	profile, found, err := getProfile(database.DB(), profileID)
+	profile, found, err := getProfile(db, profileID)
 	if err != nil || !found {
 		return model.BrowserProfile{}, model.ErrProfileNotFound
 	}
@@ -783,7 +803,10 @@ func ClearObservedProxy(profileID string) (model.BrowserProfile, error) {
 	return clearObservedProxy(database.DB(), profileID)
 }
 
-func clearObservedProxy(db *gorm.DB, profileID string) (model.BrowserProfile, error) {
+func clearObservedProxy(db *gorm.DB, profileID string) (out model.BrowserProfile, err error) {
+	return clearObservedProxyUnchecked(db, profileID)
+}
+func clearObservedProxyUnchecked(db *gorm.DB, profileID string) (model.BrowserProfile, error) {
 	result, err := execSQL(db,
 		`UPDATE browser_profiles SET bit_proxy_type = NULL, bit_proxy_host = NULL, bit_proxy_port = 0, updated_at = ? WHERE id = ? AND proxy_id IS NULL`,
 		time.Now(), profileID,

@@ -1,0 +1,57 @@
+[
+  {
+    "seq": 1,
+    "result": {
+      "status": "uncertain",
+      "evidence": {
+        "reason": "中文 <>& \\u2028\n"
+      }
+    },
+    "expected": "2136d67e96eb9c8635918855e133f98e9c88aa44274dbfc28430d6bc1fb2a2cb"
+  },
+  {
+    "seq": 9007199254740993,
+    "result": {
+      "status": "reviewing",
+      "evidence": {
+        "scene_closed": true,
+        "receipt_id": "123",
+        "note": "实测 分隔 符"
+      }
+    },
+    "expected": "48fdc4bbd8f4384f709a74ea360b79cf04eca3b5aaea60b14aed7a969fff057d"
+  },
+  {
+    "seq": 3,
+    "result": {
+      "status": "failed",
+      "evidence": {
+        "not_submitted": true,
+        "scene_closed": true
+      },
+      "error_message": "line\nquote\"slash\\\t"
+    },
+    "expected": "93003abd2b1a9a1218976cd72b5fdfa014f834963acb5f4c00132125323361f6"
+  },
+  {
+    "seq": 18446744073709551615,
+    "result": {
+      "status": "uncertain",
+      "evidence": {
+        "nested": [
+          {
+            "emoji": "🎬",
+            "literal": "\\u2028",
+            "separators": "  ",
+            "controls": "\u0000\u0001\u0002\u0003\u0004\u0005\u0006\u0007\b\t\n\u000b\f\r\u000e\u000f\u0010\u0011\u0012\u0013\u0014\u0015\u0016\u0017\u0018\u0019\u001a\u001b\u001c\u001d\u001e\u001f",
+            "limits": [
+              -9223372036854775808,
+              18446744073709551615
+            ]
+          }
+        ]
+      }
+    },
+    "expected": "c5cd33c837c47ade051d2f9aca7a0c1f2765a0cf1902fd75934808b60dcfe430"
+  }
+]

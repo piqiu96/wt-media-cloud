@@ -13,6 +13,14 @@ type Content struct {
 	Confirmed   bool   `json:"confirmed"`
 }
 type Task struct {
+	CancelRequestedAt *time.Time `json:"cancel_requested_at"`
+	AcceptedAt        *time.Time `json:"accepted_at"`
+	PublishedAt       *time.Time `json:"published_at"`
+	PlatformWorkID    *string    `json:"platform_work_id"`
+	WorkURL           *string    `json:"work_url"`
+	FailureCode       *string    `json:"failure_code"`
+	FailureMessage    *string    `json:"failure_message"`
+
 	AuditActor         int64           `json:"-" gorm:"-"`
 	ID                 uint64          `json:"id,string"`
 	TeamID             int64           `json:"team_id,string"`

@@ -1,7 +1,10 @@
 package service
 
-import "github.com/wt-media/wt-media-cloud/internal/modules/mediaaccount/dto"
-import identityservice "github.com/wt-media/wt-media-cloud/internal/modules/identity/service"
+import (
+	identityservice "github.com/wt-media/wt-media-cloud/internal/modules/identity/service"
+	"github.com/wt-media/wt-media-cloud/internal/modules/mediaaccount/dto"
+	"gorm.io/gorm"
+)
 
 // Package-level entry points construct the production account service.
 func CreateAccount(actor identityservice.PublicUser, input CreateAccountInput) (Account, error) {
@@ -12,7 +15,10 @@ func GetAccountRecord(actor identityservice.PublicUser, accountID string) (Accou
 	return defaultAccountService().GetAccountRecord(actor, accountID)
 }
 
-func GetOwnedAccountRecord(actor identityservice.PublicUser, accountID string) (AccountRecord, error) {
+func GetOwnedAccountRecord(actor identityservice.PublicUser, accountID string, db ...*gorm.DB) (AccountRecord, error) {
+	if len(db) > 0 {
+		return newAccountService(mysqlStore{db: db[0]}).GetOwnedAccountRecord(actor, accountID)
+	}
 	return defaultAccountService().GetOwnedAccountRecord(actor, accountID)
 }
 

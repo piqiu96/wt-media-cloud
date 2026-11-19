@@ -9,6 +9,8 @@ import (
 	"unicode/utf8"
 )
 
+const OutputPublishArchived = "archived"
+
 type ComposeOutputVideo struct {
 	Status    string     `json:"status"`
 	Reason    string     `json:"reason"`
