@@ -7,6 +7,7 @@ import { setOverlayScrollLock } from './overlayScrollLock.js'
 
 const props = defineProps({
   visible: Boolean,
+  formActions: Boolean,
   title: { type: String, required: true },
   kind: { type: String, default: 'dialog', validator: value => ['dialog', 'drawer'].includes(value) },
   width: { type: Number, default: 0 },
@@ -122,14 +123,14 @@ function close() {
 </script>
 
 <template>
-  <t-dialog class="resource-overlay-context" v-if="kind === 'dialog'" :visible="visible" :header="title" :width="size" placement="center"
+  <t-dialog :class="{ 'resource-form-actions-scope': formActions }" class="resource-overlay-context" v-if="kind === 'dialog'" :visible="visible" :header="title" :width="size" placement="center"
     dialog-class-name="resource-overlay-dialog" :close-btn="!busy" :close-on-esc-keydown="false" :show-overlay="isTop" :z-index="zIndex"
     :close-on-overlay-click="false" :footer="showFooter" destroy-on-close @close="close">
     <template #closeBtn><button type="button" class="resource-overlay__close" :aria-label="`关闭${title}`"><CloseIcon aria-hidden="true" /></button></template>
     <div ref="body" class="resource-overlay__body"><slot /></div>
     <template v-if="showFooter" #footer><div class="resource-overlay__footer"><slot name="footer" /></div></template>
   </t-dialog>
-  <t-drawer v-else :visible="visible" :header="title" :size="size" :attach="attach" :show-in-attached-element="showInAttachedElement" class="resource-overlay-drawer" :class="{ 'resource-overlay-drawer--full-width': fullWidth }"
+  <t-drawer v-else :visible="visible" :header="title" :size="size" :attach="attach" :show-in-attached-element="showInAttachedElement" class="resource-overlay-drawer" :class="{ 'resource-overlay-drawer--full-width': fullWidth, 'resource-form-actions-scope': formActions }"
     :close-btn="!busy" :close-on-esc-keydown="false" :show-overlay="isTop" :z-index="zIndex" :close-on-overlay-click="false"
     :footer="showFooter" destroy-on-close @close="close">
     <template #closeBtn><button type="button" class="resource-overlay__close" :aria-label="`关闭${title}`"><CloseIcon aria-hidden="true" /></button></template>

@@ -5,6 +5,7 @@ import ResourceOverlay from "../resource/ResourceOverlay.vue";
 import ResourceEmptyState from "../resource/ResourceEmptyState.vue";
 const props = defineProps({
   visible: Boolean,
+  formActions: Boolean,
   title: { type: String, default: "图片预览" },
   images: { type: Array, default: () => [] },
 });
@@ -27,6 +28,7 @@ watch(index, () => {
 </script>
 <template>
   <ResourceOverlay
+    :form-actions="formActions"
     :visible="visible"
     :title="title"
     :width="1120"

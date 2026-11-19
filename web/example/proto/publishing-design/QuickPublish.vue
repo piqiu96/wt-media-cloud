@@ -780,7 +780,7 @@ defineExpose({ open, resume, edit, hasDraft });
         <div class="quick-content-grid">
           <div class="quick-copy-fields">
             <label v-if="platform === '百家号'" data-field="description"
-              ><RequiredLabel>作品描述</RequiredLabel
+              ><RequiredLabel>发布标题</RequiredLabel>
               ><t-textarea
                 :value="row.description"
                 :autosize="{ minRows: 3, maxRows: 5 }"

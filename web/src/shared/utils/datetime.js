@@ -5,9 +5,10 @@
 //
 // 为什么不带秒：带秒时最宽的时间戳是 2026/12/31 23:59:59（约 138px），
 // 列宽压不到 150px 以内；去掉秒后约 118px，150px 定宽不会折行。
-export function formatDateTime(value) {
+export function formatDateTime(value, { timeZone } = {}) {
   if (!value) return '-'
   return new Date(value).toLocaleString('zh-CN', {
+    timeZone,
     hourCycle: 'h23',
     year: 'numeric',
     month: 'numeric',

@@ -27,16 +27,14 @@ try{
  await page.locator('[aria-label="任务搜索"] input').fill(id)
  await page.getByRole('button',{name:'查询',exact:true}).click()
  const row=page.locator('tbody tr').filter({has:page.locator('td').filter({hasText:new RegExp(`^${id}$`)})})
- await row.getByRole('button',{name:'详情',exact:true}).click()
- const detail=page.getByRole('region',{name:'发布任务详情',exact:true})
  if(before.status==='failed'){
-  await detail.getByRole('button',{name:'重试',exact:true}).click()
+  await row.getByRole('button',{name:'重试',exact:true}).click()
   const confirmation=page.locator('.resource-feedback-dialog');await confirmation.waitFor()
   await confirmation.getByRole('button',{name:'取消',exact:true}).click();await confirmation.waitFor({state:'hidden'})
   assert.deepEqual(await get(),before,'Cancel retry must preserve authorization, revision and occupancy')
   assert.deepEqual(await get('/attempts'),original,'Cancel retry must preserve original attempts')
   if(retry){
-   await detail.getByRole('button',{name:'重试',exact:true}).click();await confirmation.waitFor()
+   await row.getByRole('button',{name:'重试',exact:true}).click();await confirmation.waitFor()
    const response=page.waitForResponse(r=>r.request().method()==='POST'&&new URL(r.url()).pathname===route+'/retry')
    await confirmation.getByRole('button',{name:'确认重试',exact:true}).click()
    assert.equal((await response).status(),200);await confirmation.waitFor({state:'hidden'})
@@ -47,11 +45,11 @@ try{
    assert.deepEqual(await get('/attempts'),original,'Retry must preserve the original attempts')
   }
  }else{
- await detail.getByRole('button',{name:'核实结果',exact:true}).click()
+ await row.getByRole('button',{name:'核实结果',exact:true}).click()
  const dialog=page.getByRole('dialog',{name:'核实发布结果',exact:true})
  await dialog.waitFor();await dialog.getByRole('button',{name:'取消',exact:true}).click();await dialog.waitFor({state:'hidden'})
  assert.deepEqual(await get(),before,'Cancel must not modify the task')
- await detail.getByRole('button',{name:'核实结果',exact:true}).click()
+ await row.getByRole('button',{name:'核实结果',exact:true}).click()
  await dialog.getByRole('button',{name:'保存核实结果',exact:true}).click()
  await dialog.getByText('请选择核实结论，填写原因及实际核实依据（至少 10 字）。',{exact:true}).waitFor()
  assert.deepEqual(await get(),before,'Incomplete evidence must not modify the task')
@@ -74,6 +72,9 @@ try{
   assert.deepEqual(await get(),after)
  }
  }
+ if(await page.getByRole('dialog',{name:'核实发布结果',exact:true}).isVisible()) await page.getByRole('button',{name:'取消',exact:true}).click()
+ await row.getByRole('button',{name:'详情',exact:true}).click()
+ await page.getByRole('heading',{name:'发布任务详情',exact:true}).waitFor()
  await page.screenshot({path:path.join(evidence,'02-original-attempt-preserved.png'),fullPage:true})
  assert.deepEqual(errors,[]);assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false)
  const current=await get();await fs.writeFile(path.join(evidence,'readback.json'),JSON.stringify({task_id:id,status:current.status,revision:current.revision,attempt_count:current.attempt_count,conclusion:conclusion||'read_only',page_errors:errors,platform_submit:false},null,2))

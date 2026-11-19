@@ -1,5 +1,5 @@
 /* Explicit form surfaces share solid actions. Embedded tables retain row actions. */
-:is(.resource-editor-page, .resource-form-actions, .resource-form, .resource-overlay__body, .resource-overlay__footer, .resource-detail-page__footer, .wt-filter-actions, .cover-dialog-actions, .resource-feedback-dialog)
+:where(.resource-form-actions-scope) :is(.resource-editor-page, .resource-form-actions, .resource-form, .resource-overlay__body, .resource-overlay__footer, .resource-detail-page__footer, .wt-filter-actions, .cover-dialog-actions, .resource-feedback-dialog)
 .t-button:not(:where(.resource-embedded-table *, .resource-notice__actions *, .t-alert__operation *, .t-message *, .resource-row-actions *, .resource-field-help *, .resource-field-help, .resource-advanced-toggle *, .resource-advanced-toggle, .t-input-number *, .t-pagination *, .t-button--shape-square, .t-button--shape-circle)) {
   min-height: 36px;
   border-radius: 4px;
@@ -10,36 +10,36 @@
   border: 1px solid transparent;
   color: var(--wt-text-primary);
 }
-:is(.resource-editor-page, .resource-form-actions, .resource-form, .resource-overlay__body, .resource-overlay__footer, .resource-detail-page__footer, .wt-filter-actions, .cover-dialog-actions, .resource-feedback-dialog)
+:where(.resource-form-actions-scope) :is(.resource-editor-page, .resource-form-actions, .resource-form, .resource-overlay__body, .resource-overlay__footer, .resource-detail-page__footer, .wt-filter-actions, .cover-dialog-actions, .resource-feedback-dialog)
 .t-button:not(:where(.resource-embedded-table *, .resource-notice__actions *, .t-alert__operation *, .t-message *, .resource-row-actions *, .resource-field-help *, .resource-field-help, .resource-advanced-toggle *, .resource-advanced-toggle, .t-input-number *, .t-pagination *, .t-button--shape-square, .t-button--shape-circle)):hover:not(:disabled):not(.t-is-disabled) {
   background: var(--wt-color-bg-hover);
   color: var(--wt-text-primary);
 }
-:is(.resource-editor-page, .resource-form-actions, .resource-form, .resource-overlay__body, .resource-overlay__footer, .resource-detail-page__footer, .wt-filter-actions, .cover-dialog-actions, .resource-feedback-dialog)
+:where(.resource-form-actions-scope) :is(.resource-editor-page, .resource-form-actions, .resource-form, .resource-overlay__body, .resource-overlay__footer, .resource-detail-page__footer, .wt-filter-actions, .cover-dialog-actions, .resource-feedback-dialog)
 .t-button--theme-primary.t-button--variant-base:not(:where(.resource-embedded-table *, .resource-notice__actions *, .t-alert__operation *, .t-message *, .resource-row-actions *)) {
   background: var(--wt-primary);
   color: var(--wt-color-text-inverse);
   border-color: var(--wt-primary);
 }
-:is(.resource-editor-page, .resource-form-actions, .resource-form, .resource-overlay__body, .resource-overlay__footer, .resource-detail-page__footer, .wt-filter-actions, .cover-dialog-actions, .resource-feedback-dialog)
+:where(.resource-form-actions-scope) :is(.resource-editor-page, .resource-form-actions, .resource-form, .resource-overlay__body, .resource-overlay__footer, .resource-detail-page__footer, .wt-filter-actions, .cover-dialog-actions, .resource-feedback-dialog)
 .t-button--theme-primary.t-button--variant-base:hover:not(:disabled):not(.t-is-disabled):not(:where(.resource-embedded-table *, .resource-notice__actions *, .t-alert__operation *, .t-message *, .resource-row-actions *)) {
   background: var(--wt-primary-hover);
   color: var(--wt-color-text-inverse);
 }
-:is(.resource-editor-page, .resource-form-actions, .resource-form, .resource-overlay__body, .resource-overlay__footer, .resource-detail-page__footer, .wt-filter-actions, .cover-dialog-actions, .resource-feedback-dialog)
+:where(.resource-form-actions-scope) :is(.resource-editor-page, .resource-form-actions, .resource-form, .resource-overlay__body, .resource-overlay__footer, .resource-detail-page__footer, .wt-filter-actions, .cover-dialog-actions, .resource-feedback-dialog)
 .t-button--theme-danger.t-button--variant-base:not(:where(.resource-embedded-table *, .resource-notice__actions *, .t-alert__operation *, .t-message *, .resource-row-actions *)) {
   background: var(--wt-danger);
   color: var(--wt-color-text-inverse);
   border-color: var(--wt-danger);
 }
-:is(.resource-editor-page, .resource-form-actions, .resource-form, .resource-overlay__body, .resource-overlay__footer, .resource-detail-page__footer, .wt-filter-actions, .cover-dialog-actions, .resource-feedback-dialog)
+:where(.resource-form-actions-scope) :is(.resource-editor-page, .resource-form-actions, .resource-form, .resource-overlay__body, .resource-overlay__footer, .resource-detail-page__footer, .wt-filter-actions, .cover-dialog-actions, .resource-feedback-dialog)
 .t-button--theme-danger.t-button--variant-base:hover:not(:disabled):not(.t-is-disabled):not(:where(.resource-embedded-table *, .resource-notice__actions *, .t-alert__operation *, .t-message *, .resource-row-actions *)) {
   background: var(--wt-color-danger-hover);
   color: var(--wt-color-text-inverse);
 }
-:is(.resource-editor-page, .resource-form-actions, .resource-form, .resource-overlay__body, .resource-overlay__footer, .resource-detail-page__footer, .wt-filter-actions, .cover-dialog-actions, .resource-feedback-dialog)
+:where(.resource-form-actions-scope) :is(.resource-editor-page, .resource-form-actions, .resource-form, .resource-overlay__body, .resource-overlay__footer, .resource-detail-page__footer, .wt-filter-actions, .cover-dialog-actions, .resource-feedback-dialog)
 .t-button.is-danger:not(:where(.resource-embedded-table *, .resource-notice__actions *, .t-alert__operation *, .t-message *, .resource-row-actions *)) { color: var(--wt-danger); background: var(--wt-danger-bg); }
-:is(.resource-editor-page, .resource-form-actions, .resource-form, .resource-overlay__body, .resource-overlay__footer, .resource-detail-page__footer, .wt-filter-actions, .cover-dialog-actions, .resource-feedback-dialog)
+:where(.resource-form-actions-scope) :is(.resource-editor-page, .resource-form-actions, .resource-form, .resource-overlay__body, .resource-overlay__footer, .resource-detail-page__footer, .wt-filter-actions, .cover-dialog-actions, .resource-feedback-dialog)
 .t-button:is(:disabled, .t-is-disabled):not(.t-is-loading):not(.t-button--variant-text):not(:where(.resource-embedded-table *, .resource-notice__actions *, .t-alert__operation *, .t-message *, .resource-row-actions *, .resource-field-help *, .resource-field-help, .t-input-number *, .t-pagination *)) {
   color: var(--wt-color-text-assist);
   background: var(--wt-color-bg-subtle);
@@ -48,7 +48,7 @@
 }
 
 /* Disabled text actions keep their text-only treatment. */
-:is(.resource-editor-page, .resource-form-actions, .resource-form, .resource-overlay__body, .resource-overlay__footer, .resource-detail-page__footer, .wt-filter-actions, .cover-dialog-actions, .resource-feedback-dialog)
+:where(.resource-form-actions-scope) :is(.resource-editor-page, .resource-form-actions, .resource-form, .resource-overlay__body, .resource-overlay__footer, .resource-detail-page__footer, .wt-filter-actions, .cover-dialog-actions, .resource-feedback-dialog)
 .t-button--variant-text:is(:disabled, .t-is-disabled):not(.t-is-loading):not(:where(.resource-embedded-table *, .resource-notice__actions *, .t-alert__operation *, .t-message *, .resource-row-actions *, .resource-field-help *, .resource-field-help, .t-input-number *, .t-pagination *)) {
   color: var(--wt-color-text-assist);
   background: transparent;
@@ -56,7 +56,7 @@
 }
 
 /* Keep keyboard focus visible after explicit surface backgrounds are applied. */
-:is(.resource-editor-page, .resource-form-actions, .resource-form, .resource-overlay__body, .resource-overlay__footer, .resource-detail-page__footer, .wt-filter-actions, .cover-dialog-actions, .resource-feedback-dialog)
+:where(.resource-form-actions-scope) :is(.resource-editor-page, .resource-form-actions, .resource-form, .resource-overlay__body, .resource-overlay__footer, .resource-detail-page__footer, .wt-filter-actions, .cover-dialog-actions, .resource-feedback-dialog)
 .t-button:focus-visible:not(:disabled):not(.t-is-disabled):not(:where(.resource-embedded-table *, .resource-notice__actions *, .t-alert__operation *, .t-message *, .resource-row-actions *, .resource-field-help *, .resource-field-help, .t-input-number *, .t-pagination *)) {
   outline: 2px solid var(--wt-primary);
   outline-offset: 2px;
