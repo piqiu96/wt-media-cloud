@@ -49,7 +49,7 @@ func (s ExecutionStore) ResolveFailure(candidate model.Task, actor int64, in mod
 		return model.Task{}, ErrConflict
 	}
 	var out model.Task
-	e := s.DB.Transaction(func(tx *gorm.DB) error {
+	e := currentTransaction(s.DB, func(tx *gorm.DB) error {
 		v, e := taskSnapshot(tx, candidate.ID)
 		if e != nil {
 			return e
@@ -91,8 +91,8 @@ func (s ExecutionStore) ResolveFailure(candidate model.Task, actor int64, in mod
 }
 func (s ExecutionStore) Retry(candidate model.Task, revision uint64, actor int64, now time.Time) (model.Task, error) {
 	var out model.Task
-	e := s.DB.Transaction(func(tx *gorm.DB) error {
-		if _, e := s.lockedInput(tx, candidate); e != nil {
+	e := currentTransaction(s.DB, func(tx *gorm.DB) error {
+		if _, e := s.readInput(tx, candidate); e != nil {
 			return e
 		}
 		v, e := taskSnapshot(tx, candidate.ID)
