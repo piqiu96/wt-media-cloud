@@ -75,3 +75,16 @@ The migration runner records the version and skips replay. Verify the column's
 non-null/default properties, unchanged row count and the concurrent report tests
 in `internal/modules/publish/repository`. Roll back the application first; then
 `ALTER TABLE publication_attempt DROP COLUMN revision` removes only the token.
+
+`20261120_108_publication_task_profile_reference.sql` is owned by Publish. It
+adds a stored generated Profile ID from the already-frozen task JSON and a
+restrictive foreign key. Task save and Profile deletion now serialize through
+InnoDB reference integrity without ordinary-mutation publication callbacks.
+Before rollout, existing non-empty Profile IDs must be valid numeric references;
+this migration deliberately fails on orphaned/invalid saved inputs rather than
+silently deleting or rewriting history. Rows without a saved Profile ID derive
+NULL (legacy task data only). Re-run through the migration ledger is a no-op.
+Rollback requires removing the foreign key, index and generated column; it
+reopens the save/delete race, so do not roll back while task creation is active.
+Verified by both orderings of create/delete and fresh/full migration replay in
+isolated MySQL tests.

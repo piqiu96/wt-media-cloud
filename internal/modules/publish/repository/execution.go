@@ -233,7 +233,7 @@ func ProfileReferenced(db *gorm.DB, profile string) (bool, error) {
 	if n > 0 {
 		return true, nil
 	}
-	e := db.Model(&model.Task{}).Where("JSON_UNQUOTE(JSON_EXTRACT(resource_snapshot_json, '$.browser_profile_id'))=?", profile).Count(&n).Error
+	e := db.Model(&model.Task{}).Where("browser_profile_id=?", profile).Count(&n).Error
 	return n > 0, e
 }
 

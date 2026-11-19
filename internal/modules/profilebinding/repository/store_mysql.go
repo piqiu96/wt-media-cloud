@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	driver "github.com/go-sql-driver/mysql"
 	"github.com/wt-media/wt-media-cloud/internal/infra/database"
 	"github.com/wt-media/wt-media-cloud/internal/modules/profilebinding/model"
 	"github.com/wt-media/wt-media-cloud/internal/shared/id"
@@ -633,6 +634,10 @@ func deleteProfile(db *gorm.DB, profileID string, actorID sharedidentity.UserID,
 		}
 		rows, err := execSQL(tx, `DELETE FROM browser_profiles WHERE id = ? AND local_state = 'local_missing' AND reserved_proxy_id IS NULL AND cookie_operation_id IS NULL`, profileID)
 		if err != nil {
+			var constraint *driver.MySQLError
+			if errors.As(err, &constraint) && constraint.Number == 1451 {
+				return model.ErrProfileReferenced
+			}
 			return err
 		}
 		if rows != 1 {

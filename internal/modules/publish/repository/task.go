@@ -70,6 +70,9 @@ func (s Store) Create(v model.Task) (model.Task, error) {
 	})
 	if err != nil {
 		var duplicate *mysql.MySQLError
+		if errors.As(err, &duplicate) && duplicate.Number == 1452 {
+			return model.Task{}, ErrConflict
+		}
 		if errors.As(err, &duplicate) && duplicate.Number == 1062 {
 			if prior, e := s.ByRequest(v.CreatedBy, v.RequestKey); e == nil {
 				if prior.RequestHash == v.RequestHash {

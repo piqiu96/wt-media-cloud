@@ -3,6 +3,7 @@ package repository_test
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -404,5 +405,33 @@ func TestLiveProfileReferencesIncludeHistoryAndUnclaimedTask(t *testing.T) {
 	}
 	if used, e := repo.ProfileReferenced(s.DB, "38"); e != nil || used {
 		t.Fatalf("unrelated Profile: %v %v", used, e)
+	}
+}
+
+func TestLiveTaskProfileReferencePreventsDeleteCreateRace(t *testing.T) {
+	for _, deletionFirst := range []bool{true, false} {
+		t.Run(fmt.Sprint(deletionFirst), func(t *testing.T) {
+			db := isolated(t)
+			if err := db.Exec("INSERT INTO browser_profiles(id) VALUES(37)").Error; err != nil {
+				t.Fatal(err)
+			}
+			candidate := task("profile-reference-race", 42, 1)
+			candidate.ResourceSnapshot = []byte(`{"browser_profile_id":"37"}`)
+			if deletionFirst {
+				if err := db.Exec("DELETE FROM browser_profiles WHERE id=37").Error; err != nil {
+					t.Fatal(err)
+				}
+				if _, err := store(db).Create(candidate); err == nil {
+					t.Fatal("saved reference to deleted Profile")
+				}
+			} else {
+				if _, err := store(db).Create(candidate); err != nil {
+					t.Fatal(err)
+				}
+				if err := db.Exec("DELETE FROM browser_profiles WHERE id=37").Error; err == nil {
+					t.Fatal("deleted Profile referenced by unclaimed task")
+				}
+			}
+		})
 	}
 }
