@@ -18,7 +18,7 @@ await fs.mkdir(evidence,{recursive:true})
 const browser=await chromium.launch({channel:'chrome',headless:true})
 const context=await browser.newContext({storageState:state,viewport:{width:1440,height:1100}})
 const page=await context.newPage(),errors=[];page.on('pageerror',e=>errors.push(e.message))
-const route=`/api/v1/publications/${id}`
+const route=`/api/v1/publication/${id}`
 async function get(suffix=''){const r=await context.request.get(new URL(route+suffix,base).href);assert.equal(r.status(),200);const v=await r.json();assert.equal(v.errcode,0);return v.data}
 try{
  const before=await get(),original=await get('/attempts');assert(['uncertain','failed'].includes(before.status))
