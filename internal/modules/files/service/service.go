@@ -55,11 +55,6 @@ type Service struct {
 	Inspect       func(context.Context, string, string) (string, string, error)
 }
 
-// SetReferenceCheck binds the known business owners at bootstrap, before serving requests.
-var referenceCheck func(*gorm.DB, int64) error
-
-func SetReferenceCheck(check func(*gorm.DB, int64) error) { referenceCheck = check }
-
 // LockAvailable serializes saved references with deletion. Lock IDs in a stable order.
 func LockAvailable(tx *gorm.DB, ids []int64) error {
 	ordered := append([]int64(nil), ids...)
