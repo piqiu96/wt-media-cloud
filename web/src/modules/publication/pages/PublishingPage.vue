@@ -22,9 +22,9 @@ import { formatDateTime } from "../../../shared/utils/datetime.js";
 import {
   definitivePublicationRejection,
   contentProblem,
-  publicationStatuses,
   outputUnavailable,
 } from "../eligibility.js";
+import { PublicationStatus, publicationStatuses, attemptStageLabels } from "../status.js";
 import PublishingResourcePicker from "../components/PublishingResourcePicker.vue";
 import PublishingRecoveryDialog from "../components/PublishingRecoveryDialog.vue";
 const client = createPublicationClient(),
@@ -40,23 +40,23 @@ const blankFilters = () => ({
   category_id: "",
   created_range: [],
 });
-const executionEnabled = ref(false), attempts = ref([]);
+const attemptHistory = ref([]);
 const recoveryVisible=ref(false),recoveryTask=ref(null),recoveryError=ref("");
 const summary = ref(null),
   advanced = ref(false);
 const metricItems = computed(() => [
   { key: "", label: "全部任务", value: summary.value?.all ?? "—" },
   {
-    key: "awaiting_human",
+    key: PublicationStatus.AwaitingHuman,
     label: "等待人工",
-    value: summary.value?.awaiting_human ?? "—",
+    value: summary.value?.[PublicationStatus.AwaitingHuman] ?? "—",
     tone: "warning",
   },
-  { key: "running", label: "执行中", value: summary.value?.running ?? "—" },
+  { key: PublicationStatus.Running, label: "执行中", value: summary.value?.[PublicationStatus.Running] ?? "—" },
   {
-    key: "uncertain",
+    key: PublicationStatus.Uncertain,
     label: "结果待确认",
-    value: summary.value?.uncertain ?? "—",
+    value: summary.value?.[PublicationStatus.Uncertain] ?? "—",
     tone: "warning",
   },
 ]);
@@ -141,7 +141,6 @@ async function load() {
     rows.value = data.items;
     total.value = data.total;
     summary.value = data.summary;
-    executionEnabled.value = data.execution_enabled === true;
   } catch (e) {
     if (n === loadSequence) error.value = e.message;
   } finally {
@@ -194,9 +193,9 @@ async function openDetail(row) {
   loading.value = true;
   error.value = "";
   try {
-    const [task, history] = await Promise.all([client.get(row.id), client.attempts(row.id)]);
+    const [task, history] = await Promise.all([client.get(row.id), client.attempt(row.id)]);
     detail.value = task;
-    attempts.value = history;
+    attemptHistory.value = history;
     view.value = "detail";
   } catch (e) {
     error.value = e.message;
@@ -204,11 +203,11 @@ async function openDetail(row) {
     loading.value = false;
   }
 }
-function resolutionLabel(note){try {const r=JSON.parse(note);return `${r.conclusion==='failed'?'确认未发布':'仍无法判断'} · ${r.evidence.reason} · ${r.evidence.basis}`;}catch{return note;}}
-const phaseLabel = (value) => ({claimed:"已领取",preparing:"准备资源",ready:"资源及账号已核对",submitting:"正在提交",awaiting_human:"等待人工",connection_lost:"连接中断，等待核实",finished:"执行已结束"})[value] || "等待执行器反馈";
+function resolutionLabel(note){try {const r=JSON.parse(note);return `${r.conclusion===PublicationStatus.Failed?'确认未发布':'仍无法判断'} · ${r.evidence.reason} · ${r.evidence.basis}`;}catch{return note;}}
+const phaseLabel = (value) => attemptStageLabels[value] || "等待执行器反馈";
 async function startExecution() {
   const task = detail.value;
-  if (busy.value || !task || !executionEnabled.value) return;
+  if (busy.value || !task) return;
   busy.value = true;
   error.value = "";
   try {
@@ -224,7 +223,7 @@ async function startExecution() {
   } finally { busy.value = false; }
 }
 function openVerification() {
-  if(busy.value || detail.value?.status!=='uncertain')return;
+  if(busy.value || detail.value?.status!==PublicationStatus.Uncertain)return;
   recoveryTask.value=JSON.parse(JSON.stringify(detail.value));
   recoveryError.value='';recoveryVisible.value=true;
 }
@@ -244,7 +243,7 @@ async function saveVerification(input) {
 }
 async function retryExecution() {
   const task=detail.value;
-  if(busy.value || !task || task.status!=='failed' || !executionEnabled.value)return;
+  if(busy.value || !task || task.status!==PublicationStatus.Failed)return;
   busy.value=true;error.value='';
   try {
     if(!(await feedback.confirmWarning({title:'重试任务',message:'确认原尝试无可发布稿件、执行现场已结束。将复查原账号、成片、封面与内容，沿用本任务重新执行；历史尝试与占用保留。',confirmText:'确认重试'})))return;
@@ -260,7 +259,7 @@ async function edit(row) {
   error.value = "";
   try {
     const v = await client.get(row.id);
-    if (v.status !== "pending" || v.current_attempt_id || v.authorized_at)
+    if (v.status !== PublicationStatus.Pending || v.current_attempt_id || v.authorized_at)
       throw Error("当前任务已不能编辑，请刷新列表");
     const [a, o] = await Promise.all([
       accounts.get(v.media_account_id),
@@ -540,7 +539,7 @@ onMounted(async () => {
                   >详情</t-button
                 ><t-button
                   v-if="
-                    row.status === 'pending' &&
+                    row.status === PublicationStatus.Pending &&
                     !row.current_attempt_id &&
                     !row.authorized_at
                   "
@@ -758,12 +757,12 @@ onMounted(async () => {
       >
       <ResourceCard
         ><h3>执行历史</h3>
-        <p v-if="!attempts.length">任务尚未执行</p>
+        <p v-if="!attemptHistory.length">任务尚未执行</p>
         <p v-if="detail.authorized_at">已确认执行：{{formatDateTime(detail.authorized_at)}} · 仅由账号所属用户的 Agent 执行</p>
-        <p v-if="detail.status === 'uncertain'">结果尚未确认，请保留现场，避免重复发布。</p>
-        <p v-if="detail.status === 'reviewing'">平台已接收，正在审核；尚未确认为公开作品。</p>
+        <p v-if="detail.status === PublicationStatus.Uncertain">结果尚未确认，请保留现场，避免重复发布。</p>
+        <p v-if="detail.status === PublicationStatus.Reviewing">平台已接收，正在审核；尚未确认为公开作品。</p>
         <p v-if="detail.failure_message">平台反馈：{{detail.failure_message}}</p>
-        <section v-for="attempt in attempts" :key="attempt.id" class="resource-editor-section">
+        <section v-for="attempt in attemptHistory" :key="attempt.id" class="resource-editor-section">
           <h4>尝试 {{attempt.attempt_no}} · {{phaseLabel(attempt.stage)}}</h4>
           <p>开始：{{formatDateTime(attempt.started_at)}} · 最近反馈：{{formatDateTime(attempt.heartbeat_at)}}</p>
           <p v-for="step in attempt.steps" :key="step.seq">{{formatDateTime(step.at)}} · {{phaseLabel(step.report.stage)}}</p>
@@ -784,12 +783,12 @@ onMounted(async () => {
         </p></ResourceCard
       >
       <template #footer>
-        <t-button v-if="detail.status === 'uncertain'" theme="primary" :disabled="busy" @click="openVerification">核实结果</t-button>
-        <t-button v-if="detail.status === 'failed' && !detail.cancel_requested_at && executionEnabled" theme="primary" :loading="busy" @click="retryExecution">重试</t-button>
-        <t-button v-if="detail.status === 'pending' && !detail.current_attempt_id && !detail.authorized_at && executionEnabled" theme="primary" :loading="busy" @click="startExecution">确认执行</t-button>
+        <t-button v-if="detail.status === PublicationStatus.Uncertain" theme="primary" :disabled="busy" @click="openVerification">核实结果</t-button>
+        <t-button v-if="detail.status === PublicationStatus.Failed && !detail.cancel_requested_at" theme="primary" :loading="busy" @click="retryExecution">重试</t-button>
+        <t-button v-if="detail.status === PublicationStatus.Pending && !detail.current_attempt_id && !detail.authorized_at" theme="primary" :loading="busy" @click="startExecution">确认执行</t-button>
         <t-button
           v-if="
-            detail.status === 'pending' &&
+            detail.status === PublicationStatus.Pending &&
             !detail.current_attempt_id &&
             !detail.authorized_at
           "

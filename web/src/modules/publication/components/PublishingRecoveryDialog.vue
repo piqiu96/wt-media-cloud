@@ -1,5 +1,6 @@
 <script setup>
 import { ref, watch } from 'vue';
+import { PublicationStatus } from '../status.js';
 import ResourceOverlay from '../../../shared/ui/resource/ResourceOverlay.vue';
 import FeedbackAlert from '../../../shared/ui/feedback/FeedbackAlert.vue';
 const props=defineProps({visible:Boolean,task:Object,busy:Boolean,error:String});
@@ -10,7 +11,7 @@ function submit(){
  validation.value='';
  if(!conclusion.value||!reason.value.trim()||basis.value.trim().length<10){validation.value='请选择核实结论，填写原因及实际核实依据（至少 10 字）。';return;}
  emit('submit',{attempt_id:props.task.current_attempt_id,expected_revision:props.task.revision,conclusion:conclusion.value,
-  evidence:{platform_uid:props.task.platform_account_uid,reason:reason.value.trim(),basis:basis.value.trim(),scene_closed:conclusion.value==='failed',no_publishable_work:conclusion.value==='failed'}});
+  evidence:{platform_uid:props.task.platform_account_uid,reason:reason.value.trim(),basis:basis.value.trim(),scene_closed:conclusion.value===PublicationStatus.Failed,no_publishable_work:conclusion.value===PublicationStatus.Failed}});
 }
 </script>
 <template>
@@ -18,8 +19,8 @@ function submit(){
   <FeedbackAlert v-if="error || validation" theme="error" :message="error || validation" />
   <div class="publication-verification">
    <p>任务 {{task?.id}} · 原尝试 {{task?.current_attempt_id}}。请检查原账号稿件及执行证据，核实不会重新投稿。</p>
-   <label>核实结论 *<t-select v-model="conclusion" aria-label="核实结论" :disabled="busy" :options="[{label:'确认未发布',value:'failed'},{label:'仍无法判断',value:'uncertain'}]" /></label>
-   <p v-if="conclusion === 'failed'">只有确认无可继续发布的稿件、原执行进程与浏览器已安全结束，才能记录为失败。没有提交标记不能单独作为依据。</p>
+   <label>核实结论 *<t-select v-model="conclusion" aria-label="核实结论" :disabled="busy" :options="[{label:'确认未发布',value:PublicationStatus.Failed},{label:'仍无法判断',value:PublicationStatus.Uncertain}]" /></label>
+   <p v-if="conclusion === PublicationStatus.Failed">只有确认无可继续发布的稿件、原执行进程与浏览器已安全结束，才能记录为失败。没有提交标记不能单独作为依据。</p>
    <label>失败原因 / 核实原因 *<t-input v-model="reason" aria-label="核实原因" :maxlength="200" :disabled="busy" /></label>
    <label>核实依据 *<t-textarea v-model="basis" aria-label="核实依据" :maxlength="2000" :autosize="{minRows:4,maxRows:8}" :disabled="busy" /></label>
   </div>

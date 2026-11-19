@@ -14,13 +14,13 @@ import (
 )
 
 type ExecutionReport struct {
-	AttemptID    uint64 `json:"attempt_id,string"`
-	Seq          uint64 `json:"report_seq"`
-	Stage        string `json:"stage"`
-	PlatformUID  string `json:"platform_uid,omitempty"`
-	BitProfileID string `json:"bit_profile_id,omitempty"`
-	VideoSHA256  string `json:"video_sha256,omitempty"`
-	CoverSHA256  string `json:"cover_sha256,omitempty"`
+	AttemptID    uint64       `json:"attempt_id,string"`
+	Seq          uint64       `json:"report_seq"`
+	Stage        AttemptStage `json:"stage,omitempty"`
+	PlatformUID  string       `json:"platform_uid,omitempty"`
+	BitProfileID string       `json:"bit_profile_id,omitempty"`
+	VideoSHA256  string       `json:"video_sha256,omitempty"`
+	CoverSHA256  string       `json:"cover_sha256,omitempty"`
 }
 type Completion struct {
 	AttemptID  uint64          `json:"attempt_id,string"`
@@ -38,7 +38,7 @@ type ResultEvidence struct {
 	SceneClosed  bool   `json:"scene_closed,omitempty"`
 }
 type ExecutionResult struct {
-	Status         string         `json:"status"`
+	Status         Status         `json:"status"`
 	PlatformWorkID string         `json:"platform_work_id,omitempty"`
 	WorkURL        string         `json:"work_url,omitempty"`
 	ErrorCode      string         `json:"error_code,omitempty"`
@@ -62,14 +62,17 @@ func ParseResult(raw json.RawMessage) (ExecutionResult, error) {
 	return v, nil
 }
 
+const ExecutionInputChanged = "PUBLICATION_INPUT_CHANGED"
+
 type ExecutionFeedback struct {
-	TaskStatus    string  `json:"task_status"`
-	AttemptStatus string  `json:"attempt_status"`
-	AttemptID     uint64  `json:"attempt_id,string"`
-	Seq           uint64  `json:"report_seq"`
-	StopRequested bool    `json:"stop_requested"`
-	AllowSubmit   bool    `json:"allow_submit"`
-	ResultHash    *string `json:"result_hash,omitempty"`
+	StopReason    string        `json:"stop_reason,omitempty"`
+	TaskStatus    Status        `json:"task_status"`
+	AttemptStatus AttemptStatus `json:"attempt_status"`
+	AttemptID     uint64        `json:"attempt_id,string"`
+	Seq           uint64        `json:"report_seq"`
+	StopRequested bool          `json:"stop_requested"`
+	AllowSubmit   bool          `json:"allow_submit"`
+	ResultHash    *string       `json:"result_hash,omitempty"`
 }
 
 // Canonical JSON matches the Agent's persisted UTF-8 packet (Python sort_keys,

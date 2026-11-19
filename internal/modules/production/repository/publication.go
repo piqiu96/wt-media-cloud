@@ -9,7 +9,7 @@ import (
 )
 
 func LockSavedPublicationOutput(tx *gorm.DB, id int64) (model.CompositeOutput, bool, error) {
-	item, e := scanComposeOutput(tx.Raw(`SELECT `+composeOutputColumns+` FROM composite_outputs WHERE id=? FOR UPDATE`, id).Row())
+	item, e := scanComposeOutput(tx.Raw(`SELECT `+composeOutputColumns+` FROM composite_outputs WHERE id=? FOR SHARE`, id).Row())
 	if errors.Is(e, sql.ErrNoRows) {
 		return item, false, nil
 	}
@@ -17,7 +17,7 @@ func LockSavedPublicationOutput(tx *gorm.DB, id int64) (model.CompositeOutput, b
 		return item, false, e
 	}
 	var platforms []byte
-	e = tx.Raw("SELECT platforms_json FROM compose_tasks WHERE id=? FOR UPDATE", item.TaskID).Row().Scan(&platforms)
+	e = tx.Raw("SELECT platforms_json FROM compose_tasks WHERE id=? FOR SHARE", item.TaskID).Row().Scan(&platforms)
 	if e != nil {
 		return item, false, e
 	}

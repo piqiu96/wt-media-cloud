@@ -150,25 +150,25 @@ func TestLiveExecutionReportsNeverCacheSubmitPermissionOrRewriteResult(t *testin
 		t.Fatalf("%+v %v", claim, e)
 	}
 	report := model.ExecutionReport{AttemptID: claim.Attempt.ID, Seq: 1, Stage: "ready", PlatformUID: "uid-a", BitProfileID: "bit-37", VideoSHA256: claim.Attempt.Input.VideoSHA256, CoverSHA256: claim.Attempt.Input.CoverSHA256}
-	if _, e = s.Progress(claim.Task, 9, report, true, now); e != nil {
+	if _, e = s.Report(claim.Task, 9, report, true, now); e != nil {
 		t.Fatal(e)
 	}
 	report.Seq = 2
 	report.Stage = "submitting"
-	permission, e := s.Progress(claim.Task, 9, report, true, now)
+	permission, e := s.Report(claim.Task, 9, report, true, now)
 	if e != nil || !permission.AllowSubmit {
 		t.Fatalf("%+v %v", permission, e)
 	}
-	duplicate, e := s.Progress(claim.Task, 9, report, true, now)
+	duplicate, e := s.Report(claim.Task, 9, report, true, now)
 	if e != nil || duplicate.AllowSubmit {
 		t.Fatalf("replayed permission %+v %v", duplicate, e)
 	}
 	report.Seq = 1
-	if _, e = s.Progress(claim.Task, 9, report, true, now); !errors.Is(e, repo.ErrConflict) {
+	if _, e = s.Report(claim.Task, 9, report, true, now); !errors.Is(e, repo.ErrConflict) {
 		t.Fatal(e)
 	}
 	report.Seq = 3
-	if _, e = s.Progress(claim.Task, 10, report, true, now); !errors.Is(e, repo.ErrNotFound) {
+	if _, e = s.Report(claim.Task, 10, report, true, now); !errors.Is(e, repo.ErrNotFound) {
 		t.Fatal(e)
 	}
 	result := json.RawMessage(`{"status":"uncertain","evidence":{"scene_closed":false}}`)
@@ -208,20 +208,20 @@ func TestLiveExecutionStaleSessionAndStopCannotStartSubmission(t *testing.T) {
 		t.Fatal(e)
 	}
 	ready := model.ExecutionReport{AttemptID: claim.Attempt.ID, Seq: 1, Stage: "ready", PlatformUID: "uid-a", BitProfileID: "bit-37", VideoSHA256: claim.Attempt.Input.VideoSHA256, CoverSHA256: claim.Attempt.Input.CoverSHA256}
-	if _, e = s.Progress(claim.Task, 9, ready, false, now); !errors.Is(e, repo.ErrConflict) {
+	if _, e = s.Report(claim.Task, 9, ready, false, now); !errors.Is(e, repo.ErrConflict) {
 		t.Fatal(e)
 	}
-	if _, e = s.Progress(claim.Task, 9, ready, true, now); e != nil {
+	if _, e = s.Report(claim.Task, 9, ready, true, now); e != nil {
 		t.Fatal(e)
 	}
 	s.DB.Model(&model.Task{}).Where("id=?", claim.Task.ID).Update("cancel_requested_at", now)
 	ready.Stage = "submitting"
 	ready.Seq = 2
-	feedback, e := s.Progress(claim.Task, 9, ready, true, now)
+	feedback, e := s.Report(claim.Task, 9, ready, true, now)
 	if e != nil || feedback.AllowSubmit || !feedback.StopRequested {
 		t.Fatalf("%+v %v", feedback, e)
 	}
-	if feedback, e := s.Heartbeat(claim.Task.ID, 9, claim.Attempt.ID, 3, now); e != nil || feedback.AllowSubmit || !feedback.StopRequested {
+	if feedback, e := s.Report(claim.Task, 9, model.ExecutionReport{AttemptID: claim.Attempt.ID, Seq: 3}, false, now); e != nil || feedback.AllowSubmit || !feedback.StopRequested {
 		t.Fatalf("%+v %v", feedback, e)
 	}
 }
@@ -259,7 +259,7 @@ func TestLiveLateSafeUnsubmittedResultRequiresMatchingFrozenEvidence(t *testing.
 	if e = repo.ProfileExecutionBusy(s.DB, "37"); e != nil {
 		t.Fatal(e)
 	}
-	saved, e := s.Attempts(c.Task.ID)
+	saved, e := s.Attempt(c.Task.ID)
 	if e != nil || len(saved) != 1 {
 		t.Fatalf("%+v %v", saved, e)
 	}

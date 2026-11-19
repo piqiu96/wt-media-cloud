@@ -3,6 +3,7 @@ package repository_test
 import (
 	"encoding/json"
 	"errors"
+	"gorm.io/gorm"
 	"strings"
 	"sync"
 	"testing"
@@ -60,7 +61,7 @@ func TestLiveFailureResolutionAndRetryKeepOriginalAttemptAndOccupancy(t *testing
 	if e != nil || failed.Status != "failed" {
 		t.Fatalf("%+v %v", failed, e)
 	}
-	attempts, _ := s.Attempts(v.ID)
+	attempts, _ := s.Attempt(v.ID)
 	if attempts[0].ResultHash == nil || *attempts[0].ResultHash != original.ResultHash || attempts[0].ResultStatus == nil || *attempts[0].ResultStatus != "uncertain" || attempts[0].ResolvedAt == nil {
 		t.Fatalf("original result rewritten: %+v", attempts[0])
 	}
@@ -158,7 +159,7 @@ func TestLiveResolutionAuditFailureRollsBackAndUncertainKeepsHold(t *testing.T) 
 		t.Fatal("audit failure ignored")
 	}
 	after, _ := s.Get(v.ID)
-	attempts, _ := s.Attempts(v.ID)
+	attempts, _ := s.Attempt(v.ID)
 	if after.Status != "uncertain" || after.Revision != waiting.Revision || attempts[0].ResolvedAt != nil || attempts[0].ResultHash == nil || *attempts[0].ResultHash != original.ResultHash {
 		t.Fatalf("failed audit changed original state: %+v %+v", after, attempts)
 	}
@@ -177,12 +178,62 @@ func TestLiveVerificationPreservesMaximumAllowedEvidence(t *testing.T) {
 	if e != nil || failed.Status != "failed" {
 		t.Fatalf("valid evidence did not persist: %v", e)
 	}
-	attempts, e := s.Attempts(v.ID)
+	attempts, e := s.Attempt(v.ID)
 	if e != nil || attempts[0].ResolutionNote == nil {
 		t.Fatal(e)
 	}
 	var saved model.FailureResolution
 	if e = json.Unmarshal([]byte(*attempts[0].ResolutionNote), &saved); e != nil || saved != in {
 		t.Fatalf("verification evidence truncated: %v", e)
+	}
+}
+
+// Both verifications can read the same versions. One commits its task,
+// attempt and audit; the loser must roll back rather than serialize its reads.
+func TestLiveConcurrentResolutionUsesVersions(t *testing.T) {
+	s, c, _ := unresolvedPublication(t)
+	v, _ := s.Get(c.Task.ID)
+	in := resolution(c, v)
+	reached := make(chan struct{}, 2)
+	release := make(chan struct{})
+	if err := s.DB.Callback().Update().Before("gorm:update").Register("test:resolve-versions", func(tx *gorm.DB) {
+		if tx.Statement.Table == "publication_task" {
+			reached <- struct{}{}
+			<-release
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	defer s.DB.Callback().Update().Remove("test:resolve-versions")
+	result := make(chan error, 2)
+	for i := 0; i < 2; i++ {
+		go func() { _, err := s.ResolveFailure(v, 9, in, time.Now().UTC()); result <- err }()
+	}
+	for i := 0; i < 2; i++ {
+		select {
+		case <-reached:
+		case <-time.After(5 * time.Second):
+			close(release)
+			t.Fatal("resolution reads still serialize")
+		}
+	}
+	close(release)
+	successes := 0
+	for i := 0; i < 2; i++ {
+		if err := <-result; err == nil {
+			successes++
+		} else if !errors.Is(err, repo.ErrConflict) {
+			t.Fatal(err)
+		}
+	}
+	if successes != 1 {
+		t.Fatalf("committed resolutions=%d", successes)
+	}
+	history, err := s.Attempt(v.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if history[0].ResolvedAt == nil || history[0].ResultHash == nil {
+		t.Fatal("original result or resolution lost")
 	}
 }

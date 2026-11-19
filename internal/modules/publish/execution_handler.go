@@ -34,7 +34,7 @@ func Start(_ context.Context, c *app.RequestContext) {
 	}
 	api.Success(c, v)
 }
-func Attempts(_ context.Context, c *app.RequestContext) {
+func Attempt(_ context.Context, c *app.RequestContext) {
 	actor, ok := middleware.AuthenticateRequest(c)
 	if !ok {
 		return
@@ -44,7 +44,7 @@ func Attempts(_ context.Context, c *app.RequestContext) {
 		fail(c, e)
 		return
 	}
-	v, e := service.WiredExecution().Attempts(actor, id)
+	v, e := service.WiredExecution().Attempt(actor, id)
 	if e != nil {
 		fail(c, e)
 		return
@@ -71,33 +71,7 @@ func Claim(ctx context.Context, c *app.RequestContext) {
 	}
 	api.Success(c, v)
 }
-func Heartbeat(_ context.Context, c *app.RequestContext) {
-	auth, ok := localagent.AgentAuthFrom(c)
-	if !ok {
-		fail(c, service.ErrNotFound)
-		return
-	}
-	id, e := taskID(c)
-	if e != nil {
-		fail(c, e)
-		return
-	}
-	var in struct {
-		AttemptID uint64 `json:"attempt_id,string"`
-		Seq       uint64 `json:"report_seq"`
-	}
-	if e = decode(c, &in); e != nil {
-		fail(c, e)
-		return
-	}
-	v, e := service.WiredExecution().Heartbeat(auth.Claims.UserID, id, in.AttemptID, in.Seq)
-	if e != nil {
-		fail(c, e)
-		return
-	}
-	api.Success(c, v)
-}
-func Progress(_ context.Context, c *app.RequestContext) {
+func Report(_ context.Context, c *app.RequestContext) {
 	auth, ok := localagent.AgentAuthFrom(c)
 	if !ok {
 		fail(c, service.ErrNotFound)
@@ -113,12 +87,16 @@ func Progress(_ context.Context, c *app.RequestContext) {
 		fail(c, e)
 		return
 	}
-	_, failure, e := localagent.CheckDesktopSession(auth.Claims)
-	if e != nil {
-		fail(c, e)
-		return
+	current := false
+	if in.Stage != "" {
+		_, failure, checkErr := localagent.CheckDesktopSession(auth.Claims)
+		if checkErr != nil {
+			fail(c, checkErr)
+			return
+		}
+		current = failure == nil
 	}
-	v, e := service.WiredExecution().Progress(auth.Claims.UserID, id, in, failure == nil)
+	v, e := service.WiredExecution().Report(auth.Claims.UserID, id, in, current)
 	if e != nil {
 		fail(c, e)
 		return

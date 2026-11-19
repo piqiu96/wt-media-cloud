@@ -9,7 +9,3 @@ import (
 func LockPublicationProfile(tx *gorm.DB, id string, owner int64) (model.BrowserProfile, error) {
 	return repository.LockPublicationProfile(tx, id, owner)
 }
-
-func LockPublicationScene(tx *gorm.DB, id string, owner int64) error {
-	return repository.LockPublicationScene(tx, id, owner)
-}

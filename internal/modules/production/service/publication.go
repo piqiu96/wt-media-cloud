@@ -19,7 +19,7 @@ func SavedPublicationOutputURL(ctx context.Context, id int64, sha string, size i
 	if e != nil {
 		return "", e
 	}
-	if !found || o.PublishStatus == "archived" || o.SHA256 != sha || o.FileSizeBytes != size {
+	if !found || o.PublishStatus == model.OutputPublishArchived || o.SHA256 != sha || o.FileSizeBytes != size {
 		return "", ErrComposeOutputUnavailable
 	}
 	if e = s.requireObject(ctx, o); e != nil {

@@ -36,7 +36,7 @@ func TestPublicationRoutesAndContractRequireSession(t *testing.T) {
 				continue
 			}
 			count++
-			path = strings.ReplaceAll(path, "{id}", "1")
+			path = strings.ReplaceAll(strings.ReplaceAll(path, "{id}", "1"), "{attempt_id}", "2")
 			r := ut.PerformRequest(h.Engine, strings.ToUpper(method), path, nil)
 			if r.Result().StatusCode() != 401 {
 				t.Fatalf("%s %s got %d", method, path, r.Result().StatusCode())
@@ -97,15 +97,32 @@ func TestRevisionConflictIncludesCurrentVersion(t *testing.T) {
 }
 
 func TestPublicationAgentRoutesRequireBearer(t *testing.T) {
-	h0 := server.New()
-	RegisterRoutes(h0)
-	if r := ut.PerformRequest(h0.Engine, "GET", "/api/v1/cloud-agent/publication-tasks/1/attempts/2", nil); r.Result().StatusCode() != 401 {
-		t.Fatal("original attempt read must require bearer")
-	}
 	h := server.New()
 	RegisterRoutes(h)
-	for _, path := range []string{"claim", "1/heartbeat", "1/progress", "1/complete"} {
-		r := ut.PerformRequest(h.Engine, "POST", "/api/v1/cloud-agent/publication-tasks/"+path, nil)
+	_, file, _, _ := runtime.Caller(0)
+	raw, e := os.ReadFile(filepath.Join(filepath.Dir(file), "../../../contracts/cloud-agent-api/v1/publications.openapi.yaml"))
+	if e != nil {
+		t.Fatal(e)
+	}
+	var doc struct {
+		Paths map[string]map[string]any `yaml:"paths"`
+	}
+	if e = yaml.Unmarshal(raw, &doc); e != nil {
+		t.Fatal(e)
+	}
+	if len(doc.Paths) != 4 {
+		t.Fatalf("agent route count=%d", len(doc.Paths))
+	}
+	for path, methods := range doc.Paths {
+		method := "POST"
+		if _, ok := methods["get"]; ok {
+			method = "GET"
+		}
+		if !strings.HasPrefix(path, "/api/v1/cloud-agent/publication-task/") {
+			t.Fatalf("non-singular path: %s", path)
+		}
+		path = strings.ReplaceAll(strings.ReplaceAll(path, "{id}", "1"), "{attempt_id}", "2")
+		r := ut.PerformRequest(h.Engine, method, path, nil)
 		if r.Result().StatusCode() != 401 {
 			t.Fatalf("%s: %d", path, r.Result().StatusCode())
 		}
@@ -119,5 +136,28 @@ func TestPublicationResourceRouteRequiresSession(t *testing.T) {
 		if got := ut.PerformRequest(h.Engine, method, "/api/v1/publication", nil).Result().StatusCode(); got != 401 {
 			t.Fatalf("%s publication status=%d", method, got)
 		}
+	}
+}
+
+func TestPublicationRetiredExecutionRoutesAreAbsent(t *testing.T) {
+	h := server.New()
+	RegisterRoutes(h)
+	for _, path := range []string{
+		"/api/v1/cloud-agent/publication-tasks/claim",
+		"/api/v1/cloud-agent/publication-tasks/1/heartbeat",
+		"/api/v1/cloud-agent/publication-tasks/1/progress",
+		"/api/v1/cloud-agent/publication-tasks/1/complete",
+		"/api/v1/cloud-agent/publication-task/1/heartbeat",
+		"/api/v1/cloud-agent/publication-task/1/progress",
+	} {
+		if got := ut.PerformRequest(h.Engine, "POST", path, nil).Result().StatusCode(); got != 404 {
+			t.Fatalf("retired route %s=%d", path, got)
+		}
+	}
+	if got := ut.PerformRequest(h.Engine, "GET", "/api/v1/publication/1/attempt", nil).Result().StatusCode(); got != 401 {
+		t.Fatalf("attempt route=%d", got)
+	}
+	if got := ut.PerformRequest(h.Engine, "GET", "/api/v1/publication/1/attempts", nil).Result().StatusCode(); got != 404 {
+		t.Fatalf("retired attempts route=%d", got)
 	}
 }
