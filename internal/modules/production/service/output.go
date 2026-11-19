@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"gorm.io/gorm"
 	"time"
 
 	transferdto "github.com/wt-media/wt-media-cloud/internal/modules/filetransfer/dto"
@@ -439,4 +440,26 @@ func canReadComposeOutput(actor identity.PublicUser, item model.CompositeOutput)
 	}
 	// An absent owner is a management-only historical asset; creator is not ownership.
 	return item.OperatorID != nil && *item.OperatorID == int64(actor.ID)
+}
+
+// ReadSavedOutput returns facts for a business service's authorized saved reference.
+func ReadSavedOutput(db *gorm.DB, id int64) (model.CompositeOutput, bool, error) {
+	return (repository.ComposeOutputStore{}).FindWithPlatforms(db, id)
+}
+
+// Only a business service that has authorized its saved reference may use this
+// grant. It deliberately does not grant another user's general output access.
+func SavedOutputURL(ctx context.Context, id int64, sha string, size int64) (string, error) {
+	s := wiredComposeOutputService()
+	o, found, e := s.outputs.Find(id)
+	if e != nil {
+		return "", e
+	}
+	if !found || o.PublishStatus == model.OutputPublishArchived || o.SHA256 != sha || o.FileSizeBytes != size {
+		return "", ErrComposeOutputUnavailable
+	}
+	if e = s.requireObject(ctx, o); e != nil {
+		return "", e
+	}
+	return s.links.PresignObjectURL(ctx, o.ObjectKey)
 }

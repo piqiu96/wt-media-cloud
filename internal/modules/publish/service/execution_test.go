@@ -30,30 +30,30 @@ func (f *executionFake) Complete(v model.Task, u int64, c model.Completion, n ti
 	f.completions++
 	return model.ExecutionFeedback{}, nil
 }
-func TestExecutionRequiresActorScopeAndExplicitOpening(t *testing.T) {
+func TestExecutionRequiresActorScopeAndRevision(t *testing.T) {
 	f := &executionFake{v: model.Task{ID: 1, OperatorID: 3, Platform: "baidu"}}
 	s := &ExecutionService{Repo: f}
 	a := identity.PublicUser{ID: 3, Role: identity.RoleAdmin, Status: identity.UserStatusEnabled}
-	if _, e := s.Start(a, 1, 1); !errors.Is(e, ErrClosed) {
-		t.Fatal(e)
-	}
-	if _, e := s.Claim(context.Background(), 3, "safe-key"); !errors.Is(e, ErrClosed) {
-		t.Fatal(e)
-	}
-	if f.starts+f.claims != 0 {
-		t.Fatal("closed platform reached repository")
-	}
-	s.Enabled = true
 	if _, e := s.Start(identity.PublicUser{ID: 99, Role: identity.RoleOperator, Status: identity.UserStatusEnabled}, 1, 1); !errors.Is(e, ErrNotFound) {
 		t.Fatal(e)
 	}
-	if _, e := s.Start(a, 1, 1); e != nil || f.starts != 1 {
+	if _, e := s.Start(a, 1, 0); !errors.Is(e, ErrInvalid) {
 		t.Fatal(e)
+	}
+	if _, e := s.Start(a, 1, 1); e != nil || f.starts != 1 {
+		t.Fatalf("explicit revision authorization: %v", e)
+	}
+	if _, e := s.Claim(context.Background(), 3, "safe-key"); e != nil || f.claims != 1 {
+		t.Fatalf("owner claim: %v", e)
+	}
+	f.v.Platform = "douyin"
+	if _, e := s.Start(a, 1, 1); !errors.Is(e, ErrClosed) || f.starts != 1 {
+		t.Fatalf("unsupported platform: %v", e)
 	}
 }
 func TestClaimOnlySignsRunnableOriginalAndNeverPersistsGrant(t *testing.T) {
 	f := &executionFake{claim: &model.Claim{Task: model.Task{Status: "uncertain"}, Attempt: model.Attempt{Stage: "finished", Status: "interrupted"}, Replayed: true}}
-	s := &ExecutionService{Repo: f, Enabled: true, Grant: func(context.Context, model.Claim) (FileGrants, error) {
+	s := &ExecutionService{Repo: f, Grant: func(context.Context, model.Claim) (FileGrants, error) {
 		f.grants++
 		return FileGrants{Video: FileGrant{URL: "https://private.test/?signature=never-save"}}, nil
 	}}

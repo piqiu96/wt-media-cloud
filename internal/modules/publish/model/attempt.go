@@ -17,6 +17,7 @@ type ExecutionInput struct {
 	CoverSize     int64   `json:"cover_size"`
 }
 type Attempt struct {
+	AdmissionSlot   uint8           `json:"-" gorm:"default:1"`
 	ID              uint64          `json:"id,string"`
 	PublicationID   uint64          `json:"publication_id,string"`
 	AttemptNo       uint32          `json:"attempt_no"`
@@ -24,14 +25,15 @@ type Attempt struct {
 	ProfileID       uint64          `json:"profile_id,string" gorm:"column:browser_profile_id"`
 	ClaimRequestKey string          `json:"-"`
 	Input           ExecutionInput  `json:"input_snapshot" gorm:"column:input_snapshot_json;serializer:json"`
-	Status          string          `json:"status"`
-	Stage           string          `json:"stage"`
+	Status          AttemptStatus   `json:"status"`
+	Stage           AttemptStage    `json:"stage"`
+	Revision        uint64          `json:"-" gorm:"default:1"`
 	ReportSeq       uint64          `json:"report_seq"`
 	StartedAt       time.Time       `json:"started_at"`
 	HeartbeatAt     time.Time       `json:"heartbeat_at"`
 	SubmitStartedAt *time.Time      `json:"submit_started_at"`
 	FinishedAt      *time.Time      `json:"finished_at"`
-	ResultStatus    *string         `json:"result_status"`
+	ResultStatus    *Status         `json:"result_status"`
 	ErrorCode       *string         `json:"error_code"`
 	ErrorMessage    *string         `json:"error_message"`
 	Steps           json.RawMessage `json:"steps" gorm:"column:steps_json"`

@@ -1,4 +1,4 @@
-import { publicationStatuses } from './eligibility.js';
+import { publicationStatuses } from './status.js';
 export const executionPhase = value => ({ claimed: '已领取任务', preparing: '准备资源', ready: '资源及账号已核对', submitting: '正在提交', awaiting_human: '等待人工', connection_lost: '连接中断，等待核实', finished: '执行已结束' })[value] || '等待执行器反馈';
 export function executionVerification(attempt) {
   try { const value = JSON.parse(attempt.resolution_note || 'null'); return value && typeof value === 'object' ? value : null; } catch { return null; }

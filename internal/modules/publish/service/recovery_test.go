@@ -29,7 +29,7 @@ func (f *recoveryFake) OriginalAttempt(task, attempt uint64, user int64) (model.
 }
 func TestRecoveryRequiresCurrentScopeAndNeverUsesAnOldResultAsAuthorization(t *testing.T) {
 	f := &recoveryFake{task: model.Task{ID: 1, OperatorID: 3, CategoryID: 4, TeamID: 1, Platform: "baidu"}}
-	s := RecoveryService{Repo: f, Enabled: true}
+	s := RecoveryService{Repo: f}
 	owner := identity.PublicUser{ID: 3, Role: identity.RoleOperator, Status: identity.UserStatusEnabled, CategoryIDs: []identity.CategoryID{4}}
 	in := model.FailureResolution{AttemptID: 2, ExpectedRevision: 3, Conclusion: "uncertain", Evidence: model.VerificationEvidence{PlatformUID: "original", Reason: "等待人工核对", Basis: "平台安全验证尚未完成，保留原尝试待核实"}}
 	for _, actor := range []identity.PublicUser{{ID: 99, Role: identity.RoleOperator, Status: identity.UserStatusEnabled, CategoryIDs: owner.CategoryIDs}, {ID: 3, Role: identity.RoleOperator, Status: identity.UserStatusEnabled}, {ID: 3, Role: identity.RoleOperator, Status: identity.UserStatusDisabled, CategoryIDs: owner.CategoryIDs}} {
@@ -51,11 +51,6 @@ func TestRecoveryRequiresCurrentScopeAndNeverUsesAnOldResultAsAuthorization(t *t
 	if _, e := s.Resolve(owner, 1, in); e != nil || f.writes != 1 {
 		t.Fatal(e)
 	}
-	s.Enabled = false
-	if _, e := s.Retry(owner, 1, 3); !errors.Is(e, ErrClosed) {
-		t.Fatal(e)
-	}
-	s.Enabled = true
 	f.task.Platform = "bilibili"
 	if _, e := s.Retry(owner, 1, 3); !errors.Is(e, ErrClosed) {
 		t.Fatal(e)

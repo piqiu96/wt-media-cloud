@@ -1062,3 +1062,8 @@ func foreignKeyReferenced(err error) bool {
 	var mysqlErr *mysqlDriver.MySQLError
 	return errors.As(err, &mysqlErr) && mysqlErr.Number == 1451
 }
+
+func FindUserIn(db *gorm.DB, id model.UserID) (model.User, bool, error) { return findUserByID(db, id) }
+func FindCategoryIn(db *gorm.DB, id model.CategoryID) (model.Category, bool, error) {
+	return findCategory(db, id)
+}

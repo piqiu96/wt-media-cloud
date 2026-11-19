@@ -1,4 +1,5 @@
 <script setup>
+import { OutputVideoStatus } from "../../compose/outputStatus.js";
 import { computed, ref, watch } from "vue";
 import ResourceRowActions from "../../../shared/ui/resource/ResourceRowActions.vue";
 import ResourceOverlay from "../../../shared/ui/resource/ResourceOverlay.vue";
@@ -152,7 +153,7 @@ watch(
             {{ row.platform_account_id || "未识别" }}</span><span v-else-if="kind === 'output'"
             >类目 {{ row.category_id }} ·
             {{
-              row.video?.status === "ready" ? "视频可读" : "视频不可用"
+              row.video?.status === OutputVideoStatus.Ready ? "视频可读" : "视频不可用"
             }}</span><img
             v-else-if="!row.deleted_at"
             :src="files.resourceURL(row)"

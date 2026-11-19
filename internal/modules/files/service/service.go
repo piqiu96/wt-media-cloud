@@ -55,11 +55,6 @@ type Service struct {
 	Inspect       func(context.Context, string, string) (string, string, error)
 }
 
-// SetReferenceCheck binds the known business owners at bootstrap, before serving requests.
-var referenceCheck func(*gorm.DB, int64) error
-
-func SetReferenceCheck(check func(*gorm.DB, int64) error) { referenceCheck = check }
-
 // LockAvailable serializes saved references with deletion. Lock IDs in a stable order.
 func LockAvailable(tx *gorm.DB, ids []int64) error {
 	ordered := append([]int64(nil), ids...)
@@ -194,7 +189,7 @@ func (s *Service) Read(actor identity.PublicUser, id int64) (model.File, error) 
 // ReadSavedReference is for a business service that has already authorized a saved
 // reference. It does not grant general file-list access to another owner's uploads.
 func (s *Service) ReadSavedReference(ctx context.Context, id int64) (model.File, error) {
-	f, err := s.Repo.Find(id)
+	f, err := s.SavedReference(id)
 	if err != nil {
 		return f, err
 	}
@@ -398,4 +393,16 @@ func (s *Service) Resource(ctx context.Context, token string, download bool) (st
 		return storage.PresignDownload(ctx, s.Objects, f.ObjectKey, f.Name+"."+f.Extension, s.GrantTTL)
 	}
 	return s.Objects.PresignGet(ctx, f.ObjectKey, s.GrantTTL)
+}
+
+// SavedReference reads an authorized saved reference without signing or object I/O.
+func (s *Service) SavedReference(id int64) (model.File, error) {
+	f, err := s.Repo.Find(id)
+	if err == nil && f.DeletedAt != nil {
+		return model.File{}, ErrNotFound
+	}
+	return f, err
+}
+func ReadSavedReference(db *gorm.DB, id int64) (model.File, error) {
+	return (&Service{Repo: repository.Store{DB: db}}).SavedReference(id)
 }

@@ -1,8 +1,8 @@
 openapi: 3.1.0
 info:
   title: WT Media Single Publication Preparation
-  version: 2026.11.19.2
-  description: Creating never authorizes execution or submits a platform post. Separate revision-bound start requires the publishing_baidu_execution switch; public opening remains subject to real platform acceptance. Baidu task preparation is available. IDs and revisions are decimal strings; timestamps RFC3339. Uses errcode/message/data/logid.
+  version: 2026.11.19.3
+  description: Creating never authorizes execution or submits a platform post. Execution requires separate revision-bound start authorization. Baidu task preparation is available. IDs and revisions are decimal strings; timestamps RFC3339. Uses errcode/message/data/logid.
 paths:
   /api/v1/publication:
     get:
@@ -86,9 +86,9 @@ paths:
       responses:
         '200': {description: 'Authorized task, pending until not_before or queued when due. Never creates an attempt; frozen inputs cannot subsequently be edited.'}
         '409': {description: 'Revision/state conflict, unavailable resource or platform not open for execution.'}
-  /api/v1/publication/{id}/attempts:
+  /api/v1/publication/{id}/attempt:
     get:
-      operationId: listPublicationAttempts
+      operationId: getPublicationAttemptHistory
       security: [{sessionCookie: []}]
       parameters: [{in: path, name: id, required: true, schema: {$ref: '#/components/schemas/ID'}}]
       responses:

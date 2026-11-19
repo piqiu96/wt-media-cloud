@@ -31,9 +31,9 @@ import { createFilesClient } from "../../../shared/api/files.js";
 import {
   definitivePublicationRejection,
   contentProblem,
-  publicationStatuses,
   outputUnavailable,
 } from "../eligibility.js";
+import { PublicationStatus, publicationStatuses } from "../status.js";
 import { publicationTitleForOutput } from "../title.js";
 import PublishingExecutionHistory from "../components/PublishingExecutionHistory.vue";
 import PublishingResourcePicker from "../components/PublishingResourcePicker.vue";
@@ -51,21 +51,21 @@ const blankFilters = () => ({
   category_id: "",
   created_range: [],
 });
-const executionEnabled = ref(false), attempts = ref([]);
+const attempts = ref([]);
 const recoveryVisible=ref(false),recoveryTask=ref(null),recoveryError=ref("");
 const summary = ref(null),
   advanced = ref(false);
 const metricItems = computed(() => [
   { key: "", label: "全部任务", value: summary.value?.all ?? "—" },
   {
-    key: "awaiting_human",
+    key: PublicationStatus.AwaitingHuman,
     label: "等待人工",
     value: summary.value?.awaiting_human ?? "—",
     tone: "warning",
   },
-  { key: "running", label: "执行中", value: summary.value?.running ?? "—" },
+  { key: PublicationStatus.Running, label: "执行中", value: summary.value?.running ?? "—" },
   {
-    key: "uncertain",
+    key: PublicationStatus.Uncertain,
     label: "结果待确认",
     value: summary.value?.uncertain ?? "—",
     tone: "warning",
@@ -192,7 +192,6 @@ async function load() {
     rows.value = data.items;
     total.value = data.total;
     summary.value = data.summary;
-    executionEnabled.value = data.execution_enabled === true;
   } catch (e) {
     if (n === loadSequence) error.value = e.message;
   } finally {
@@ -246,7 +245,7 @@ async function openDetail(row) {
   loading.value = true;
   error.value = "";
   try {
-    const [task, history] = await Promise.all([client.get(row.id), client.attempts(row.id)]);
+    const [task, history] = await Promise.all([client.get(row.id), client.attempt(row.id)]);
     detail.value = task;
     attempts.value = history;
     view.value = "detail";
@@ -256,10 +255,10 @@ async function openDetail(row) {
     loading.value = false;
   }
 }
-const editable = (task) => task.status === "pending" && !task.current_attempt_id && !task.authorized_at && !task.cancel_requested_at;
-const retryable = (task) => task.status === "failed" && !task.cancel_requested_at && executionEnabled.value;
+const editable = (task) => task.status === PublicationStatus.Pending && !task.current_attempt_id && !task.authorized_at && !task.cancel_requested_at;
+const retryable = (task) => task.status === PublicationStatus.Failed && !task.cancel_requested_at;
 async function startExecution(row) {
-  if (busy.value || !executionEnabled.value) return;
+  if (busy.value) return;
   busy.value = true;
   error.value = "";
   try {
@@ -282,7 +281,7 @@ async function openVerification(row) {
   error.value = "";
   try {
     const task = await client.get(row.id);
-    if (task.status !== "uncertain") throw new Error("任务状态已变化，请核对列表后操作");
+    if (task.status !== PublicationStatus.Uncertain) throw new Error("任务状态已变化，请核对列表后操作");
     recoveryTask.value = JSON.parse(JSON.stringify(task));
     recoveryError.value = "";
     recoveryVisible.value = true;
@@ -307,7 +306,7 @@ async function saveVerification(input) {
   } finally {busy.value=false;}
 }
 async function retryExecution(row) {
-  if (busy.value || !executionEnabled.value) return;
+  if (busy.value) return;
   busy.value = true;
   error.value = "";
   try {
@@ -592,8 +591,8 @@ onMounted(async () => {
             }}</template>
             <template #op="{ row }">
               <ResourceRowActions>
-                <t-button v-if="editable(row) && executionEnabled" class="is-primary" variant="text" size="small" :disabled="busy" @click="startExecution(row)">执行</t-button>
-                <t-button v-if="row.status === 'uncertain'" class="is-primary" variant="text" size="small" :disabled="busy" @click="openVerification(row)">核实结果</t-button>
+                <t-button v-if="editable(row)" class="is-primary" variant="text" size="small" :disabled="busy" @click="startExecution(row)">执行</t-button>
+                <t-button v-if="row.status === PublicationStatus.Uncertain" class="is-primary" variant="text" size="small" :disabled="busy" @click="openVerification(row)">核实结果</t-button>
                 <t-button v-if="retryable(row)" class="is-primary" variant="text" size="small" :disabled="busy" @click="retryExecution(row)">重试</t-button>
                 <t-button v-if="editable(row)" variant="text" size="small" :disabled="busy" @click="edit(row)">编辑</t-button>
                 <t-button variant="text" size="small" :disabled="busy" @click="detailReturn = 'list'; openDetail(row)">详情</t-button>

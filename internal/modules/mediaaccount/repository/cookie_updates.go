@@ -39,9 +39,6 @@ func mutateCookie(db *gorm.DB, id string, userID sharedidentity.UserID, mutate f
 		if e != nil {
 			return e
 		}
-		if e := checkPublication(tx, record.BrowserProfileID); e != nil {
-			return e
-		}
 		if reserved.Valid {
 			return model.ErrCookieConflict
 		}

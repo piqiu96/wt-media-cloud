@@ -53,7 +53,7 @@ try{
  const after=await read()
  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>window.innerWidth),false,'detail must fit the current viewport')
  if(after.attempt_count>0){
-  await page.getByRole('heading',{name:/尝试 1/}).waitFor()
+  await page.getByText('第 1 次',{exact:true}).waitFor()
   assert.equal(await page.getByText('任务尚未执行',{exact:true}).count(),0)
  }
  await fs.writeFile(path.join(evidence,'readback.json'),JSON.stringify({task_id:after.id,status:after.status,revision:after.revision,attempt_count:after.attempt_count,authorized:!!after.authorized_at,public_success:after.status==='published'},null,2))

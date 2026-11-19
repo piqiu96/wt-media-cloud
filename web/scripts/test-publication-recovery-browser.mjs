@@ -21,7 +21,7 @@ const page=await context.newPage(),errors=[];page.on('pageerror',e=>errors.push(
 const route=`/api/v1/publication/${id}`
 async function get(suffix=''){const r=await context.request.get(new URL(route+suffix,base).href);assert.equal(r.status(),200);const v=await r.json();assert.equal(v.errcode,0);return v.data}
 try{
- const before=await get(),original=await get('/attempts');assert(['uncertain','failed'].includes(before.status))
+ const before=await get(),original=await get('/attempt');assert(['uncertain','failed'].includes(before.status))
  await page.goto(new URL('/publish',base).href)
  await page.getByRole('heading',{name:'发布任务',exact:true}).waitFor()
  await page.locator('[aria-label="任务搜索"] input').fill(id)
@@ -32,7 +32,7 @@ try{
   const confirmation=page.locator('.resource-feedback-dialog');await confirmation.waitFor()
   await confirmation.getByRole('button',{name:'取消',exact:true}).click();await confirmation.waitFor({state:'hidden'})
   assert.deepEqual(await get(),before,'Cancel retry must preserve authorization, revision and occupancy')
-  assert.deepEqual(await get('/attempts'),original,'Cancel retry must preserve original attempts')
+  assert.deepEqual(await get('/attempt'),original,'Cancel retry must preserve original attempts')
   if(retry){
    await row.getByRole('button',{name:'重试',exact:true}).click();await confirmation.waitFor()
    const response=page.waitForResponse(r=>r.request().method()==='POST'&&new URL(r.url()).pathname===route+'/retry')
@@ -42,7 +42,7 @@ try{
    assert.equal(after.current_attempt_id,null);assert.equal(after.attempt_count,before.attempt_count)
    assert.equal(BigInt(after.revision),BigInt(before.revision)+1n)
    assert.deepEqual(after.content,before.content);assert.deepEqual(after.resources,before.resources)
-   assert.deepEqual(await get('/attempts'),original,'Retry must preserve the original attempts')
+   assert.deepEqual(await get('/attempt'),original,'Retry must preserve the original attempts')
   }
  }else{
  await row.getByRole('button',{name:'核实结果',exact:true}).click()
@@ -62,7 +62,7 @@ try{
   const response=page.waitForResponse(r=>r.request().method()==='POST'&&new URL(r.url()).pathname===route+'/resolve')
   await dialog.getByRole('button',{name:'保存核实结果',exact:true}).click()
   assert.equal((await response).status(),200);await dialog.waitFor({state:'hidden'})
-  const after=await get(),attempts=await get('/attempts')
+  const after=await get(),attempts=await get('/attempt')
   assert.equal(after.status,conclusion);assert.equal(BigInt(after.revision),BigInt(before.revision)+1n)
   assert.equal(after.current_attempt_id,before.current_attempt_id);assert.equal(after.attempt_count,before.attempt_count)
   const oldRows=Array.isArray(original)?original:original.items,newRows=Array.isArray(attempts)?attempts:attempts.items

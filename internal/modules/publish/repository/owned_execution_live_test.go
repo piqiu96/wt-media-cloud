@@ -33,6 +33,17 @@ func ownedStore(t *testing.T) (repo.ExecutionStore, func(int) model.Task) {
 			t.Fatal(e)
 		}
 	}
+	// These reads reuse the normal owner services, including their complete rows.
+	for _, q := range []string{
+		`ALTER TABLE users ADD username VARCHAR(128) NOT NULL DEFAULT 'owner',ADD nickname VARCHAR(128),ADD avatar_id VARCHAR(32),ADD password_hash VARCHAR(255) NOT NULL DEFAULT '',ADD created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),ADD updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6)`,
+		`CREATE TABLE operation_teams(id BIGINT PRIMARY KEY,name VARCHAR(128))`, `INSERT INTO operation_teams VALUES(7,'team')`,
+		`ALTER TABLE categories ADD type VARCHAR(32) NOT NULL DEFAULT 'operation',ADD name VARCHAR(128) NOT NULL DEFAULT 'category',ADD remark VARCHAR(255) NOT NULL DEFAULT '',ADD created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),ADD updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6)`,
+		`ALTER TABLE media_accounts ADD platform_name VARCHAR(255),ADD platform_avatar_url VARCHAR(512),ADD remark VARCHAR(255),ADD original_cookie TEXT,ADD active_cookie TEXT,ADD cookie_status VARCHAR(32),ADD cookie_updated_at DATETIME(6),ADD last_check_at DATETIME(6),ADD last_check_items JSON,ADD created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),ADD updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),ADD last_check_status VARCHAR(32) NOT NULL DEFAULT '',ADD last_check_message VARCHAR(255),ADD last_check_identity JSON,ADD check_operation_id VARCHAR(64),ADD check_profile_id VARCHAR(64),ADD check_started_at DATETIME(6),ADD before_cookie TEXT,ADD cookie_update JSON`,
+	} {
+		if e := db.Exec(q).Error; e != nil {
+			t.Fatal(e)
+		}
+	}
 	for n := 0; n < 5; n++ {
 		profile, account, output := 37+n, 12+n, 42+n
 		if n > 0 {
@@ -143,8 +154,8 @@ func TestLiveOwnedCookieBusyAndBindingChangeDenyNewWork(t *testing.T) {
 		t.Fatalf("%+v %v", c, e)
 	}
 	s.DB.Exec("UPDATE media_accounts SET browser_profile_id=38 WHERE id=12")
-	if _, e := s.Progress(c.Task, 9, model.ExecutionReport{AttemptID: c.Attempt.ID, Seq: 1, Stage: "preparing"}, true, now); !errors.Is(e, repo.ErrConflict) {
-		t.Fatalf("changed binding accepted %v", e)
+	if f, e := s.Report(c.Task, 9, model.ExecutionReport{AttemptID: c.Attempt.ID, Seq: 1, Stage: model.AttemptStagePreparing}, true, now); e != nil || !f.StopRequested || f.AllowSubmit || f.StopReason != model.ExecutionInputChanged {
+		t.Fatalf("changed binding did not stop: %+v %v", f, e)
 	}
 	if e := repo.ProfileExecutionBusy(s.DB, "37"); !errors.Is(e, repo.ErrConflict) {
 		t.Fatal(e)

@@ -25,7 +25,7 @@ try {
  for (const width of [1440, 390]) {
   task.status = 'pending'; task.revision = '2'; task.revision = '2';
   const context = await browser.newContext({ viewport: { width, height: 1000 } });
-  let videoRequests = 0;
+  let videoRequests = 0, history = [];
   const page = await context.newPage(); page.on('pageerror', error => errors.push(error.message));
   await page.route('https://video.visual.invalid/**', route => route.fulfill({ status: 404, body: 'fixture media unavailable' }));
   await page.route('**/api/v1/**', async route => {
@@ -35,8 +35,8 @@ try {
    if (request.method() !== 'GET') { writes.push({ path: p, body: request.postDataJSON() }); return route.fulfill({ json: { errcode: 18001, message: '视觉走查不写入真实任务', data: null } }); }
    if (p === '/api/v1/auth/me') data = { id: '1', username: 'operator01', nickname: '走查用户', role: 'operator', category_ids: ['1'] };
    else if (p.endsWith('/categories')) data = [{ id: '1', name: '游戏', enabled: true }];
-   else if (p.endsWith('/publication')) { check(`${width}: default page size`, url.searchParams.get('page_size') === '10'); data = { items: [task], total: 1, execution_enabled: true, summary: { all: 1, awaiting_human: 0, running: 0, uncertain: 0 } }; }
-   else if (p.endsWith('/attempts')) data = [];
+   else if (p.endsWith('/publication')) { check(`${width}: default page size`, url.searchParams.get('page_size') === '10'); data = { items: [task], total: 1, summary: { all: 1, awaiting_human: 0, running: 0, uncertain: 0 } }; }
+   else if (p.endsWith('/attempt')) data = history;
    else if (p === '/api/v1/publication/3') data = task;
    else if (p === '/api/v1/media-accounts/9') data = account;
    else if (p.endsWith('/media-accounts')) data = { items: [account], total: 1 };
@@ -171,6 +171,21 @@ try {
   check(`${width}: verification uses scoped solid actions`, cancelStyle.backgroundColor !== 'rgba(0, 0, 0, 0)');
   await page.screenshot({ path: path.join(evidence, `${width}-verification.png`), fullPage: true });
   await recovery.getByRole('button', { name: '取消', exact: true }).click(); await recovery.waitFor({ state: 'hidden' });
+  history = [
+   { id: 'a', attempt_no: 1, status: 'completed', result_status: 'failed', stage: 'finished', started_at: task.created_at, finished_at: task.created_at, input_snapshot: { content: { description: '旧尝试独立快照', cover_file_id: '11' } }, steps: [] },
+   { id: 'b', attempt_no: 2, status: 'completed', result_status: 'reviewing', stage: 'finished', started_at: task.created_at, finished_at: task.created_at, input_snapshot: { content: { description: '新尝试独立快照', cover_file_id: '12' } }, steps: [] },
+  ];
+  await page.getByRole('button', { name: '详情', exact: true }).click();
+  await page.getByRole('heading', { name: '发布任务详情', exact: true }).waitFor();
+  for (const [number, title] of [[1, '旧尝试独立快照'], [2, '新尝试独立快照']]) {
+   await page.getByRole('button', { name: `查看第 ${number} 次执行详情`, exact: true }).click();
+   const closeHistory = page.getByRole('button', { name: '关闭执行详情', exact: true }); await closeHistory.waitFor();
+   await page.getByText(title, { exact: true }).waitFor();
+   check(`${width}: history ${number} shows its frozen content`, await page.getByText(title, { exact: true }).count() === 1);
+   check(`${width}: history ${number} fits viewport`, await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+   await page.screenshot({ path: path.join(evidence, `${width}-attempt-${number}.png`), fullPage: true });
+   await closeHistory.click(); await closeHistory.waitFor({ state: 'hidden' });
+  }
   await page.goto(base + '/files');
   await page.locator('.resource-filter-bar').waitFor();
   const sample = () => page.locator('.resource-filter-bar .t-button').evaluateAll(nodes => nodes.map(node => { const s = getComputedStyle(node); return [s.height, s.fontSize, s.backgroundColor, s.borderColor]; }));

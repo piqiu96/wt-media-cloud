@@ -19,13 +19,11 @@ import (
 	identityservice "github.com/wt-media/wt-media-cloud/internal/modules/identity/service"
 	"github.com/wt-media/wt-media-cloud/internal/modules/localagent"
 	"github.com/wt-media/wt-media-cloud/internal/modules/mediaaccount"
-	accountservice "github.com/wt-media/wt-media-cloud/internal/modules/mediaaccount/service"
 	"github.com/wt-media/wt-media-cloud/internal/modules/production"
 	"github.com/wt-media/wt-media-cloud/internal/modules/profilebinding"
 	profileservice "github.com/wt-media/wt-media-cloud/internal/modules/profilebinding/service"
 	"github.com/wt-media/wt-media-cloud/internal/modules/proxy"
-	proxyservice "github.com/wt-media/wt-media-cloud/internal/modules/proxy/service"
-	publish "github.com/wt-media/wt-media-cloud/internal/modules/publish"
+	"github.com/wt-media/wt-media-cloud/internal/modules/publish"
 	publishservice "github.com/wt-media/wt-media-cloud/internal/modules/publish/service"
 	api "github.com/wt-media/wt-media-cloud/internal/shared/api"
 )
@@ -50,9 +48,7 @@ func registerRoutes(engine *server.Hertz) error {
 // 单独拆出来是为了让测试能拿到完整模块列表：registerRoutes 会读配置并初始化管理员，
 // 从它入口断言就等于在断言数据库。这里漏掉一个模块，它所有的路由都会 404，没有其他症状。
 func registerModuleRoutes(engine *server.Hertz) {
-	profileservice.SetPublicationGuard(publishservice.CheckProfileExecution)
-	accountservice.SetPublicationGuard(publishservice.CheckProfileExecution)
-	proxyservice.SetPublicationGuard(publishservice.CheckProfileExecution)
+	profileservice.SetReferenceCheck(publishservice.CheckProfileReferences)
 	cloudagent.RegisterRoutes(engine)
 	identity.RegisterRoutes(engine)
 	localagent.RegisterRoutes(engine)

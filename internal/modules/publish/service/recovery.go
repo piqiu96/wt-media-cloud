@@ -1,7 +1,6 @@
 package service
 
 import (
-	"github.com/wt-media/wt-media-cloud/internal/config"
 	identity "github.com/wt-media/wt-media-cloud/internal/modules/identity/service"
 	"github.com/wt-media/wt-media-cloud/internal/modules/publish/model"
 	"time"
@@ -14,12 +13,11 @@ type RecoveryRepository interface {
 	OriginalAttempt(uint64, uint64, int64) (model.OriginalAttemptState, error)
 }
 type RecoveryService struct {
-	Repo    RecoveryRepository
-	Enabled bool
+	Repo RecoveryRepository
 }
 
 func WiredRecovery() *RecoveryService {
-	return &RecoveryService{Repo: ExecutionStore(), Enabled: config.Get().App.PublishingBaiduExecution}
+	return &RecoveryService{Repo: ExecutionStore()}
 }
 func (s *RecoveryService) readable(actor identity.PublicUser, id uint64) (model.Task, error) {
 	v, e := s.Repo.Get(id)
@@ -43,7 +41,7 @@ func (s *RecoveryService) Retry(actor identity.PublicUser, id, revision uint64) 
 	if e != nil {
 		return v, e
 	}
-	if !s.Enabled || v.Platform != "baidu" {
+	if v.Platform != "baidu" {
 		return model.Task{}, ErrClosed
 	}
 	if revision == 0 {

@@ -62,14 +62,6 @@ func ReserveProfileProxy(profileID, proxyID string, teamID sharedidentity.TeamID
 	var target ProfileProxyTarget
 	var proxy model.Proxy
 	err := database.DB().Transaction(func(tx *gorm.DB) error {
-		var locked string
-		if e := tx.Raw("SELECT id FROM browser_profiles WHERE id=? FOR UPDATE", profileID).Row().Scan(&locked); e != nil {
-			return e
-		}
-		if e := checkPublication(tx, profileID); e != nil {
-			return e
-		}
-
 		row := tx.Raw(`SELECT id, bit_profile_id, user_id, team_id, proxy_id, reserved_proxy_id, reserved_since FROM browser_profiles WHERE id = ? AND local_state = 'active' AND enabled = 1 AND cookie_operation_id IS NULL FOR UPDATE`, profileID).Row()
 		var gotTeam *sharedidentity.TeamID
 		var currentProxyID, reservedProxyID sql.NullString
@@ -111,14 +103,6 @@ func ReserveProfileUnbind(profileID string, teamID sharedidentity.TeamID, now ti
 	var target ProfileProxyTarget
 	var proxy model.Proxy
 	err := database.DB().Transaction(func(tx *gorm.DB) error {
-		var locked string
-		if e := tx.Raw("SELECT id FROM browser_profiles WHERE id=? FOR UPDATE", profileID).Row().Scan(&locked); e != nil {
-			return e
-		}
-		if e := checkPublication(tx, profileID); e != nil {
-			return e
-		}
-
 		row := tx.Raw(`SELECT id, bit_profile_id, user_id, team_id, proxy_id, reserved_proxy_id, reserved_since FROM browser_profiles WHERE id = ? AND local_state = 'active' FOR UPDATE`, profileID).Row()
 		var gotTeam *sharedidentity.TeamID
 		var proxyID, reservedProxyID sql.NullString
@@ -163,14 +147,6 @@ func ReleaseProfileProxy(profileID string, teamID sharedidentity.TeamID, now tim
 	var target ProfileProxyTarget
 	var proxy model.Proxy
 	err := database.DB().Transaction(func(tx *gorm.DB) error {
-		var locked string
-		if e := tx.Raw("SELECT id FROM browser_profiles WHERE id=? FOR UPDATE", profileID).Row().Scan(&locked); e != nil {
-			return e
-		}
-		if e := checkPublication(tx, profileID); e != nil {
-			return e
-		}
-
 		var proxyID, reservedProxyID sql.NullString
 		var gotTeam *sharedidentity.TeamID
 		if err := tx.Raw(`SELECT id, bit_profile_id, user_id, team_id, proxy_id, reserved_proxy_id FROM browser_profiles WHERE id = ? AND cookie_operation_id IS NULL FOR UPDATE`, profileID).Row().

@@ -1,7 +1,11 @@
 // Package-level operations preserve the existing Service behavior while callers use the controlled database registry.
 package service
 
-import "github.com/wt-media/wt-media-cloud/internal/modules/identity/model"
+import (
+	"github.com/wt-media/wt-media-cloud/internal/modules/identity/model"
+	"github.com/wt-media/wt-media-cloud/internal/modules/identity/repository"
+	"gorm.io/gorm"
+)
 
 func BootstrapAdmin(username, password string) (PublicUser, error) {
 	return newService(mysqlStore{}).BootstrapAdmin(username, password)
@@ -137,4 +141,15 @@ func UpdateUser(actorID, userID UserID, role Role, teamID *TeamID, categoryIDs [
 
 func CanAccessCategory(userID UserID, categoryID CategoryID) bool {
 	return newService(mysqlStore{}).CanAccessCategory(userID, categoryID)
+}
+
+// ResolveUserIn shares the caller transaction without exposing credentials.
+func ResolveUserIn(db *gorm.DB, id UserID) (PublicUser, bool, error) {
+	u, found, err := repository.FindUserIn(db, id)
+	return publicUser(u), found, err
+}
+
+// ResolveCategoryIn reads category facts in the caller transaction.
+func ResolveCategoryIn(db *gorm.DB, id CategoryID) (Category, bool, error) {
+	return repository.FindCategoryIn(db, id)
 }
