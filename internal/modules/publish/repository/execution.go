@@ -3,7 +3,7 @@ package repository
 import (
 	"errors"
 	driver "github.com/go-sql-driver/mysql"
-	"github.com/wt-media/wt-media-cloud/internal/modules/publishing/model"
+	"github.com/wt-media/wt-media-cloud/internal/modules/publish/model"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 	"time"

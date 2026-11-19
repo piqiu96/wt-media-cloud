@@ -1,7 +1,6 @@
 name = 'wt-media-cloud'
-# M6-A task preparation only; does not authorize browser submission.
+# Browser submission requires separate execution authorization.
 publishing_baidu_execution = false
-publishing_baidu_preparation = false
 
 [initial_admin]
 password = 'admin123'

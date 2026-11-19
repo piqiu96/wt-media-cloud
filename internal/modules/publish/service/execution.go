@@ -16,8 +16,8 @@ import (
 	accounts "github.com/wt-media/wt-media-cloud/internal/modules/mediaaccount/service"
 	production "github.com/wt-media/wt-media-cloud/internal/modules/production/service"
 	profiles "github.com/wt-media/wt-media-cloud/internal/modules/profilebinding/service"
-	"github.com/wt-media/wt-media-cloud/internal/modules/publishing/model"
-	"github.com/wt-media/wt-media-cloud/internal/modules/publishing/repository"
+	"github.com/wt-media/wt-media-cloud/internal/modules/publish/model"
+	"github.com/wt-media/wt-media-cloud/internal/modules/publish/repository"
 	"gorm.io/gorm"
 )
 

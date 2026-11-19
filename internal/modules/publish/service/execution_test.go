@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	identity "github.com/wt-media/wt-media-cloud/internal/modules/identity/service"
-	"github.com/wt-media/wt-media-cloud/internal/modules/publishing/model"
+	"github.com/wt-media/wt-media-cloud/internal/modules/publish/model"
 	"testing"
 	"time"
 )

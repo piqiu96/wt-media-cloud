@@ -13,7 +13,7 @@ await fs.mkdir(evidence,{recursive:true})
 const browser=await chromium.launch({channel:process.env.WT_MEDIA_BROWSER_CHANNEL||'chrome',headless:true})
 const context=await browser.newContext({storageState:state,viewport:{width:Number(process.env.WT_MEDIA_BROWSER_WIDTH||1440),height:1100}})
 const page=await context.newPage(),errors=[];page.on('pageerror',e=>errors.push(e.message))
-async function read(){const response=await context.request.get(new URL(`/api/v1/publications/${id}`,base).href);assert.equal(response.status(),200);const body=await response.json();assert.equal(body.errcode,0);return body.data}
+async function read(){const response=await context.request.get(new URL(`/api/v1/publication/${id}`,base).href);assert.equal(response.status(),200);const body=await response.json();assert.equal(body.errcode,0);return body.data}
 try{
  const before=await read()
  await page.goto(new URL('/publish',base).href)
@@ -33,14 +33,14 @@ try{
   if(process.env.WT_MEDIA_BROWSER_AUTHORIZE_TASK==='1'){
   await page.getByRole('region',{name:'发布任务详情',exact:true}).getByRole('button',{name:'确认执行',exact:true}).click()
   await dialog.waitFor();await page.screenshot({path:path.join(evidence,'01-confirm-execution.png'),fullPage:true})
-  const saved=page.waitForResponse(r=>r.request().method()==='POST'&&new URL(r.url()).pathname===`/api/v1/publications/${id}/start`)
+  const saved=page.waitForResponse(r=>r.request().method()==='POST'&&new URL(r.url()).pathname===`/api/v1/publication/${id}/start`)
   await dialog.getByRole('button',{name:'确认执行',exact:true}).click()
   const response=await saved;assert.equal(response.status(),200);await dialog.waitFor({state:'hidden'})
   await page.getByText('仅由账号所属用户的 Agent 执行',{exact:false}).waitFor()
   const after=await read();assert.equal(after.status,'queued');assert(after.authorized_at);assert.equal(after.attempt_count,0)
   assert.equal(await page.getByRole('button',{name:'编辑',exact:true}).count(),0)
   assert.equal(await page.getByRole('button',{name:'确认执行',exact:true}).count(),0)
-  const repeated=await context.request.post(new URL(`/api/v1/publications/${id}/start`,base).href,{data:{expected_revision:before.revision}})
+  const repeated=await context.request.post(new URL(`/api/v1/publication/${id}/start`,base).href,{data:{expected_revision:before.revision}})
   assert.equal(repeated.status(),409)
   }
  }

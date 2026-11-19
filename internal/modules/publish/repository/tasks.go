@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"github.com/go-sql-driver/mysql"
 	identity "github.com/wt-media/wt-media-cloud/internal/modules/identity/service"
-	"github.com/wt-media/wt-media-cloud/internal/modules/publishing/model"
+	"github.com/wt-media/wt-media-cloud/internal/modules/publish/model"
 	"github.com/wt-media/wt-media-cloud/internal/shared/id"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -95,7 +95,7 @@ func (s Store) Edit(v model.Task, revision uint64) (model.Task, error) {
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&old, v.ID).Error; err != nil {
 			return missing(err)
 		}
-		if old.Revision != revision || old.Status != "pending" || old.CurrentAttemptID != nil || old.AuthorizedAt != nil {
+		if old.Revision != revision || old.Status != model.StatusPending || old.CurrentAttemptID != nil || old.AuthorizedAt != nil {
 			return &ConflictError{TaskID: old.ID, Revision: old.Revision}
 		}
 		if err := tx.Model(&model.Task{}).Where("id=?", v.ID).Updates(map[string]any{"content_json": mustJSON(v.Content), "resource_snapshot_json": string(v.ResourceSnapshot), "cover_file_id": v.CoverFileID, "not_before": v.NotBefore, "revision": revision + 1, "updated_at": time.Now().UTC()}).Error; err != nil {
@@ -142,7 +142,7 @@ func (s Store) query(f Filter) *gorm.DB {
 func (s Store) Summary(f Filter) (map[string]int64, error) {
 	f.Status = ""
 	var rows []struct {
-		Status string
+		Status model.Status
 		Count  int64
 	}
 	if err := s.query(f).Select("status,COUNT(*) AS count").Group("status").Scan(&rows).Error; err != nil {
@@ -150,7 +150,7 @@ func (s Store) Summary(f Filter) (map[string]int64, error) {
 	}
 	counts := map[string]int64{"all": 0, "awaiting_human": 0, "running": 0, "uncertain": 0}
 	for _, row := range rows {
-		counts[row.Status] = row.Count
+		counts[string(row.Status)] = row.Count
 		counts["all"] += row.Count
 	}
 	return counts, nil

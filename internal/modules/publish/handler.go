@@ -1,4 +1,4 @@
-package publishing
+package publish
 
 import (
 	"bytes"
@@ -7,25 +7,27 @@ import (
 	"errors"
 	app "github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/app/server"
+	"github.com/cloudwego/hertz/pkg/protocol/consts"
 	"github.com/wt-media/wt-media-cloud/internal/middleware"
 	files "github.com/wt-media/wt-media-cloud/internal/modules/files/service"
 	"github.com/wt-media/wt-media-cloud/internal/modules/localagent"
 	accounts "github.com/wt-media/wt-media-cloud/internal/modules/mediaaccount/service"
 	production "github.com/wt-media/wt-media-cloud/internal/modules/production/service"
-	"github.com/wt-media/wt-media-cloud/internal/modules/publishing/service"
+	"github.com/wt-media/wt-media-cloud/internal/modules/publish/service"
 	api "github.com/wt-media/wt-media-cloud/internal/shared/api"
+	"github.com/wt-media/wt-media-cloud/internal/shared/errcode"
 	"io"
 	"strconv"
 	"time"
 )
 
 func RegisterRoutes(h *server.Hertz) {
-	h.GET("/api/v1/publications", List)
-	h.POST("/api/v1/publications", Create)
-	h.GET("/api/v1/publications/:id", Get)
-	h.PUT("/api/v1/publications/:id/content", Edit)
-	h.POST("/api/v1/publications/:id/start", Start)
-	h.GET("/api/v1/publications/:id/attempts", Attempts)
+	h.GET("/api/v1/publication", List)
+	h.POST("/api/v1/publication", Create)
+	h.GET("/api/v1/publication/:id", Get)
+	h.PUT("/api/v1/publication/:id/content", Edit)
+	h.POST("/api/v1/publication/:id/start", Start)
+	h.GET("/api/v1/publication/:id/attempts", Attempts)
 	h.POST("/api/v1/cloud-agent/publication-tasks/claim", localagent.RequireAgent(localagent.StrictMode), Claim)
 	h.POST("/api/v1/cloud-agent/publication-tasks/:id/heartbeat", localagent.RequireAgent(localagent.ReportSafeMode), Heartbeat)
 	h.POST("/api/v1/cloud-agent/publication-tasks/:id/progress", localagent.RequireAgent(localagent.ReportSafeMode), Progress)
@@ -34,22 +36,22 @@ func RegisterRoutes(h *server.Hertz) {
 func fail(c *app.RequestContext, err error) {
 	switch {
 	case errors.Is(err, service.ErrInvalid), errors.Is(err, files.ErrInvalid):
-		api.FailureNamed(c, 400, 18001, "请检查发布资源并确认文案、封面和声明", "publication_invalid")
+		api.FailureNamed(c, consts.StatusBadRequest, errcode.PublishInvalid, "请检查发布资源并确认文案、封面和声明", "publication_invalid")
 	case errors.Is(err, service.ErrNotFound), errors.Is(err, files.ErrNotFound), errors.Is(err, accounts.ErrNotFound), errors.Is(err, accounts.ErrForbidden), errors.Is(err, production.ErrComposeOutputNotFound), errors.Is(err, production.ErrComposeOutputForbidden):
-		api.FailureNamed(c, 404, 18002, "任务或资源不存在，或没有访问权限", "publication_not_found")
+		api.FailureNamed(c, consts.StatusNotFound, errcode.PublishNotFound, "任务或资源不存在，或没有访问权限", "publication_not_found")
 	case errors.Is(err, service.ErrConflict):
 		var conflict *service.ConflictError
 		var details any
 		if errors.As(err, &conflict) {
 			details = conflict
 		}
-		api.FailureCode(c, 409, 18003, "任务或输入已变化，请重新加载后编辑", "publication_conflict", details, false, "reload")
+		api.FailureCode(c, consts.StatusConflict, errcode.PublishConflict, "任务或输入已变化，请重新加载后编辑", "publication_conflict", details, false, "reload")
 	case errors.Is(err, service.ErrOccupied):
-		api.FailureNamed(c, 409, 18004, "该成片已被当前平台的任务占用", "publication_output_occupied")
+		api.FailureNamed(c, consts.StatusConflict, errcode.PublishOutputOccupied, "该成片已被当前平台的任务占用", "publication_output_occupied")
 	case errors.Is(err, service.ErrClosed):
-		api.FailureNamed(c, 409, 18005, "当前平台尚未开放该操作", "publication_platform_closed")
+		api.FailureNamed(c, consts.StatusConflict, errcode.PublishPlatformClosed, "当前平台尚未开放该操作", "publication_platform_closed")
 	default:
-		api.FailureNamed(c, 503, 18006, "操作尚未完成，请保留当前内容并重试", "publication_unavailable")
+		api.FailureNamed(c, consts.StatusServiceUnavailable, errcode.PublishUnavailable, "操作尚未完成，请保留当前内容并重试", "publication_unavailable")
 	}
 }
 func decode(c *app.RequestContext, in any) error {
@@ -115,7 +117,7 @@ func List(_ context.Context, c *app.RequestContext) {
 		fail(c, err)
 		return
 	}
-	api.Success(c, map[string]any{"summary": summary, "items": items, "total": total, "page": f.Page, "page_size": f.PageSize, "preparation_enabled": s.PreparationEnabled, "execution_enabled": service.WiredExecution().Enabled})
+	api.Success(c, map[string]any{"summary": summary, "items": items, "total": total, "page": f.Page, "page_size": f.PageSize, "execution_enabled": service.WiredExecution().Enabled})
 }
 func Create(ctx context.Context, c *app.RequestContext) {
 	a, ok := middleware.AuthenticateRequest(c)

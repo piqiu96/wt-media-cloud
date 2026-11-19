@@ -2,7 +2,7 @@ package repository
 
 import (
 	"encoding/json"
-	"github.com/wt-media/wt-media-cloud/internal/modules/publishing/model"
+	"github.com/wt-media/wt-media-cloud/internal/modules/publish/model"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 	"time"
@@ -21,7 +21,7 @@ func currentAttempt(tx *gorm.DB, task uint64, user int64, attempt uint64) (model
 	return v, a, missing(e)
 }
 func feedback(v model.Task, a model.Attempt) model.ExecutionFeedback {
-	return model.ExecutionFeedback{TaskStatus: v.Status, AttemptStatus: a.Status, AttemptID: a.ID, Seq: a.ReportSeq, StopRequested: v.CancelRequestedAt != nil || v.AuthorizedAt == nil || v.Status != "running" && v.Status != "awaiting_human", ResultHash: a.ResultHash}
+	return model.ExecutionFeedback{TaskStatus: string(v.Status), AttemptStatus: a.Status, AttemptID: a.ID, Seq: a.ReportSeq, StopRequested: v.CancelRequestedAt != nil || v.AuthorizedAt == nil || v.Status != "running" && v.Status != "awaiting_human", ResultHash: a.ResultHash}
 }
 func (s ExecutionStore) Heartbeat(task uint64, user int64, attempt, seq uint64, now time.Time) (model.ExecutionFeedback, error) {
 	var out model.ExecutionFeedback
@@ -197,7 +197,7 @@ func (s ExecutionStore) Complete(candidate model.Task, user int64, r model.Compl
 		if e := audit(tx, user, v.ID, "publication.result", v.Revision+1); e != nil {
 			return e
 		}
-		v.Status = status
+		v.Status = model.Status(status)
 		v.Revision++
 		a.Status = attemptStatus
 		a.ReportSeq = r.Seq

@@ -1,10 +1,10 @@
 openapi: 3.1.0
 info:
   title: WT Media Single Publication Preparation
-  version: 2026.11.18.2
-  description: Creating never authorizes execution or submits a platform post. Separate revision-bound start requires the publishing_baidu_execution switch; public opening remains subject to real platform acceptance. Baidu preparation uses publishing_baidu_preparation. IDs and revisions are decimal strings; timestamps RFC3339. Uses errcode/message/data/logid.
+  version: 2026.11.19.2
+  description: Creating never authorizes execution or submits a platform post. Separate revision-bound start requires the publishing_baidu_execution switch; public opening remains subject to real platform acceptance. Baidu task preparation is available. IDs and revisions are decimal strings; timestamps RFC3339. Uses errcode/message/data/logid.
 paths:
-  /api/v1/publications:
+  /api/v1/publication:
     get:
       operationId: listPublications
       security: [{sessionCookie: []}]
@@ -18,7 +18,7 @@ paths:
         - {in: query, name: created_before, schema: {type: string, format: date-time}}
         - {in: query, name: status, schema: {type: string, enum: [pending, queued, running, awaiting_human, uncertain, reviewing, failed, published, cancelled, abandoned]}}
       responses:
-        '200': {description: '{items:[Publication],total,page,page_size,preparation_enabled,summary:{all,awaiting_human,running,uncertain}}. Summary uses the same non-status filters and actor scope, independent of pagination. Scope uses account owner, team and category; creator is audit only.'}
+        '200': {description: '{items:[Publication],total,page,page_size,summary:{all,awaiting_human,running,uncertain}}. Summary uses the same non-status filters and actor scope, independent of pagination. Scope uses account owner, team and category; creator is audit only.'}
         '400': {description: Invalid query.}
     post:
       operationId: createPublication
@@ -43,9 +43,9 @@ paths:
         '201': {description: Pending Publication, without authorization or attempt. Same creator/key/input returns the original record even if resources later change.}
         '400': {description: Invalid content or unavailable resource.}
         '404': {description: Resource missing or outside actor scope.}
-        '409': {description: Same key with different input, output occupied on this platform, or platform preparation closed.}
+        '409': {description: Same key with different input, output occupied on this platform, or unsupported platform.}
         '503': {description: Storage or persistence unavailable; retry with the same key and input.}
-  /api/v1/publications/{id}:
+  /api/v1/publication/{id}:
     parameters:
       - {in: path, name: id, required: true, schema: {$ref: '#/components/schemas/ID'}}
     get:
@@ -54,7 +54,7 @@ paths:
       responses:
         '200': {description: Publication with saved content and safe resource snapshot. No cookies, signed grants or bucket secrets.}
         '404': {description: Task absent or outside actor scope.}
-  /api/v1/publications/{id}/content:
+  /api/v1/publication/{id}/content:
     parameters:
       - {in: path, name: id, required: true, schema: {$ref: '#/components/schemas/ID'}}
     put:
@@ -77,7 +77,7 @@ paths:
         '400': {description: Invalid or unconfirmed content.}
         '404': {description: Task absent or outside actor scope.}
         '409': {description: Revision changed, task claimed/authorized or no longer pending. Reload before editing.}
-  /api/v1/publications/{id}/start:
+  /api/v1/publication/{id}/start:
     post:
       operationId: startPublication
       security: [{sessionCookie: []}]
@@ -86,7 +86,7 @@ paths:
       responses:
         '200': {description: 'Authorized task, pending until not_before or queued when due. Never creates an attempt; frozen inputs cannot subsequently be edited.'}
         '409': {description: 'Revision/state conflict, unavailable resource or platform not open for execution.'}
-  /api/v1/publications/{id}/attempts:
+  /api/v1/publication/{id}/attempts:
     get:
       operationId: listPublicationAttempts
       security: [{sessionCookie: []}]

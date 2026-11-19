@@ -32,7 +32,7 @@ describe('output asset workspace',()=>{
   expect(table).toContain('reserve-selected-row-on-paginate')
   expect(source).toContain('knownRows.value[row.id]=row')
   for(const text of [source,material]){expect(text).toContain('<ResourceSelectionToolbar');expect(text).toContain(':disabled="!!publishingReason"')}
-  expect(source).toContain('targets.length!==1');expect(source).toContain('!preparationEnabled.value');expect(source).toContain('outputUnavailable(targets[0]');expect(source).toContain("query:{output_id:String(targets[0].id)}")
+  expect(source).toContain('targets.length!==1');expect(source).toContain('outputUnavailable(targets[0]');expect(source).toContain("query:{output_id:String(targets[0].id)}")
  })
  it('keeps role category boundaries and basic date/video filters without local-page filtering',()=>{
   expect(source).toContain('isAdmin.value||isSenior.value||own.has(category.id)')

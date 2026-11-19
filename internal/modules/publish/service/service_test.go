@@ -8,7 +8,7 @@ import (
 	accounts "github.com/wt-media/wt-media-cloud/internal/modules/mediaaccount/service"
 	outputmodel "github.com/wt-media/wt-media-cloud/internal/modules/production/model"
 	production "github.com/wt-media/wt-media-cloud/internal/modules/production/service"
-	"github.com/wt-media/wt-media-cloud/internal/modules/publishing/model"
+	"github.com/wt-media/wt-media-cloud/internal/modules/publish/model"
 	"testing"
 )
 
@@ -16,7 +16,7 @@ func fixture() (*Service, identity.PublicUser, CreateInput) {
 	team := identity.TeamID(7)
 	owner := int64(9)
 	actor := identity.PublicUser{ID: 9, Status: identity.UserStatusEnabled, Role: identity.RoleOperator, TeamID: &team, CategoryIDs: []identity.CategoryID{1}}
-	s := &Service{PreparationEnabled: true, Repo: &memoryTasks{items: map[uint64]model.Task{}}, Account: func(identity.PublicUser, string) (accounts.Account, error) {
+	s := &Service{Repo: &memoryTasks{items: map[uint64]model.Task{}}, Account: func(identity.PublicUser, string) (accounts.Account, error) {
 		return accounts.Account{ID: "12", UserID: 9, TeamID: &team, CategoryIDs: []identity.CategoryID{1}, Enabled: true, Platform: "baidu", PlatformAccountID: "real-uid", BrowserProfileID: "profile", IdentificationStatus: "identified", PlatformLoginStatus: "normal"}, nil
 	}, Output: func(identity.PublicUser, int64) (production.ComposeOutputDetail, error) {
 		return production.ComposeOutputDetail{Output: outputmodel.CompositeOutput{ID: 42, TeamID: 7, CategoryID: 1, OperatorID: &owner, PublishStatus: "pending_publish", Platforms: []string{"baidu"}, ObjectKey: "video", FileSizeBytes: 3, SHA256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Video: outputmodel.ComposeOutputVideo{Status: "ready"}}}, nil
@@ -99,12 +99,10 @@ func TestCreateIsPendingIdempotentAndOccupiesOutput(t *testing.T) {
 	}
 }
 func TestCreateRejectsUnavailableResourcesAndPlatform(t *testing.T) {
-	for _, name := range []string{"closed", "wrong-platform", "unconfirmed", "missing-cover", "bad-declaration", "outside-category", "file-unavailable", "output-unavailable"} {
+	for _, name := range []string{"wrong-platform", "unconfirmed", "missing-cover", "bad-declaration", "outside-category", "file-unavailable", "output-unavailable"} {
 		t.Run(name, func(t *testing.T) {
 			s, a, in := fixture()
 			switch name {
-			case "closed":
-				s.PreparationEnabled = false
 			case "wrong-platform":
 				in.Platform = "bilibili"
 			case "unconfirmed":
@@ -159,5 +157,17 @@ func TestEditChecksPermissionRevisionAndPendingState(t *testing.T) {
 	r.items[v.ID] = v
 	if _, err = s.Edit(context.Background(), a, v.ID, EditInput{ExpectedRevision: 2, Content: content}); !errors.Is(err, ErrConflict) {
 		t.Fatalf("queued edit: %v", err)
+	}
+}
+
+func TestBaiduPreparationNeedsNoFeatureSwitch(t *testing.T) {
+	resources, actor, input := fixture()
+	s := &Service{Repo: resources.Repo, Account: resources.Account, Output: resources.Output, File: resources.File}
+	task, err := s.Create(context.Background(), actor, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if task.Status != "pending" || task.AuthorizedAt != nil || task.CurrentAttemptID != nil {
+		t.Fatalf("create authorized execution: %+v", task)
 	}
 }

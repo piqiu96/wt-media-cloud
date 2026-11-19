@@ -1,9 +1,9 @@
 schema_version: 1
-revision: "2026.11.18.1"
+revision: "2026.11.19.1"
 errors:
   publication_invalid: {errcode: 18001, http_status: 400, retryable: false, message: Invalid publication content or resources.}
   publication_not_found: {errcode: 18002, http_status: 404, retryable: false, message: Missing or inaccessible publication resource.}
   publication_conflict: {errcode: 18003, http_status: 409, retryable: false, message: Request content or revision changed; reload before editing.}
   publication_output_occupied: {errcode: 18004, http_status: 409, retryable: false, message: Output already occupied on this platform.}
-  publication_platform_closed: {errcode: 18005, http_status: 409, retryable: false, message: Platform preparation is not enabled.}
+  publication_platform_closed: {errcode: 18005, http_status: 409, retryable: false, message: Requested platform is not supported.}
   publication_unavailable: {errcode: 18006, http_status: 503, retryable: true, message: Publication operation incomplete; retry the same request key and content.}

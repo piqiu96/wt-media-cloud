@@ -21,15 +21,13 @@ import (
 	"github.com/wt-media/wt-media-cloud/internal/modules/mediaaccount"
 	accountservice "github.com/wt-media/wt-media-cloud/internal/modules/mediaaccount/service"
 	"github.com/wt-media/wt-media-cloud/internal/modules/production"
-	productionservice "github.com/wt-media/wt-media-cloud/internal/modules/production/service"
 	"github.com/wt-media/wt-media-cloud/internal/modules/profilebinding"
 	profileservice "github.com/wt-media/wt-media-cloud/internal/modules/profilebinding/service"
 	"github.com/wt-media/wt-media-cloud/internal/modules/proxy"
 	proxyservice "github.com/wt-media/wt-media-cloud/internal/modules/proxy/service"
-	"github.com/wt-media/wt-media-cloud/internal/modules/publishing"
-	publishingservice "github.com/wt-media/wt-media-cloud/internal/modules/publishing/service"
+	"github.com/wt-media/wt-media-cloud/internal/modules/publish"
+	publishservice "github.com/wt-media/wt-media-cloud/internal/modules/publish/service"
 	api "github.com/wt-media/wt-media-cloud/internal/shared/api"
-	"gorm.io/gorm"
 )
 
 func registerRoutes(engine *server.Hertz) error {
@@ -52,9 +50,9 @@ func registerRoutes(engine *server.Hertz) error {
 // 单独拆出来是为了让测试能拿到完整模块列表：registerRoutes 会读配置并初始化管理员，
 // 从它入口断言就等于在断言数据库。这里漏掉一个模块，它所有的路由都会 404，没有其他症状。
 func registerModuleRoutes(engine *server.Hertz) {
-	profileservice.SetPublicationGuard(publishingservice.CheckProfileExecution)
-	accountservice.SetPublicationGuard(publishingservice.CheckProfileExecution)
-	proxyservice.SetPublicationGuard(publishingservice.CheckProfileExecution)
+	profileservice.SetPublicationGuard(publishservice.CheckProfileExecution)
+	accountservice.SetPublicationGuard(publishservice.CheckProfileExecution)
+	proxyservice.SetPublicationGuard(publishservice.CheckProfileExecution)
 	cloudagent.RegisterRoutes(engine)
 	identity.RegisterRoutes(engine)
 	localagent.RegisterRoutes(engine)
@@ -64,25 +62,9 @@ func registerModuleRoutes(engine *server.Hertz) {
 	contentpool.RegisterRoutes(engine)
 	production.RegisterRoutes(engine)
 	filetransfer.RegisterRoutes(engine)
-	fileservice.SetReferenceCheck(func(tx *gorm.DB, id int64) error {
-		if err := publishingservice.CheckFileReferences(tx, id); err != nil {
-			return err
-		}
-		token, err := fileservice.ReferenceToken(tx, id)
-		if err != nil {
-			return err
-		}
-		used, err := productionservice.OperationsFileReferenced(tx, token)
-		if err != nil {
-			return err
-		}
-		if used {
-			return fileservice.ErrInUse
-		}
-		return nil
-	})
+	fileservice.SetReferenceCheck(publishservice.CheckFileReferences)
 	files.RegisterRoutes(engine)
-	publishing.RegisterRoutes(engine)
+	publish.RegisterRoutes(engine)
 }
 
 func bootstrapIdentity(username, password string) error {

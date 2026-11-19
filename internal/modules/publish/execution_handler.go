@@ -1,12 +1,12 @@
-package publishing
+package publish
 
 import (
 	"context"
 	app "github.com/cloudwego/hertz/pkg/app"
 	"github.com/wt-media/wt-media-cloud/internal/middleware"
 	"github.com/wt-media/wt-media-cloud/internal/modules/localagent"
-	"github.com/wt-media/wt-media-cloud/internal/modules/publishing/model"
-	"github.com/wt-media/wt-media-cloud/internal/modules/publishing/service"
+	"github.com/wt-media/wt-media-cloud/internal/modules/publish/model"
+	"github.com/wt-media/wt-media-cloud/internal/modules/publish/service"
 	api "github.com/wt-media/wt-media-cloud/internal/shared/api"
 )
 
