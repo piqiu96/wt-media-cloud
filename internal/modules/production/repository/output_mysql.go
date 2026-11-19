@@ -191,3 +191,19 @@ func scanComposeOutput(row composeOutputScanner) (model.CompositeOutput, error) 
 	item.Media = media
 	return item, nil
 }
+
+// FindWithPlatforms reads output facts together with its source task platforms.
+func (ComposeOutputStore) FindWithPlatforms(db *gorm.DB, id int64) (model.CompositeOutput, bool, error) {
+	item, found, err := findComposeOutput(db, id)
+	if err != nil || !found {
+		return item, found, err
+	}
+	var raw []byte
+	if err = db.Raw("SELECT platforms_json FROM compose_tasks WHERE id=?", item.TaskID).Row().Scan(&raw); err != nil {
+		return item, false, err
+	}
+	if err = json.Unmarshal(raw, &item.Platforms); err != nil {
+		return item, false, err
+	}
+	return item, true, nil
+}

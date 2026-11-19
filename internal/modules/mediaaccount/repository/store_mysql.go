@@ -100,7 +100,10 @@ func createInTx(tx *gorm.DB, record model.AccountRecord) (string, error) {
 	return accountID, nil
 }
 
-func Find(id string) (model.AccountRecord, bool, error) {
+func Find(id string, db ...*gorm.DB) (model.AccountRecord, bool, error) {
+	if len(db) > 0 {
+		return findByID(db[0], id)
+	}
 	return findByID(database.DB(), id)
 }
 

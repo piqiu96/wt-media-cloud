@@ -39,7 +39,7 @@ func verified(a model.Attempt, r model.ExecutionReport) bool {
 }
 func (s ExecutionStore) Report(candidate model.Task, user int64, r model.ExecutionReport, currentSession bool, now time.Time) (model.ExecutionFeedback, error) {
 	var out model.ExecutionFeedback
-	e := s.DB.Transaction(func(tx *gorm.DB) error {
+	e := currentTransaction(s.DB, func(tx *gorm.DB) error {
 		if r.Stage == "" {
 			// No stage means keepalive only. It never revalidates resources,
 			// appends history, changes task revision, or grants submission.
@@ -101,7 +101,7 @@ func (s ExecutionStore) Report(candidate model.Task, user int64, r model.Executi
 			return ErrConflict
 		}
 		if r.Stage == model.AttemptStageReady || r.Stage == model.AttemptStageSubmitting || r.Stage == model.AttemptStagePreparing {
-			input, err := s.lockedInput(tx, v)
+			input, err := s.readInput(tx, v)
 			if err != nil && !errors.Is(err, ErrInputChanged) {
 				return err
 			}
@@ -169,7 +169,7 @@ func (s ExecutionStore) Complete(candidate model.Task, user int64, r model.Compl
 	if e != nil || hash != r.ResultHash {
 		return out, ErrConflict
 	}
-	e = s.DB.Transaction(func(tx *gorm.DB) error {
+	e = currentTransaction(s.DB, func(tx *gorm.DB) error {
 		v, a, e := currentAttempt(tx, candidate.ID, user, r.AttemptID)
 		if e != nil {
 			return e

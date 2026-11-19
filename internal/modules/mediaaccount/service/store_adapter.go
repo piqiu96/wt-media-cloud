@@ -1,6 +1,7 @@
 package service
 
 import (
+	"gorm.io/gorm"
 	"time"
 
 	identityservice "github.com/wt-media/wt-media-cloud/internal/modules/identity/service"
@@ -10,7 +11,7 @@ import (
 	profilebindingservice "github.com/wt-media/wt-media-cloud/internal/modules/profilebinding/service"
 )
 
-type mysqlStore struct{}
+type mysqlStore struct{ db *gorm.DB }
 
 func (mysqlStore) ListPage(query dto.AccountFilter) ([]model.AccountRecord, model.AccountCounts, error) {
 	return repository.ListPage(repository.AccountFilter(query))
@@ -29,7 +30,12 @@ func (mysqlStore) CompleteCheck(record model.AccountRecord) error {
 func (mysqlStore) Create(record model.AccountRecord) (string, error) {
 	return repository.Create(record)
 }
-func (mysqlStore) Find(id string) (model.AccountRecord, bool, error) { return repository.Find(id) }
+func (s mysqlStore) Find(id string) (model.AccountRecord, bool, error) {
+	if s.db != nil {
+		return repository.Find(id, s.db)
+	}
+	return repository.Find(id)
+}
 func (mysqlStore) FindByProfilePlatform(profileID string, platform model.Platform) (model.AccountRecord, bool, error) {
 	return repository.FindByProfilePlatform(profileID, platform)
 }
