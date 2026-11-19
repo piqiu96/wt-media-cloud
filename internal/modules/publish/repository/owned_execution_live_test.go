@@ -143,8 +143,8 @@ func TestLiveOwnedCookieBusyAndBindingChangeDenyNewWork(t *testing.T) {
 		t.Fatalf("%+v %v", c, e)
 	}
 	s.DB.Exec("UPDATE media_accounts SET browser_profile_id=38 WHERE id=12")
-	if _, e := s.Progress(c.Task, 9, model.ExecutionReport{AttemptID: c.Attempt.ID, Seq: 1, Stage: "preparing"}, true, now); !errors.Is(e, repo.ErrConflict) {
-		t.Fatalf("changed binding accepted %v", e)
+	if f, e := s.Report(c.Task, 9, model.ExecutionReport{AttemptID: c.Attempt.ID, Seq: 1, Stage: model.AttemptStagePreparing}, true, now); e != nil || !f.StopRequested || f.AllowSubmit || f.StopReason != model.ExecutionInputChanged {
+		t.Fatalf("changed binding did not stop: %+v %v", f, e)
 	}
 	if e := repo.ProfileExecutionBusy(s.DB, "37"); !errors.Is(e, repo.ErrConflict) {
 		t.Fatal(e)

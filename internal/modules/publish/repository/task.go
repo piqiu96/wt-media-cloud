@@ -9,7 +9,6 @@ import (
 	"github.com/wt-media/wt-media-cloud/internal/modules/publish/model"
 	"github.com/wt-media/wt-media-cloud/internal/shared/id"
 	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 	"time"
 )
 
@@ -92,13 +91,13 @@ func (s Store) Edit(v model.Task, revision uint64) (model.Task, error) {
 			return err
 		}
 		var old model.Task
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&old, v.ID).Error; err != nil {
+		if err := tx.First(&old, v.ID).Error; err != nil {
 			return missing(err)
 		}
 		if old.Revision != revision || old.Status != model.StatusPending || old.CurrentAttemptID != nil || old.AuthorizedAt != nil {
 			return &ConflictError{TaskID: old.ID, Revision: old.Revision}
 		}
-		if err := tx.Model(&model.Task{}).Where("id=?", v.ID).Updates(map[string]any{"content_json": mustJSON(v.Content), "resource_snapshot_json": string(v.ResourceSnapshot), "cover_file_id": v.CoverFileID, "not_before": v.NotBefore, "revision": revision + 1, "updated_at": time.Now().UTC()}).Error; err != nil {
+		if err := updateTask(tx, old, map[string]any{"content_json": mustJSON(v.Content), "resource_snapshot_json": string(v.ResourceSnapshot), "cover_file_id": v.CoverFileID, "not_before": v.NotBefore, "updated_at": time.Now().UTC()}); err != nil {
 			return err
 		}
 		return audit(tx, v.AuditActor, v.ID, "publication.edit", revision+1)
@@ -148,7 +147,7 @@ func (s Store) Summary(f Filter) (map[string]int64, error) {
 	if err := s.query(f).Select("status,COUNT(*) AS count").Group("status").Scan(&rows).Error; err != nil {
 		return nil, err
 	}
-	counts := map[string]int64{"all": 0, "awaiting_human": 0, "running": 0, "uncertain": 0}
+	counts := map[string]int64{"all": 0, string(model.StatusAwaitingHuman): 0, string(model.StatusRunning): 0, string(model.StatusUncertain): 0}
 	for _, row := range rows {
 		counts[string(row.Status)] = row.Count
 		counts["all"] += row.Count

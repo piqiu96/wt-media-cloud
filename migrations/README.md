@@ -64,3 +64,14 @@ Before applying this migration to a non-empty environment:
 4. verify that every numeric user reference resolves to `users.id` and that the row counts are unchanged.
 
 The original string user identifier remains in `users.legacy_id`. It is the recovery mapping source if an operator must rebuild the old string relationships. A rollback must recreate shadow string columns from `users.legacy_id`, validate all mappings, swap the foreign keys in reverse order, and only then restore the old primary key. Never drop the numeric columns or `legacy_id` before that validation succeeds.
+
+## Migration 107 Safety
+
+`20261119_107_publication_attempt_revision.sql` is owned by Publish and adds an
+internal optimistic concurrency token to `publication_attempt`. Existing rows
+receive revision 1; task status, report sequences and evidence are preserved.
+Apply this migration before deploying code that reads/writes attempt revisions.
+The migration runner records the version and skips replay. Verify the column's
+non-null/default properties, unchanged row count and the concurrent report tests
+in `internal/modules/publish/repository`. Roll back the application first; then
+`ALTER TABLE publication_attempt DROP COLUMN revision` removes only the token.

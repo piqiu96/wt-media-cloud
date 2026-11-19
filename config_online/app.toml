@@ -1,6 +1,4 @@
 name = 'wt-media-cloud'
-# Browser submission requires separate execution authorization.
-publishing_baidu_execution = false
 
 [initial_admin]
 password = 'admin123'

@@ -9,11 +9,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/wt-media/wt-media-cloud/internal/config"
 	"github.com/wt-media/wt-media-cloud/internal/infra/database"
 	files "github.com/wt-media/wt-media-cloud/internal/modules/files/service"
 	identity "github.com/wt-media/wt-media-cloud/internal/modules/identity/service"
 	accounts "github.com/wt-media/wt-media-cloud/internal/modules/mediaaccount/service"
+	productionmodel "github.com/wt-media/wt-media-cloud/internal/modules/production/model"
 	production "github.com/wt-media/wt-media-cloud/internal/modules/production/service"
 	profiles "github.com/wt-media/wt-media-cloud/internal/modules/profilebinding/service"
 	"github.com/wt-media/wt-media-cloud/internal/modules/publish/model"
@@ -25,15 +25,13 @@ type ExecutionRepository interface {
 	Get(uint64) (model.Task, error)
 	Start(model.Task, uint64, int64, time.Time) (model.Task, error)
 	Claim(int64, string, time.Time) (*model.Claim, error)
-	Attempts(uint64) ([]model.Attempt, error)
-	Heartbeat(uint64, int64, uint64, uint64, time.Time) (model.ExecutionFeedback, error)
-	Progress(model.Task, int64, model.ExecutionReport, bool, time.Time) (model.ExecutionFeedback, error)
+	Attempt(uint64) ([]model.Attempt, error)
+	Report(model.Task, int64, model.ExecutionReport, bool, time.Time) (model.ExecutionFeedback, error)
 	Complete(model.Task, int64, model.Completion, time.Time) (model.ExecutionFeedback, error)
 }
 type ExecutionService struct {
-	Repo    ExecutionRepository
-	Enabled bool
-	Grant   func(context.Context, model.Claim) (FileGrants, error)
+	Repo  ExecutionRepository
+	Grant func(context.Context, model.Claim) (FileGrants, error)
 }
 type FileGrant struct {
 	URL    string `json:"url"`
@@ -56,7 +54,7 @@ func NewExecutionStore(db *gorm.DB) repository.ExecutionStore {
 	return repository.ExecutionStore{Store: repository.Store{DB: db, LockFiles: files.LockAvailable}, LockInput: lockExecutionInput}
 }
 func WiredExecution() *ExecutionService {
-	return &ExecutionService{Repo: ExecutionStore(), Enabled: config.Get().App.PublishingBaiduExecution, Grant: grantExecutionFiles}
+	return &ExecutionService{Repo: ExecutionStore(), Grant: grantExecutionFiles}
 }
 func lockExecutionInput(tx *gorm.DB, v model.Task) (model.ExecutionInput, error) {
 	var snap struct {
@@ -67,22 +65,22 @@ func lockExecutionInput(tx *gorm.DB, v model.Task) (model.ExecutionInput, error)
 	}
 	var out model.ExecutionInput
 	if json.Unmarshal(v.ResourceSnapshot, &snap) != nil || v.Platform != "baidu" || !contentValid(v.Content) {
-		return out, ErrConflict
+		return out, repository.ErrInputChanged
 	}
 	id, e := strconv.ParseUint(snap.Profile, 10, 64)
 	if e != nil || id == 0 {
-		return out, ErrConflict
+		return out, repository.ErrInputChanged
 	}
 	p, e := profiles.LockPublicationProfile(tx, snap.Profile, v.OperatorID)
 	if errors.Is(e, profiles.ErrProfileNotFound) || errors.Is(e, profiles.ErrProfileInactive) {
-		return out, ErrConflict
+		return out, repository.ErrInputChanged
 	}
 	if e != nil {
 		return out, e
 	}
 	f, e := files.LockSavedPublicationFile(tx, v.CoverFileID)
 	if errors.Is(e, files.ErrNotFound) {
-		return out, ErrConflict
+		return out, repository.ErrInputChanged
 	}
 	if e != nil {
 		return out, e
@@ -92,14 +90,14 @@ func lockExecutionInput(tx *gorm.DB, v model.Task) (model.ExecutionInput, error)
 		return out, e
 	}
 	if !eligible {
-		return out, ErrConflict
+		return out, repository.ErrInputChanged
 	}
 	eligible, e = accounts.CheckPublicationBinding(tx, accounts.PublicationBinding{ID: v.MediaAccountID, Owner: v.OperatorID, Team: v.TeamID, Category: v.CategoryID, Platform: v.Platform, UID: v.PlatformAccountUID, Profile: snap.Profile})
 	if e != nil {
 		return out, e
 	}
 	if !eligible {
-		return out, ErrConflict
+		return out, repository.ErrInputChanged
 	}
 	o, found, e := production.LockSavedPublicationOutput(tx, v.CompositeOutputID)
 	if e != nil {
@@ -111,8 +109,8 @@ func lockExecutionInput(tx *gorm.DB, v model.Task) (model.ExecutionInput, error)
 			supported = true
 		}
 	}
-	if !found || !supported || o.TeamID != v.TeamID || int64(o.CategoryID) != v.CategoryID || o.PublishStatus == "archived" || o.SHA256 != snap.VideoSHA || o.FileSizeBytes != snap.VideoSize || f.Type != "image" || f.SHA256 != snap.CoverSHA || f.SizeBytes <= 0 || len(o.SHA256) != 64 || len(f.SHA256) != 64 || o.FileSizeBytes <= 0 {
-		return out, ErrConflict
+	if !found || !supported || o.TeamID != v.TeamID || int64(o.CategoryID) != v.CategoryID || o.PublishStatus == productionmodel.OutputPublishArchived || o.SHA256 != snap.VideoSHA || o.FileSizeBytes != snap.VideoSize || f.Type != "image" || f.SHA256 != snap.CoverSHA || f.SizeBytes <= 0 || len(o.SHA256) != 64 || len(f.SHA256) != 64 || o.FileSizeBytes <= 0 {
+		return out, repository.ErrInputChanged
 	}
 	return model.ExecutionInput{ProfileID: id, BitProfileID: p.BitProfileID, BitMainUserID: p.BitMainUserID, PlatformUID: v.PlatformAccountUID, Content: v.Content, VideoSHA256: o.SHA256, VideoSize: o.FileSizeBytes, CoverSHA256: f.SHA256, CoverSize: f.SizeBytes}, nil
 }
@@ -152,7 +150,7 @@ func (s *ExecutionService) Start(a identity.PublicUser, id, revision uint64) (mo
 	if e != nil {
 		return v, e
 	}
-	if !s.Enabled || v.Platform != "baidu" {
+	if v.Platform != "baidu" {
 		return model.Task{}, ErrClosed
 	}
 	if revision == 0 {
@@ -160,11 +158,11 @@ func (s *ExecutionService) Start(a identity.PublicUser, id, revision uint64) (mo
 	}
 	return s.Repo.Start(v, revision, int64(a.ID), time.Now().UTC())
 }
-func (s *ExecutionService) Attempts(a identity.PublicUser, id uint64) ([]model.Attempt, error) {
+func (s *ExecutionService) Attempt(a identity.PublicUser, id uint64) ([]model.Attempt, error) {
 	if _, e := s.readable(a, id); e != nil {
 		return nil, e
 	}
-	return s.Repo.Attempts(id)
+	return s.Repo.Attempt(id)
 }
 func validKey(key string) bool {
 	if len(key) < 1 || len(key) > 64 {
@@ -181,9 +179,6 @@ func (s *ExecutionService) Claim(ctx context.Context, user int64, key string) (*
 	if user <= 0 || !validKey(key) {
 		return nil, ErrInvalid
 	}
-	if !s.Enabled {
-		return nil, ErrClosed
-	}
 	c, e := s.Repo.Claim(user, key, time.Now().UTC())
 	if e != nil || c == nil {
 		return nil, e
@@ -191,7 +186,7 @@ func (s *ExecutionService) Claim(ctx context.Context, user int64, key string) (*
 	out := &GrantedClaim{Claim: *c}
 	// Replaying finished or lost work never signs new input. The old attempt is
 	// returned so the Agent can reconcile its own durable record without acting.
-	if c.Task.Status != "running" || c.Attempt.Status != "running" || c.Attempt.Stage != "claimed" {
+	if c.Task.Status != model.StatusRunning || c.Attempt.Status != model.AttemptStatusRunning || c.Attempt.Stage != model.AttemptStageClaimed {
 		return out, nil
 	}
 	grants, e := s.Grant(ctx, *c)
@@ -201,13 +196,7 @@ func (s *ExecutionService) Claim(ctx context.Context, user int64, key string) (*
 	out.Files = &grants
 	return out, nil
 }
-func (s *ExecutionService) Heartbeat(user int64, id, attempt, seq uint64) (model.ExecutionFeedback, error) {
-	if user <= 0 || attempt == 0 || seq == 0 {
-		return model.ExecutionFeedback{}, ErrInvalid
-	}
-	return s.Repo.Heartbeat(id, user, attempt, seq, time.Now().UTC())
-}
-func (s *ExecutionService) Progress(user int64, id uint64, in model.ExecutionReport, current bool) (model.ExecutionFeedback, error) {
+func (s *ExecutionService) Report(user int64, id uint64, in model.ExecutionReport, current bool) (model.ExecutionFeedback, error) {
 	if user <= 0 || in.AttemptID == 0 || in.Seq == 0 {
 		return model.ExecutionFeedback{}, ErrInvalid
 	}
@@ -218,8 +207,7 @@ func (s *ExecutionService) Progress(user int64, id uint64, in model.ExecutionRep
 	if v.OperatorID != user {
 		return model.ExecutionFeedback{}, ErrNotFound
 	}
-	// Disabling execution prevents new external actions, but not result reporting.
-	return s.Repo.Progress(v, user, in, current && s.Enabled, time.Now().UTC())
+	return s.Repo.Report(v, user, in, current, time.Now().UTC())
 }
 func safePublicURL(raw string) bool {
 	if raw == "" {
@@ -259,10 +247,8 @@ func (s *ExecutionService) Complete(user int64, id uint64, in model.Completion) 
 	return s.Repo.Complete(v, user, in, time.Now().UTC())
 }
 
-func CheckProfileExecution(tx *gorm.DB, id string) (bool, error) {
-	e := repository.ProfileExecutionBusy(tx, id)
-	if errors.Is(e, repository.ErrConflict) {
-		return true, nil
-	}
-	return false, e
+// CheckProfileReferences protects saved task inputs and immutable attempt history
+// from destructive Profile deletion; it does not block ordinary resource edits.
+func CheckProfileReferences(id string) (bool, error) {
+	return repository.ProfileReferenced(database.DB(), id)
 }

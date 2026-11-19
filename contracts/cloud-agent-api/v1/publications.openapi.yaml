@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: WT Media Cloud-Agent Publication Execution
-  version: 2026.11.18.2
+  version: 2026.11.20.1
   description: >-
     Additive single-task execution. Agent bearer identifies the account owner; no device identity or
     generic lease. Claim requires a current Desktop session. Reports are report-safe only for the same
@@ -9,7 +9,7 @@ info:
     Task/attempt ids and revisions are decimal strings. Responses use errcode/message/data/logid.
     Download grants appear only in responses, never in frozen snapshots, evidence or logs.
 paths:
-  /api/v1/cloud-agent/publication-tasks/claim:
+  /api/v1/cloud-agent/publication-task/claim:
     post:
       operationId: claimPublication
       security: [{agentBearer: []}]
@@ -25,25 +25,16 @@ paths:
           content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}
         '401': {description: Invalid bearer or Desktop session no longer current.}
         '409': {description: Input changed, owner/Profile busy, or platform unavailable.}
-  /api/v1/cloud-agent/publication-tasks/{id}/heartbeat:
+  /api/v1/cloud-agent/publication-task/{id}/report:
     post:
-      operationId: heartbeatPublication
+      operationId: reportPublication
       security: [{agentBearer: []}]
       parameters: [{$ref: '#/components/parameters/TaskID'}]
-      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ReportIdentity'}}}}
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/Report'}}}}
       responses:
-        '200': {description: Current task/attempt status and stop_requested; no permission for a new platform operation.}
-        '409': {description: Stale sequence, foreign/non-current attempt or resolved scene.}
-  /api/v1/cloud-agent/publication-tasks/{id}/progress:
-    post:
-      operationId: progressPublication
-      security: [{agentBearer: []}]
-      parameters: [{$ref: '#/components/parameters/TaskID'}]
-      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/Progress'}}}}
-      responses:
-        '200': {description: '{task_status,attempt_status,report_seq,stop_requested,allow_submit}. Only a fresh submitting response may allow one click; no persisted/replayed permission. Lost responses never replay a click.'}
+        '200': {description: '{task_status,attempt_status,attempt_id,report_seq,stop_requested,stop_reason?,allow_submit}. Omit stage for lightweight keepalive: no history append, resource revalidation or submit permission. Supply stage for progress and pre-submit checks. Invalidated execution input persists stop_reason=PUBLICATION_INPUT_CHANGED without advancing the stage; keepalive returns this stop until the executor safely completes or the attempt is reconciled. Only a fresh submitting report can grant one click; replay never grants it again.'}
         '409': {description: Stale/conflicting report, invalid transition, changed input or unsafe scene.}
-  /api/v1/cloud-agent/publication-tasks/{id}/complete:
+  /api/v1/cloud-agent/publication-task/{id}/complete:
     post:
       operationId: completePublication
       security: [{agentBearer: []}]
@@ -59,17 +50,15 @@ components:
     TaskID: {in: path, name: id, required: true, schema: {$ref: '#/components/schemas/ID'}}
   schemas:
     ID: {type: string, pattern: '^[1-9][0-9]*$'}
-    ReportIdentity:
+    Report:
       type: object
       required: [attempt_id, report_seq]
       additionalProperties: false
-      properties:
-        attempt_id: {$ref: '#/components/schemas/ID'}
-        report_seq: {type: integer, minimum: 1}
-    Progress:
-      type: object
-      required: [attempt_id, report_seq, stage]
-      additionalProperties: false
+      description: >-
+        A single sequence covers keepalive and progress. Omit stage and all evidence fields for
+        keepalive; it remains report-safe after the Desktop session is replaced. Progress with stage
+        requires the current Desktop session, except awaiting_human. Retry with the original packet;
+        repeated packets never replay submit permission. Each new report uses an increasing sequence.
       properties:
         attempt_id: {$ref: '#/components/schemas/ID'}
         report_seq: {type: integer, minimum: 1}
@@ -78,6 +67,15 @@ components:
         bit_profile_id: {type: string, maxLength: 255}
         video_sha256: {type: string, pattern: '^[a-f0-9]{64}$'}
         cover_sha256: {type: string, pattern: '^[a-f0-9]{64}$'}
+      allOf:
+        - if: {not: {required: [stage]}}
+          then:
+            not:
+              anyOf:
+                - {required: [platform_uid]}
+                - {required: [bit_profile_id]}
+                - {required: [video_sha256]}
+                - {required: [cover_sha256]}
     Completion:
       type: object
       required: [attempt_id, report_seq, result_hash, result]

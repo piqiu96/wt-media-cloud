@@ -27,11 +27,10 @@ func RegisterRoutes(h *server.Hertz) {
 	h.GET("/api/v1/publication/:id", Get)
 	h.PUT("/api/v1/publication/:id/content", Edit)
 	h.POST("/api/v1/publication/:id/start", Start)
-	h.GET("/api/v1/publication/:id/attempts", Attempts)
-	h.POST("/api/v1/cloud-agent/publication-tasks/claim", localagent.RequireAgent(localagent.StrictMode), Claim)
-	h.POST("/api/v1/cloud-agent/publication-tasks/:id/heartbeat", localagent.RequireAgent(localagent.ReportSafeMode), Heartbeat)
-	h.POST("/api/v1/cloud-agent/publication-tasks/:id/progress", localagent.RequireAgent(localagent.ReportSafeMode), Progress)
-	h.POST("/api/v1/cloud-agent/publication-tasks/:id/complete", localagent.RequireAgent(localagent.ReportSafeMode), Complete)
+	h.GET("/api/v1/publication/:id/attempt", Attempt)
+	h.POST("/api/v1/cloud-agent/publication-task/claim", localagent.RequireAgent(localagent.StrictMode), Claim)
+	h.POST("/api/v1/cloud-agent/publication-task/:id/report", localagent.RequireAgent(localagent.ReportSafeMode), Report)
+	h.POST("/api/v1/cloud-agent/publication-task/:id/complete", localagent.RequireAgent(localagent.ReportSafeMode), Complete)
 }
 func fail(c *app.RequestContext, err error) {
 	switch {
@@ -117,7 +116,7 @@ func List(_ context.Context, c *app.RequestContext) {
 		fail(c, err)
 		return
 	}
-	api.Success(c, map[string]any{"summary": summary, "items": items, "total": total, "page": f.Page, "page_size": f.PageSize, "execution_enabled": service.WiredExecution().Enabled})
+	api.Success(c, map[string]any{"summary": summary, "items": items, "total": total, "page": f.Page, "page_size": f.PageSize})
 }
 func Create(ctx context.Context, c *app.RequestContext) {
 	a, ok := middleware.AuthenticateRequest(c)

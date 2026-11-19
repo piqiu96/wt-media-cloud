@@ -395,29 +395,6 @@ func bindBitAccount(db *gorm.DB, userID sharedidentity.UserID, mainUserID string
 	case !rebind:
 		return model.BitAccountBinding{}, model.ErrBitMainUserMismatch
 	default:
-		rows, e := queryRows(tx, "SELECT id FROM browser_profiles WHERE user_id=? ORDER BY id FOR UPDATE", userID)
-		if e != nil {
-			return model.BitAccountBinding{}, e
-		}
-		var ids []string
-		for rows.Next() {
-			var pid string
-			if e = rows.Scan(&pid); e != nil {
-				rows.Close()
-				return model.BitAccountBinding{}, e
-			}
-			ids = append(ids, pid)
-		}
-		e = rows.Err()
-		rows.Close()
-		if e != nil {
-			return model.BitAccountBinding{}, e
-		}
-		for _, pid := range ids {
-			if e := checkPublication(tx, pid); e != nil {
-				return model.BitAccountBinding{}, e
-			}
-		}
 		action, result, previous = model.AuditMainAccountRebind, "rebound", current.String
 		if _, err := execSQL(tx,
 			`UPDATE users SET bit_main_user_id = ?, bit_account_status = ?, bit_account_bound_at = ?, bit_account_last_verified_at = ?, updated_at = ? WHERE id = ?`,
@@ -641,9 +618,6 @@ func deleteProfile(db *gorm.DB, profileID string, actorID sharedidentity.UserID,
 		if err != nil {
 			return err
 		}
-		if err := checkPublication(tx, profileID); err != nil {
-			return err
-		}
 		if localState != string(model.ProfileLocalMissing) {
 			return model.ErrProfileNotMissing
 		}
@@ -692,10 +666,7 @@ func UpdateProfile(profileID string, remark *string, enabled *bool, at time.Time
 }
 
 func updateProfile(db *gorm.DB, profileID string, remark *string, enabled *bool, at time.Time) error {
-	if enabled == nil {
-		return updateProfileUnchecked(db, profileID, remark, enabled, at)
-	}
-	return guardedProfileMutation(db, profileID, func(tx *gorm.DB) error { return updateProfileUnchecked(tx, profileID, remark, enabled, at) })
+	return updateProfileUnchecked(db, profileID, remark, enabled, at)
 }
 func updateProfileUnchecked(db *gorm.DB, profileID string, remark *string, enabled *bool, at time.Time) error {
 	var sets []string
@@ -742,12 +713,7 @@ func BindProxy(profileID, proxyID, proxyType, proxyHost string, proxyPort int) (
 }
 
 func bindProxy(db *gorm.DB, profileID, proxyID, proxyType, proxyHost string, proxyPort int) (out model.BrowserProfile, err error) {
-	err = guardedProfileMutation(db, profileID, func(tx *gorm.DB) error {
-		var e error
-		out, e = bindProxyUnchecked(tx, profileID, proxyID, proxyType, proxyHost, proxyPort)
-		return e
-	})
-	return
+	return bindProxyUnchecked(db, profileID, proxyID, proxyType, proxyHost, proxyPort)
 }
 func bindProxyUnchecked(db *gorm.DB, profileID, proxyID, proxyType, proxyHost string, proxyPort int) (model.BrowserProfile, error) {
 	result, err := execSQL(db,
@@ -776,12 +742,7 @@ func UnbindProxy(profileID, expectedProxyID string) (model.BrowserProfile, error
 }
 
 func unbindProxy(db *gorm.DB, profileID, expectedProxyID string) (out model.BrowserProfile, err error) {
-	err = guardedProfileMutation(db, profileID, func(tx *gorm.DB) error {
-		var e error
-		out, e = unbindProxyUnchecked(tx, profileID, expectedProxyID)
-		return e
-	})
-	return
+	return unbindProxyUnchecked(db, profileID, expectedProxyID)
 }
 func unbindProxyUnchecked(db *gorm.DB, profileID, expectedProxyID string) (model.BrowserProfile, error) {
 	result, err := execSQL(db,
@@ -808,8 +769,7 @@ func unbindProxyUnchecked(db *gorm.DB, profileID, expectedProxyID string) (model
 // ReleaseProxy 只解除正式托管关系，保留窗口的观测代理配置，也就是「改为比特自管」：
 // 比特继续使用该地址，代理资源不再占用窗口配额。
 func ReleaseProxy(profileID, expectedProxyID string) (out model.BrowserProfile, err error) {
-	err = guardedProfileMutation(database.DB(), profileID, func(tx *gorm.DB) error { var e error; out, e = releaseProxy(tx, profileID, expectedProxyID); return e })
-	return
+	return releaseProxy(database.DB(), profileID, expectedProxyID)
 }
 func releaseProxy(db *gorm.DB, profileID, expectedProxyID string) (model.BrowserProfile, error) {
 	result, err := execSQL(db,
@@ -836,8 +796,7 @@ func ClearObservedProxy(profileID string) (model.BrowserProfile, error) {
 }
 
 func clearObservedProxy(db *gorm.DB, profileID string) (out model.BrowserProfile, err error) {
-	err = guardedProfileMutation(db, profileID, func(tx *gorm.DB) error { var e error; out, e = clearObservedProxyUnchecked(tx, profileID); return e })
-	return
+	return clearObservedProxyUnchecked(db, profileID)
 }
 func clearObservedProxyUnchecked(db *gorm.DB, profileID string) (model.BrowserProfile, error) {
 	result, err := execSQL(db,

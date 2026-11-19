@@ -39,7 +39,7 @@ it("preserves string IDs, request key and expected revision across create/read/e
 
 it("authorizes separately with the reviewed revision and reads original attempts", async()=>{
  const calls=[];const client=createPublicationClient({fetch:async(url,init={})=>{calls.push({url,init});return {json:async()=>({errcode:0,data:[]})}}});
- await client.start("9007199254740993",{expected_revision:"9007199254740994"});await client.attempts("9007199254740993");
+ await client.start("9007199254740993",{expected_revision:"9007199254740994"});await client.attempt("9007199254740993");
  expect(calls[0].url).toContain("/publication/9007199254740993/start");expect(JSON.parse(calls[0].init.body)).toEqual({expected_revision:"9007199254740994"});
- expect(calls[1].url).toContain("/publication/9007199254740993/attempts");expect(calls[1].init.method).toBe("GET");
+ expect(calls[1].url).toContain("/publication/9007199254740993/attempt");expect(calls[1].init.method).toBe("GET");
 });

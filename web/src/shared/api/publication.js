@@ -9,7 +9,7 @@ export function createPublicationClient({
     get: (id) => api.get(`/publication/${id}`),
     create: (input) => api.post("/publication", input),
     start: (id, input) => api.post(`/publication/${id}/start`, input),
-    attempts: (id) => api.get(`/publication/${id}/attempts`),
+    attempt: (id) => api.get(`/publication/${id}/attempt`),
     edit: (id, input) => api.put(`/publication/${id}/content`, input),
   };
 }
