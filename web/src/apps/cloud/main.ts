@@ -9,6 +9,7 @@ import "tdesign-vue-next/es/style/index.css"
 import "../../shared/styles/layout.css"
 import "../../styles/design-token.css"
 import "../../shared/styles/resource-module.css"
+import "../../shared/styles/resource-surfaces.css"
 
 const app = createApp(App)
 const pinia = createPinia()

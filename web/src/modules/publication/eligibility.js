@@ -28,7 +28,7 @@ export function outputUnavailable(output, category, account) {
 export function contentProblem(form) {
   if (!form.category_id || !form.media_account_id || !form.composite_output_id)
     return "请选择发布类目、账号和成片";
-  if (!form.content.description.trim()) return "请填写作品描述";
+  if (!form.content.description.trim()) return "请填写发布标题";
   if (!form.content.cover_file_id) return "请选择发布封面";
   if (!form.content.declaration) return "请按内容事实选择创作声明";
   if (!form.content.confirmed) return "请核对并确认当前文案、封面和声明";

@@ -5,22 +5,39 @@ import ResourcePageHeader from './ResourcePageHeader.vue'
 defineProps({ title: { type: String, required: true }, backLabel: { type: String, default: '返回列表' }, hideTitle: Boolean, busy: Boolean, returnButton: { type: Boolean, default: true } })
 const emit = defineEmits(['back'])
 const footer = ref(null), heading = ref(null), footerHeight = ref(69)
-let observer
+let observer, hostObserver
+const footerBounds = ref({})
+function updateFooterBounds() {
+  let element = footer.value?.parentElement?.parentElement
+  while (element && element !== document.body) {
+    if (/(auto|scroll)/.test(getComputedStyle(element).overflowY)) {
+      const bounds = element.getBoundingClientRect()
+      footerBounds.value = { left: `${Math.max(0, bounds.left)}px`, right: `${Math.max(0, innerWidth - bounds.right)}px` }
+      return element
+    }
+    element = element.parentElement
+  }
+  footerBounds.value = {}
+  return null
+}
 watch(footer, element => {
   observer?.disconnect()
+  hostObserver?.disconnect()
   if (!element) return
+  const host = updateFooterBounds()
+  if (host) { hostObserver = new ResizeObserver(updateFooterBounds); hostObserver.observe(host) }
   footerHeight.value = element.getBoundingClientRect().height
   observer = new ResizeObserver(() => { footerHeight.value = element.getBoundingClientRect().height })
   observer.observe(element)
 }, { flush: 'post' })
-onMounted(async () => { await nextTick(); heading.value?.focus({ preventScroll: true }) })
-onBeforeUnmount(() => observer?.disconnect())
+onMounted(async () => { await nextTick(); heading.value?.focus({ preventScroll: true }); window.addEventListener('resize', updateFooterBounds) })
+onBeforeUnmount(() => { observer?.disconnect(); hostObserver?.disconnect(); window.removeEventListener('resize', updateFooterBounds) })
 </script>
 <template>
   <section class="resource-detail-page" :class="{ 'has-footer': returnButton || !!$slots.footer }" :style="{ '--detail-footer-height': `${footerHeight}px` }" :aria-label="title" :aria-busy="busy">
     <div v-if="!hideTitle" ref="heading" class="resource-detail-page__heading" tabindex="-1" :aria-label="title"><ResourcePageHeader :title="title" /></div>
     <div class="resource-detail-page__content"><slot /></div>
-    <footer v-if="returnButton || $slots.footer" ref="footer" class="resource-detail-page__footer" aria-label="页面操作">
+    <footer v-if="returnButton || $slots.footer" ref="footer" :style="footerBounds" class="resource-detail-page__footer" aria-label="页面操作">
       <Button v-if="returnButton" class="resource-detail-page__back" theme="default" variant="outline" :aria-description="backLabel" :disabled="busy" @click="emit('back')">返回</Button>
       <slot name="footer" />
     </footer>

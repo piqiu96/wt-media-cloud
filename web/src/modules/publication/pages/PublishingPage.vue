@@ -1,16 +1,26 @@
 <script setup>
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch, nextTick } from "vue";
 import { useRoute, useRouter, onBeforeRouteLeave } from "vue-router";
 import ResourcePageHeader from "../../../shared/ui/resource/ResourcePageHeader.vue";
 import ResourceStatGrid from "../../../shared/ui/resource/ResourceStatGrid.vue";
 import ResourceAdvancedToggle from "../../../shared/ui/resource/ResourceAdvancedToggle.vue";
 import ResourceDateRange from "../../../shared/ui/resource/ResourceDateRange.vue";
-import { createdRangeParams } from "../../compose/createdRange.js";
+import { publicationCreatedRangeParams as createdRangeParams, publicationScheduleInput, publicationScheduleUTC, formatPublicationTime as formatDateTime } from "../dateTime.js";
 import ResourceCard from "../../../shared/ui/resource/ResourceCard.vue";
 import ResourceFilterBar from "../../../shared/ui/resource/ResourceFilterBar.vue";
+import ResourceRequiredLabel from "../../../shared/ui/resource/ResourceRequiredLabel.vue";
+import ResourceDateTime from "../../../shared/ui/resource/ResourceDateTime.vue";
+import ResourceFieldHelp from "../../../shared/ui/resource/ResourceFieldHelp.vue";
+import ResourceSection from "../../../shared/ui/resource/ResourceSection.vue";
+import ResourceDescriptions from "../../../shared/ui/resource/ResourceDescriptions.vue";
+import ResourceOverlay from "../../../shared/ui/resource/ResourceOverlay.vue";
+import { publicObjectReadUrl } from "../../../shared/utils/objectReadUrl.js";
+import MediaPreview from "../../../shared/ui/media/MediaPreview.vue";
+import { platformLabel } from "../../../shared/utils/platforms.js";
 import ResourceEditorPage from "../../../shared/ui/resource/ResourceEditorPage.vue";
 import ResourceDetailPage from "../../../shared/ui/resource/ResourceDetailPage.vue";
 import ResourceRowActions from "../../../shared/ui/resource/ResourceRowActions.vue";
+import { opColumnWidth } from "../../../shared/ui/resource/opColumnWidth.js";
 import ResourceStatusBadge from "../../../shared/ui/resource/ResourceStatusBadge.vue";
 import FeedbackAlert from "../../../shared/ui/feedback/FeedbackAlert.vue";
 import { feedback } from "../../../shared/ui/feedback/index.js";
@@ -18,14 +28,16 @@ import { createPublicationClient } from "../../../shared/api/publication.js";
 import { createComposeClient } from "../../../shared/api/compose.js";
 import { createMediaAccountClient } from "../../../shared/api/mediaAccounts.js";
 import { createFilesClient } from "../../../shared/api/files.js";
-import { formatDateTime } from "../../../shared/utils/datetime.js";
 import {
   definitivePublicationRejection,
   contentProblem,
   outputUnavailable,
 } from "../eligibility.js";
-import { PublicationStatus, publicationStatuses, attemptStageLabels } from "../status.js";
+import { PublicationStatus, publicationStatuses } from "../status.js";
+import { publicationTitleForOutput } from "../title.js";
+import PublishingExecutionHistory from "../components/PublishingExecutionHistory.vue";
 import PublishingResourcePicker from "../components/PublishingResourcePicker.vue";
+import PublishingRecoveryDialog from "../components/PublishingRecoveryDialog.vue";
 const client = createPublicationClient(),
   compose = createComposeClient(),
   accounts = createMediaAccountClient(),
@@ -39,7 +51,8 @@ const blankFilters = () => ({
   category_id: "",
   created_range: [],
 });
-const attemptHistory = ref([]);
+const attempts = ref([]);
+const recoveryVisible=ref(false),recoveryTask=ref(null),recoveryError=ref("");
 const summary = ref(null),
   advanced = ref(false);
 const metricItems = computed(() => [
@@ -47,14 +60,14 @@ const metricItems = computed(() => [
   {
     key: PublicationStatus.AwaitingHuman,
     label: "等待人工",
-    value: summary.value?.[PublicationStatus.AwaitingHuman] ?? "—",
+    value: summary.value?.awaiting_human ?? "—",
     tone: "warning",
   },
-  { key: PublicationStatus.Running, label: "执行中", value: summary.value?.[PublicationStatus.Running] ?? "—" },
+  { key: PublicationStatus.Running, label: "执行中", value: summary.value?.running ?? "—" },
   {
     key: PublicationStatus.Uncertain,
     label: "结果待确认",
-    value: summary.value?.[PublicationStatus.Uncertain] ?? "—",
+    value: summary.value?.uncertain ?? "—",
     tone: "warning",
   },
 ]);
@@ -65,11 +78,13 @@ function selectMetric(status) {
 const rows = ref([]),
   total = ref(0),
   page = ref(1),
-  pageSize = ref(20),
+  pageSize = ref(10),
   filters = ref(blankFilters()),
   applied = ref({ ...filters.value }),
   loading = ref(false),
   error = ref("");
+const pageRoot = ref(null);
+let listScroll = 0;
 const view = ref("list"),
   detail = ref(null),
   categories = ref([]),
@@ -84,6 +99,38 @@ const view = ref("list"),
   picker = ref(""),
   baseline = ref(""),
   pendingRequest = ref(null);
+const videoVisible = ref(false), videoURL = ref(""), videoLoading = ref(false), videoError = ref("");
+let videoSequence = 0;
+async function previewOutput() {
+  if (!output.value || videoLoading.value) return;
+  const sequence = ++videoSequence;
+  videoURL.value = "";
+  videoError.value = "";
+  videoLoading.value = true;
+  videoVisible.value = true;
+  try {
+    const link = await compose.getComposeOutputVideoUrl(output.value.id);
+    if (sequence === videoSequence && videoVisible.value) videoURL.value = publicObjectReadUrl(link?.url);
+  } catch (error) {
+    if (sequence === videoSequence && videoVisible.value) videoError.value = error.message || "暂时无法预览，请重试";
+  } finally { if (sequence === videoSequence) videoLoading.value = false; }
+}
+function videoFailed(event) {
+  if (videoVisible.value && videoURL.value && event.target.currentSrc === videoURL.value) {
+    videoError.value = "视频暂时无法读取，请重试预览";
+  }
+}
+function closeVideo(visible) {
+  videoVisible.value = visible;
+  if (!visible) { videoSequence++; videoLoading.value = false; videoURL.value = ""; }
+}
+const preview = ref(false);
+const previewImages = ref([]);
+function previewImage(path, label) {
+  if (!path) return;
+  previewImages.value = [{ src: files.resourceURL({ resource_path: path }), label }];
+  preview.value = true;
+}
 const source = ref(false),
   detailReturn = ref("list");
 const columns = [
@@ -93,8 +140,14 @@ const columns = [
   { colKey: "account", title: "发布账号", width: 180 },
   { colKey: "status", title: "状态", width: 120 },
   { colKey: "created_at", title: "创建时间", width: 170 },
-  { colKey: "op", title: "操作", width: 140, fixed: "right" },
+  { colKey: "op", title: "操作", width: opColumnWidth(["执行", "编辑", "详情"], { variant: "text", primary: true }), fixed: "right" },
 ];
+watch(view, async (next, previous) => {
+  const container = pageRoot.value?.closest(".content-area");
+  if (previous === "list") listScroll = container?.scrollTop || 0;
+  await nextTick();
+  if (container) container.scrollTop = next === "list" ? listScroll : 0;
+});
 const categoryOptions = computed(() =>
   categories.value.map((c) => ({ label: c.name, value: String(c.id) })),
 );
@@ -177,6 +230,7 @@ function openCreate() {
   source.value = false;
   editing.value = null;
   detail.value = null;
+  attempts.value = [];
   account.value = null;
   output.value = null;
   cover.value = null;
@@ -193,7 +247,7 @@ async function openDetail(row) {
   try {
     const [task, history] = await Promise.all([client.get(row.id), client.attempt(row.id)]);
     detail.value = task;
-    attemptHistory.value = history;
+    attempts.value = history;
     view.value = "detail";
   } catch (e) {
     error.value = e.message;
@@ -201,21 +255,70 @@ async function openDetail(row) {
     loading.value = false;
   }
 }
-const phaseLabel = (value) => attemptStageLabels[value] || "等待执行器反馈";
-async function startExecution() {
-  const task = detail.value;
-  if (busy.value || !task) return;
+const editable = (task) => task.status === PublicationStatus.Pending && !task.current_attempt_id && !task.authorized_at && !task.cancel_requested_at;
+const retryable = (task) => task.status === PublicationStatus.Failed && !task.cancel_requested_at;
+async function startExecution(row) {
+  if (busy.value) return;
   busy.value = true;
   error.value = "";
   try {
+    const task = await client.get(row.id);
+    if (!editable(task) || task.revision !== row.revision) throw new Error("任务内容或状态已变化，请核对更新后的列表再操作");
     if (!(await feedback.confirmWarning({title:"确认执行发布",message:`将使用账号「${task.resources.account_name}」自动发布此任务。请确认文案、封面和声明；执行后不能再编辑。`,confirmText:"确认执行"}))) return;
     await client.start(task.id, {expected_revision: task.revision});
-    await openDetail(task);
+    await load();
     feedback.toast.success("已授权执行，等待所属用户的 Agent 领取");
-  } catch(e) {
+  } catch (e) {
     const message = e.message;
-    // Resolve a lost response by reading state; never resend authorization.
-    await openDetail(task);
+    // Read back state after an uncertain response; never resend authorization.
+    await load();
+    error.value = message;
+  } finally { busy.value = false; }
+}
+async function openVerification(row) {
+  if (busy.value) return;
+  busy.value = true;
+  error.value = "";
+  try {
+    const task = await client.get(row.id);
+    if (task.status !== PublicationStatus.Uncertain) throw new Error("任务状态已变化，请核对列表后操作");
+    recoveryTask.value = JSON.parse(JSON.stringify(task));
+    recoveryError.value = "";
+    recoveryVisible.value = true;
+  } catch (e) {
+    const message = e.message;
+    await load();
+    error.value = message;
+  } finally { busy.value = false; }
+}
+async function saveVerification(input) {
+  if(busy.value || !recoveryTask.value)return;
+  busy.value=true;recoveryError.value='';
+  const task=recoveryTask.value;
+  try {
+    await client.resolve(task.id,input);
+    recoveryVisible.value=false;
+    await load();
+    feedback.toast.success('已保存核实结果，原尝试与资源占用保留');
+  } catch(e) {
+    // Preserve the form. A missing response is not a reason to resend a write.
+    recoveryError.value=e.message+'；请保留依据，关闭后在任务列表查询核对结果。';
+  } finally {busy.value=false;}
+}
+async function retryExecution(row) {
+  if (busy.value) return;
+  busy.value = true;
+  error.value = "";
+  try {
+    const task = await client.get(row.id);
+    if (!retryable(task) || task.revision !== row.revision) throw new Error("任务内容或状态已变化，请核对更新后的列表再操作");
+    if (!(await feedback.confirmWarning({title:"重试任务",message:"确认原尝试无可发布稿件、执行现场已结束。将复查原账号、成片、封面与内容，沿用本任务重新执行；历史尝试与占用保留。",confirmText:"确认重试"}))) return;
+    await client.retry(task.id, {expected_revision: task.revision});
+    await load();
+    feedback.toast.success("原任务已重新排队，等待所属用户的 Agent 领取");
+  } catch (e) {
+    const message = e.message;
+    await load();
     error.value = message;
   } finally { busy.value = false; }
 }
@@ -224,7 +327,7 @@ async function edit(row) {
   error.value = "";
   try {
     const v = await client.get(row.id);
-    if (v.status !== PublicationStatus.Pending || v.current_attempt_id || v.authorized_at)
+    if (!editable(v))
       throw Error("当前任务已不能编辑，请刷新列表");
     const [a, o] = await Promise.all([
       accounts.get(v.media_account_id),
@@ -246,13 +349,7 @@ async function edit(row) {
       composite_output_id: v.composite_output_id,
       content: { ...v.content },
     };
-    schedule.value = v.not_before
-      ? new Date(
-          new Date(v.not_before) - new Date().getTimezoneOffset() * 60000,
-        )
-          .toISOString()
-          .slice(0, 16)
-      : "";
+    schedule.value = publicationScheduleInput(v.not_before);
     baseline.value = JSON.stringify({
       form: form.value,
       schedule: schedule.value,
@@ -266,6 +363,11 @@ async function edit(row) {
     busy.value = false;
   }
 }
+function setOutput(row) {
+  form.value.content.description = publicationTitleForOutput(form.value.content.description, output.value, row);
+  output.value = row;
+  form.value.composite_output_id = row ? String(row.id) : "";
+}
 function picked(row) {
   if (picker.value === "account") {
     account.value = row;
@@ -274,13 +376,11 @@ function picked(row) {
       output.value &&
       outputUnavailable(output.value, form.value.category_id, row)
     ) {
-      output.value = null;
-      form.value.composite_output_id = "";
+      setOutput(null);
     }
     invalidate();
   } else if (picker.value === "output") {
-    output.value = row;
-    form.value.composite_output_id = String(row.id);
+    setOutput(row);
     invalidate();
   } else {
     cover.value = row;
@@ -298,9 +398,7 @@ async function submit() {
   }
   busy.value = true;
   try {
-    const not_before = schedule.value
-      ? new Date(schedule.value).toISOString()
-      : null;
+    const not_before = publicationScheduleUTC(schedule.value);
     const payload =
       pendingRequest.value ||
       (editing.value
@@ -369,9 +467,8 @@ onMounted(async () => {
       const data = await compose.getComposeOutput(id);
       openCreate();
       source.value = true;
-      output.value = data.output;
+      setOutput(data.output);
       form.value.category_id = String(data.output.category_id);
-      form.value.composite_output_id = String(data.output.id);
     }
   } catch (e) {
     error.value = e.message;
@@ -379,7 +476,7 @@ onMounted(async () => {
 });
 </script>
 <template>
-  <div class="wt-resource-page resource-visual-approved publishing-page">
+  <div ref="pageRoot" class="wt-resource-page resource-visual-approved publishing-page resource-form-actions-scope" :class="{ 'resource-list-page': view === 'list' }">
     <template v-if="view === 'list'">
       <ResourcePageHeader title="发布任务"
         ><template #actions
@@ -390,13 +487,13 @@ onMounted(async () => {
       >
       <FeedbackAlert v-if="error" theme="error" :message="error" />
       <ResourceStatGrid :items="metricItems" interactive :active-key="applied.status" @select="selectMetric" />
-      <ResourceCard>
+      <ResourceCard class="resource-list-panel">
         <ResourceFilterBar
           ><label class="wt-filter-field wt-filter-field--wide"
             ><span class="wt-filter-field__label">综合搜索</span><t-input
               v-model="filters.search"
               aria-label="任务搜索"
-              placeholder="作品描述 / 任务 ID"
+              placeholder="发布标题 / 任务 ID"
               clearable
               @enter="query" /></label
           ><label class="wt-filter-field"
@@ -452,14 +549,14 @@ onMounted(async () => {
               ><span class="wt-filter-field__label">创建时间</span><ResourceDateRange v-model="filters.created_range"
             /></label></div
         ></ResourceFilterBar>
-        <div class="table-scroll-wrap">
+        <div class="table-scroll-wrap resource-data-table">
           <t-table
             class="wt-resource-table"
             :columns="columns"
             :data="rows"
             row-key="id"
             :loading="loading"
-            :scroll="{ x: '1070px' }"
+            :scroll="{ x: columns.reduce((sum, column) => sum + column.width, 0) + 'px' }"
             empty="暂无发布任务"
           >
             <template #content="{ row }"
@@ -480,7 +577,7 @@ onMounted(async () => {
                 </div>
               </div></template
             >
-            <template #platform="{row}">{{({baidu:"百度（百家号）",bilibili:"B站",xiaohongshu:"小红书"})[row.platform] || row.platform}}<small class="publication-sub">{{categoryName(row.category_id)}}</small></template><template #account="{ row }"
+            <template #platform="{row}">{{ platformLabel(row.platform) }}<small class="publication-sub">{{categoryName(row.category_id)}}</small></template><template #account="{ row }"
               >{{ row.resources.account_name || "—"
               }}<small class="publication-sub">{{
                 row.resources.account_owner || "—"
@@ -492,31 +589,16 @@ onMounted(async () => {
             ><template #created_at="{ row }">{{
               formatDateTime(row.created_at)
             }}</template>
-            <template #op="{ row }"
-              ><ResourceRowActions
-                ><t-button
-                  variant="text"
-                  size="small"
-                  @click="
-                    detailReturn = 'list';
-                    openDetail(row);
-                  "
-                  >详情</t-button
-                ><t-button
-                  v-if="
-                    row.status === PublicationStatus.Pending &&
-                    !row.current_attempt_id &&
-                    !row.authorized_at
-                  "
-                  size="small"
-                  variant="text"
-                  @click="edit(row)"
-                  >编辑</t-button
-                ></ResourceRowActions
-              ></template
-            >
+            <template #op="{ row }">
+              <ResourceRowActions>
+                <t-button v-if="editable(row)" class="is-primary" variant="text" size="small" :disabled="busy" @click="startExecution(row)">执行</t-button>
+                <t-button v-if="row.status === PublicationStatus.Uncertain" class="is-primary" variant="text" size="small" :disabled="busy" @click="openVerification(row)">核实结果</t-button>
+                <t-button v-if="retryable(row)" class="is-primary" variant="text" size="small" :disabled="busy" @click="retryExecution(row)">重试</t-button>
+                <t-button v-if="editable(row)" variant="text" size="small" :disabled="busy" @click="edit(row)">编辑</t-button>
+                <t-button variant="text" size="small" :disabled="busy" @click="detailReturn = 'list'; openDetail(row)">详情</t-button>
+              </ResourceRowActions>
+            </template>
           </t-table>
-        </div>
         <div class="pagination-bar">
           <t-pagination
             :current="page"
@@ -530,6 +612,7 @@ onMounted(async () => {
               load();
             "
           />
+        </div>
         </div>
       </ResourceCard>
     </template>
@@ -548,19 +631,19 @@ onMounted(async () => {
           </h3>
           <div class="quick-resource-grid">
             <label
-              >发布平台 *<t-select
+              ><ResourceRequiredLabel>发布平台</ResourceRequiredLabel><t-select
                 value="baidu"
                 :options="[{ label: '百度（百家号）', value: 'baidu' }]"
                 disabled /></label
             ><label
-              >发布类目 *<t-select
+              ><ResourceRequiredLabel>发布类目</ResourceRequiredLabel><t-select
                 :value="form.category_id"
                 aria-label="发布类目"
                 :options="categoryOptions"
                 :disabled="!!editing || frozen"
                 @change="changeCategory" /></label
             ><label
-              >发布账号 *<t-input
+              ><ResourceRequiredLabel>发布账号</ResourceRequiredLabel><t-input
                 :value="account?.platform_name || ''"
                 placeholder="请选择发布账号"
                 readonly
@@ -592,29 +675,26 @@ onMounted(async () => {
               :disabled="!form.media_account_id || !!editing || frozen"
               @click="picker = 'output'"
               >{{ output ? "更换成片" : "选择成片" }}</t-button
-            >
+            ><t-button v-if="output" theme="default" variant="outline" :disabled="busy" @click="previewOutput">预览成片</t-button>
           </div>
         </section>
         <section v-if="output" class="resource-editor-section quick-block">
           <h3><span>02</span>发布内容</h3>
+          <div class="quick-copy-fields">
           <label
-            >作品描述 *<t-textarea
+            ><ResourceRequiredLabel>发布标题</ResourceRequiredLabel><t-textarea
               v-model="form.content.description"
-              aria-label="作品描述"
+              aria-label="发布标题"
+              placeholder="默认带入素材标题，可修改"
               :maxlength="1000"
               :autosize="{ minRows: 3, maxRows: 5 }"
               :disabled="frozen"
               @change="invalidate"
           /></label>
           <div class="quick-cover-field">
-            <label>发布封面 *</label>
-            <p class="publication-sub">使用现成封面</p>
+            <label class="quick-field-heading"><ResourceRequiredLabel>发布封面</ResourceRequiredLabel><ResourceFieldHelp label="发布封面" content="本阶段使用现成图片，可从已有文件中选择。按原图预览，不改变文件内容。" /></label>
             <div class="quick-cover-workspace">
-              <img
-                v-if="cover?.resource_path"
-                :src="files.resourceURL(cover)"
-                alt="当前发布封面"
-              />
+              <button v-if="cover?.resource_path" type="button" class="publication-image-button" aria-label="预览发布封面" @click="previewImage(cover.resource_path, cover.name)"><img :src="files.resourceURL(cover)" alt="当前发布封面" /><span>预览封面</span></button>
               <div>
                 <strong>{{ cover?.name || "请选择现成图片" }}</strong
                 ><t-button
@@ -635,7 +715,7 @@ onMounted(async () => {
               @change="invalidate"
           /></label>
           <label
-            >创作声明 *<t-select
+            ><ResourceRequiredLabel>创作声明</ResourceRequiredLabel><t-select
               v-model="form.content.declaration"
               aria-label="创作声明"
               :options="[{ label: '无需声明', value: '无需声明' }]"
@@ -643,20 +723,14 @@ onMounted(async () => {
               :disabled="frozen"
               @change="invalidate"
           /></label>
+          </div>
         </section>
         <section v-if="output" class="resource-editor-section quick-block">
           <h3><span>03</span>发布设置</h3>
-          <label
-            >最早执行时间<input
-              v-model="schedule"
-              type="datetime-local"
-              aria-label="最早执行时间"
-              :disabled="frozen"
-              @input="invalidate"
-          /></label>
-          <p class="publication-sub">
-            留空表示立即；创建任务后仍需单独确认执行。
-          </p>
+          <div class="quick-resource-grid two">
+            <label>发布方式<t-input value="自动发布" disabled /></label>
+            <label><span class="quick-field-heading">最早执行时间<ResourceFieldHelp label="最早执行时间" content="留空表示确认执行后尽快发布；指定时间为最早开始执行时间。创建任务后仍需单独确认执行。" /></span><ResourceDateTime v-model:value="schedule" aria-label="最早执行时间" :disabled="frozen" @change="invalidate" /></label>
+          </div>
           <t-checkbox v-model="form.content.confirmed" :disabled="frozen"
             >已核对当前文案、封面和声明，确认内容可用</t-checkbox
           >
@@ -678,88 +752,48 @@ onMounted(async () => {
       @back="back"
     >
       <FeedbackAlert v-if="error" theme="error" :message="error" />
-      <ResourceCard
-        ><h3>
-          任务 {{ detail.id }}
-          <ResourceStatusBadge :label="statusLabel(detail.status)" />
-        </h3>
-        <p v-if="detail.attempt_count === 0">尚未执行</p>
-        <div class="detail-grid">
-          <label>发布平台<strong>百度（百家号）</strong></label
-          ><label
-            >类目<strong>{{ categoryName(detail.category_id) }}</strong></label
-          ><label
-            >发布账号<strong>{{ detail.resources.account_name || "—" }}</strong
-            ><small>真实 UID：{{ detail.platform_account_uid }}</small></label
-          ><label
-            >成片<strong>{{
-              detail.resources.output_name || detail.composite_output_id
-            }}</strong></label
-          >
-        </div></ResourceCard
-      >
-      <ResourceCard
-        ><h3>发布内容</h3>
-        <p class="publication-description">{{ detail.content.description }}</p>
-        <div class="quick-cover-workspace">
-          <img
-            v-if="detail.resources.cover_resource_path"
-            :src="
-              files.resourceURL({
-                resource_path: detail.resources.cover_resource_path,
-              })
-            "
-            alt="最终发布封面"
-          />
-          <p>
-            封面：{{
-              detail.resources.cover_name || detail.content.cover_file_id
-            }}
-          </p>
-        </div>
-        <p>话题：{{ detail.content.topics || "—" }}</p>
-        <p>创作声明：{{ detail.content.declaration }}</p></ResourceCard
-      >
-      <ResourceCard
-        ><h3>执行历史</h3>
-        <p v-if="!attemptHistory.length">任务尚未执行</p>
-        <p v-if="detail.authorized_at">已确认执行：{{formatDateTime(detail.authorized_at)}} · 仅由账号所属用户的 Agent 执行</p>
-        <p v-if="detail.status === PublicationStatus.Uncertain">结果尚未确认，请保留现场，避免重复发布。</p>
-        <p v-if="detail.status === PublicationStatus.Reviewing">平台已接收，正在审核；尚未确认为公开作品。</p>
-        <p v-if="detail.failure_message">平台反馈：{{detail.failure_message}}</p>
-        <section v-for="attempt in attemptHistory" :key="attempt.id" class="resource-editor-section">
-          <h4>尝试 {{attempt.attempt_no}} · {{phaseLabel(attempt.stage)}}</h4>
-          <p>开始：{{formatDateTime(attempt.started_at)}} · 最近反馈：{{formatDateTime(attempt.heartbeat_at)}}</p>
-          <p v-for="step in attempt.steps" :key="step.seq">{{formatDateTime(step.at)}} · {{phaseLabel(step.report.stage)}}</p>
-          <p v-if="attempt.error_message">{{attempt.error_message}}</p>
-        </section>
-        <t-button variant="text" :loading="loading" @click="openDetail(detail)">刷新进展</t-button>
-        <p>
-          创建时间：{{ formatDateTime(detail.created_at) }} · 修订
-          {{ detail.revision }}
-        </p>
-        <p>
-          最早执行时间：{{
-            detail.not_before
-              ? formatDateTime(detail.not_before)
-              : detail.authorized_at ? "立即" : "立即（需单独确认执行）"
-          }}
-        </p></ResourceCard
-      >
-      <template #footer>
-        <t-button v-if="detail.status === PublicationStatus.Pending && !detail.current_attempt_id && !detail.authorized_at" theme="primary" :loading="busy" @click="startExecution">确认执行</t-button>
-        <t-button
-          v-if="
-            detail.status === PublicationStatus.Pending &&
-            !detail.current_attempt_id &&
-            !detail.authorized_at
-          "
-          :disabled="busy"
-          @click="edit(detail)"
-          >编辑</t-button
-        ></template
-      >
+      <ResourceCard class="detail-card"><ResourceSection title="任务信息">
+        <ResourceDescriptions>
+          <t-descriptions-item label="任务 ID">{{ detail.id }}</t-descriptions-item>
+          <t-descriptions-item label="任务状态"><ResourceStatusBadge :label="statusLabel(detail.status)" /></t-descriptions-item>
+          <t-descriptions-item label="发布平台">{{ platformLabel(detail.platform) }}</t-descriptions-item>
+          <t-descriptions-item label="内容类目">{{ categoryName(detail.category_id) }}</t-descriptions-item>
+          <t-descriptions-item label="发布账号">{{ detail.resources.account_name || "—" }}</t-descriptions-item>
+          <t-descriptions-item label="真实 UID">{{ detail.platform_account_uid }}</t-descriptions-item>
+          <t-descriptions-item label="成片" full>{{ detail.resources.output_name || detail.composite_output_id }}</t-descriptions-item>
+        </ResourceDescriptions>
+      </ResourceSection></ResourceCard>
+      <ResourceCard class="detail-card"><ResourceSection title="发布内容">
+        <ResourceDescriptions>
+          <t-descriptions-item label="发布标题" full><span class="publication-description">{{ detail.content.description }}</span></t-descriptions-item>
+          <t-descriptions-item label="发布封面" full>
+            <div class="publication-cover-summary">
+              <button v-if="detail.resources.cover_resource_path" type="button" class="publication-image-button" aria-label="预览最终发布封面" @click="previewImage(detail.resources.cover_resource_path, detail.resources.cover_name)"><img :src="files.resourceURL({ resource_path: detail.resources.cover_resource_path })" alt="最终发布封面" /><span>预览封面</span></button>
+              <span>{{ detail.resources.cover_name || detail.content.cover_file_id }}</span>
+            </div>
+          </t-descriptions-item>
+          <t-descriptions-item label="话题" full>{{ detail.content.topics || "—" }}</t-descriptions-item>
+          <t-descriptions-item label="创作声明">{{ detail.content.declaration }}</t-descriptions-item>
+        </ResourceDescriptions>
+      </ResourceSection></ResourceCard>
+      <ResourceCard class="detail-card"><ResourceSection title="发布设置">
+        <ResourceDescriptions>
+          <t-descriptions-item label="发布方式">自动发布</t-descriptions-item>
+          <t-descriptions-item label="最早执行时间">{{ detail.not_before ? formatDateTime(detail.not_before) : detail.authorized_at ? "立即" : "立即（需单独确认执行）" }}</t-descriptions-item>
+          <t-descriptions-item label="创建时间">{{ formatDateTime(detail.created_at) }}</t-descriptions-item>
+          <t-descriptions-item label="修订">{{ detail.revision }}</t-descriptions-item>
+        </ResourceDescriptions>
+      </ResourceSection></ResourceCard>
+      <ResourceCard class="detail-card"><ResourceSection title="执行历史">
+        <PublishingExecutionHistory :task="detail" :attempts="attempts" />
+      </ResourceSection></ResourceCard>
     </ResourceDetailPage>
+    <ResourceOverlay :visible="videoVisible" title="成片预览" :width="960" :footer="!!videoError" form-actions @update:visible="closeVideo">
+      <t-loading :loading="videoLoading"><video v-if="videoURL" class="publication-video" :src="videoURL" controls preload="metadata" @error="videoFailed" /><FeedbackAlert v-if="videoError" theme="error" :message="videoError" /></t-loading>
+      <template #footer><t-button v-if="videoError" theme="default" variant="outline" @click="previewOutput">重试预览</t-button></template>
+    </ResourceOverlay>
+    <MediaPreview form-actions v-model:visible="preview" :images="previewImages" title="发布封面预览" />
+    <PublishingRecoveryDialog v-model:visible="recoveryVisible" :task="recoveryTask" :busy="busy" :error="recoveryError" @submit="saveVerification" />
     <PublishingResourcePicker
       :visible="!!picker"
       :kind="picker"
@@ -783,9 +817,10 @@ onMounted(async () => {
   object-fit: contain;
   border: 1px solid var(--wt-border);
   border-radius: 4px;
-  background: var(--wt-bg-subtle);
+  background: var(--wt-color-bg-subtle);
 }
 .quick-publish {
+  container-type: inline-size;
   display: flex;
   flex-direction: column;
   gap: 16px;
@@ -794,8 +829,10 @@ onMounted(async () => {
 .quick-block {
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 16px;
 }
+.quick-copy-fields { display: flex; flex-direction: column; gap: 24px; }
+.quick-block :deep(.t-input.t-is-disabled), .quick-block :deep(.t-input__inner:disabled) { color: var(--wt-text-secondary); -webkit-text-fill-color: var(--wt-text-secondary); background: var(--wt-color-bg-subtle); }
 .quick-block h3 {
   margin: 0;
   display: flex;
@@ -820,20 +857,25 @@ onMounted(async () => {
   flex-direction: column;
   gap: 8px;
   min-width: 0;
-  font-size: 14px;
+  font-size: 13px;
+  line-height: 20px;
+  font-weight: 500;
 }
+.quick-block :deep(.t-textarea__inner), .quick-block :deep(.t-input) { font-size: 14px; font-weight: 400; }
+.quick-field-heading { display: flex !important; flex-direction: row !important; align-items: center; gap: 6px !important; }
+.quick-resource-grid.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .quick-resource-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 20px;
+  gap: 20px 24px;
 }
 .quick-selected-asset {
   display: flex;
   align-items: center;
   gap: 16px;
   border: 1px solid var(--wt-border);
-  padding: 16px;
-  background: var(--wt-bg-page);
+  padding: 12px 16px;
+  background: var(--wt-color-bg-subtle);
   border-radius: 4px;
 }
 .quick-selected-asset > div {
@@ -845,33 +887,29 @@ onMounted(async () => {
 .quick-selected-asset small,
 .publication-sub {
   display: block;
-  color: var(--wt-text-tertiary);
-  font-size: 13px;
+  color: var(--wt-text-secondary);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 20px;
 }
 .quick-cover-field {
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
-.quick-cover-workspace {
-  display: flex;
-  gap: 20px;
-  align-items: center;
-  padding: 16px;
-  border: 1px solid var(--wt-border);
-  border-radius: 6px;
-  background: var(--wt-bg-page);
-}
-.quick-cover-workspace img {
-  width: 180px;
-  max-height: 130px;
-  object-fit: contain;
-}
-.quick-cover-workspace > div {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
+.quick-cover-workspace { display: grid; grid-template-columns: 220px minmax(0, 1fr); align-items: start; gap: 24px; min-width: 0; }
+.quick-cover-workspace > div { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; min-width: 0; }
+.quick-cover-workspace strong { font-size: 14px; font-weight: 400; overflow-wrap: anywhere; }
+.publication-video { display: block; width: 100%; max-height: 65vh; background: var(--wt-color-bg-subtle); }
+.publication-image-button { display: block; padding: 0; border: 1px solid var(--wt-border); border-radius: 4px; overflow: hidden; background: var(--wt-color-bg-subtle); cursor: zoom-in; max-width: 100%; }
+.publication-image-button img { display: block; width: 220px; height: 165px; object-fit: contain; max-width: 100%; }
+.publication-image-button span { display: block; padding: 8px; color: var(--wt-primary); font-size: 12px; }
+.quick-selected-asset .publication-video { display: block; width: 100%; max-height: 65vh; background: var(--wt-color-bg-subtle); }
+.publication-image-button { flex: none; }
+.quick-selected-asset .publication-image-button img { width: 72px; height: 52px; }
+.publication-cover-summary { display: flex; align-items: center; gap: 24px; flex-wrap: wrap; }
+.publication-cover-summary > span { overflow-wrap: anywhere; }
+.publishing-page .pagination-bar { border-top: 1px solid var(--wt-border); padding: 0; }
 .publication-content {
   display: flex;
   flex-direction: column;
@@ -887,40 +925,23 @@ onMounted(async () => {
   color: var(--wt-text-tertiary);
 }
 .publication-description {
+  overflow-wrap: anywhere;
   white-space: pre-wrap;
-}
-.detail-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 20px;
-}
-.detail-grid label {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  color: var(--wt-text-tertiary);
-}
-.detail-grid strong {
-  font-weight: 400;
-  color: var(--wt-text-primary);
-}
-input[type="datetime-local"] {
-  min-height: 36px;
-  padding: 0 12px;
-  border: 1px solid var(--wt-border);
-  border-radius: 4px;
-  font: inherit;
-  color: var(--wt-text-primary);
-  background: var(--wt-bg-card);
 }
 @media (max-width: 720px) {
   .quick-resource-grid,
-  .detail-grid {
+  .quick-resource-grid.two {
     grid-template-columns: 1fr;
   }
-  .quick-cover-workspace {
-    align-items: flex-start;
-    flex-wrap: wrap;
-  }
+  .quick-cover-workspace { grid-template-columns: 1fr; }
+  .quick-selected-asset { flex-wrap: wrap; }
+  .quick-selected-asset > div { min-width: 0; flex: 1 1 160px; }
+  .quick-selected-asset strong { overflow-wrap: anywhere; }
+}
+@container (max-width: 560px) {
+  .quick-resource-grid, .quick-resource-grid.two, .quick-cover-workspace { grid-template-columns: 1fr; }
+  .quick-selected-asset { flex-wrap: wrap; }
+  .quick-selected-asset > div { flex: 1 1 100%; }
+  .quick-selected-asset strong { overflow-wrap: anywhere; }
 }
 </style>

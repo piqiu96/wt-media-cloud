@@ -86,27 +86,27 @@
   font-size: 14px;
   font-weight: 400;
 }
-.resource-advanced-toggle {
+.resource-list-page .resource-advanced-toggle {
   flex: 0 0 100%;
   min-width: 0;
 }
-.resource-advanced-toggle .t-button {
+.resource-list-page .resource-advanced-toggle .t-button {
   height: 28px;
   padding: 0;
   font-size: 14px;
   font-weight: 400;
   gap: 6px;
 }
-.resource-advanced-toggle .t-icon {
+.resource-list-page .resource-advanced-toggle .t-icon {
   width: 16px;
   height: 16px;
   margin-left: 6px;
   transition: transform .15s;
 }
-.resource-advanced-toggle .is-expanded {
+.resource-list-page .resource-advanced-toggle .is-expanded {
   transform: rotate(180deg);
 }
-.resource-list-page .wt-advanced-filters {
+.wt-resource-page.resource-visual-approved.resource-list-page .wt-advanced-filters {
   padding: 0 !important;
   border-top: 0;
 }

@@ -93,10 +93,46 @@ paths:
       parameters: [{in: path, name: id, required: true, schema: {$ref: '#/components/schemas/ID'}}]
       responses:
         '200': {description: 'Owner-scoped attempt history without credentials, signed grants or mutable old input.'}
+  /api/v1/publication/{id}/resolve:
+    post:
+      operationId: resolvePublication
+      security: [{sessionCookie: []}]
+      parameters: [{in: path, name: id, required: true, schema: {$ref: '#/components/schemas/ID'}}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/FailureResolution'}}}}
+      responses:
+        '200': {description: 'Revision-checked current-attempt verification, preserving the original result. This revision supports confirmed failure or still uncertain only; no public-success inference. Failure requires explicit no-publishable-work and closed-scene evidence from the original account, not merely a missing submit flag.'}
+        '409': {description: 'Stale revision/attempt, active scene, unsafe or unsupported conclusion. No input, occupancy or original result is changed.'}
+  /api/v1/publication/{id}/retry:
+    post:
+      operationId: retryPublication
+      security: [{sessionCookie: []}]
+      parameters: [{in: path, name: id, required: true, schema: {$ref: '#/components/schemas/ID'}}]
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [expected_revision], additionalProperties: false, properties: {expected_revision: {$ref: '#/components/schemas/ID'}}}}}}
+      responses:
+        '200': {description: 'Same failed task queued after current resource and safe-resolution checks; keeps input, output occupancy and history. Only claim creates the next attempt. No editing, replacement resources or implicit retry of unknown work.'}
+        '409': {description: 'Stale revision, unresolved/publishable old scene, stopped task or unavailable original resources.'}
 components:
   securitySchemes:
     sessionCookie: {type: apiKey, in: cookie, name: wt_media_session}
   schemas:
+    FailureResolution:
+      type: object
+      additionalProperties: false
+      required: [attempt_id, expected_revision, conclusion, evidence]
+      properties:
+        attempt_id: {$ref: '#/components/schemas/ID'}
+        expected_revision: {$ref: '#/components/schemas/ID'}
+        conclusion: {type: string, enum: [failed, uncertain]}
+        evidence:
+          type: object
+          additionalProperties: false
+          required: [platform_uid, reason, basis, scene_closed, no_publishable_work]
+          properties:
+            platform_uid: {type: string, minLength: 1, maxLength: 255}
+            reason: {type: string, minLength: 1, maxLength: 200}
+            basis: {type: string, minLength: 10, maxLength: 2000}
+            scene_closed: {type: boolean}
+            no_publishable_work: {type: boolean}
     ID: {type: string, pattern: '^[1-9][0-9]*$'}
     Content:
       type: object

@@ -1,6 +1,7 @@
 <script setup>
 import { OutputVideoStatus } from "../../compose/outputStatus.js";
 import { computed, ref, watch } from "vue";
+import ResourceRowActions from "../../../shared/ui/resource/ResourceRowActions.vue";
 import ResourceOverlay from "../../../shared/ui/resource/ResourceOverlay.vue";
 import ResourceFilterBar from "../../../shared/ui/resource/ResourceFilterBar.vue";
 import FeedbackAlert from "../../../shared/ui/feedback/FeedbackAlert.vue";
@@ -94,9 +95,10 @@ watch(
 </script>
 <template>
   <ResourceOverlay
+    form-actions
     :visible="visible"
     :title="titles[kind] || '选择资源'"
-    :width="1000"
+    :width="960"
     :footer="false"
     @update:visible="emit('update:visible', $event)"
   >
@@ -130,7 +132,7 @@ watch(
       </div></ResourceFilterBar
     >
     <FeedbackAlert v-if="error" theme="error" :message="error" />
-    <div class="table-scroll-wrap">
+    <div class="table-scroll-wrap resource-data-table resource-embedded-table is-flush">
       <t-table
         class="wt-resource-table"
         :data="rows"
@@ -161,14 +163,13 @@ watch(
         <template #op="{ row }"
           ><span v-if="reason(row)" class="picker-reason">{{
             reason(row)
-          }}</span><t-button
-            v-else
+          }}</span><ResourceRowActions v-else><t-button
             :disabled="busy"
             size="small"
             variant="text"
             @click="select(row)"
             >选择</t-button
-          ></template
+          ></ResourceRowActions></template
         >
       </t-table>
     </div>
@@ -194,7 +195,7 @@ watch(
   object-fit: contain;
 }
 .picker-reason {
-  color: var(--wt-text-tertiary);
+  color: var(--wt-text-secondary);
   font-size: 13px;
 }
 </style>

@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: WT Media Cloud-Agent Publication Execution
-  version: 2026.11.20.1
+  version: 2026.11.20.2
   description: >-
     Additive single-task execution. Agent bearer identifies the account owner; no device identity or
     generic lease. Claim requires a current Desktop session. Reports are report-safe only for the same
@@ -43,6 +43,30 @@ paths:
       responses:
         '200': {description: '{task_status,attempt_status,attempt_id,result_hash}. Exact same result/sequence acknowledges the original write without another state change. Reviewing requires a matching real receipt; public success is verified separately, never inferred from this endpoint.'}
         '409': {description: Foreign/non-current attempt, stale sequence, conflicting result, or an already resolved scene.}
+  /api/v1/cloud-agent/publication-task/{id}/attempt/{attempt_id}:
+    get:
+      operationId: inspectOriginalPublicationAttempt
+      security: [{agentBearer: []}]
+      parameters:
+        - {$ref: '#/components/parameters/TaskID'}
+        - {in: path, name: attempt_id, required: true, schema: {$ref: '#/components/schemas/ID'}}
+      responses:
+        '200':
+          description: 'Report-safe, owner-only original result acknowledgement and explicit scene resolution, including historical attempts. Read only: no grants, permission, new work or automatic browser re-entry. A matching stored hash may acknowledge only the exact original packet; scene_resolved requires explicit safe resolution or a completed result with verified closed scene.'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    required: [attempt_id, result_hash, scene_resolved, resolved_status]
+                    properties:
+                      attempt_id: {$ref: '#/components/schemas/ID'}
+                      result_hash: {type: [string, 'null']}
+                      scene_resolved: {type: boolean}
+                      resolved_status: {type: string, enum: [failed, reviewing, ''], description: 'Original attempt disposition, never authorization for the task currently occupying this id.'}
+        '404': {description: 'Original attempt missing, wrong publication or foreign owner.'}
 components:
   securitySchemes:
     agentBearer: {type: http, scheme: bearer}

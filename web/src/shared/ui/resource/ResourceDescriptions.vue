@@ -20,7 +20,7 @@ export default defineComponent({
     return () => {
       const fields = items(slots.default?.() || [])
       const layout = descriptionLayout(fields.map(node => node.props || {}), width.value)
-      return h('div', { ref: container, class: 'resource-descriptions', 'data-columns': layout.columns }, [
+      return h('div', { ref: container, class: 'resource-descriptions', 'data-columns': layout.columns, 'data-compact': width.value > 0 && width.value < 360 }, [
         h(Descriptions, { ...attrs, column: layout.columns, itemLayout: 'horizontal', tableLayout: 'fixed', colon: false }, {
           default: () => fields.map((node, index) => cloneVNode(node, { span: layout.spans[index] })),
         }),
@@ -31,7 +31,7 @@ export default defineComponent({
 </script>
 
 <style scoped>
-.resource-descriptions { min-width: 0; }
+.resource-descriptions { min-width: 0; container-type: inline-size; }
 .resource-descriptions :deep(.t-descriptions__body) { width: 100%; }
 /* A full first row spans three cells in TDesign. Native fixed table layout
    then ignores later label widths. Explicit tracks keep both field pairs
@@ -44,4 +44,7 @@ export default defineComponent({
 .resource-descriptions :deep(.t-descriptions__content) { padding: 8px 16px 8px 0; color: var(--wt-text-primary); font-size: 14px; line-height: 24px; vertical-align: top; overflow-wrap: anywhere; white-space: pre-wrap; }
 .resource-descriptions :deep(.t-descriptions__content .t-button) { margin-left: 8px; }
 @media (max-width: 600px) { .resource-descriptions :deep(.t-descriptions__body > tbody > tr) { grid-template-columns: 96px minmax(0, 1fr); column-gap: 12px; } }
+.resource-descriptions[data-compact="true"] :deep(.t-descriptions__body > tbody > tr) { grid-template-columns: minmax(0, 1fr); column-gap: 0; }
+.resource-descriptions[data-compact="true"] :deep(.t-descriptions__label) { padding: 8px 0 0; }
+.resource-descriptions[data-compact="true"] :deep(.t-descriptions__content) { padding: 4px 0 12px; }
 </style>

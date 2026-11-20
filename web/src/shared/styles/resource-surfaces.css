@@ -1,0 +1,4 @@
+/* Geometry and actions only apply to explicitly opted-in resource surfaces. */
+@import "./resource-data-table.css";
+@import "./resource-list.css";
+@import "./resource-form-actions.css";

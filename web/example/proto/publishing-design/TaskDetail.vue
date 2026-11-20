@@ -1,5 +1,6 @@
 <script setup>
 import { computed } from "vue";
+import PublishingExecutionHistory from "../../../src/modules/publication/components/PublishingExecutionHistory.vue";
 import { Button, DescriptionsItem as Field } from "tdesign-vue-next";
 import ResourceCard from "../../../src/shared/ui/resource/ResourceCard.vue";
 import ResourceSection from "../../../src/shared/ui/resource/ResourceSection.vue";
@@ -22,7 +23,15 @@ const sourceAsset = computed(() =>
 const batch = computed(() =>
   props.db.batches.find((b) => b.id === props.task.batchId),
 );
-const latest = computed(() => props.task.attemptHistory?.at(-1));
+const realStatus = status => ({ '待执行':'pending', '排队中':'queued', '执行中':'running', '等待人工':'awaiting_human', '结果待确认':'uncertain', '平台审核中':'reviewing', '执行失败':'failed', '已发布':'published' })[status] || 'uncertain';
+const historyTask = computed(() => ({ id: props.task.id, status: realStatus(props.task.status), failure_message: props.task.evidence }));
+const historyAttempts = computed(() => (props.task.attemptHistory || []).map(a => ({
+  id: String(a.number), attempt_no: a.number, started_at: a.started, finished_at: a.ended,
+  status: a.ended ? 'completed' : 'running', result_status: realStatus(a.status),
+  stage: a.ended ? 'finished' : 'preparing', error_message: a.receipt,
+  input_snapshot: a.snapshot ? { content: { title: props.task.platform !== '百家号' ? a.snapshot.title : null, description: a.snapshot.description || a.snapshot.title, cover: a.snapshot.cover, cover_file_id: a.snapshot.coverFileId, visibility: a.snapshot.visibility, partition: a.snapshot.partition, topics: a.snapshot.topics || a.snapshot.tags, declaration: a.snapshot.declaration } } : null,
+  steps: (a.steps || []).map((step, i) => ({ seq:i + 1, at:step.time, label:[displayStatus(step), step.evidence].filter(Boolean).join(' · '), report:{ stage: step.status === '等待人工' ? 'awaiting_human' : undefined } })),
+})));
 const content = computed(() => taskContent(props.task));
 const coverFields = computed(() =>
   (content.value.templateDocument
@@ -81,7 +90,7 @@ const attention = computed(() => {
     <ResourceCard class="detail-card"><ResourceSection title="发布内容">
       <ResourceDescriptions>
         <Field v-if="task.platform !== '百家号'" label="标题" full>{{ content.title || '未填写' }}</Field>
-        <Field label="正文 / 简介" full>{{ content.description || "未填写" }}</Field>
+        <Field :label="task.platform === '百家号' ? '发布标题' : '正文 / 简介'" full>{{ content.description || "未填写" }}</Field>
         <Field label="发布封面" full>
           <div class="task-cover-row">
             <button v-if="content.cover" class="task-cover" aria-label="预览发布封面" @click="emit('preview', { src: content.cover, title: '发布封面' })"><img :src="content.cover" alt="发布封面" /></button>
@@ -133,34 +142,8 @@ const attention = computed(() => {
     </ResourceSection>
     </ResourceCard>
     <ResourceCard class="detail-card"><ResourceSection title="执行历史">
-      <p v-if="task.status === '执行中'">
-        当前阶段：{{ task.log?.at(-1)?.text || "等待执行器反馈" }}
-      </p>
-      <p v-if="!task.attemptHistory?.length">
-        {{
-          task.status === "待执行" && !task.attempts
-            ? "任务尚未执行"
-            : "暂无已保存的执行记录"
-        }}
-      </p>
-      <details v-for="a in task.attemptHistory || []" :key="a.number">
-        <summary>
-          第 {{ a.number }} 次 · 内容版本 {{ a.version || 1 }} ·
-          {{ displayStatus(a) }}
-        </summary>
-        <p>{{ date(a.started) }} — {{ date(a.ended) }}</p>
-        <p>{{ a.receipt || "尚无平台反馈" }}</p>
-        <p>执行快照：{{ a.snapshot?.title || a.snapshot?.description }}</p>
-        <p v-for="(s, i) in a.steps || []" :key="i">
-          {{ date(s.time) }} · {{ displayStatus(s) }} · {{ s.evidence }}
-        </p>
-      </details>
-      <div v-if="task.log?.length" class="v4-history">
-        <p v-for="(l, i) in task.log" :key="i">
-          <time>{{ date(l.time) }}</time
-          >{{ l.text.replaceAll("执行失败", "发布失败") }}
-        </p>
-      </div>
+      <PublishingExecutionHistory v-if="historyAttempts.length || task.status === '待执行'" :task="historyTask" :attempts="historyAttempts" />
+      <p v-else>暂无已保存的执行记录</p>
     </ResourceSection></ResourceCard>
   </article>
 </template>

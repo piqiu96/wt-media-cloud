@@ -187,3 +187,15 @@
 表格内资源数量和名称等查看入口使用蓝色文字，无默认底色；普通数据不做按钮块，只有可编辑字段显示控件。行操作继续使用 ResourceRowActions，不能被外层表单实底按钮规则覆盖。
 
 ResourceNotice 提醒条使用紧凑布局，单行含操作约50px，操作为32px热区的蓝色文字按钮，悬浮浅蓝底。Toast保持短时反馈，辅助操作也使用文字入口。表单自身保存、提交、页脚以及最终确认仍按实底规则，提示条和表格入口是显式排除项。
+
+## 原型与正式页面的公共实现核对
+
+公共预览和正式双入口加载同一份 `src/shared/styles/` 样式。正式双入口通过 `resource-surfaces.css` 加载列表、表格和表单操作适配；列表须显式接入 `resource-list-page` / `resource-list-panel` / `resource-data-table`，表单操作须置于 `resource-form-actions-scope`。预览入口在自身 body 接入该作用域，正式应用只在选定页面接入；`ResourceOverlay` 与 `MediaPreview` 的 `form-actions` 负责挂到页面外的弹层，默认关闭，不影响未迁移页面。
+
+`ResourceRequiredLabel` 提供统一必填标识，发布原型的 RequiredLabel 仅作为业务引用适配。时间控件使用 ResourceDateTime，详情分区与字段使用 ResourceSection / ResourceDescriptions。ResourceDescriptions 基于真实容器宽度布局，过窄时标签和值纵向排列，避免固定标签宽度挤压内容。
+
+独立页面使用 ResourceDetailPage / ResourceEditorPage：固定底栏按最近可滚动正文容器的真实边界定位，观察容器尺寸并跟随侧栏展开/收起；无该容器时保留原型的 `--resource-detail-sidebar-width` 接入。底栏不能横跨菜单，正文按实际底栏高度留空；验收须包含展开/收起和窄屏。按钮职责来自对应业务 PRD，不能因共用底栏而把列表动作复制进只读详情。
+
+公共模式改动先核对正式规范与真实实现；冲突或大幅影响既有产品时先列影响并裁定，不能用原型修改自动覆盖规范。已确认的修改须同时核验公共原型、真实组件与本次覆盖的正式页面。发布任务为本轮正式接入范围；批次、计划、图片库、模板的正式业务开放仍按各 Milestone，不以原型能力代替真实交付。已有生产、素材、账号、文件等页面未作整页迁移，不得声称全产品已覆盖；后续迁移沿用这些公共实现，不另建第二套。
+
+独立页 ResourceDetailPage / ResourceEditorPage 的固定底栏按最近可滚动正文容器测量横向边界，随侧栏展开/收起与视口变化更新，不能盖住菜单；正文按实际底栏高度留空。无该容器的预览保留 `--resource-detail-sidebar-width` 接入。操作入口与名称继续按具体 PRD；发布任务详情只读，业务处理从列表进入，不因底栏可插槽而重复配置业务按钮。

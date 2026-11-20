@@ -36,17 +36,17 @@ func TestPublicationRoutesAndContractRequireSession(t *testing.T) {
 				continue
 			}
 			count++
-			path = strings.ReplaceAll(path, "{id}", "1")
+			path = strings.ReplaceAll(strings.ReplaceAll(path, "{id}", "1"), "{attempt_id}", "2")
 			r := ut.PerformRequest(h.Engine, strings.ToUpper(method), path, nil)
 			if r.Result().StatusCode() != 401 {
 				t.Fatalf("%s %s got %d", method, path, r.Result().StatusCode())
 			}
 		}
 	}
-	if count != 6 {
+	if count != 8 {
 		t.Fatalf("route/contract count=%d", count)
 	}
-	for _, action := range []string{"execute", "authorize", "retry"} {
+	for _, action := range []string{"execute", "authorize"} {
 		if got := ut.PerformRequest(h.Engine, "POST", "/api/v1/publication/1/"+action, nil).Result().StatusCode(); got != 404 {
 			t.Fatalf("premature execution endpoint %s=%d", action, got)
 		}
@@ -110,18 +110,19 @@ func TestPublicationAgentRoutesRequireBearer(t *testing.T) {
 	if e = yaml.Unmarshal(raw, &doc); e != nil {
 		t.Fatal(e)
 	}
-	if len(doc.Paths) != 3 {
+	if len(doc.Paths) != 4 {
 		t.Fatalf("agent route count=%d", len(doc.Paths))
 	}
 	for path, methods := range doc.Paths {
-		if _, ok := methods["post"]; !ok {
-			t.Fatalf("missing POST %s", path)
+		method := "POST"
+		if _, ok := methods["get"]; ok {
+			method = "GET"
 		}
 		if !strings.HasPrefix(path, "/api/v1/cloud-agent/publication-task/") {
 			t.Fatalf("non-singular path: %s", path)
 		}
-		path = strings.ReplaceAll(path, "{id}", "1")
-		r := ut.PerformRequest(h.Engine, "POST", path, nil)
+		path = strings.ReplaceAll(strings.ReplaceAll(path, "{id}", "1"), "{attempt_id}", "2")
+		r := ut.PerformRequest(h.Engine, method, path, nil)
 		if r.Result().StatusCode() != 401 {
 			t.Fatalf("%s: %d", path, r.Result().StatusCode())
 		}

@@ -122,6 +122,13 @@ func isolatedDB(t *testing.T, fixtures bool) *gorm.DB {
 	if _, err = migration.Apply(context.Background(), db, []migration.Migration{{Version: "attempt", Name: "attempt", SQL: string(body)}}); err != nil {
 		t.Fatal(err)
 	}
+	body, err = os.ReadFile(config.GetRuntimePaths().Migrations + "/20261118_105_publication_resolution_note.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = migration.Apply(context.Background(), db, []migration.Migration{{Version: "verification_note", Name: "verification_note", SQL: string(body)}}); err != nil {
+		t.Fatal(err)
+	}
 	exec("INSERT INTO media_accounts(id) VALUES(12)")
 	exec("INSERT INTO composite_outputs(id) VALUES(42),(43),(44)")
 	for id := 1; id <= 3; id++ {

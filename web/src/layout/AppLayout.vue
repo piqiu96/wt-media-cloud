@@ -35,9 +35,10 @@ const menuItems = [
     { title: '成片管理', path: '/finished-media', icon: 'video' },
   ] },
   { value: 'operations', title: '运营执行', icon: 'send', children: [
-    { title: '发布管理', path: '/publish', icon: 'send' },
+    { value: 'publishing', title: '发布管理', icon: 'send', children: [
+      { title: '发布任务', path: '/publish', icon: 'send' },
+    ] },
     { title: '互动管理', path: '/interact', icon: 'chat' },
-    { title: '评论模板', path: '/comment-templates', icon: 'chat-bubble' },
   ] },
   { value: 'operation-resources', title: '运营资源', icon: 'folder', children: [
     { title: '浏览器窗口', path: '/browser-windows', icon: 'desktop' },
@@ -46,9 +47,6 @@ const menuItems = [
   ] },
   { value: 'operation-tools', title: '运营工具', icon: 'tools', children: [
     { title: '文件管理', path: '/files', icon: 'folder' },
-  ] },
-  { value: 'analytics', title: '数据分析', icon: 'chart-bar', children: [
-    { title: '数据统计', path: '/stats', icon: 'chart-bar' },
   ] },
   { value: 'system', title: '系统管理', icon: 'setting', children: [
     { title: '用户管理', path: '/users', icon: 'user-setting' },
@@ -109,21 +107,24 @@ const allItems = computed(() => {
     .filter(Boolean)
 })
 
-const breadcrumbItems = computed(() => {
-  const group = allItems.value.find((item) => item.children?.some((child) => child.path === route.path))
-  if (group) {
-    const child = group.children.find((item) => item.path === route.path)
-    return child ? [group.title, child.title] : [group.title]
+function findMenuTrail(items, path) {
+  for (const item of items) {
+    if (item.path === path) return [item]
+    const children = item.children ? findMenuTrail(item.children, path) : []
+    if (children.length) return [item, ...children]
   }
-  const item = allItems.value.find((candidate) => candidate.path === route.path)
-  return [route.meta?.title || item?.title || String(route.name || '')]
-})
+  return []
+}
 
-watch([() => route.path, allItems], ([path, items]) => {
-  const activeGroup = items.find((item) => item.children?.some((child) => child.path === path))
-  if (activeGroup && !expandedGroups.value.includes(activeGroup.value)) {
-    expandedGroups.value = [...expandedGroups.value, activeGroup.value]
-  }
+const activeMenuTrail = computed(() => findMenuTrail(allItems.value, route.path))
+const breadcrumbItems = computed(() => activeMenuTrail.value.length
+  ? activeMenuTrail.value.map((item) => item.title)
+  : [route.meta?.title || String(route.name || '')])
+
+watch(activeMenuTrail, (trail) => {
+  const activeGroups = trail.filter((item) => item.children).map((item) => item.value)
+  const missingGroups = activeGroups.filter((value) => !expandedGroups.value.includes(value))
+  if (missingGroups.length) expandedGroups.value = [...expandedGroups.value, ...missingGroups]
 }, { immediate: true })
 
 watch(expandedGroups, (groups) => {
@@ -159,7 +160,7 @@ async function logout() {
 
 <template>
   <t-layout class="app-shell">
-    <t-aside class="app-aside" :width="collapsed ? '64px' : '232px'">
+    <t-aside class="app-aside" :width="collapsed ? '64px' : '248px'">
       <div class="sidebar-header" :class="{ 'is-collapsed': collapsed }" @click="router.push('/')">
         <BrandLogo :compact="collapsed" />
         <div v-if="!collapsed" class="sidebar-meta">
@@ -179,12 +180,16 @@ async function logout() {
             <template #icon>
               <t-icon :name="item.icon" />
             </template>
-            <t-menu-item v-for="child in item.children" :key="child.path" :value="child.path">
-              <template #icon>
-                <t-icon :name="child.icon" />
-              </template>
-              {{ child.title }}
-            </t-menu-item>
+            <template v-for="child in item.children" :key="child.path || child.value">
+              <t-submenu v-if="child.children" :value="child.value" :title="child.title">
+                <t-menu-item v-for="page in child.children" :key="page.path" :value="page.path">
+                  {{ page.title }}
+                </t-menu-item>
+              </t-submenu>
+              <t-menu-item v-else :value="child.path">
+                {{ child.title }}
+              </t-menu-item>
+            </template>
           </t-submenu>
           <t-menu-item v-else :value="item.path">
             <template #icon>
@@ -268,6 +273,7 @@ async function logout() {
 .profile-trigger:hover, .profile-trigger:focus-visible { background: #eff6ff; outline: none; }
 .profile-name { max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
 
+/* Shared Cloud/Desktop navigation: icons identify top-level sections only. */
 :deep(.t-default-menu) {
   width: 100%;
   padding: 4px 0 24px;
@@ -276,79 +282,67 @@ async function logout() {
   transition: width 0.2s ease;
 }
 :deep(.t-default-menu .t-menu__item) {
-  height: 44px;
-  margin: 1px 10px;
-  padding: 0 20px;
-  border-radius: 8px;
-  color: #4B5563;
+  box-sizing: border-box;
+  height: 42px;
+  margin: 0 12px;
+  padding: 0 12px;
+  border-radius: 7px;
+  color: #414957;
   font-size: 15px;
   font-weight: 500;
-  line-height: 44px;
+  line-height: 42px;
   transition: background-color 0.2s ease, color 0.2s ease;
 }
+:deep(.t-default-menu .t-menu > .t-submenu + .t-submenu) { margin-top: 10px; }
 :deep(.t-default-menu .t-menu__item .t-icon) {
   width: 18px;
   height: 18px;
   margin-right: 10px;
-  color: currentColor;
+  color: #77808D;
   font-size: 18px;
 }
-:deep(.t-default-menu .t-menu__item:hover:not(.t-is-active):not(.t-is-disabled)) {
-  background: rgba(0, 0, 0, 0.03);
+:deep(.t-default-menu .t-menu__item:hover:not(.t-is-active):not(.t-is-disabled)),
+:deep(.t-default-menu .t-submenu > .t-menu__item:hover) {
+  background: #F0F1EE;
 }
 :deep(.t-default-menu .t-submenu > .t-menu__item.t-is-opened),
-:deep(.t-menu .t-submenu.t-is-active > .t-menu__item),
-:deep(.t-menu .t-submenu.t-is-active > .t-menu__item .t-icon) {
-  color: #4B5563;
+:deep(.t-default-menu .t-submenu.t-is-active > .t-menu__item) {
+  color: #414957;
   background: transparent;
 }
-:deep(.t-default-menu .t-submenu > .t-menu__item:hover) { background: rgba(0, 0, 0, 0.03); }
+:deep(.t-default-menu .t-submenu.t-is-active > .t-menu__item .t-icon) { color: #77808D; }
 :deep(.t-default-menu .t-menu__sub) {
-  position: relative;
-  margin: 2px 20px 7px 30px;
-  padding: 2px 0;
+  margin: 2px 12px 0 40px;
+  padding: 0;
   overflow: hidden;
   transition: height 0.2s ease;
 }
-:deep(.t-default-menu .t-menu__sub::before) {
-  content: '';
-  position: absolute;
-  top: 6px;
-  bottom: 6px;
-  left: 8px;
-  width: 1px;
-  background: rgba(75, 85, 99, 0.18);
+/* One 16px step for level three; do not accumulate the outer gutter. */
+:deep(.t-default-menu:not(.t-is-collapsed) .t-menu__sub .t-menu__sub) {
+  margin: 2px 0 2px 16px;
 }
 :deep(.t-default-menu .t-menu__sub .t-menu__item) {
-  height: 40px;
-  margin: 1px 0;
-  padding: 0 12px 0 20px;
-  color: #6B7280;
-  font-size: 14px;
+  margin: 0;
+  padding: 0 12px;
+  color: #566171;
   font-weight: 400;
-  line-height: 40px;
 }
-:deep(.t-default-menu .t-menu__sub .t-menu__item .t-icon) {
-  width: 16px;
-  height: 16px;
-  margin-right: 10px;
-  font-size: 16px;
-}
+:deep(.t-default-menu .t-menu__sub .t-submenu > .t-menu__item) { color: #566171; }
 :deep(.t-default-menu .t-menu__sub .t-menu__item.t-is-active:not(.t-is-opened)) {
-  padding-left: 17px;
+  padding-left: 9px;
   border-left: 3px solid #2563EB;
-  border-radius: 8px;
-  color: #1D4ED8;
-  background: rgba(30, 64, 175, 0.06);
+  border-radius: 7px;
+  color: #2563EB;
+  background: #EDF1F8;
+  font-weight: 500;
 }
-:deep(.t-default-menu .t-menu__sub .t-menu__item.t-is-active .t-icon) { color: #1D4ED8; }
-:deep(.t-default-menu .t-submenu .t-submenu-icon) {
-  width: 14px;
-  height: 14px;
-  opacity: 0.5;
+:deep(.t-default-menu .t-menu__item .t-fake-arrow) {
+  width: 13px;
+  height: 13px;
+  color: #77808D;
+  opacity: 1;
   transition: transform 0.2s ease;
 }
-:deep(.t-default-menu .t-submenu.t-is-opened .t-submenu-icon) { transform: rotate(180deg); }
 :deep(.t-default-menu.t-is-collapsed .t-menu .t-menu__item) { margin: 1px 10px; padding: 0; }
 :deep(.t-default-menu.t-is-collapsed .t-menu__item .t-icon) { margin-right: 0; }
 .topbar {
