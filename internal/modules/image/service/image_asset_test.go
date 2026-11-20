@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"gorm.io/gorm"
 	"testing"
 	"time"
 
@@ -233,5 +234,54 @@ func TestRegistrationRejectsUnverifiedOrCorruptImage(t *testing.T) {
 				t.Fatal("invalid image persisted")
 			}
 		})
+	}
+}
+
+func (m *memoryAsset) Delete(id, revision uint64, check func(*gorm.DB, int64) error) error {
+	v, e := m.Get(id)
+	if e != nil {
+		return e
+	}
+	if v.Revision != revision {
+		return ErrConflict
+	}
+	if check == nil {
+		return errors.New("missing reference check")
+	}
+	if e = check(nil, v.FileID); e != nil {
+		return e
+	}
+	delete(m.rows, id)
+	return nil
+}
+
+func TestImageBatchKeepsFailedItemAndAppliesIndependentChanges(t *testing.T) {
+	s, r, a := assetFixture()
+	v, e := s.RegisterImageAsset(context.Background(), a, RegisterInput{FileID: 7, Name: "图片", AllowAsCover: true, CategoryIDs: []string{}})
+	if e != nil {
+		t.Fatal(e)
+	}
+	other := v
+	other.ID = 2
+	other.FileID = 8
+	r.rows[2] = other
+	result, e := s.BatchImageAsset(a, BatchInput{Operation: "disable", Items: []BatchItem{{ID: v.ID, ExpectedRevision: v.Revision + 1}, {ID: 2, ExpectedRevision: other.Revision}}})
+	if e != nil || len(result) != 2 || result[0].Success || !result[1].Success || !r.rows[v.ID].Enabled || r.rows[2].Enabled {
+		t.Fatalf("partial result %+v %v", result, e)
+	}
+	if _, e = s.BatchImageAsset(a, BatchInput{Operation: "enable", Items: []BatchItem{{ID: 2, ExpectedRevision: 2}, {ID: 2, ExpectedRevision: 2}}}); !errors.Is(e, ErrInvalid) {
+		t.Fatal("duplicate batch IDs accepted")
+	}
+}
+func TestPreviewArtworkCannotBeRegisteredAsPublicationImage(t *testing.T) {
+	s, _, a := assetFixture()
+	read := s.ReadFile
+	s.ReadFile = func(ctx context.Context, a identity.PublicUser, id int64) (filemodel.File, error) {
+		f, e := read(ctx, a, id)
+		f.MetadataJSON = []byte(`{"width":640,"height":360,"format":"png","source":"render","preview":true}`)
+		return f, e
+	}
+	if _, e := s.RegisterImageAsset(context.Background(), a, RegisterInput{FileID: 7, Name: "预览图", AllowAsCover: true, CategoryIDs: []string{}}); !errors.Is(e, ErrInvalid) {
+		t.Fatal("preview registered as formal image")
 	}
 }

@@ -33,12 +33,15 @@ type Repository interface {
 	Get(uint64) (model.ImageAsset, error)
 	Update(model.ImageAsset, uint64) (model.ImageAsset, error)
 	List(model.Scope, repository.Filter) ([]model.ImageAsset, int64, error)
+	Delete(uint64, uint64, func(*gorm.DB, int64) error) error
 }
 type Service struct {
 	Repo            Repository
 	ReadFile        func(context.Context, identity.PublicUser, int64) (filemodel.File, error)
 	CategoryAllowed func(identity.PublicUser, int64) (bool, error)
 	TeamAllowed     func(identity.PublicUser, int64) (bool, error)
+	ReferenceCheck  func(*gorm.DB, int64) error
+	ListReference   func(identity.PublicUser, int64) ([]model.Reference, error)
 }
 type RegisterInput struct {
 	FileID            int64    `json:"file_id,string"`
@@ -68,7 +71,7 @@ type SelectInput struct {
 }
 
 func Wired() *Service {
-	return &Service{Repo: repository.Store{DB: database.DB()}, ReadFile: func(ctx context.Context, a identity.PublicUser, id int64) (filemodel.File, error) {
+	return &Service{Repo: repository.Store{DB: database.DB()}, ReferenceCheck: referenceCheck, ListReference: listReference, ReadFile: func(ctx context.Context, a identity.PublicUser, id int64) (filemodel.File, error) {
 		s, e := files.Wired()
 		if e != nil {
 			return filemodel.File{}, e
@@ -181,6 +184,9 @@ func (s *Service) validateImageAssetAttributes(a identity.PublicUser, name strin
 func withImageMetadata(v model.ImageAsset) (model.ImageAsset, error) {
 	var metadata filemodel.ImageMetadata
 	if e := json.Unmarshal(v.MetadataJSON, &metadata); e != nil || metadata.Width <= 0 || metadata.Height <= 0 {
+		return v, ErrInvalid
+	}
+	if metadata.Preview {
 		return v, ErrInvalid
 	}
 	v.Width, v.Height, v.Format = metadata.Width, metadata.Height, metadata.Format
@@ -318,6 +324,9 @@ func (s *Service) SetImageAssetUsage(a identity.PublicUser, id uint64, in UsageI
 	return withImageMetadata(v)
 }
 func validateFilter(f repository.Filter) error {
+	if f.Source != "" && f.Source != "upload" && f.Source != "render" {
+		return ErrInvalid
+	}
 	if f.Page < 1 || f.PageSize < 1 || f.PageSize > 100 || f.Page > int(^uint(0)>>1)/f.PageSize || utf8.RuneCountInString(f.Search) > 100 || f.MinWidth < 0 || f.MinHeight < 0 {
 		return ErrInvalid
 	}
@@ -422,5 +431,5 @@ func CheckFileReferences(tx *gorm.DB, id int64) error {
 	if used {
 		return files.ErrInUse
 	}
-	return nil
+	return CheckTemplateFileReferences(tx, id)
 }

@@ -171,3 +171,27 @@ func TestBaiduPreparationNeedsNoFeatureSwitch(t *testing.T) {
 		t.Fatalf("create authorized execution: %+v", task)
 	}
 }
+
+func TestCreateAndEditRejectRendererPreview(t *testing.T) {
+	s, a, in := fixture()
+	original := s.File
+	preview := func(ctx context.Context, a identity.PublicUser, id int64) (filemodel.File, error) {
+		f, e := original(ctx, a, id)
+		f.MetadataJSON = []byte(`{"preview":true}`)
+		return f, e
+	}
+	s.File = preview
+	if _, err := s.Create(context.Background(), a, in); err == nil {
+		t.Fatal("preview became formal task")
+	}
+	s.File = original
+	task, err := s.Create(context.Background(), a, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.File = preview
+	in.Content.CoverFileID++
+	if _, err = s.Edit(context.Background(), a, task.ID, EditInput{ExpectedRevision: task.Revision, Content: in.Content}); err == nil {
+		t.Fatal("preview replaced formal cover")
+	}
+}

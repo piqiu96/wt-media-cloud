@@ -35,3 +35,9 @@ type Scope struct {
 	OwnerID, TeamID int64
 	CategoryIDs     []string
 }
+
+// Reference exposes only an identifier, never another owner's content.
+type Reference struct {
+	Kind string `json:"kind"`
+	ID   string `json:"id"`
+}

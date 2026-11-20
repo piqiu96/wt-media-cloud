@@ -15,9 +15,9 @@ var ErrNotFound = errors.New("image asset not found")
 var ErrConflict = errors.New("image asset revision or registration conflict")
 
 type Filter struct {
-	Search, Usage, CategoryID, CategoryMode, Aspect string
-	Enabled                                         *bool
-	Page, PageSize, MinWidth, MinHeight             int
+	Search, Usage, CategoryID, CategoryMode, Aspect, Source string
+	Enabled                                                 *bool
+	Page, PageSize, MinWidth, MinHeight                     int
 }
 type Store struct{ DB *gorm.DB }
 
@@ -126,6 +126,9 @@ func (s Store) List(sc model.Scope, f Filter) ([]model.ImageAsset, int64, error)
 	if f.MinHeight > 0 {
 		q = q.Where(height+">=?", f.MinHeight)
 	}
+	if f.Source != "" {
+		q = q.Where("JSON_UNQUOTE(JSON_EXTRACT(f.metadata_json, '$.source'))=?", f.Source)
+	}
 	switch f.Aspect {
 	case "landscape":
 		q = q.Where(width + ">" + height)
@@ -146,4 +149,40 @@ func FileReferenced(db *gorm.DB, id int64) (bool, error) {
 	var n int64
 	e := db.Model(&model.ImageAsset{}).Where("file_id=?", id).Count(&n).Error
 	return n > 0, e
+}
+
+// Delete removes a library registration; the independently managed source file remains.
+// The file lock serializes this check with every business reference writer.
+func (s Store) Delete(id, revision uint64, check func(*gorm.DB, int64) error) error {
+	return s.DB.Transaction(func(tx *gorm.DB) error {
+		v, e := (Store{DB: tx}).Get(id)
+		if e != nil {
+			return e
+		}
+		if e = files.LockAvailable(tx, []int64{v.FileID}); e != nil {
+			return e
+		}
+		// Re-read after acquiring the shared reference lock.
+		v, e = (Store{DB: tx}).Get(id)
+		if e != nil {
+			return e
+		}
+		if v.Revision != revision {
+			return ErrConflict
+		}
+		if check == nil {
+			return errors.New("image reference checker is not configured")
+		}
+		if e = check(tx, v.FileID); e != nil {
+			return e
+		}
+		r := tx.Where("id=? AND revision=?", id, revision).Delete(&model.ImageAsset{})
+		if r.Error != nil {
+			return r.Error
+		}
+		if r.RowsAffected != 1 {
+			return ErrConflict
+		}
+		return nil
+	})
 }

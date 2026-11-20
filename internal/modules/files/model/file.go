@@ -6,10 +6,14 @@ import (
 )
 
 type ImageMetadata struct {
-	Width  int    `json:"width"`
-	Height int    `json:"height"`
-	Format string `json:"format"`
-	Source string `json:"source"`
+	Width           int             `json:"width"`
+	Height          int             `json:"height"`
+	Format          string          `json:"format"`
+	Source          string          `json:"source"`
+	RenderInputHash string          `json:"render_input_hash,omitempty"`
+	RenderVersion   string          `json:"render_version,omitempty"`
+	RenderInput     json.RawMessage `json:"render_input,omitempty"`
+	Preview         bool            `json:"preview,omitempty"`
 }
 
 type File struct {

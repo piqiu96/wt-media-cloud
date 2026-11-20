@@ -203,7 +203,7 @@ func (s *Service) Create(ctx context.Context, a identity.PublicUser, in CreateIn
 	if err != nil {
 		return model.Task{}, err
 	}
-	if cover.Type != "image" || cover.SizeBytes <= 0 || len(cover.SHA256) != 64 {
+	if cover.Type != "image" || cover.SizeBytes <= 0 || len(cover.SHA256) != 64 || previewCover(cover) {
 		return model.Task{}, ErrInvalid
 	}
 	snapshot, _ := json.Marshal(map[string]any{"account_name": account.PlatformName, "account_owner": account.UserName, "browser_profile_id": account.BrowserProfileID, "output_name": o.Name, "video_sha256": o.SHA256, "video_size": o.FileSizeBytes, "cover_sha256": cover.SHA256, "cover_name": cover.Name, "cover_resource_path": "/api/v1/file-resources/" + cover.ResourceToken})
@@ -231,7 +231,7 @@ func (s *Service) Edit(ctx context.Context, a identity.PublicUser, id uint64, in
 	if err != nil {
 		return model.Task{}, err
 	}
-	if cover.Type != "image" || cover.SizeBytes <= 0 || len(cover.SHA256) != 64 {
+	if cover.Type != "image" || cover.SizeBytes <= 0 || len(cover.SHA256) != 64 || previewCover(cover) {
 		return model.Task{}, ErrInvalid
 	}
 	var snapshot map[string]any
@@ -247,4 +247,14 @@ func (s *Service) Edit(ctx context.Context, a identity.PublicUser, id uint64, in
 	v.NotBefore = in.NotBefore
 	v.AuditActor = int64(a.ID)
 	return s.Repo.Edit(v, in.ExpectedRevision)
+}
+
+func ListFileReference(a identity.PublicUser, id int64) ([]repository.FileReference, error) {
+	return repository.ListFileReference(database.DB(), a, id)
+}
+
+// A renderer preview is a validation sample and must never become task content.
+func previewCover(f filemodel.File) bool {
+	var metadata filemodel.ImageMetadata
+	return len(f.MetadataJSON) > 0 && json.Unmarshal(f.MetadataJSON, &metadata) == nil && metadata.Preview
 }

@@ -257,3 +257,34 @@ func TestLiveImageRegistrationAndFileDeletionCannotBothSucceed(t *testing.T) {
 		}
 	}
 }
+
+func TestLiveImageDeleteProtectsReferenceAndRevision(t *testing.T) {
+	db := isolated(t)
+	s, a := fixture(db)
+	seedFile(t, db, 31, 640, 360)
+	v, e := s.RegisterImageAsset(context.Background(), a, service.RegisterInput{FileID: 31, Name: "删除检查", AllowAsCover: true, CategoryIDs: []string{}})
+	if e != nil {
+		t.Fatal(e)
+	}
+	store := repository.Store{DB: db}
+	if e = store.Delete(v.ID, v.Revision+1, nil); !errors.Is(e, repository.ErrConflict) {
+		t.Fatalf("stale deletion: %v", e)
+	}
+	blocked := errors.New("referenced")
+	if e = store.Delete(v.ID, v.Revision, func(*gorm.DB, int64) error { return blocked }); !errors.Is(e, blocked) {
+		t.Fatalf("reference protection: %v", e)
+	}
+	if _, e = s.GetImageAsset(a, v.ID); e != nil {
+		t.Fatalf("failed deletion lost record: %v", e)
+	}
+	if e = store.Delete(v.ID, v.Revision, func(*gorm.DB, int64) error { return nil }); e != nil {
+		t.Fatal(e)
+	}
+	if _, e = s.GetImageAsset(a, v.ID); !errors.Is(e, service.ErrNotFound) {
+		t.Fatalf("deleted image still visible: %v", e)
+	}
+	var n int64
+	if e = db.Table("operations_files").Where("id=31 AND deleted_at IS NULL").Count(&n).Error; e != nil || n != 1 {
+		t.Fatalf("library removal changed independent file: %d %v", n, e)
+	}
+}

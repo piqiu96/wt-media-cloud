@@ -5,13 +5,32 @@ info:
   description: CHG106 image registration and selection. Owner/team/category scope is enforced server-side. No publication
     state or action changes.
 paths:
+  /api/v1/image-asset/batch:
+    post:
+      operationId: batchImageAsset
+      security: [{sessionCookie: []}]
+      description: Apply enable, disable or dual_usage to at most 100 unique items with id and expected_revision. Each item returns id, success and error; failures do not roll back successful independent items.
+      responses:
+        '200': {description: Per-item results, including revision conflicts and unavailable resources.}
+        '400': {description: Invalid operation or item list.}
+  /api/v1/image-asset/{id}/reference:
+    get:
+      operationId: listImageAssetReference
+      security: [{sessionCookie: []}]
+      parameters:
+      - {in: path, name: id, required: true, schema: {type: string}}
+      description: Authorized image reference identifiers. Returns kind and id only; no cross-owner task content is exposed.
+      responses:
+        '200': {description: items containing kind and id.}
+        '404': {description: Image outside scope or missing.}
+        '503': {description: Reference lookup unavailable.}
   /api/v1/image-asset:
     get:
       operationId: listImageAsset
       security:
       - sessionCookie: []
       description: 'Scoped by existing owner/team/category permissions. Filters: search, usage (cover/background),
-        category_id, enabled, aspect (landscape/portrait/square), page and page_size (1..100). Returns items,total,page,page_size.
+        category_id, enabled, source (upload/render), aspect (landscape/portrait/square), page and page_size (1..100). Returns items,total,page,page_size.
         Loading failure is not an empty list.'
       responses:
         '200':
@@ -48,6 +67,9 @@ paths:
         name: enabled
         schema:
           type: boolean
+      - in: query
+        name: source
+        schema: {type: string, enum: [upload, render]}
       - in: query
         name: aspect
         schema:
@@ -137,6 +159,16 @@ paths:
                   allow_as_background:
                     const: true
   /api/v1/image-asset/{id}:
+    delete:
+      operationId: deleteImageAsset
+      security: [{sessionCookie: []}]
+      parameters:
+      - {in: path, name: id, required: true, schema: {type: string}}
+      - {in: query, name: expected_revision, required: true, schema: {type: string}}
+      description: Remove library registration only, preserving the separately managed source file. References and revision are checked under the source file lock. Any failure retains registration.
+      responses:
+        '200': {description: Removed.}
+        '409': {description: Referenced image or stale revision.}
     parameters:
     - in: path
       name: id

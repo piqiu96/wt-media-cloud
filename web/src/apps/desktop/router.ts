@@ -26,6 +26,8 @@ export const desktopRoutes = [
       { path: "publish", name: "Publish", component: () => import("../../modules/publication/pages/PublishingPage.vue") },
       { path: "interact", name: "Interact", component: () => import("../../shared/ui/ComingSoon.vue") },
       { path: "comment-templates", name: "CommentTemplates", component: () => import("../../shared/ui/ComingSoon.vue") },
+      { path: "cover-template", name: "CoverTemplate", component: () => import("../../modules/image/pages/CoverTemplatePage.vue") },
+      { path: "image-library", name: "ImageLibrary", component: () => import("../../modules/image/pages/ImageLibraryPage.vue") },
       { path: "files", name: "Files", component: () => import("../../modules/files/pages/FilesPage.vue") },
       { path: "stats", name: "Stats", component: () => import("../../shared/ui/ComingSoon.vue") },
       // 社媒账号三角色可见（本地操作按账号归属在页面内判定）；浏览器窗口与代理对

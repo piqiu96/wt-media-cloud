@@ -20,9 +20,13 @@ import (
 )
 
 func RegisterRoutes(h *server.Hertz) {
+	registerTemplateRoutes(h)
 	h.GET("/api/v1/image-asset", ListImageAsset)
 	h.POST("/api/v1/image-asset", RegisterImageAsset)
 	h.POST("/api/v1/image-asset/select", SelectImageAsset)
+	h.POST("/api/v1/image-asset/batch", BatchImageAsset)
+	h.GET("/api/v1/image-asset/:id/reference", ListImageAssetReference)
+	h.DELETE("/api/v1/image-asset/:id", DeleteImageAsset)
 	h.GET("/api/v1/image-asset/:id", GetImageAsset)
 	h.PUT("/api/v1/image-asset/:id", UpdateImageAsset)
 	h.PUT("/api/v1/image-asset/:id/usage", SetImageAssetUsage)
@@ -33,6 +37,8 @@ func fail(c *app.RequestContext, e error) {
 		api.FailureCode(c, consts.StatusBadRequest, errcode.ImageInvalid, "请检查图片名称、用途、类目和尺寸要求", "image_invalid", nil, false, "none")
 	case errors.Is(e, service.ErrNotFound), errors.Is(e, files.ErrNotFound), errors.Is(e, files.ErrForbidden):
 		api.FailureCode(c, consts.StatusNotFound, errcode.ImageNotFound, "图片不存在或没有访问权限", "image_not_found", nil, false, "none")
+	case errors.Is(e, files.ErrInUse):
+		api.FailureCode(c, consts.StatusConflict, errcode.ImageConflict, "图片被模板或正式任务引用，请先停用", "image_in_use", nil, false, "none")
 	case errors.Is(e, service.ErrConflict):
 		api.FailureCode(c, consts.StatusConflict, errcode.ImageConflict, "图片已变化或该文件已登记，请重新加载", "image_conflict", nil, false, "reload")
 	default:
@@ -62,7 +68,7 @@ func ListImageAsset(_ context.Context, c *app.RequestContext) {
 	if !ok {
 		return
 	}
-	f := repository.Filter{Search: c.Query("search"), Usage: c.Query("usage"), CategoryID: c.Query("category_id"), Aspect: c.Query("aspect"), Page: 1, PageSize: 20}
+	f := repository.Filter{Search: c.Query("search"), Usage: c.Query("usage"), CategoryID: c.Query("category_id"), Aspect: c.Query("aspect"), Source: c.Query("source"), Page: 1, PageSize: 20}
 	for name, target := range map[string]*int{"page": &f.Page, "page_size": &f.PageSize} {
 		if raw := c.Query(name); raw != "" {
 			v, e := strconv.Atoi(raw)
@@ -182,4 +188,60 @@ func SelectImageAsset(_ context.Context, c *app.RequestContext) {
 		return
 	}
 	api.Success(c, v)
+}
+
+func BatchImageAsset(_ context.Context, c *app.RequestContext) {
+	a, ok := middleware.AuthenticateRequest(c)
+	if !ok {
+		return
+	}
+	var in service.BatchInput
+	if e := decodeInput(c, &in); e != nil {
+		fail(c, e)
+		return
+	}
+	v, e := service.Wired().BatchImageAsset(a, in)
+	if e != nil {
+		fail(c, e)
+		return
+	}
+	api.Success(c, map[string]any{"items": v})
+}
+func ListImageAssetReference(_ context.Context, c *app.RequestContext) {
+	a, ok := middleware.AuthenticateRequest(c)
+	if !ok {
+		return
+	}
+	id, e := assetID(c)
+	if e != nil {
+		fail(c, e)
+		return
+	}
+	v, e := service.Wired().ListImageAssetReference(a, id)
+	if e != nil {
+		fail(c, e)
+		return
+	}
+	api.Success(c, map[string]any{"items": v})
+}
+func DeleteImageAsset(_ context.Context, c *app.RequestContext) {
+	a, ok := middleware.AuthenticateRequest(c)
+	if !ok {
+		return
+	}
+	id, e := assetID(c)
+	if e != nil {
+		fail(c, e)
+		return
+	}
+	revision, e := strconv.ParseUint(c.Query("expected_revision"), 10, 64)
+	if e != nil {
+		fail(c, service.ErrInvalid)
+		return
+	}
+	if e = service.Wired().DeleteImageAsset(a, id, revision); e != nil {
+		fail(c, e)
+		return
+	}
+	api.Success(c, map[string]any{"deleted": true})
 }

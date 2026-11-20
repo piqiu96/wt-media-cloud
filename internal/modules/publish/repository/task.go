@@ -9,6 +9,7 @@ import (
 	"github.com/wt-media/wt-media-cloud/internal/modules/publish/model"
 	"github.com/wt-media/wt-media-cloud/internal/shared/id"
 	"gorm.io/gorm"
+	"strconv"
 	"time"
 )
 
@@ -184,5 +185,34 @@ func mustJSON(v any) string { b, _ := json.Marshal(v); return string(b) }
 func FileReferenced(tx *gorm.DB, fileID int64) (bool, error) {
 	var count int64
 	err := tx.Model(&model.Task{}).Where("cover_file_id=?", fileID).Count(&count).Error
+	if err != nil || count > 0 {
+		return count > 0, err
+	}
+	err = tx.Model(&model.Attempt{}).Where("JSON_UNQUOTE(JSON_EXTRACT(input_snapshot_json,'$.content.cover_file_id'))=?", strconv.FormatInt(fileID, 10)).Count(&count).Error
 	return count > 0, err
+}
+
+// FileReference identifies references without exposing task or attempt content.
+type FileReference struct {
+	Kind string
+	ID   string
+}
+
+func ListFileReference(db *gorm.DB, a identity.PublicUser, id int64) ([]FileReference, error) {
+	out := []FileReference{}
+	var taskIDs, attemptIDs []uint64
+	allowed := (Store{DB: db}).query(Filter{Actor: a}).Select("id")
+	if e := db.Model(&model.Task{}).Where("id IN (?)", allowed).Where("cover_file_id=?", id).Pluck("id", &taskIDs).Error; e != nil {
+		return nil, e
+	}
+	if e := db.Model(&model.Attempt{}).Where("publication_id IN (?)", allowed).Where("JSON_UNQUOTE(JSON_EXTRACT(input_snapshot_json,'$.content.cover_file_id'))=?", strconv.FormatInt(id, 10)).Pluck("id", &attemptIDs).Error; e != nil {
+		return nil, e
+	}
+	for _, id := range taskIDs {
+		out = append(out, FileReference{Kind: "publication", ID: strconv.FormatUint(id, 10)})
+	}
+	for _, id := range attemptIDs {
+		out = append(out, FileReference{Kind: "publication_attempt", ID: strconv.FormatUint(id, 10)})
+	}
+	return out, nil
 }

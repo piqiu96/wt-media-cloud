@@ -218,6 +218,18 @@ func (s *Service) List(actor identity.PublicUser, kind, search string, page, siz
 }
 
 func (s *Service) Upload(ctx context.Context, actor identity.PublicUser, name, original string, body io.Reader) (model.FileView, error) {
+	return s.upload(ctx, actor, name, original, body, nil)
+}
+
+// UploadGeneratedImage stores provider-owned artwork provenance with inspected dimensions.
+// This is an in-process capability, never exposed as user-supplied upload metadata.
+func (s *Service) UploadGeneratedImage(ctx context.Context, actor identity.PublicUser, name string, body io.Reader, provenance model.ImageMetadata) (model.FileView, error) {
+	if provenance.RenderInputHash == "" || provenance.RenderVersion == "" || !json.Valid(provenance.RenderInput) {
+		return model.FileView{}, ErrInvalid
+	}
+	return s.upload(ctx, actor, name, name+".png", body, &provenance)
+}
+func (s *Service) upload(ctx context.Context, actor identity.PublicUser, name, original string, body io.Reader, provenance *model.ImageMetadata) (model.FileView, error) {
 	if _, err := scope(actor); err != nil {
 		return model.FileView{}, err
 	}
@@ -270,7 +282,15 @@ func (s *Service) Upload(ctx context.Context, actor identity.PublicUser, name, o
 		if inspected.Width <= 0 || inspected.Height <= 0 {
 			return model.FileView{}, ErrInvalid
 		}
-		metadata, err = json.Marshal(model.ImageMetadata{Width: inspected.Width, Height: inspected.Height, Format: ext, Source: "upload"})
+		imageMetadata := model.ImageMetadata{Width: inspected.Width, Height: inspected.Height, Format: ext, Source: "upload"}
+		if provenance != nil {
+			imageMetadata.RenderInputHash = provenance.RenderInputHash
+			imageMetadata.RenderVersion = provenance.RenderVersion
+			imageMetadata.RenderInput = provenance.RenderInput
+			imageMetadata.Preview = provenance.Preview
+			imageMetadata.Source = "render"
+		}
+		metadata, err = json.Marshal(imageMetadata)
 		if err != nil {
 			return model.FileView{}, err
 		}

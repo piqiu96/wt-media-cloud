@@ -14,7 +14,11 @@ import WorkEnvPill from '../apps/desktop/features/local-agent/WorkEnvPill.vue'
 const route = useRoute()
 const router = useRouter()
 const downloadCentre = useDownloadCentre()
-const collapsed = ref(false)
+const narrowViewport = window.matchMedia('(max-width: 760px)')
+const collapsed = ref(narrowViewport.matches)
+function syncNavigationSize(event) { collapsed.value = event.matches }
+narrowViewport.addEventListener('change', syncNavigationSize)
+watch(() => route.path, () => { if (narrowViewport.matches) collapsed.value = true })
 const SIDEBAR_EXPANDED_GROUPS_KEY = 'wt-media:sidebar-expanded-groups'
 const expandedGroups = ref(readExpandedGroups())
 const sessionClient = createSessionClient()
@@ -46,6 +50,8 @@ const menuItems = [
     { title: '社媒账号', path: '/accounts', icon: 'user' },
   ] },
   { value: 'operation-tools', title: '运营工具', icon: 'tools', children: [
+    { title: '封面模板', path: '/cover-template', icon: 'image' },
+    { title: '图片库', path: '/image-library', icon: 'image' },
     { title: '文件管理', path: '/files', icon: 'folder' },
   ] },
   { value: 'system', title: '系统管理', icon: 'setting', children: [
@@ -83,7 +89,10 @@ onMounted(async () => {
   await refreshUser()
   window.addEventListener('wt-media:profile-updated', refreshUser)
 })
-onUnmounted(() => window.removeEventListener('wt-media:profile-updated', refreshUser))
+onUnmounted(() => {
+ window.removeEventListener('wt-media:profile-updated', refreshUser)
+ narrowViewport.removeEventListener('change', syncNavigationSize)
+})
 
 const allItems = computed(() => {
   const hiddenPaths = new Set()
@@ -358,4 +367,11 @@ async function logout() {
   padding: 24px; background: var(--td-bg-color-page);
 }
 .content-area > * { min-width: 0; max-width: 100%; }
+@media (max-width: 760px) {
+ .app-aside { position:fixed; inset:0 auto 0 0; z-index:20; }
+ .app-main { margin-left:64px; }
+ .content-area { padding:20px 16px; }
+ .topbar { padding:0 8px; }
+ .topbar :deep(.t-breadcrumb), .profile-name { display:none; }
+}
 </style>
