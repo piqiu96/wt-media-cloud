@@ -36,7 +36,7 @@ function save() {
       <p class="task-settings__notice">仅本次任务生效，不修改策略。</p>
       <ResourceForm class="task-settings__form">
         <t-form-item v-for="field in fields" :key="field.key" :required-mark="field.required && editable(field)">
-          <template #label>{{ field.label }}<ResourceFieldHelp v-if="!editable(field) || field.description" :content="!editable(field) ? '固定参数，任务内不可调整。' : field.description" /></template>
+          <template #label>{{ field.label }}<ResourceFieldHelp v-if="!editable(field) || field.description" :label="field.label" :content="!editable(field) ? '固定参数，任务内不可调整。' : field.description" /></template>
           <div class="task-settings__field">
 
               <t-input-number v-if="['integer','number'].includes(field.type)" v-model="draft[field.key]" theme="column" :min="field.minimum" :max="field.maximum_from_strategy ? activeGroup?.params?.[field.key] : field.maximum" :decimal-places="field.type === 'integer' ? 0 : undefined" :disabled="!editable(field)" :status="errors[field.key] ? 'error' : undefined" />

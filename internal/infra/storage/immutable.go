@@ -1,13 +1,17 @@
 package storage
 
 import (
+	"bytes"
 	"context"
+	"crypto/md5"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
 	"strings"
+	"time"
 
 	"github.com/minio/minio-go/v7"
 )
@@ -96,9 +100,16 @@ func (s *minioStore) PutImmutable(ctx context.Context, key string, body io.Reade
 	// Shared claims reject different payloads before touching the bucket. Some
 	// S3-compatible backends ignore conditional PUT, so the header is additional
 	// protection only. Concurrent writers admitted here have identical bytes.
-	options := minio.PutObjectOptions{ContentType: contentType, SendContentMd5: true, DisableMultipart: true, UserMetadata: map[string]string{"sha256": digest}}
+	// Bound each request so large videos fit through the storage gateway. Shared
+	// claims still admit only identical bytes; completion retains If-None-Match,
+	// and the full read-back below verifies the assembled payload.
+	options := minio.PutObjectOptions{ContentType: contentType, SendContentMd5: true, PartSize: 8 * 1024 * 1024, UserMetadata: map[string]string{"sha256": digest}}
 	options.SetMatchETagExcept("*")
-	_, err = s.client.PutObject(ctx, bucket, object, body, size, options)
+	if size > int64(options.PartSize) {
+		err = s.putImmutableMultipart(ctx, bucket, object, body, size, options)
+	} else {
+		_, err = s.client.PutObject(ctx, bucket, object, body, size, options)
+	}
 	if err != nil {
 		response := minio.ToErrorResponse(err)
 		if response.StatusCode == 412 || response.Code == "PreconditionFailed" {
@@ -109,6 +120,40 @@ func (s *minioStore) PutImmutable(ctx context.Context, key string, body io.Reade
 	// Read-back also catches a backend that accepted a checksum without verifying
 	// it. A metadata value supplied by the writer is not an integrity proof.
 	return s.matches(ctx, key, size, digest)
+}
+
+// The SDK's high-level multipart path discards conditional headers at completion.
+// Use its multipart API so the final commit retains the non-overwrite condition.
+func (s *minioStore) putImmutableMultipart(ctx context.Context, bucket, object string, body io.Reader, size int64, options minio.PutObjectOptions) (err error) {
+	core := minio.Core{Client: s.client}
+	uploadID, err := core.NewMultipartUpload(ctx, bucket, object, options)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err != nil {
+			cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+			defer cancel()
+			_ = core.AbortMultipartUpload(cleanup, bucket, object, uploadID)
+		}
+	}()
+	buffer := make([]byte, int(options.PartSize))
+	parts := make([]minio.CompletePart, 0, (size+int64(len(buffer))-1)/int64(len(buffer)))
+	for remaining := size; remaining > 0; {
+		length := min(remaining, int64(len(buffer)))
+		if _, err = io.ReadFull(body, buffer[:length]); err != nil {
+			return err
+		}
+		digest := md5.Sum(buffer[:length])
+		part, uploadErr := core.PutObjectPart(ctx, bucket, object, uploadID, len(parts)+1, bytes.NewReader(buffer[:length]), length, minio.PutObjectPartOptions{Md5Base64: base64.StdEncoding.EncodeToString(digest[:])})
+		if uploadErr != nil {
+			return uploadErr
+		}
+		parts = append(parts, minio.CompletePart{PartNumber: part.PartNumber, ETag: part.ETag})
+		remaining -= length
+	}
+	_, err = core.CompleteMultipartUpload(ctx, bucket, object, uploadID, parts, options)
+	return err
 }
 
 func PutImmutable(ctx context.Context, store Store, key string, body io.Reader, size int64, contentType, digest string) error {

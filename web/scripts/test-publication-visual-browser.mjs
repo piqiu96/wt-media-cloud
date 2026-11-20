@@ -9,12 +9,12 @@ import { spawn } from 'node:child_process';
 const root = fileURLToPath(new URL('..', import.meta.url));
 const evidence = process.env.WT_MEDIA_BROWSER_EVIDENCE || '/tmp/wt-media-publication-visual';
 await fs.mkdir(evidence, { recursive: true });
-const server = await createServer({ root, configFile: path.join(root, 'vite.config.js'), server: { host: '127.0.0.1', port: 0, strictPort: false, open: false } });
+const server = await createServer({ root, cacheDir: path.join(evidence, '.vite-cloud'), configFile: path.join(root, 'vite.config.js'), server: { host: '127.0.0.1', port: 0, strictPort: false, open: false } });
 await server.listen();
 const base = `http://127.0.0.1:${server.httpServer.address().port}`;
 const browser = await chromium.launch({ headless: true, executablePath: process.env.CHROMIUM_EXECUTABLE });
 const resourcePath = '/api/v1/file-resources/' + 'a'.repeat(64);
-const account = { id: '9', platform: 'baidu', platform_name: '走查账号', platform_account_id: '123456789', user_name: '运营用户', enabled: true, identification_status: 'identified', browser_profile_id: '8', platform_login_status: 'normal', category_ids: ['1'], team_id: '1' };
+const account = { id: '9', user_id: '1', platform: 'baidu', platform_name: '走查账号', platform_account_id: '123456789', user_name: '运营用户', enabled: true, identification_status: 'identified', browser_profile_id: '8', platform_login_status: 'normal', category_ids: ['1'], team_id: '1' };
 const output = { id: '130', name: '真实接口字段的成片摘要 · 横版', category_id: '1', team_id: '1', platforms: ['baidu'], video: { status: 'ready' }, publish_status: 'unpublished' };
 const cover = { id: '12', name: '走查封面', resource_path: resourcePath, deleted_at: null };
 const task = { id: '3', revision: '2', request_key: 'visual-only', platform: 'baidu', category_id: '1', media_account_id: '9', composite_output_id: '130', platform_account_uid: '123456789', status: 'pending', attempt_count: 0, current_attempt_id: null, authorized_at: null, created_at: '2026-11-18T06:00:00Z', not_before: null, content: { description: '走查内容，核对公共布局与返回后输入保留。', cover_file_id: '12', topics: '#公共规范', declaration: '无需声明', confirmed: true }, resources: { account_name: account.platform_name, account_owner: '运营用户', output_name: output.name, cover_name: cover.name, cover_resource_path: resourcePath } };
@@ -22,10 +22,12 @@ const checks = [], errors = [], writes = [];
 const check = (name, value) => { assert(value, name); checks.push(name); };
 const style = (locator, properties) => locator.evaluate((node, keys) => Object.fromEntries(keys.map(key => [key, getComputedStyle(node)[key]])), properties);
 try {
- for (const width of [1440, 390]) {
+ for (const width of (process.env.WT_MEDIA_BROWSER_WIDTH ? [Number(process.env.WT_MEDIA_BROWSER_WIDTH)] : [1440, 390])) {
   task.status = 'pending'; task.revision = '2'; task.revision = '2';
   const context = await browser.newContext({ viewport: { width, height: 1000 } });
-  let videoRequests = 0, history = [];
+  // WebKit may leave currentSrc empty when CSP rejects a video before selection.
+  await context.addInitScript(() => Object.defineProperty(HTMLMediaElement.prototype, 'currentSrc', { get() { return ''; } }));
+  let videoRequests = 0, history = [], candidateFailure = false, candidate131Occupied = false, accountFailure = false;
   const page = await context.newPage(); page.on('pageerror', error => errors.push(error.message));
   await page.route('https://video.visual.invalid/**', route => route.fulfill({ status: 404, body: 'fixture media unavailable' }));
   await page.route('**/api/v1/**', async route => {
@@ -37,8 +39,16 @@ try {
    else if (p.endsWith('/categories')) data = [{ id: '1', name: '游戏', enabled: true }];
    else if (p.endsWith('/publication')) { check(`${width}: default page size`, url.searchParams.get('page_size') === '10'); data = { items: [task], total: 1, summary: { all: 1, awaiting_human: 0, running: 0, uncertain: 0 } }; }
    else if (p.endsWith('/attempt')) data = history;
+   else if (p === '/api/v1/publication/output') {
+    if (candidateFailure) return route.fulfill({ status: 503, json: { errcode: 18006, message: '模拟成片占用查询失败', data: null } });
+    data = { items: [{ ...output, id: '129', occupied: true }, { ...output, id: '130', occupied: true }, { ...output, id: '131', occupied: candidate131Occupied }], total: 3, page: 1, page_size: 10 };
+   }
    else if (p === '/api/v1/publication/3') data = task;
-   else if (p === '/api/v1/media-accounts/9') data = account;
+   else if (p === '/api/v1/media-accounts/9') {
+    if (accountFailure) return route.fulfill({ status: 503, json: { errcode: 10001, message: '账号信息暂时不可读', data: null } });
+    data = account;
+   }
+   else if (p === '/api/v1/browser-profiles') { check(`${width}: summary queries only bound profile`, url.searchParams.get('id') === '8'); data = [{ id: '8', user_id: '1', bit_profile_id: 'bit-8', bit_name: '走查绑定窗口', bit_group_name: '运营分组', enabled: true, local_state: 'active' }]; }
    else if (p.endsWith('/media-accounts')) data = { items: [account], total: 1 };
    else if (p.endsWith('/video-url')) {
     videoRequests++;
@@ -55,6 +65,13 @@ try {
   await page.getByRole('heading', { name: '发布任务', exact: true }).waitFor();
   if (width < 600) { await page.locator('.topbar .t-button').first().click(); await page.waitForFunction(() => document.querySelector('.app-aside').getBoundingClientRect().width < 70); }
   await page.locator('.publication-content strong').waitFor();
+  await page.getByRole('button', { name: '走查账号', exact: true }).click();
+  const accountSummary = page.getByRole('dialog', { name: '账号信息', exact: true });
+  await accountSummary.getByText('走查绑定窗口', { exact: true }).waitFor();
+  check(`${width}: account summary shows UID and login`, await accountSummary.getByText('123456789', { exact: true }).isVisible() && await accountSummary.getByText('登录正常', { exact: true }).isVisible());
+  check(`${width}: web explains disabled browser action`, await accountSummary.getByRole('button', { name: '打开浏览器窗口', exact: true }).isDisabled() && await accountSummary.getByText('请在起飞桌面端打开浏览器窗口', { exact: true }).isVisible());
+  await page.screenshot({ path: path.join(evidence, `${width}-account-summary.png`), fullPage: true });
+  await accountSummary.getByRole('button', { name: '关闭', exact: true }).click(); await accountSummary.waitFor({ state: 'hidden' });
   const h = await style(page.locator('.resource-page-header h1'), ['fontSize', 'fontWeight']);
   check(`${width}: list heading`, h.fontSize === '24px' && h.fontWeight === '500');
   const th = await style(page.locator('.t-table__header th').first(), ['fontSize', 'backgroundColor']);
@@ -83,13 +100,57 @@ try {
   await page.getByText('请选择发布类目、账号和成片', { exact: true }).waitFor();
   await page.screenshot({ path: path.join(evidence, `${width}-quick-publish.png`), fullPage: true });
   check(`${width}: empty creation stays in form`, await page.getByRole('heading', { name: '快速发布', exact: true }).isVisible());
+  await page.locator('[aria-label="发布类目"]').click();
+  await page.locator('.t-select-option').filter({ hasText: /^游戏$/ }).click();
+  await page.getByRole('button', { name: '选择', exact: true }).click();
+  const accountPicker = page.getByRole('dialog', { name: '选择发布账号', exact: true }); await accountPicker.waitFor();
+  await accountPicker.getByRole('button', { name: '走查账号', exact: true }).click();
+  await accountSummary.getByText('走查绑定窗口', { exact: true }).waitFor();
+  check(`${width}: viewing a candidate keeps picker and does not select`, await accountPicker.isVisible() && await page.locator('input[placeholder="请选择发布账号"]').inputValue() === '');
+  await page.keyboard.press('Escape'); await accountSummary.waitFor({ state: 'hidden' });
+  await page.waitForFunction(() => document.activeElement?.textContent?.trim() === '走查账号');
+  checks.push(`${width}: nested summary restores candidate focus`);
+  await accountPicker.getByRole('button', { name: '选择', exact: true }).click(); await accountPicker.waitFor({ state: 'hidden' });
+  accountFailure = true;
+  await page.getByRole('button', { name: '查看账号信息', exact: true }).click();
+  await accountSummary.getByText('账号信息暂时不可读', { exact: true }).waitFor();
+  check(`${width}: failed account read disables opening`, await accountSummary.getByRole('button', { name: '打开浏览器窗口', exact: true }).isDisabled());
+  accountFailure = false;
+  await accountSummary.getByRole('button', { name: '重新读取', exact: true }).click();
+  await accountSummary.getByText('走查绑定窗口', { exact: true }).waitFor();
+  await accountSummary.getByRole('button', { name: '关闭', exact: true }).click(); await accountSummary.waitFor({ state: 'hidden' });
+  check(`${width}: viewing selected account preserves selection`, await page.locator('input[placeholder="请选择发布账号"]').inputValue() === '走查账号');
+  await page.getByRole('button', { name: '选择成片', exact: true }).click();
+  const outputPicker = page.getByRole('dialog', { name: '选择成片', exact: true }); await outputPicker.waitFor();
+  const outputRow = id => outputPicker.locator('tbody tr').filter({ has: page.locator('td').filter({ hasText: new RegExp(`^${id}$`) }) });
+  for (const id of ['129', '130']) {
+   await outputRow(id).getByText('该成片已被当前平台的任务占用', { exact: true }).waitFor();
+   check(`${width}: occupied output ${id} cannot be selected`, await outputRow(id).getByRole('button', { name: '选择', exact: true }).count() === 0);
+  }
+  check(`${width}: unoccupied output 131 is selectable`, await outputRow('131').getByRole('button', { name: '选择', exact: true }).count() === 1);
+  candidate131Occupied = true;
+  await outputPicker.getByRole('button', { name: '查询', exact: true }).click();
+  await outputRow('131').getByText('该成片已被当前平台的任务占用', { exact: true }).waitFor();
+  check(`${width}: new task occupancy removes output 131 choice`, await outputRow('131').getByRole('button', { name: '选择', exact: true }).count() === 0);
+  candidateFailure = true;
+  await outputPicker.getByRole('button', { name: '查询', exact: true }).click();
+  await outputPicker.getByText('模拟成片占用查询失败', { exact: true }).waitFor();
+  check(`${width}: failed occupancy query exposes no candidate choice`, await outputPicker.getByRole('button', { name: '选择', exact: true }).count() === 0);
+  await page.screenshot({ path: path.join(evidence, `${width}-occupied-output-query.png`), fullPage: true });
+  await outputPicker.getByRole('button', { name: '关闭选择成片', exact: true }).click(); await outputPicker.waitFor({ state: 'hidden' });
   await page.getByRole('button', { name: '返回', exact: true }).click();
+  const discardCreation = page.locator('.resource-feedback-dialog'); await discardCreation.waitFor();
+  await discardCreation.getByRole('button', { name: '离开', exact: true }).click(); await discardCreation.waitFor({ state: 'hidden' });
   await page.getByRole('heading', { name: '发布任务', exact: true }).waitFor();
   await page.getByRole('button', { name: '高级筛选', exact: false }).click();
   await page.locator('#publication-advanced').waitFor();
   await page.getByRole('button', { name: '详情', exact: true }).click();
   await page.getByRole('heading', { name: '发布任务详情', exact: true }).waitFor();
   await page.locator('.resource-descriptions').first().waitFor();
+  await page.getByRole('button', { name: '走查账号', exact: true }).click();
+  await accountSummary.getByText('走查绑定窗口', { exact: true }).waitFor();
+  await accountSummary.getByRole('button', { name: '关闭', exact: true }).click(); await accountSummary.waitFor({ state: 'hidden' });
+  check(`${width}: account summary returns to task detail`, await page.getByRole('heading', { name: '发布任务详情', exact: true }).isVisible());
   check(`${width}: detail only returns to list`, await page.locator('.resource-detail-page__footer button').allTextContents().then(labels => labels.length === 1 && labels[0].trim() === '返回'));
   check(`${width}: no invented refresh action`, await page.getByRole('button', { name: '刷新进展', exact: true }).count() === 0);
   check(`${width}: shared detail fields`, await page.locator('.resource-descriptions').count() === 3);
@@ -115,6 +176,16 @@ try {
   await page.getByRole('heading', { name: '编辑发布内容', exact: true }).waitFor();
   const description = page.locator('[aria-label="发布标题"] textarea');
   await description.fill('返回资源选择弹窗后应保留这段输入');
+  const confirmationLabel = page.locator('.quick-block .t-checkbox');
+  const confirmationInput = confirmationLabel.locator('input[type="checkbox"]');
+  check(`${width}: confirmation keeps checkbox and label in a row`, await confirmationLabel.evaluate(node => getComputedStyle(node).flexDirection === 'row'));
+  if (await confirmationInput.isChecked()) await confirmationLabel.locator('.t-checkbox__label').click();
+  await confirmationLabel.locator('.t-checkbox__input').click();
+  check(`${width}: visible confirmation square checks content`, await confirmationInput.isChecked());
+  await confirmationLabel.locator('.t-checkbox__label').click();
+  check(`${width}: confirmation text unchecks content`, !await confirmationInput.isChecked());
+  await confirmationLabel.focus(); await page.keyboard.press('Space');
+  check(`${width}: keyboard confirms content`, await confirmationInput.isChecked());
   await page.getByRole('button', { name: '预览成片', exact: true }).click();
   const videoDialog = page.getByRole('dialog', { name: '成片预览', exact: true }); await videoDialog.waitFor();
   await videoDialog.getByText('测试视频暂不可读', { exact: true }).waitFor();
@@ -186,6 +257,21 @@ try {
    await page.screenshot({ path: path.join(evidence, `${width}-attempt-${number}.png`), fullPage: true });
    await closeHistory.click(); await closeHistory.waitFor({ state: 'hidden' });
   }
+  await page.getByRole('button', { name: '返回', exact: true }).click();
+  task.status = 'running';
+  history = [{ ...history[1], status: 'running', result_status: null, finished_at: null, stage: 'preparing' }];
+  await page.getByRole('button', { name: '查询', exact: true }).click();
+  await page.locator('tbody .resource-status-badge').filter({ hasText: /^执行中$/ }).waitFor();
+  await page.getByRole('button', { name: '详情', exact: true }).click();
+  await page.getByRole('button', { name: '查看第 2 次执行详情', exact: true }).click();
+  const liveDrawer = page.getByRole('button', { name: '关闭执行详情', exact: true });
+  await liveDrawer.waitFor();
+  task.status = 'reviewing';
+  history = [{ ...history[0], status: 'completed', result_status: 'reviewing', finished_at: task.created_at, stage: 'finished' }];
+  await page.locator('.publication-attempt-detail .resource-status-badge').filter({ hasText: /^平台审核中$/ }).waitFor();
+  check(`${width}: executing detail and open attempt drawer refresh automatically`, await liveDrawer.isVisible());
+  await liveDrawer.click(); await liveDrawer.waitFor({ state: 'hidden' });
+  check(`${width}: task detail reaches the latest result`, await page.locator('.resource-status-badge').filter({ hasText: /^平台审核中$/ }).count() >= 1);
   await page.goto(base + '/files');
   await page.locator('.resource-filter-bar').waitFor();
   const sample = () => page.locator('.resource-filter-bar .t-button').evaluateAll(nodes => nodes.map(node => { const s = getComputedStyle(node); return [s.height, s.fontSize, s.backgroundColor, s.borderColor]; }));
@@ -202,7 +288,7 @@ try {
 
 if (process.env.WT_MEDIA_CHECK_PROTOTYPE === '1') {
  await fs.mkdir(path.join(evidence, 'prototype'), { recursive: true });
- const prototype = await createServer({ root, configFile: path.join(root, 'vite.config.example.js'), server: { host: '127.0.0.1', port: 18768, strictPort: true, open: false } });
+ const prototype = await createServer({ root, cacheDir: path.join(evidence, '.vite-example'), configFile: path.join(root, 'vite.config.example.js'), server: { host: '127.0.0.1', port: 18768, strictPort: true, open: false } });
  try {
   await prototype.listen();
   const child = spawn(process.execPath, ['--test', 'example/proto/publishing-design/tests/commonVisual.browser.cjs', 'example/proto/publishing-design/tests/taskPages.browser.cjs'], { cwd: root, stdio: 'inherit', env: { ...process.env, EXAMPLE_URL: 'http://127.0.0.1:18768', SCREENSHOT_DIR: path.join(evidence, 'prototype') } });

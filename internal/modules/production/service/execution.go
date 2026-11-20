@@ -40,13 +40,14 @@ var errComposeOutputInvalid = errors.New("compose output failed verification")
 // Task error_code values stored on failures. They surface through the task
 // detail API as plain strings (openapi leaves error_code free).
 const (
-	composeErrTemplateUnavailable = "template_unavailable"
-	composeErrInputMissing        = "input_missing"
-	composeErrInputInvalid        = "input_invalid"
-	composeErrExecutionFailed     = "execution_failed"
-	composeErrStorageError        = "storage_error"
-	composeErrTaskTimeout         = "task_timeout"
-	composeErrExecutionUncertain  = "execution_uncertain"
+	composeErrTemplateUnavailable    = "template_unavailable"
+	composeErrInputMissing           = "input_missing"
+	composeErrInputInvalid           = "input_invalid"
+	composeErrInputPreparationFailed = "input_preparation_failed"
+	composeErrExecutionFailed        = "execution_failed"
+	composeErrStorageError           = "storage_error"
+	composeErrTaskTimeout            = "task_timeout"
+	composeErrExecutionUncertain     = "execution_uncertain"
 )
 
 // Compose stage/progress boundaries (change.md §7: stage enum, progress at
@@ -447,7 +448,7 @@ func prepareInput(ctx context.Context, deps ComposeExecutorDeps, task model.Comp
 		code := composeErrInputInvalid
 		if gate.PrepareRequested {
 			if gate.PrepareObserved {
-				return "", failTerminal(deps.Tasks, task, nodeID, step, code, "source preparation did not produce a video for material "+strconv.FormatInt(task.MaterialID, 10))
+				return "", failTerminal(deps.Tasks, task, nodeID, step, composeErrInputPreparationFailed, "source preparation did not produce a video for material "+strconv.FormatInt(task.MaterialID, 10))
 			}
 			return waitForInput(deps, task, nodeID)
 		}

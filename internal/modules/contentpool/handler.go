@@ -15,6 +15,7 @@ import (
 	contentservice "github.com/wt-media/wt-media-cloud/internal/modules/contentpool/service"
 	identityservice "github.com/wt-media/wt-media-cloud/internal/modules/identity/service"
 	api "github.com/wt-media/wt-media-cloud/internal/shared/api"
+	"github.com/wt-media/wt-media-cloud/internal/shared/errcode"
 	sharedidentity "github.com/wt-media/wt-media-cloud/internal/shared/identity"
 )
 
@@ -609,6 +610,12 @@ func writeContentError(c *hertzapp.RequestContext, err error) {
 }
 func writeDiscoveryError(c *hertzapp.RequestContext, err error) {
 	switch {
+	case errors.Is(err, context.DeadlineExceeded):
+		api.FailureCode(c, 504, errcode.DiscoveryUpstreamTimeout, "内容发现上游服务响应超时，请稍后重试", "discovery_upstream_timeout", nil, true, "")
+	case errors.Is(err, contentservice.ErrDiscoveryUpstreamUnavailable):
+		api.FailureCode(c, 502, errcode.DiscoveryUpstreamUnavailable, "内容发现上游服务暂时不可用，请稍后重试", "discovery_upstream_unavailable", nil, true, "")
+	case errors.Is(err, contentservice.ErrCrawlerUnavailable):
+		api.FailureCode(c, 503, errcode.DiscoveryNotConfigured, "内容发现服务尚未配置，请联系管理员", "discovery_not_configured", nil, false, "")
 	case errors.Is(err, contentservice.ErrDouyinAuthorUnavailable):
 		api.BadRequest(c, 14006, "博主搜索接口维护中")
 	case errors.Is(err, contentservice.ErrDiscoveryForbidden):

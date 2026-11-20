@@ -12,7 +12,7 @@ const files=(await readdir(tests)).filter(name=>name.endsWith('.browser.cjs')&&(
 if(!files.length||requested.size&&files.length!==requested.size)throw Error('Unknown browser test file');
 const output=process.env.SCREENSHOT_DIR||await mkdtemp(path.join(tmpdir(),'wt-publishing-browser-'));
 await mkdir(output,{recursive:true});
-const server=await createServer({configFile:path.join(root,'vite.config.example.js'),server:{host:'127.0.0.1',port:0,strictPort:false,open:false}});
+const server=await createServer({cacheDir:path.join(output,'.vite-example'),configFile:path.join(root,'vite.config.example.js'),server:{host:'127.0.0.1',port:0,strictPort:false,open:false}});
 let child;
 try {
   await server.listen();

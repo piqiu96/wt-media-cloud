@@ -20,6 +20,7 @@ export function outputUnavailable(output, category, account) {
   if (account && String(output.team_id) !== String(account.team_id))
     return "成片团队不匹配";
   if (!output.platforms?.includes("baidu")) return "成片不适用于百度";
+  if (output.occupied === true) return "该成片已被当前平台的任务占用";
   if (output.publish_status === OutputPublishStatus.Archived) return "成片已归档";
   if (output.video?.status !== OutputVideoStatus.Ready)
     return output.video?.reason || "视频文件不可用";

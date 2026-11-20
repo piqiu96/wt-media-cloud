@@ -712,7 +712,7 @@ function openImageViewer(url) {
             </div></ResourceForm>
           </ResourceSection>
           <ResourceSection :title="manualMode === 'id' ? '输入内容' : '关键词'" variant="form">
-            <template #title-extra><ResourceFieldHelp :content="manualMode === 'id' ? '支持抖音视频 ID、作品链接或分享短链接，可批量粘贴。' : '多个关键词共同用于本次搜索，可批量粘贴。'" /></template>
+            <template #title-extra><ResourceFieldHelp :label="manualMode === 'id' ? '输入内容' : '关键词'" :content="manualMode === 'id' ? '支持抖音视频 ID、作品链接或分享短链接，可批量粘贴。' : '多个关键词共同用于本次搜索，可批量粘贴。'" /></template>
             <KeywordTags v-if="manualMode === 'id'" v-model="manualForm.idList" subject="ID或链接" :max="100" placeholder="输入视频 ID 或链接，按回车添加" />
             <KeywordTags v-else v-model="manualForm.keywords" :max="100" placeholder="输入关键词，按回车添加" />
           </ResourceSection>

@@ -44,15 +44,15 @@ function remove(index) { if (props.modelValue.length > 1) update(props.modelValu
         <t-form-item label="成片设置名称" required-mark>
           <div class="strategy-setting__field"><t-input v-model="group.name" :maxlength="120" placeholder="例如：通用版" :status="errors[group.key]?.name ? 'error' : undefined" /><p v-if="errors[group.key]?.name" class="strategy-setting__error">{{ errors[group.key].name }}</p></div>
         </t-form-item>
-        <t-form-item required-mark><template #label>适用平台<ResourceFieldHelp content="至少选择一个平台，仅用于本组成片设置。" /></template>
+        <t-form-item required-mark><template #label>适用平台<ResourceFieldHelp label="适用平台" content="至少选择一个平台，仅用于本组成片设置。" /></template>
           <div class="strategy-setting__field"><t-checkbox-group v-model="group.platforms" :options="OUTPUT_PLATFORMS" /><p v-if="errors[group.key]?.platforms" class="strategy-setting__error">{{ errors[group.key].platforms }}</p></div>
         </t-form-item>
-        <t-form-item required-mark><template #label>每条素材生成份数<ResourceFieldHelp content="每条素材按本组设置生成的份数；适用平台数量不影响份数。" /></template>
+        <t-form-item required-mark><template #label>每条素材生成份数<ResourceFieldHelp label="每条素材生成份数" content="每条素材按本组设置生成的份数；适用平台数量不影响份数。" /></template>
           <div class="strategy-setting__field"><t-input-number v-model="group.copies" :min="1" :max="20" suffix="份" theme="column" :status="errors[group.key]?.copies ? 'error' : undefined" /><p v-if="errors[group.key]?.copies" class="strategy-setting__error">{{ errors[group.key].copies }}</p></div>
         </t-form-item>
         <div class="strategy-setting__subtitle">模板参数</div>
         <t-form-item v-for="field in fields" :key="field.key" :class="{'strategy-setting__full': field.key === 'guide_video_url'}" :required-mark="field.required">
-          <template #label><span>{{ field.label }} <ResourceFieldHelp v-if="field.description" :content="field.description" /></span></template>
+          <template #label><span>{{ field.label }} <ResourceFieldHelp v-if="field.description" :label="field.label" :content="field.description" /></span></template>
           <div class="strategy-setting__field">
             <t-input-number v-if="['integer', 'number'].includes(field.type)" v-model="group.params[field.key]" :min="field.minimum" :max="field.maximum" :decimal-places="field.type === 'integer' ? 0 : undefined" theme="column" :status="errors[group.key]?.[field.key] ? 'error' : undefined" />
             <t-switch v-else-if="field.type === 'boolean'" v-model="group.params[field.key]" />

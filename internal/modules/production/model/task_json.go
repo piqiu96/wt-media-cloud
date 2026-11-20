@@ -21,6 +21,8 @@ func safeComposeErrorMessage(code, message string) string {
 		return "任务超时"
 	case "input_missing":
 		return "源文件缺失"
+	case "input_preparation_failed":
+		return "源素材准备失败，请检查下载与存储"
 	case "input_invalid":
 		return "素材校验失败"
 	case "template_unavailable":

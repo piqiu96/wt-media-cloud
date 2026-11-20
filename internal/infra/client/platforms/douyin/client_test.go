@@ -2,16 +2,22 @@ package douyin
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/cloudwego/hertz/pkg/common/hlog"
 	"github.com/wt-media/wt-media-cloud/internal/config"
+	"github.com/wt-media/wt-media-cloud/internal/shared/requestctx"
 	httpclient "github.com/wt-media/wt-media-cloud/pkg/clients/http"
+	pkglogger "github.com/wt-media/wt-media-cloud/pkg/logger"
 )
 
 func TestDouyinSearchBuildsTypedRequest(t *testing.T) {
@@ -166,8 +172,80 @@ func TestClientMapsNonSuccessStatus(t *testing.T) {
 	if err == nil {
 		t.Fatal("Search() with HTTP 502 succeeded")
 	}
-	if !strings.Contains(err.Error(), "502") || !strings.Contains(err.Error(), "douyin unavailable") {
-		t.Fatalf("error = %v, want status and response body", err)
+	if !strings.Contains(err.Error(), "502") || strings.Contains(err.Error(), "message") {
+		t.Fatalf("error = %v, want status without the provider response body", err)
+	}
+}
+
+func TestSearchGatewayTimeoutIsClassifiedWithoutProviderBody(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "private-provider-response", http.StatusGatewayTimeout)
+	}))
+	defer server.Close()
+	client := NewWithClient(server.URL, config.DouyinCredentialConfig{APIKey: "secret"}, newTransport(1))
+	_, err := client.Search(context.Background(), SearchRequest{Keyword: "三角洲行动"})
+	if !errors.Is(err, context.DeadlineExceeded) || strings.Contains(err.Error(), "private-provider-response") {
+		t.Fatalf("gateway timeout must remain identifiable and safe to log: %v", err)
+	}
+}
+
+func TestSearchTransportDeadlineIsClassified(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(100 * time.Millisecond)
+	}))
+	defer server.Close()
+	transport, closeTransport, err := httpclient.New(httpclient.Config{
+		Name: "search-timeout-test", Endpoint: endpointForTest(server.URL),
+		Timeout: httpclient.Duration{Duration: 20 * time.Millisecond},
+		Retry:   httpclient.RetryConfig{Attempts: 1},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closeTransport()
+	client := NewWithClient(server.URL, config.DouyinCredentialConfig{APIKey: "secret"}, transport)
+	_, err = client.Search(context.Background(), SearchRequest{Keyword: "三角洲行动"})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("transport deadline lost: %v", err)
+	}
+}
+
+func TestSearchFailureLogsCorrelateWithoutLeakingProviderData(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "app.log")
+	log, err := pkglogger.New(pkglogger.Config{Path: path, Level: "info", Format: "json"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	previous := hlog.DefaultLogger()
+	hlog.SetLogger(log)
+	t.Cleanup(func() { hlog.SetLogger(previous); _ = log.Close() })
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"result":0,"message":"private-provider-response"}`))
+	}))
+	defer server.Close()
+	client := NewWithClient(server.URL, config.DouyinCredentialConfig{APIKey: "private-api-key", Cookie: "private-cookie"}, newTransport(1))
+	ctx := requestctx.WithTraceID(context.Background(), "tr-search-failure")
+	ctx = requestctx.WithRequestID(ctx, "rq-search-failure")
+	_, requestErr := client.Search(ctx, SearchRequest{Keyword: "private-keyword"})
+	if requestErr == nil {
+		t.Fatal("provider rejection treated as success")
+	}
+	if err := log.Close(); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"path=/v2dysearchvideo", "failure=provider_rejected", "status=200", "tr-search-failure", "rq-search-failure"} {
+		if !strings.Contains(string(data), want) {
+			t.Fatalf("missing %s in log: %s", want, data)
+		}
+	}
+	for _, secret := range []string{"private-api-key", "private-cookie", "private-keyword", "private-provider-response"} {
+		if strings.Contains(string(data)+requestErr.Error(), secret) {
+			t.Fatalf("failure diagnostics leaked %s", secret)
+		}
 	}
 }
 

@@ -6,7 +6,7 @@ import ResourceOverlay from "../../../shared/ui/resource/ResourceOverlay.vue";
 import ResourceFilterBar from "../../../shared/ui/resource/ResourceFilterBar.vue";
 import FeedbackAlert from "../../../shared/ui/feedback/FeedbackAlert.vue";
 import { createMediaAccountClient } from "../../../shared/api/mediaAccounts.js";
-import { createComposeClient } from "../../../shared/api/compose.js";
+import { createPublicationClient } from "../../../shared/api/publication.js";
 import { createFilesClient } from "../../../shared/api/files.js";
 import { accountUnavailable, outputUnavailable } from "../eligibility.js";
 const props = defineProps({
@@ -15,9 +15,9 @@ const props = defineProps({
   category: String,
   account: Object,
 });
-const emit = defineEmits(["update:visible", "selected"]);
+const emit = defineEmits(["update:visible", "selected", "view-account"]);
 const accounts = createMediaAccountClient(),
-  compose = createComposeClient(),
+  publication = createPublicationClient(),
   files = createFilesClient();
 const rows = ref([]),
   total = ref(0),
@@ -55,13 +55,19 @@ async function load() {
     if (props.kind === "account")
       data = await accounts.listPage({ ...params, platform: "baidu" });
     else if (props.kind === "output")
-      data = await compose.listComposeOutputs(params);
+      data = await publication.outputs({ ...params, platform: "baidu" });
     else data = await files.list({ ...params, type: "image" });
     if (n !== sequence) return;
+    if (props.kind === "output" && (data.items || []).some(row => typeof row.occupied !== "boolean"))
+      throw new Error("暂时无法确认成片占用，请重新查询");
     rows.value = data.items || [];
     total.value = data.total || 0;
   } catch (e) {
-    if (n === sequence) error.value = e.message;
+    if (n === sequence) {
+      rows.value = [];
+      total.value = 0;
+      error.value = e.message;
+    }
   } finally {
     if (n === sequence) busy.value = false;
   }
@@ -142,11 +148,10 @@ watch(
         empty="没有符合当前范围的资源"
         :scroll="{ x: '800px' }"
       >
-        <template #name="{ row }">{{
-          kind === "account"
-            ? row.platform_name || "未识别账号"
-            : row.name || row.file_name || "未命名"
-        }}</template>
+        <template #name="{ row }">
+          <t-button v-if="kind === 'account'" theme="primary" variant="text" size="small" @click.stop="emit('view-account', String(row.id))">{{ row.platform_name || "未识别账号" }}</t-button>
+          <template v-else>{{ row.name || row.file_name || "未命名" }}</template>
+        </template>
         <template #scope="{ row }"
           ><span v-if="kind === 'account'"
             >{{ row.user_name || "—" }} ·

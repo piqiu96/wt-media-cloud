@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: WT Media Single Publication Preparation
-  version: 2026.11.19.3
+  version: 2026.11.20.1
   description: Creating never authorizes execution or submits a platform post. Execution requires separate revision-bound start authorization. Baidu task preparation is available. IDs and revisions are decimal strings; timestamps RFC3339. Uses errcode/message/data/logid.
 paths:
   /api/v1/publication:
@@ -45,6 +45,45 @@ paths:
         '404': {description: Resource missing or outside actor scope.}
         '409': {description: Same key with different input, output occupied on this platform, or unsupported platform.}
         '503': {description: Storage or persistence unavailable; retry with the same key and input.}
+  /api/v1/publication/output:
+    get:
+      operationId: listPublicationOutputCandidates
+      security: [{sessionCookie: []}]
+      description: Production service owns output visibility, authorization and pagination. Publication adds only occupied for the selected platform, from all tasks still holding formal occupancy, including terminal states and irrespective of occupying task owner. The generated occupied_output_id column releases abandoned tasks, matching the existing create uniqueness constraint. Occupied rows remain visible with a reason; no occupying task identity is returned. This read creates no reservation and the existing atomic create uniqueness remains authoritative.
+      parameters:
+        - {in: query, name: platform, required: true, schema: {type: string, enum: [baidu, bilibili, xiaohongshu]}}
+        - {in: query, name: page, schema: {type: integer, minimum: 1, default: 1}}
+        - {in: query, name: page_size, schema: {type: integer, minimum: 1, maximum: 100, default: 10}}
+        - {in: query, name: search, schema: {type: string, maxLength: 100}}
+        - {in: query, name: category_id, schema: {$ref: '#/components/schemas/ID'}}
+      responses:
+        '200':
+          description: Existing compose-output read projection plus a required boolean occupied on every row; total/page/page_size retain the production page. No task details, credentials or additional grants.
+          content:
+            application/json:
+              schema:
+                type: object
+                description: Standard errcode/message/data/logid envelope.
+                properties:
+                  data:
+                    type: object
+                    required: [items, total, page, page_size]
+                    properties:
+                      items:
+                        type: array
+                        items:
+                          type: object
+                          description: Existing authorized compose-output projection extended only with occupied.
+                          required: [id, occupied]
+                          properties:
+                            id: {type: integer}
+                            occupied: {type: boolean}
+                      total: {type: integer}
+                      page: {type: integer}
+                      page_size: {type: integer}
+        '400': {description: Invalid platform or pagination/filter input.}
+        '404': {description: Production authorization denied.}
+        '503': {description: Candidate or occupancy read failed; no candidates are returned as available.}
   /api/v1/publication/{id}:
     parameters:
       - {in: path, name: id, required: true, schema: {$ref: '#/components/schemas/ID'}}

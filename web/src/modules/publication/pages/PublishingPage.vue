@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, ref, watch, nextTick } from "vue";
+import { computed, onMounted, onBeforeUnmount, ref, watch, nextTick } from "vue";
 import { useRoute, useRouter, onBeforeRouteLeave } from "vue-router";
 import ResourcePageHeader from "../../../shared/ui/resource/ResourcePageHeader.vue";
 import ResourceStatGrid from "../../../shared/ui/resource/ResourceStatGrid.vue";
@@ -38,6 +38,7 @@ import { publicationTitleForOutput } from "../title.js";
 import PublishingExecutionHistory from "../components/PublishingExecutionHistory.vue";
 import PublishingResourcePicker from "../components/PublishingResourcePicker.vue";
 import PublishingRecoveryDialog from "../components/PublishingRecoveryDialog.vue";
+import AccountSummaryDialog from "../../accounts/components/AccountSummaryDialog.vue";
 const client = createPublicationClient(),
   compose = createComposeClient(),
   accounts = createMediaAccountClient(),
@@ -52,6 +53,12 @@ const blankFilters = () => ({
   created_range: [],
 });
 const attempts = ref([]);
+const accountSummaryVisible = ref(false), accountSummaryId = ref("");
+function viewAccount(id) {
+  if (!id) return;
+  accountSummaryId.value = String(id);
+  accountSummaryVisible.value = true;
+}
 const recoveryVisible=ref(false),recoveryTask=ref(null),recoveryError=ref("");
 const summary = ref(null),
   advanced = ref(false);
@@ -116,7 +123,7 @@ async function previewOutput() {
   } finally { if (sequence === videoSequence) videoLoading.value = false; }
 }
 function videoFailed(event) {
-  if (videoVisible.value && videoURL.value && event.target.currentSrc === videoURL.value) {
+  if (videoVisible.value && videoURL.value && event.target.src === videoURL.value) {
     videoError.value = "视频暂时无法读取，请重试预览";
   }
 }
@@ -176,10 +183,12 @@ const emptyForm = () => ({
   },
 });
 let loadSequence = 0;
-async function load() {
+async function load({ background = false } = {}) {
   const n = ++loadSequence;
-  loading.value = true;
-  error.value = "";
+  if (!background) {
+    loading.value = true;
+    error.value = "";
+  }
   try {
     const data = await client.list({
       ...applied.value,
@@ -192,10 +201,11 @@ async function load() {
     rows.value = data.items;
     total.value = data.total;
     summary.value = data.summary;
+    error.value = "";
   } catch (e) {
     if (n === loadSequence) error.value = e.message;
   } finally {
-    if (n === loadSequence) loading.value = false;
+    if (n === loadSequence && !background) loading.value = false;
   }
 }
 function query() {
@@ -417,6 +427,9 @@ async function submit() {
       form: form.value,
       schedule: schedule.value,
     });
+    // Created or editable tasks have no execution history. Drop any records
+    // retained from a different task detail before showing the saved task.
+    attempts.value = [];
     detail.value = saved;
     view.value = "detail";
     detailReturn.value = source.value ? "source" : "list";
@@ -455,6 +468,39 @@ async function back() {
   detail.value = null;
 }
 onBeforeRouteLeave(async () => !busy.value && (view.value !== "form" || (await canLeave())));
+const isExecuting = task => [PublicationStatus.Queued, PublicationStatus.Running].includes(task?.status);
+const needsExecutionRefresh = computed(() => view.value === "list"
+  ? rows.value.some(isExecuting)
+  : view.value === "detail" && isExecuting(detail.value));
+let executionTimer = null, refreshInFlight = false, disposed = false;
+async function refreshExecution() {
+  if (disposed || !needsExecutionRefresh.value || busy.value || loading.value || recoveryVisible.value || refreshInFlight
+      || (typeof document !== "undefined" && document.hidden)) return;
+  refreshInFlight = true;
+  const originalDetail = detail.value;
+  try {
+    if (view.value === "list") await load({ background: true });
+    else {
+      const [task, history] = await Promise.all([client.get(originalDetail.id), client.attempt(originalDetail.id)]);
+      if (!disposed && view.value === "detail" && detail.value === originalDetail && !busy.value && !loading.value && !recoveryVisible.value) {
+        detail.value = task;
+        attempts.value = history;
+        error.value = "";
+      }
+    }
+  } catch (e) {
+    if (!disposed && view.value === "detail" && detail.value === originalDetail) error.value = e.message;
+  } finally { refreshInFlight = false; }
+}
+watch(needsExecutionRefresh, active => {
+  if (executionTimer) clearInterval(executionTimer);
+  executionTimer = active ? setInterval(refreshExecution, 5000) : null;
+});
+onBeforeUnmount(() => {
+  disposed = true;
+  if (executionTimer) clearInterval(executionTimer);
+  loadSequence++;
+});
 onMounted(async () => {
   await load();
   try {
@@ -578,8 +624,7 @@ onMounted(async () => {
               </div></template
             >
             <template #platform="{row}">{{ platformLabel(row.platform) }}<small class="publication-sub">{{categoryName(row.category_id)}}</small></template><template #account="{ row }"
-              >{{ row.resources.account_name || "—"
-              }}<small class="publication-sub">{{
+              ><t-button v-if="row.media_account_id" theme="primary" variant="text" size="small" @click.stop="viewAccount(row.media_account_id)">{{ row.resources.account_name || "查看账号" }}</t-button><span v-else>—</span><small class="publication-sub">{{
                 row.resources.account_owner || "—"
               }}</small></template
             >
@@ -642,9 +687,10 @@ onMounted(async () => {
                 :options="categoryOptions"
                 :disabled="!!editing || frozen"
                 @change="changeCategory" /></label
-            ><label
+            ><div class="quick-account-field"
               ><ResourceRequiredLabel>发布账号</ResourceRequiredLabel><t-input
                 :value="account?.platform_name || ''"
+                aria-label="发布账号"
                 placeholder="请选择发布账号"
                 readonly
                 :disabled="!form.category_id || !!editing || frozen"
@@ -658,7 +704,7 @@ onMounted(async () => {
                     >选择</t-button
                   ></template
                 ></t-input
-              ></label
+              ><t-button v-if="account" theme="primary" variant="text" size="small" @click="viewAccount(account.id)">查看账号信息</t-button></div
             >
           </div>
           <div class="quick-selected-asset">
@@ -758,7 +804,7 @@ onMounted(async () => {
           <t-descriptions-item label="任务状态"><ResourceStatusBadge :label="statusLabel(detail.status)" /></t-descriptions-item>
           <t-descriptions-item label="发布平台">{{ platformLabel(detail.platform) }}</t-descriptions-item>
           <t-descriptions-item label="内容类目">{{ categoryName(detail.category_id) }}</t-descriptions-item>
-          <t-descriptions-item label="发布账号">{{ detail.resources.account_name || "—" }}</t-descriptions-item>
+          <t-descriptions-item label="发布账号"><t-button v-if="detail.media_account_id" theme="primary" variant="text" size="small" @click="viewAccount(detail.media_account_id)">{{ detail.resources.account_name || "查看账号" }}</t-button><span v-else>—</span></t-descriptions-item>
           <t-descriptions-item label="真实 UID">{{ detail.platform_account_uid }}</t-descriptions-item>
           <t-descriptions-item label="成片" full>{{ detail.resources.output_name || detail.composite_output_id }}</t-descriptions-item>
         </ResourceDescriptions>
@@ -801,7 +847,9 @@ onMounted(async () => {
       :account="account"
       @update:visible="!$event && (picker = '')"
       @selected="picked"
+      @view-account="viewAccount"
     />
+    <AccountSummaryDialog v-model:visible="accountSummaryVisible" :account-id="accountSummaryId" />
   </div>
 </template>
 <style scoped>
@@ -852,7 +900,7 @@ onMounted(async () => {
   place-items: center;
   font-weight: 500;
 }
-.quick-block label {
+.quick-block label:not(.t-checkbox), .quick-account-field {
   display: flex;
   flex-direction: column;
   gap: 8px;

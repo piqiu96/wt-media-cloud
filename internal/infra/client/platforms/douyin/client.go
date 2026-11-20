@@ -6,15 +6,22 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/url"
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
+	hertzerrors "github.com/cloudwego/hertz/pkg/common/errors"
+	"github.com/cloudwego/hertz/pkg/common/hlog"
 	"github.com/cloudwego/hertz/pkg/protocol"
 	"github.com/wt-media/wt-media-cloud/internal/config"
 	httpclient "github.com/wt-media/wt-media-cloud/pkg/clients/http"
 )
+
+// ErrUnavailable identifies a failed upstream response without exposing its body.
+var ErrUnavailable = errors.New("douyin upstream unavailable")
 
 type SearchRequest struct {
 	Keyword string
@@ -193,6 +200,13 @@ func (c *Client) FetchByURL(ctx context.Context, request FetchByURLRequest) (map
 }
 
 func (c *Client) postForm(ctx context.Context, path string, fields map[string]string, target *map[string]any) error {
+	started := time.Now()
+	fail := func(reason string, status int, err error) error {
+		// RequestContext supplies trace_id/request_id. Never log the credential
+		// query, submitted content, provider body, or raw transport error here.
+		hlog.CtxErrorf(ctx, "module=douyin path=%s failure=%s status=%d duration=%s", path, reason, status, time.Since(started))
+		return err
+	}
 	values := url.Values{}
 	for key, value := range fields {
 		values.Set(key, value)
@@ -216,16 +230,26 @@ func (c *Client) postForm(ctx context.Context, path string, fields map[string]st
 	}
 
 	if err := c.transport.Do(ctx, request, response); err != nil {
-		return err
+		var networkError net.Error
+		if errors.Is(err, hertzerrors.ErrTimeout) || errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &networkError) && networkError.Timeout()) {
+			return fail("upstream_timeout", 0, fmt.Errorf("douyin request: %w", context.DeadlineExceeded))
+		}
+		if errors.Is(err, context.Canceled) {
+			return fail("request_canceled", 0, context.Canceled)
+		}
+		return fail("transport_failed", 0, fmt.Errorf("%w: transport failed", ErrUnavailable))
 	}
 	if response.StatusCode() < 200 || response.StatusCode() >= 300 {
-		return fmt.Errorf("douyin http status %d: %s", response.StatusCode(), strings.TrimSpace(string(response.BodyBytes())))
+		if response.StatusCode() == 504 || response.StatusCode() == 408 {
+			return fail("upstream_timeout", response.StatusCode(), fmt.Errorf("douyin HTTP status %d: %w", response.StatusCode(), context.DeadlineExceeded))
+		}
+		return fail("http_error", response.StatusCode(), fmt.Errorf("%w: HTTP status %d", ErrUnavailable, response.StatusCode()))
 	}
 	if err := json.Unmarshal(response.BodyBytes(), target); err != nil {
-		return fmt.Errorf("decode douyin response: %w", err)
+		return fail("invalid_response", response.StatusCode(), fmt.Errorf("%w: invalid JSON response", ErrUnavailable))
 	}
 	if !successValue((*target)["result"]) {
-		return errors.New("douyin API rejected request")
+		return fail("provider_rejected", response.StatusCode(), fmt.Errorf("%w: API rejected request", ErrUnavailable))
 	}
 	return nil
 }

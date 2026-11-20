@@ -256,7 +256,9 @@ async function logout() {
   font-family: "PingFang SC", "Microsoft YaHei", "Noto Sans SC", sans-serif;
   transition: width 0.2s ease;
 }
-.app-main { height: 100%; min-width: 0; overflow: hidden; }
+/* Only content-area scrolls. Hidden overflow lets focusing a table action
+   scroll this shell sideways and move the footer across the sidebar. */
+.app-main { height: 100%; min-width: 0; overflow: clip; }
 .sidebar-header {
   height: 76px;
   padding: 0 20px;
