@@ -12,6 +12,7 @@ const errorLabels = {
   task_timeout: '任务超时',
   input_missing: '源文件缺失',
   input_invalid: '素材校验失败',
+  input_preparation_failed: '源素材准备失败，请检查下载与存储',
   template_unavailable: '模板不可用',
   execution_failed: '执行失败',
 }

@@ -573,7 +573,7 @@ func TestAttemptFailsBusinessWhenSourcePreparationFailed(t *testing.T) {
 	if ensure != 1 {
 		t.Fatalf("an observed retry must not be requested twice: ensure=%d", ensure)
 	}
-	if len(lifecycle.failed) != 1 || !strings.HasPrefix(lifecycle.failed[0], composeErrInputInvalid+"|") {
+	if len(lifecycle.failed) != 1 || !strings.HasPrefix(lifecycle.failed[0], "input_preparation_failed|") {
 		t.Fatalf("failed=%v", lifecycle.failed)
 	}
 	if len(lifecycle.released) != 0 || len(runner.requests) != 0 {

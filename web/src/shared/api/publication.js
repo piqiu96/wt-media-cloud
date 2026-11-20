@@ -6,6 +6,7 @@ export function createPublicationClient({
   const api = createApiClient({ base, fetchImpl: fetch });
   return {
     list: (params) => api.get("/publication", params),
+    outputs: (params) => api.get("/publication/output", params),
     get: (id) => api.get(`/publication/${id}`),
     create: (input) => api.post("/publication", input),
     start: (id, input) => api.post(`/publication/${id}/start`, input),

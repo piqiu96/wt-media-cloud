@@ -14,8 +14,9 @@ import (
 )
 
 var (
-	ErrCrawlerUnavailable      = errors.New("content crawler is not configured")
-	ErrDouyinAuthorUnavailable = errors.New("douyin author discovery is temporarily unavailable")
+	ErrCrawlerUnavailable           = errors.New("content crawler is not configured")
+	ErrDouyinAuthorUnavailable      = errors.New("douyin author discovery is temporarily unavailable")
+	ErrDiscoveryUpstreamUnavailable = douyinclient.ErrUnavailable
 )
 
 type douyinCrawler struct{ client *douyinclient.Client }

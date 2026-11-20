@@ -7,7 +7,9 @@ import { TDesignResolver } from "unplugin-vue-components/resolvers";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 
-export default defineConfig({
+export default defineConfig(({ command, mode }) => ({
+  // Concurrent entries and test/build modes must not replace live optimizer files.
+  cacheDir: `node_modules/.vite/cloud-entry-${command}-${mode}`,
   root: __dirname,
   plugins: [
     vue(),
@@ -33,4 +35,4 @@ export default defineConfig({
       input: fileURLToPath(new URL("index.cloud.html", import.meta.url)),
     },
   },
-});
+}));

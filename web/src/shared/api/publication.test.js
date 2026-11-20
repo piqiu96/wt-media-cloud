@@ -51,3 +51,12 @@ it('keeps resolution evidence, current attempt and safe-retry revision exact', a
  expect(calls[0].url).toContain('/publication/9007199254740994/resolve');expect(JSON.parse(calls[0].init.body)).toEqual(input);
  expect(calls[1].url).toContain('/publication/9007199254740994/retry');expect(JSON.parse(calls[1].init.body)).toEqual({expected_revision:'8'});
 });
+
+it('reads server-projected candidate occupancy with production pagination and platform', async () => {
+ const calls=[];const client=createPublicationClient({fetch:async(url,init={})=>{calls.push({url,init});return {json:async()=>({errcode:0,data:{items:[{id:129,occupied:true}],total:41,page:4,page_size:10}})}}});
+ const page=await client.outputs({platform:'baidu',page:4,page_size:10,search:'原素材'});
+ const url=new URL(calls[0].url,'http://localhost');
+ expect(url.pathname).toBe('/api/v1/publication/output');
+ expect(url.searchParams.get('platform')).toBe('baidu');expect(url.searchParams.get('page')).toBe('4');
+ expect(page.items[0].occupied).toBe(true);
+});

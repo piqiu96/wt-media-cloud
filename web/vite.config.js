@@ -5,7 +5,9 @@ import AutoImport from 'unplugin-auto-import/vite'
 import Components from 'unplugin-vue-components/vite'
 import { TDesignResolver } from 'unplugin-vue-components/resolvers'
 
-export default defineConfig({
+export default defineConfig(({ command, mode }) => ({
+  // Concurrent entries and test/build modes must not replace live optimizer files.
+  cacheDir: `node_modules/.vite/cloud-${command}-${mode}`,
   plugins: [
     vue(),
     AutoImport({
@@ -29,4 +31,4 @@ export default defineConfig({
     environment: 'node',
     exclude: [...configDefaults.exclude, 'example/**'],
   },
-})
+}))

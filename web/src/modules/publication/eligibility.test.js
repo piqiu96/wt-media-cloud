@@ -65,3 +65,9 @@ describe("uncertain publication save",()=>{
   for(const errcode of [18001,18002,18003,18004,18005])expect(definitivePublicationRejection({errcode})).toBe(true)
  })
 })
+
+it('does not offer a server-occupied output even while its production status is unpublished', () => {
+ const output={category_id:4,team_id:1,platforms:['baidu'],video:{status:'ready'},publish_status:'pending_publish'};
+ expect(outputUnavailable({...output,occupied:true},4,{team_id:1})).toBe('该成片已被当前平台的任务占用');
+ expect(outputUnavailable({...output,occupied:false},4,{team_id:1})).toBe('');
+});

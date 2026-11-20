@@ -1,7 +1,10 @@
 schema_version: 1
-revision: "2026.11.05.4"
+revision: "2026.11.20.1"
 
 errors:
+  discovery_upstream_timeout: {http_status: 504, errcode: 14010, retryable: true, description: Provider request timed out or returned HTTP 408/504; logid correlates access and upstream failure logs.}
+  discovery_upstream_unavailable: {http_status: 502, errcode: 14011, retryable: true, description: Provider transport or response failed; raw response bodies and credentials are not exposed.}
+  discovery_not_configured: {http_status: 503, errcode: 14012, retryable: false, description: Discovery credentials are not configured; contact an administrator.}
   material_not_found: {http_status: 404}
   material_forbidden: {http_status: 403}
   material_unavailable: {http_status: 409}

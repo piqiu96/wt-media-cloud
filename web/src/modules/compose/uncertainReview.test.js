@@ -15,6 +15,7 @@ describe('uncertain execution review', () => {
     expect(summary).not.toContain('storage.example')
     expect(summary).not.toContain('token=')
     expect(safeComposeError('storage_error')).toBe('存储暂时失败')
+    expect(safeComposeError('input_preparation_failed')).toBe('源素材准备失败，请检查下载与存储')
   })
 
   it('needs both declarations and a reviewable note without URLs', () => {
