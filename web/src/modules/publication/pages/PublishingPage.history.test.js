@@ -7,7 +7,7 @@ const services = vi.hoisted(() => ({
   draft: { get: vi.fn(), save: vi.fn(), clear: vi.fn(), remember: vi.fn(), persistent: false },
   chooseDraft: vi.fn(),
   images: { getImageAsset: vi.fn() },
-  publication: { findByRequest: vi.fn(), get: vi.fn(), attempt: vi.fn(), list: vi.fn(), edit: vi.fn(), create: vi.fn() },
+  publication: { findByRequest: vi.fn(), get: vi.fn(), attempt: vi.fn(), list: vi.fn(), edit: vi.fn(), create: vi.fn(), cancel: vi.fn(), abandon: vi.fn() },
   compose: { getComposeOutput: vi.fn() },
   accounts: { get: vi.fn() },
 }));
@@ -232,4 +232,33 @@ it('keeps an unreadable cover reference through another explicit save', async ()
   state.form.value.content.description = '新的人工稿';
   await state.saveDraft();
   expect(services.draft.save).toHaveBeenCalledWith(expect.objectContaining({ image_asset_id: '22', form: expect.objectContaining({ content: expect.objectContaining({ description: '新的人工稿' }) }) }));
+});
+
+it('rechecks cancellation against the original list revision before showing a decision', async () => {
+ services.publication.get.mockResolvedValue({...task('A'),status:'running',revision:'2',current_attempt_id:'21'});
+ await state.openTermination(task('A'),'cancel');
+ expect(state.terminationVisible.value).toBe(false);
+ expect(services.publication.cancel).not.toHaveBeenCalled();
+ expect(state.error.value).toContain('状态已变化');
+});
+it('submits cancellation once and refreshes after a lost reply', async () => {
+ await state.openTermination(task('A'),'cancel');
+ expect(state.terminationVisible.value).toBe(true);
+ services.publication.cancel.mockRejectedValue(new Error('响应中断'));
+ await state.saveTermination({expected_revision:'1'});
+ expect(services.publication.cancel).toHaveBeenCalledTimes(1);
+ expect(services.publication.list).toHaveBeenCalled();
+ expect(state.terminationError.value).toContain('查询核对');
+ expect(state.terminationVisible.value).toBe(true);
+});
+it('keeps abandonment evidence on failure and sends the frozen original attempt', async () => {
+ const failed = {...task('A'),status:'failed',current_attempt_id:'21'};
+ services.publication.get.mockResolvedValue(failed);
+ await state.openTermination(failed,'abandon');
+ const input = {expected_revision:'1',attempt_id:'21',evidence:{basis:'原账号现场核实，没有可继续发布稿件'}};
+ services.publication.abandon.mockRejectedValue(new Error('任务已变化'));
+ await state.saveTermination(input);
+ expect(services.publication.abandon).toHaveBeenCalledWith('A',input);
+ expect(state.terminationTask.value.current_attempt_id).toBe('21');
+ expect(state.terminationVisible.value).toBe(true);
 });

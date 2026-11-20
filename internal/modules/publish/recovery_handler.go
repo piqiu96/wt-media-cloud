@@ -80,3 +80,48 @@ func OriginalAttempt(_ context.Context, c *app.RequestContext) {
 	}
 	api.Success(c, v)
 }
+
+func Cancel(_ context.Context, c *app.RequestContext) {
+	actor, ok := middleware.AuthenticateRequest(c)
+	if !ok {
+		return
+	}
+	id, err := taskID(c)
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	var in model.Cancellation
+	if err = decode(c, &in); err != nil {
+		fail(c, err)
+		return
+	}
+	v, err := service.WiredRecovery().Cancel(actor, id, in)
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	api.Success(c, v)
+}
+func Abandon(_ context.Context, c *app.RequestContext) {
+	actor, ok := middleware.AuthenticateRequest(c)
+	if !ok {
+		return
+	}
+	id, err := taskID(c)
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	var in model.Abandonment
+	if err = decode(c, &in); err != nil {
+		fail(c, err)
+		return
+	}
+	v, err := service.WiredRecovery().Abandon(actor, id, in)
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	api.Success(c, v)
+}

@@ -13,6 +13,8 @@ export function createPublicationClient({
     start: (id, input) => api.post(`/publication/${id}/start`, input),
     resolve: (id, input) => api.post(`/publication/${id}/resolve`, input),
     retry: (id, input) => api.post(`/publication/${id}/retry`, input),
+    cancel: (id, input) => api.post(`/publication/${id}/cancel`, input),
+    abandon: (id, input) => api.post(`/publication/${id}/abandon`, input),
     attempt: (id) => api.get(`/publication/${id}/attempt`),
     edit: (id, input) => api.put(`/publication/${id}/content`, input),
   };

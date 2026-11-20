@@ -8,6 +8,8 @@ import (
 
 type RecoveryRepository interface {
 	Get(uint64) (model.Task, error)
+	Cancel(model.Task, model.Cancellation, int64, time.Time) (model.Task, error)
+	Abandon(model.Task, int64, model.Abandonment, time.Time) (model.Task, error)
 	ResolveFailure(model.Task, int64, model.FailureResolution, time.Time) (model.Task, error)
 	Retry(model.Task, uint64, int64, time.Time) (model.Task, error)
 	OriginalAttempt(uint64, uint64, int64) (model.OriginalAttemptState, error)
@@ -54,4 +56,25 @@ func (s *RecoveryService) OriginalAttempt(user int64, id, attempt uint64) (model
 		return model.OriginalAttemptState{}, ErrInvalid
 	}
 	return s.Repo.OriginalAttempt(id, attempt, user)
+}
+
+func (s *RecoveryService) Cancel(actor identity.PublicUser, id uint64, in model.Cancellation) (model.Task, error) {
+	v, err := s.readable(actor, id)
+	if err != nil {
+		return v, err
+	}
+	if !in.Valid() {
+		return model.Task{}, ErrInvalid
+	}
+	return s.Repo.Cancel(v, in, int64(actor.ID), time.Now().UTC())
+}
+func (s *RecoveryService) Abandon(actor identity.PublicUser, id uint64, in model.Abandonment) (model.Task, error) {
+	v, err := s.readable(actor, id)
+	if err != nil {
+		return v, err
+	}
+	if !in.Valid() {
+		return model.Task{}, ErrInvalid
+	}
+	return s.Repo.Abandon(v, int64(actor.ID), in, time.Now().UTC())
 }

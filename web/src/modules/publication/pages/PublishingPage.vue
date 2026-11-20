@@ -43,6 +43,7 @@ import { publicationTitleForOutput } from "../title.js";
 import PublishingExecutionHistory from "../components/PublishingExecutionHistory.vue";
 import PublishingResourcePicker from "../components/PublishingResourcePicker.vue";
 import PublishingRecoveryDialog from "../components/PublishingRecoveryDialog.vue";
+import PublishingTerminationDialog from "../components/PublishingTerminationDialog.vue";
 import AccountSummaryDialog from "../../accounts/components/AccountSummaryDialog.vue";
 const client = createPublicationClient(),
   compose = createComposeClient(),
@@ -65,6 +66,7 @@ function viewAccount(id) {
   accountSummaryVisible.value = true;
 }
 const recoveryVisible=ref(false),recoveryTask=ref(null),recoveryError=ref("");
+const terminationVisible = ref(false), terminationTask = ref(null), terminationAction = ref(""), terminationError = ref(""), terminationSubmitted = ref(false);
 const summary = ref(null),
   advanced = ref(false);
 const metricItems = computed(() => [
@@ -152,7 +154,7 @@ const columns = [
   { colKey: "account", title: "发布账号", width: 180 },
   { colKey: "status", title: "状态", width: 120 },
   { colKey: "created_at", title: "创建时间", width: 170 },
-  { colKey: "op", title: "操作", width: opColumnWidth(["执行", "编辑", "详情"], { variant: "text", primary: true }), fixed: "right" },
+  { colKey: "op", title: "操作", width: opColumnWidth(["执行", "编辑", "终止", "详情"], { variant: "text", primary: true }), fixed: "right" },
 ];
 watch(view, async (next, previous) => {
   const container = pageRoot.value?.closest(".content-area");
@@ -384,6 +386,33 @@ async function openDetail(row) {
 }
 const editable = (task) => task.status === PublicationStatus.Pending && !task.current_attempt_id && !task.authorized_at && !task.cancel_requested_at;
 const retryable = (task) => task.status === PublicationStatus.Failed && !task.cancel_requested_at;
+const cancellable = (task) => [PublicationStatus.Pending, PublicationStatus.Queued].includes(task.status) && !task.current_attempt_id && !task.cancel_requested_at;
+const abandonable = (task) => task.status === PublicationStatus.Failed && !!task.current_attempt_id;
+async function openTermination(row, action) {
+  if (busy.value) return;
+  busy.value = true; error.value = '';
+  try {
+    const task = await client.get(row.id);
+    if (task.revision !== row.revision || !(action === 'cancel' ? cancellable(task) : action === 'abandon' && abandonable(task))) throw new Error('任务内容或状态已变化，请核对更新后的列表再操作');
+    terminationTask.value = JSON.parse(JSON.stringify(task));
+    terminationAction.value = action; terminationError.value = ''; terminationSubmitted.value = false; terminationVisible.value = true;
+  } catch (e) { await load(); error.value = e.message; }
+  finally { busy.value = false; }
+}
+async function saveTermination(input) {
+  if (busy.value || terminationSubmitted.value || !terminationTask.value) return;
+  busy.value = true; terminationError.value = ''; terminationSubmitted.value = true;
+  try {
+    const action = terminationAction.value;
+    await client[action](terminationTask.value.id, input);
+    terminationVisible.value = false;
+    await load();
+    feedback.toast.success(action === 'abandon' ? '已安全放弃，成片占用已释放' : '已终止任务，保留成片占用');
+  } catch (e) {
+    await load();
+    terminationError.value = e.message + '；请保留依据，返回任务列表查询核对结果。';
+  } finally { busy.value = false; }
+}
 async function startExecution(row) {
   if (busy.value) return;
   busy.value = true;
@@ -637,7 +666,7 @@ const needsExecutionRefresh = computed(() => view.value === "list"
   : view.value === "detail" && isExecuting(detail.value));
 let executionTimer = null, refreshInFlight = false, disposed = false;
 async function refreshExecution() {
-  if (disposed || !needsExecutionRefresh.value || busy.value || loading.value || recoveryVisible.value || refreshInFlight
+  if (disposed || !needsExecutionRefresh.value || busy.value || loading.value || recoveryVisible.value || terminationVisible.value || refreshInFlight
       || (typeof document !== "undefined" && document.hidden)) return;
   refreshInFlight = true;
   const originalDetail = detail.value;
@@ -645,7 +674,7 @@ async function refreshExecution() {
     if (view.value === "list") await load({ background: true });
     else {
       const [task, history] = await Promise.all([client.get(originalDetail.id), client.attempt(originalDetail.id)]);
-      if (!disposed && view.value === "detail" && detail.value === originalDetail && !busy.value && !loading.value && !recoveryVisible.value) {
+      if (!disposed && view.value === "detail" && detail.value === originalDetail && !busy.value && !loading.value && !recoveryVisible.value && !terminationVisible.value) {
         detail.value = task;
         attempts.value = history;
         error.value = "";
@@ -800,6 +829,8 @@ onMounted(async () => {
                 <t-button v-if="row.status === PublicationStatus.Uncertain" class="is-primary" variant="text" size="small" :disabled="busy" @click="openVerification(row)">核实结果</t-button>
                 <t-button v-if="retryable(row)" class="is-primary" variant="text" size="small" :disabled="busy" @click="retryExecution(row)">重试</t-button>
                 <t-button v-if="editable(row)" variant="text" size="small" :disabled="busy" @click="edit(row)">编辑</t-button>
+                <t-button v-if="cancellable(row)" theme="danger" variant="text" size="small" :disabled="busy" @click="openTermination(row, 'cancel')">终止</t-button>
+                <t-button v-if="abandonable(row)" theme="danger" variant="text" size="small" :disabled="busy" @click="openTermination(row, 'abandon')">放弃</t-button>
                 <t-button variant="text" size="small" :disabled="busy" @click="detailReturn = 'list'; openDetail(row)">详情</t-button>
               </ResourceRowActions>
             </template>
@@ -1004,6 +1035,7 @@ onMounted(async () => {
       <template #footer><t-button v-if="videoError" theme="default" variant="outline" @click="previewOutput">重试预览</t-button></template>
     </ResourceOverlay>
     <MediaPreview form-actions v-model:visible="preview" :images="previewImages" title="发布封面预览" />
+    <PublishingTerminationDialog v-model:visible="terminationVisible" :task="terminationTask" :action="terminationAction" :busy="busy" :error="terminationError" :submitted="terminationSubmitted" @submit="saveTermination" />
     <PublishingRecoveryDialog v-model:visible="recoveryVisible" :task="recoveryTask" :busy="busy" :error="recoveryError" @submit="saveVerification" />
     <PublishingResourcePicker
       :visible="!!picker"
