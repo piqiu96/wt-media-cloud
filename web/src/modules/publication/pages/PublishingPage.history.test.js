@@ -3,10 +3,18 @@ import { renderToString } from 'vue/server-renderer';
 import { beforeEach, expect, it, vi } from 'vitest';
 
 const services = vi.hoisted(() => ({
-  publication: { get: vi.fn(), attempt: vi.fn(), list: vi.fn(), edit: vi.fn(), create: vi.fn() },
+  session: { me: vi.fn() },
+  draft: { get: vi.fn(), save: vi.fn(), clear: vi.fn(), remember: vi.fn(), persistent: false },
+  chooseDraft: vi.fn(),
+  images: { getImageAsset: vi.fn() },
+  publication: { findByRequest: vi.fn(), get: vi.fn(), attempt: vi.fn(), list: vi.fn(), edit: vi.fn(), create: vi.fn() },
   compose: { getComposeOutput: vi.fn() },
   accounts: { get: vi.fn() },
 }));
+vi.mock('../../../shared/api/image.js', () => ({ createImageClient: () => services.images }));
+vi.mock('../../../shared/api/session.js', () => ({ createSessionClient: () => services.session }));
+vi.mock('../../../shared/api/publicationDraft.js', () => ({ createPublicationDraftClient: () => services.draft }));
+vi.mock('../draftRecovery.js', async importOriginal => ({ ...(await importOriginal()), choosePublicationDraft: services.chooseDraft }));
 vi.mock('../../../shared/api/publication.js', () => ({ createPublicationClient: () => services.publication }));
 vi.mock('../../../shared/api/compose.js', () => ({ createComposeClient: () => services.compose }));
 vi.mock('../../../shared/api/mediaAccounts.js', () => ({ createMediaAccountClient: () => services.accounts }));
@@ -25,6 +33,10 @@ const history = [{ id: 'attempt-A', attempt_no: 1, input_snapshot: { content: { 
 let state;
 beforeEach(async () => {
   vi.clearAllMocks();
+  services.session.me.mockResolvedValue({ id: '9' });
+  services.draft.get.mockResolvedValue({ payload: null, revision: '0', saved_at: null, schema_version: 1 });
+  services.draft.save.mockResolvedValue({ revision: '1' });
+  services.draft.clear.mockResolvedValue({ revision: '2' });
   services.publication.get.mockImplementation(async id => task(id));
   services.publication.attempt.mockImplementation(async id => id === 'A' ? history : []);
   services.publication.list.mockResolvedValue({ items: [], total: 0, summary: {} });
@@ -56,7 +68,7 @@ it('keeps a newly created task history empty after returning from another task d
   await state.openDetail(task('A'));
   expect(state.attempts.value).toEqual(history);
   await state.back();
-  state.openCreate();
+  await state.openCreate();
   state.form.value = { ...state.form.value, ...task('C') };
   await state.submit();
   expect(services.publication.create).toHaveBeenCalledOnce();
@@ -116,4 +128,108 @@ it('skips overlapping refreshes and leaves editing and result verification alone
   expect(services.publication.get).toHaveBeenCalledOnce();
   finish({ ...task('A'), status: 'failed' });
   await pending;
+});
+
+
+it('closing draft recovery preserves the previous input and current page', async () => {
+  services.draft.get.mockResolvedValue({ payload: { form: task('D') }, revision: '1' });
+  services.chooseDraft.mockResolvedValue(null);
+  await state.openCreate();
+  expect(state.view.value).toBe('list');
+  expect(services.draft.clear).not.toHaveBeenCalled();
+});
+
+it('saves creation input before posting and clears only after a confirmed task', async () => {
+  await state.openCreate();
+  state.form.value = { ...state.form.value, ...task('C') };
+  await state.submit();
+  expect(services.draft.save.mock.invocationCallOrder[0]).toBeLessThan(services.publication.create.mock.invocationCallOrder[0]);
+  expect(services.draft.clear.mock.invocationCallOrder[0]).toBeGreaterThan(services.publication.create.mock.invocationCallOrder[0]);
+});
+
+it('preserves uncertain creation and queries the original key before any repost', async () => {
+  await state.openCreate();
+  state.form.value = { ...state.form.value, ...task('C') };
+  services.publication.create.mockRejectedValueOnce(new Error('断网'));
+  await state.submit();
+  expect(state.pendingRequest.value.request_key).toBe('request-C');
+  expect(services.draft.clear).not.toHaveBeenCalled();
+  services.publication.findByRequest.mockResolvedValue(task('C'));
+  await state.submit();
+  expect(services.publication.findByRequest).toHaveBeenCalledWith('request-C');
+  expect(services.publication.create).toHaveBeenCalledTimes(1);
+  expect(state.view.value).toBe('detail');
+});
+
+it('keeps the created task visible when clearing local input fails', async () => {
+  await state.openCreate();
+  state.form.value = { ...state.form.value, ...task('C') };
+  services.draft.clear.mockRejectedValueOnce(new Error('本机保存冲突'));
+  await state.submit();
+  expect(state.view.value).toBe('detail');
+  expect(state.detail.value.id).toBe('C');
+  expect(state.error.value).toContain('任务已创建');
+  expect(state.pendingRequest.value).toBeNull();
+});
+
+it('restores human text when a selected resource is unavailable without silently replacing it', async () => {
+  const old = task('D');
+  services.draft.get.mockResolvedValue({ payload: { form: old, schedule: '', image_asset_id: '' }, revision: '2' });
+  services.chooseDraft.mockResolvedValue('continue');
+  services.accounts.get.mockRejectedValueOnce(new Error('无权限'));
+  services.compose.getComposeOutput.mockRejectedValueOnce(new Error('已删除'));
+  await state.openCreate();
+  expect(state.form.value.content.description).toBe(old.content.description);
+  expect(state.form.value.media_account_id).toBe('9');
+  expect(state.form.value.composite_output_id).toBe('10');
+  expect(state.form.value.content.confirmed).toBe(false);
+  expect(state.account.value).toBeNull();
+  expect(state.output.value).toBeNull();
+  await state.submit();
+  expect(services.publication.create).not.toHaveBeenCalled();
+});
+
+it('reselecting the same image preserves confirmation', async () => {
+  await state.openCreate();
+  state.form.value.content.cover_file_id = '11';
+  state.form.value.content.confirmed = true;
+  state.picker.value = 'image';
+  state.picked({ id: '11' });
+  expect(state.form.value.content.confirmed).toBe(true);
+  state.picker.value = 'image';
+  state.picked({ id: '12' });
+  expect(state.form.value.content.confirmed).toBe(false);
+});
+
+
+it('reselects an unavailable original account after it becomes available without clearing unchanged confirmation', async () => {
+  await state.openCreate();
+  state.form.value.media_account_id = '9';
+  state.form.value.content.confirmed = true;
+  state.account.value = null;
+  state.draftResourceIssue.value.account = '原账号不可用';
+  state.picker.value = 'account';
+  state.picked({ id: '9', platform: 'baidu' });
+  expect(state.account.value.id).toBe('9');
+  expect(state.draftResourceIssue.value.account).toBeFalsy();
+  expect(state.form.value.content.confirmed).toBe(true);
+});
+
+it('does not apply a previous new-draft resource error to editing an existing task', async () => {
+  state.draftResourceIssue.value = { account: '上一份草稿的错误' };
+  await state.edit(task('B'));
+  await state.submit();
+  expect(services.publication.edit).toHaveBeenCalledOnce();
+  expect(state.view.value).toBe('detail');
+});
+
+it('keeps an unreadable cover reference through another explicit save', async () => {
+  const old = task('D');
+  services.draft.get.mockResolvedValue({ payload: { form: old, image_asset_id: '22' }, revision: '2' });
+  services.chooseDraft.mockResolvedValue('continue');
+  services.images.getImageAsset.mockRejectedValueOnce(new Error('网络不可用'));
+  await state.openCreate();
+  state.form.value.content.description = '新的人工稿';
+  await state.saveDraft();
+  expect(services.draft.save).toHaveBeenCalledWith(expect.objectContaining({ image_asset_id: '22', form: expect.objectContaining({ content: expect.objectContaining({ description: '新的人工稿' }) }) }));
 });

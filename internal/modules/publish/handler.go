@@ -24,6 +24,7 @@ import (
 func RegisterRoutes(h *server.Hertz) {
 	h.GET("/api/v1/publication", List)
 	h.GET("/api/v1/publication/output", OutputCandidates)
+	h.GET("/api/v1/publication/request", FindByRequest)
 	h.POST("/api/v1/publication", Create)
 	h.GET("/api/v1/publication/:id", Get)
 	h.PUT("/api/v1/publication/:id/content", Edit)
@@ -122,6 +123,19 @@ func List(_ context.Context, c *app.RequestContext) {
 	}
 	api.Success(c, map[string]any{"summary": summary, "items": items, "total": total, "page": f.Page, "page_size": f.PageSize})
 }
+func FindByRequest(_ context.Context, c *app.RequestContext) {
+	actor, ok := middleware.AuthenticateRequest(c)
+	if !ok {
+		return
+	}
+	task, err := service.Wired().FindByRequest(actor, c.Query("request_key"))
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	api.Success(c, task)
+}
+
 func Create(ctx context.Context, c *app.RequestContext) {
 	a, ok := middleware.AuthenticateRequest(c)
 	if !ok {

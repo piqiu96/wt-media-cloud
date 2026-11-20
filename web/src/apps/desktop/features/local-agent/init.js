@@ -72,17 +72,17 @@ export async function cloudBaseUrl({ invokeImpl = invoke } = {}) {
 let pendingToken = null
 export function ensureAgentToken({ force = false, tauri = isTauri(), invokeImpl = invoke } = {}) {
   if (!tauri) return Promise.resolve(null)
-  if (force) return configureAgentToken({ invokeImpl })
+  if (force) return configureAgentToken({ invokeImpl, force: true })
   if (!pendingToken) {
     pendingToken = configureAgentToken({ invokeImpl }).finally(() => { pendingToken = null })
   }
   return pendingToken
 }
 
-async function configureAgentToken({ invokeImpl }) {
+async function configureAgentToken({ invokeImpl, force = false }) {
   const service = createLocalAgentService({ invoke: invokeImpl })
   const held = await service.tokenFacts().catch(() => null)
-  if (held?.configured) return held
+  if (!force && held?.configured) return held
   const sessionToken = getSessionToken()
   if (!sessionToken) {
     throw new Error("请先登录运营平台，才能获取本机执行凭证")

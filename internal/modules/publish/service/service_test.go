@@ -195,3 +195,24 @@ func TestCreateAndEditRejectRendererPreview(t *testing.T) {
 		t.Fatal("preview replaced formal cover")
 	}
 }
+
+func TestFindCreationByRequestKeepsCreatorAndResourceScope(t *testing.T) {
+	s, actor, input := fixture()
+	task, err := s.Create(context.Background(), actor, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.FindByRequest(actor, input.RequestKey)
+	if err != nil || got.ID != task.ID {
+		t.Fatalf("lookup: %+v %v", got, err)
+	}
+	other := actor
+	other.ID = 10
+	if _, err := s.FindByRequest(other, input.RequestKey); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("other creator: %v", err)
+	}
+	actor.CategoryIDs = nil
+	if _, err := s.FindByRequest(actor, input.RequestKey); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("revoked category: %v", err)
+	}
+}

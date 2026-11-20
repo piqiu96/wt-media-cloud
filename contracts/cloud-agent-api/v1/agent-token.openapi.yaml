@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: WT Media Agent Token API
-  version: 2026.10.23.1
+  version: 2026.11.21.1
   description: >
     A Desktop session exchanges itself for a short-lived signed Agent Token that lets the
     Local Agent on that machine act for the signed-in user. The token is stateless: Cloud
@@ -44,8 +44,9 @@ components:
       properties:
         data:
           type: object
-          required: [token, expires_at]
+          required: [token, expires_at, user_id]
           properties:
+            user_id: {type: string, pattern: "^[1-9][0-9]*$", description: Authenticated Desktop session user. Native uses this for local input scoping; token claims are not decoded for authorization.}
             token: {type: string, description: Secret. Never persisted, never logged, never echoed back by any other endpoint.}
             expires_at:
               type: integer

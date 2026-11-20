@@ -108,6 +108,20 @@ func (s *Service) Get(a identity.PublicUser, id uint64) (model.Task, error) {
 	}
 	return v, e
 }
+func (s *Service) FindByRequest(a identity.PublicUser, key string) (model.Task, error) {
+	if a.ID <= 0 || a.Status != identity.UserStatusEnabled {
+		return model.Task{}, ErrNotFound
+	}
+	if len(key) < 1 || len(key) > 64 || strings.TrimSpace(key) != key {
+		return model.Task{}, ErrInvalid
+	}
+	task, err := s.Repo.ByRequest(int64(a.ID), key)
+	if err == nil && !CanRead(a, task) {
+		return model.Task{}, ErrNotFound
+	}
+	return task, err
+}
+
 func validateFilter(a identity.PublicUser, f Filter) error {
 	if a.Role == identity.RoleSeniorOperator && a.TeamID == nil {
 		return ErrNotFound

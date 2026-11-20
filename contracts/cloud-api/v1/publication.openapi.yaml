@@ -1,9 +1,20 @@
 openapi: 3.1.0
 info:
   title: WT Media Single Publication Preparation
-  version: 2026.11.20.1
+  version: 2026.11.21.1
   description: Creating never authorizes execution or submits a platform post. Execution requires separate revision-bound start authorization. Baidu task preparation is available. IDs and revisions are decimal strings; timestamps RFC3339. Uses errcode/message/data/logid.
 paths:
+  /api/v1/publication/request:
+    get:
+      operationId: findPublicationByRequest
+      security: [{sessionCookie: []}]
+      summary: Find the current creator's original task after a lost creation reply.
+      parameters:
+        - {in: query, name: request_key, required: true, schema: {type: string, minLength: 1, maxLength: 64}}
+      responses:
+        '200': {description: Original Publication, still subject to current account/team/category read permissions.}
+        '400': {description: Invalid request key.}
+        '404': {description: No accessible original task for this creator and key.}
   /api/v1/publication:
     get:
       operationId: listPublications

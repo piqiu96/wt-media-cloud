@@ -27,6 +27,11 @@ import { feedback } from "../../../shared/ui/feedback/index.js";
 import { createPublicationClient } from "../../../shared/api/publication.js";
 import { createComposeClient } from "../../../shared/api/compose.js";
 import { createMediaAccountClient } from "../../../shared/api/mediaAccounts.js";
+import { createSessionClient } from "../../../shared/api/session.js";
+import { createImageClient } from "../../../shared/api/image.js";
+import { createPublicationDraftClient } from "../../../shared/api/publicationDraft.js";
+import { choosePublicationDraft, capturePublicationDraft } from "../draftRecovery.js";
+import { accountUnavailable } from "../eligibility.js";
 import { createFilesClient } from "../../../shared/api/files.js";
 import {
   definitivePublicationRejection,
@@ -218,7 +223,7 @@ function invalidate() {
   if (form.value) form.value.content.confirmed = false;
 }
 async function changeCategory(category) {
-  if (frozen.value) return;
+  if (frozen.value || String(category) === String(form.value.category_id)) return;
   if (account.value || output.value) {
     if (
       !(await feedback.confirmWarning({
@@ -229,6 +234,8 @@ async function changeCategory(category) {
     )
       return;
   }
+  draftResourceIssue.value = {};
+  draftNotice.value = "";
   form.value = emptyForm();
   form.value.category_id = category;
   account.value = null;
@@ -236,7 +243,7 @@ async function changeCategory(category) {
   cover.value = null;
   schedule.value = "";
 }
-function openCreate() {
+function initializeCreate() {
   source.value = false;
   editing.value = null;
   detail.value = null;
@@ -251,6 +258,116 @@ function openCreate() {
   baseline.value = JSON.stringify({ form: form.value, schedule: "" });
   view.value = "form";
 }
+const draftPersistent = ref(false), draftReady = ref(false), draftNotice = ref("");
+const draftResourceIssue = ref({}), draftConflict = ref(false);
+let draftClient = null;
+function draftPayload() {
+  return capturePublicationDraft(form.value, schedule.value, cover.value, pendingRequest.value);
+}
+async function openCreate(sourceOutput = null) {
+  if (busy.value) return false;
+  busy.value = true;
+  draftReady.value = false;
+  error.value = "";
+  try {
+    const user = await createSessionClient().me();
+    draftClient = createPublicationDraftClient({ userId: user.id });
+    draftPersistent.value = draftClient.persistent;
+    const previous = await draftClient.get();
+    let choice = null;
+    if (previous.payload) {
+      choice = await choosePublicationDraft(previous.saved_at);
+      if (!choice) return false;
+      if (choice === "restart") await draftClient.clear();
+    }
+    initializeCreate();
+    draftResourceIssue.value = {};
+    draftConflict.value = false;
+    draftNotice.value = "";
+    if (choice === "continue") await restoreDraft(previous.payload);
+    else if (sourceOutput?.id) {
+      source.value = true;
+      setOutput(sourceOutput);
+      form.value.category_id = String(sourceOutput.category_id);
+    }
+    baseline.value = JSON.stringify({ form: form.value, schedule: schedule.value });
+    draftReady.value = true;
+    return true;
+  } catch (e) {
+    error.value = e.message || "无法读取续编，原输入已保留，请重试";
+    if (view.value === "form") formError.value = error.value;
+    return false;
+  } finally { busy.value = false; }
+}
+async function restoreDraft(payload) {
+  if (!payload?.form?.content || !payload.form.request_key || payload.form.platform !== "baidu") throw new Error("续编输入无法读取，请保留原草稿后核对");
+  form.value = capturePublicationDraft(payload.form, payload.schedule, null, null).form;
+  schedule.value = String(payload.schedule || "");
+  pendingRequest.value = payload.pending_request || null;
+  // Restoring user input never re-confirms resources or replaces human text.
+  if (!pendingRequest.value) form.value.content.confirmed = false;
+  const results = await Promise.allSettled([
+    form.value.media_account_id ? accounts.get(form.value.media_account_id) : null,
+    form.value.composite_output_id ? compose.getComposeOutput(form.value.composite_output_id) : null,
+    payload.image_asset_id ? createImageClient().getImageAsset(payload.image_asset_id) : null,
+  ]);
+  const [a, o, c] = results.map(result => result.status === "fulfilled" ? result.value : null);
+  account.value = a;
+  output.value = o?.output || null;
+  if (form.value.media_account_id) draftResourceIssue.value.account = !a ? "原账号不可用，请恢复原账号或重新选择" : accountUnavailable(a, form.value.category_id);
+  if (form.value.composite_output_id) draftResourceIssue.value.output = !output.value ? "原成片不可用，填写内容已保留" : outputUnavailable(output.value, form.value.category_id, a);
+  if (form.value.content.cover_file_id) {
+    cover.value = { id: form.value.content.cover_file_id, image_asset_id: String(payload.image_asset_id || ""), name: "原封面暂不可用" };
+    if (c && String(c.file_id) === form.value.content.cover_file_id && c.enabled && c.allow_as_cover && (!c.category_ids?.length || c.category_ids.map(String).includes(form.value.category_id))) {
+      cover.value = { ...c, id: c.file_id, image_asset_id: c.id };
+    } else {
+      draftResourceIssue.value.cover = "原封面不可用，请恢复原图片或重新选择";
+    }
+  }
+  draftNotice.value = "已恢复填写，资源可用性已重新检查；请重新核对内容。";
+}
+watch([form, schedule, pendingRequest], () => {
+  if (draftReady.value && draftClient && view.value === "form" && !editing.value && !busy.value) {
+    const hasInput = form.value.category_id || form.value.media_account_id || form.value.composite_output_id || form.value.content.description || schedule.value;
+    draftClient.remember(hasInput ? draftPayload() : null);
+  }
+}, { deep: true });
+async function saveDraft() {
+  if (busy.value || !draftReady.value || editing.value) return false;
+  busy.value = true;
+  formError.value = "";
+  try {
+    await draftClient.save(draftPayload());
+    baseline.value = JSON.stringify({ form: form.value, schedule: schedule.value });
+    feedback.toast.success(draftPersistent.value ? "草稿已保存，重启后可继续；不占用成片" : "已暂存当前填写；刷新、关闭或退出后清空");
+    return true;
+  } catch (e) { draftConflict.value = e.code === "draft_revision_conflict"; formError.value = e.message || "保存失败，填写内容已保留"; return false; }
+  finally { busy.value = false; }
+}
+async function reloadDraft() {
+  if (busy.value || editing.value || !draftClient) return;
+  if (!(await feedback.confirmWarning({ title: "读取最新草稿？", message: "最新草稿会替换当前填写，当前未保存修改将丢失。", confirmText: "读取最新草稿", cancelText: "保留当前填写" }))) return;
+  busy.value = true;
+  formError.value = "";
+  try {
+    const current = await draftClient.get({ reload: true });
+    draftResourceIssue.value = {};
+    if (current.payload) await restoreDraft(current.payload);
+    else initializeCreate();
+    draftConflict.value = false;
+    baseline.value = JSON.stringify({ form: form.value, schedule: schedule.value });
+  } catch (e) { formError.value = e.message || "读取失败，填写内容已保留"; }
+  finally { busy.value = false; }
+}
+async function clearCreatedDraft() {
+  if (!draftClient || editing.value) return "";
+  let warning = "";
+  try { await draftClient.clear(); }
+  catch (e) { warning = `任务已创建；续编未清除，请重新打开后核对原任务。${e.message || ""}`; }
+  draftReady.value = false;
+  return warning;
+}
+
 async function openDetail(row) {
   loading.value = true;
   error.value = "";
@@ -343,6 +460,10 @@ async function edit(row) {
       accounts.get(v.media_account_id),
       compose.getComposeOutput(v.composite_output_id),
     ]);
+    draftReady.value = false;
+    draftResourceIssue.value = {};
+    draftNotice.value = "";
+    draftConflict.value = false;
     editing.value = v;
     account.value = a;
     output.value = o.output;
@@ -378,8 +499,13 @@ function setOutput(row) {
   output.value = row;
   form.value.composite_output_id = row ? String(row.id) : "";
 }
+function reviewedInput() {
+  return JSON.stringify({ platform: form.value.platform, category: form.value.category_id, account: form.value.media_account_id, output: form.value.composite_output_id, description: form.value.content.description, topics: form.value.content.topics, declaration: form.value.content.declaration, cover: form.value.content.cover_file_id });
+}
 function picked(row) {
+  const previousInput = reviewedInput();
   if (picker.value === "account") {
+    delete draftResourceIssue.value.account;
     account.value = row;
     form.value.media_account_id = String(row.id);
     if (
@@ -388,26 +514,46 @@ function picked(row) {
     ) {
       setOutput(null);
     }
-    invalidate();
   } else if (picker.value === "output") {
+    delete draftResourceIssue.value.output;
     setOutput(row);
-    invalidate();
   } else {
+    delete draftResourceIssue.value.cover;
     cover.value = row;
     form.value.content.cover_file_id = String(row.id);
-    invalidate();
   }
+  if (reviewedInput() !== previousInput) invalidate();
+  else formError.value = "";
   picker.value = "";
 }
 async function submit() {
+  if (busy.value) return;
   formError.value = "";
-  const problem = contentProblem(form.value);
+  const problem = !pendingRequest.value && ((!editing.value && Object.values(draftResourceIssue.value).find(Boolean)) || contentProblem(form.value));
   if (problem) {
     formError.value = problem;
     return;
   }
   busy.value = true;
+  let sent = false;
+  const wasPending = !!pendingRequest.value;
   try {
+    if (wasPending && !editing.value) {
+      let existing = null;
+      try { existing = await client.findByRequest(pendingRequest.value.request_key); }
+      catch (e) { if (e.errcode !== 18002) throw e; }
+      if (existing) {
+        const cleanupWarning = await clearCreatedDraft();
+        error.value = cleanupWarning;
+        pendingRequest.value = null;
+        attempts.value = [];
+        detail.value = existing;
+        view.value = "detail";
+        try { attempts.value = await client.attempt(existing.id); } catch (e) { error.value = e.message; }
+        feedback.toast.success("已找到原任务，未重复创建");
+        return;
+      }
+    }
     const not_before = publicationScheduleUTC(schedule.value);
     const payload =
       pendingRequest.value ||
@@ -419,9 +565,12 @@ async function submit() {
           }
         : { ...form.value, content: { ...form.value.content }, not_before });
     pendingRequest.value = payload;
+    if (!editing.value) await draftClient.save(draftPayload());
+    sent = true;
     const saved = editing.value
       ? await client.edit(editing.value.id, payload)
       : await client.create(payload);
+    const cleanupWarning = await clearCreatedDraft();
     pendingRequest.value = null;
     baseline.value = JSON.stringify({
       form: form.value,
@@ -437,10 +586,20 @@ async function submit() {
       editing.value ? "发布内容已保存" : "任务已创建，尚未执行",
     );
     await load();
+    if (cleanupWarning) error.value = cleanupWarning;
   } catch (e) {
     formError.value = e.message;
-    if (definitivePublicationRejection(e)) pendingRequest.value = null;
-    else formError.value += "。结果尚未确认，请保留当前输入并重试。";
+    draftConflict.value = e.code === "draft_revision_conflict";
+    if (definitivePublicationRejection(e) || (!sent && !wasPending)) {
+      pendingRequest.value = null;
+      if (!editing.value && draftClient) {
+        draftClient.remember(draftPayload());
+        if (sent && definitivePublicationRejection(e)) {
+          try { await draftClient.save(draftPayload()); }
+          catch (saveError) { draftConflict.value = saveError.code === "draft_revision_conflict"; formError.value += `；本机输入未更新，请保留当前填写。${saveError.message || ""}`; }
+        }
+      }
+    } else formError.value += "。结果尚未确认，原请求和输入已保留；请先查询原任务。";
   } finally {
     busy.value = false;
   }
@@ -448,6 +607,10 @@ async function submit() {
 async function canLeave() {
   if (busy.value) return false;
   if (!dirty.value && !pendingRequest.value) return true;
+  if (!editing.value && !pendingRequest.value) {
+    if (!(await feedback.confirmWarning({ title: "保存草稿后返回？", message: draftPersistent.value ? "保存后重启可继续；不会占用成片或启动任务。" : "当前应用中可继续；刷新、关闭或退出后清空。", confirmText: "保存并返回", cancelText: "继续编辑" }))) return false;
+    return saveDraft();
+  }
   return feedback.confirmWarning({
     title: "离开发布内容",
     message: pendingRequest.value
@@ -511,10 +674,7 @@ onMounted(async () => {
     const id = String(route.query.output_id || "");
     if (/^[1-9][0-9]*$/.test(id)) {
       const data = await compose.getComposeOutput(id);
-      openCreate();
-      source.value = true;
-      setOutput(data.output);
-      form.value.category_id = String(data.output.category_id);
+      await openCreate(data.output);
     }
   } catch (e) {
     error.value = e.message;
@@ -526,7 +686,7 @@ onMounted(async () => {
     <template v-if="view === 'list'">
       <ResourcePageHeader title="发布任务"
         ><template #actions
-          ><t-button @click="openCreate"
+          ><t-button :loading="busy" @click="openCreate"
             >快速发布</t-button
           ></template
         ></ResourcePageHeader
@@ -669,6 +829,10 @@ onMounted(async () => {
       @back="back"
     >
       <FeedbackAlert v-if="formError" theme="error" :message="formError" />
+      <FeedbackAlert v-if="!editing" theme="info" :message="draftPersistent ? '保存草稿后重启可继续；不占用成片，也不会启动发布。' : '填写仅暂存于当前应用；刷新、关闭或退出登录后清空。'" />
+      <t-button v-if="draftConflict" theme="default" variant="outline" :disabled="busy" @click="reloadDraft">读取最新草稿</t-button>
+      <FeedbackAlert v-if="draftNotice" theme="info" :message="draftNotice" />
+      <FeedbackAlert v-if="Object.values(draftResourceIssue).some(Boolean)" theme="warning" :message="Object.values(draftResourceIssue).filter(Boolean).join('；')" />
       <div class="quick-publish">
         <section class="resource-editor-section quick-block">
           <h3>
@@ -724,7 +888,7 @@ onMounted(async () => {
             ><t-button v-if="output" theme="default" variant="outline" :disabled="busy" @click="previewOutput">预览成片</t-button>
           </div>
         </section>
-        <section v-if="output" class="resource-editor-section quick-block">
+        <section v-if="output || form.composite_output_id" class="resource-editor-section quick-block">
           <h3><span>02</span>发布内容</h3>
           <div class="quick-copy-fields">
           <label
@@ -771,11 +935,11 @@ onMounted(async () => {
           /></label>
           </div>
         </section>
-        <section v-if="output" class="resource-editor-section quick-block">
+        <section v-if="output || form.composite_output_id" class="resource-editor-section quick-block">
           <h3><span>03</span>发布设置</h3>
           <div class="quick-resource-grid two">
             <label>发布方式<t-input value="自动发布" disabled /></label>
-            <label><span class="quick-field-heading">最早执行时间<ResourceFieldHelp label="最早执行时间" content="留空表示确认执行后尽快发布；指定时间为最早开始执行时间。创建任务后仍需单独确认执行。" /></span><ResourceDateTime v-model:value="schedule" aria-label="最早执行时间" :disabled="frozen" @change="invalidate" /></label>
+            <label><span class="quick-field-heading">最早执行时间<ResourceFieldHelp label="最早执行时间" content="留空表示确认执行后尽快发布；指定时间为最早开始执行时间。创建任务后仍需单独确认执行。" /></span><ResourceDateTime v-model:value="schedule" aria-label="最早执行时间" :disabled="frozen" /></label>
           </div>
           <t-checkbox v-model="form.content.confirmed" :disabled="frozen"
             >已核对当前文案、封面和声明，确认内容可用</t-checkbox
@@ -783,8 +947,9 @@ onMounted(async () => {
         </section>
       </div>
       <template #footer
+        ><t-button v-if="!editing" theme="default" variant="outline" :disabled="busy" @click="saveDraft">保存草稿</t-button
         ><t-button :loading="busy" @click="submit">{{
-          pendingRequest ? "重试确认结果" : editing ? "保存" : "创建任务"
+          pendingRequest ? "查询创建结果" : editing ? "保存" : "创建任务"
         }}</t-button></template
       >
     </ResourceEditorPage>

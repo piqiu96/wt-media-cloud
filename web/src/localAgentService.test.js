@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
 
 import { createLocalAgentService, LOCAL_AGENT_COMMANDS } from './apps/desktop/features/local-agent/service.js'
-import { startDesktopLocalAgent } from './apps/desktop/features/local-agent/init.js'
+import { setSessionToken } from './shared/api/http.js'
+import { ensureAgentToken, startDesktopLocalAgent } from './apps/desktop/features/local-agent/init.js'
 
 describe('local agent desktop service', () => {
   it('extracts dynamic proxy through the Desktop bridge', async () => {
@@ -197,3 +198,17 @@ describe('where Cloud is', () => {
     await expect(cloudBaseUrl({ invokeImpl: broken })).resolves.toBe('https://cloud.example.test')
   })
 })
+
+
+it('exchanges the new Desktop session even while an old Agent token is still held', async () => {
+  setSessionToken('new-desktop-session');
+  const invoke = vi.fn(async command => {
+    if (command === LOCAL_AGENT_COMMANDS.tokenFacts) return { configured: true, expires_at: 4000000000 };
+    if (command === 'get_public_config') return { cloud_base_url: 'https://configured.example' };
+    return { configured: true, expires_at: 4000000000 };
+  });
+  try {
+    await ensureAgentToken({ force: true, tauri: true, invokeImpl: invoke });
+    expect(invoke).toHaveBeenCalledWith(LOCAL_AGENT_COMMANDS.configureToken, { args: { cloud_base_url: 'https://configured.example', session_token: 'new-desktop-session' } });
+  } finally { setSessionToken(''); }
+});
