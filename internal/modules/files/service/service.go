@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"gorm.io/gorm"
@@ -52,7 +53,7 @@ type Service struct {
 	Objects       storage.ImmutableStore
 	MaxBytes      int64
 	GrantTTL      time.Duration
-	Inspect       func(context.Context, string, string) (string, string, error)
+	Inspect       func(context.Context, string, string) (string, string, media.Info, error)
 }
 
 // LockAvailable serializes saved references with deletion. Lock IDs in a stable order.
@@ -67,12 +68,13 @@ func Wired() (*Service, error) {
 	if !ok {
 		return nil, storage.ErrNotConfigured
 	}
-	return &Service{Repo: repository.Store{DB: database.DB(), CheckReferences: referenceCheck}, Objects: objects, PublicBaseURL: cfg.Storage.ObjectStorage.FilesPublicBaseURL, Bucket: cfg.Storage.ObjectStorage.Bucket, MaxBytes: cfg.Storage.ObjectStorage.UploadMaxBytes, GrantTTL: cfg.Storage.ObjectStorage.PresignTTL.Duration, Inspect: func(ctx context.Context, p, ext string) (string, string, error) {
+	return &Service{Repo: repository.Store{DB: database.DB(), CheckReferences: referenceCheck}, Objects: objects, PublicBaseURL: cfg.Storage.ObjectStorage.FilesPublicBaseURL, Bucket: cfg.Storage.ObjectStorage.Bucket, MaxBytes: cfg.Storage.ObjectStorage.UploadMaxBytes, GrantTTL: cfg.Storage.ObjectStorage.PresignTTL.Duration, Inspect: func(ctx context.Context, p, ext string) (string, string, media.Info, error) {
 		info, err := media.ProbeFile(ctx, cfg.Media.FFmpeg.FFprobePath, p)
 		if err != nil {
-			return "", "", fmt.Errorf("%w: 文件无法读取", ErrInvalid)
+			return "", "", media.Info{}, fmt.Errorf("%w: 文件无法读取", ErrInvalid)
 		}
-		return verifiedType(info, ext)
+		kind, contentType, err := verifiedType(info, ext)
+		return kind, contentType, info, err
 	}}, nil
 }
 
@@ -169,7 +171,7 @@ func (s *Service) view(f model.File) (model.FileView, error) {
 	if err != nil {
 		return model.FileView{}, err
 	}
-	return model.FileView{PublicURL: publicURL, ID: f.ID, Name: f.Name, Filename: f.Name + "." + f.Extension, Type: f.Type, ContentType: f.ContentType, SizeBytes: f.SizeBytes, SHA256: f.SHA256, OwnerID: f.OwnerID, OwnerName: f.OwnerName, TeamID: f.TeamID, TeamName: f.TeamName, CreatedAt: f.CreatedAt, ResourcePath: "/api/v1/file-resources/" + f.ResourceToken}, nil
+	return model.FileView{Metadata: f.MetadataJSON, PublicURL: publicURL, ID: f.ID, Name: f.Name, Filename: f.Name + "." + f.Extension, Type: f.Type, ContentType: f.ContentType, SizeBytes: f.SizeBytes, SHA256: f.SHA256, OwnerID: f.OwnerID, OwnerName: f.OwnerName, TeamID: f.TeamID, TeamName: f.TeamName, CreatedAt: f.CreatedAt, ResourcePath: ResourcePath(f.ResourceToken)}, nil
 }
 func (s *Service) Read(actor identity.PublicUser, id int64) (model.File, error) {
 	sc, err := scope(actor)
@@ -256,19 +258,29 @@ func (s *Service) Upload(ctx context.Context, actor identity.PublicUser, name, o
 	if size <= 0 {
 		return model.FileView{}, ErrInvalid
 	}
-	actualKind, actualType, err := s.Inspect(ctx, local.Name(), ext)
+	actualKind, actualType, inspected, err := s.Inspect(ctx, local.Name(), ext)
 	if err != nil {
 		return model.FileView{}, err
 	}
 	if actualKind != kind || actualType != contentType {
 		return model.FileView{}, ErrInvalid
 	}
+	var metadata json.RawMessage
+	if kind == "image" {
+		if inspected.Width <= 0 || inspected.Height <= 0 {
+			return model.FileView{}, ErrInvalid
+		}
+		metadata, err = json.Marshal(model.ImageMetadata{Width: inspected.Width, Height: inspected.Height, Format: ext, Source: "upload"})
+		if err != nil {
+			return model.FileView{}, err
+		}
+	}
 	var token [32]byte
 	if _, err := rand.Read(token[:]); err != nil {
 		return model.FileView{}, err
 	}
 	now := time.Now().UTC()
-	f := model.File{OwnerID: int64(actor.ID), Name: name, Extension: ext, Type: kind, ContentType: contentType, ResourceToken: hex.EncodeToString(token[:]), CreatedAt: now, UpdatedAt: now, OwnerName: actor.Nickname, TeamName: actor.TeamName}
+	f := model.File{MetadataJSON: metadata, OwnerID: int64(actor.ID), Name: name, Extension: ext, Type: kind, ContentType: contentType, ResourceToken: hex.EncodeToString(token[:]), CreatedAt: now, UpdatedAt: now, OwnerName: actor.Nickname, TeamName: actor.TeamName}
 	if f.OwnerName == "" {
 		f.OwnerName = actor.Username
 	}
@@ -406,3 +418,6 @@ func (s *Service) SavedReference(id int64) (model.File, error) {
 func ReadSavedReference(db *gorm.DB, id int64) (model.File, error) {
 	return (&Service{Repo: repository.Store{DB: db}}).SavedReference(id)
 }
+
+// ResourcePath returns the file provider-owned stable access path.
+func ResourcePath(token string) string { return "/api/v1/file-resources/" + token }

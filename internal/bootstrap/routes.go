@@ -17,6 +17,8 @@ import (
 	"github.com/wt-media/wt-media-cloud/internal/modules/filetransfer"
 	"github.com/wt-media/wt-media-cloud/internal/modules/identity"
 	identityservice "github.com/wt-media/wt-media-cloud/internal/modules/identity/service"
+	"github.com/wt-media/wt-media-cloud/internal/modules/image"
+	imageservice "github.com/wt-media/wt-media-cloud/internal/modules/image/service"
 	"github.com/wt-media/wt-media-cloud/internal/modules/localagent"
 	"github.com/wt-media/wt-media-cloud/internal/modules/mediaaccount"
 	"github.com/wt-media/wt-media-cloud/internal/modules/production"
@@ -26,6 +28,7 @@ import (
 	"github.com/wt-media/wt-media-cloud/internal/modules/publish"
 	publishservice "github.com/wt-media/wt-media-cloud/internal/modules/publish/service"
 	api "github.com/wt-media/wt-media-cloud/internal/shared/api"
+	"gorm.io/gorm"
 )
 
 func registerRoutes(engine *server.Hertz) error {
@@ -58,8 +61,14 @@ func registerModuleRoutes(engine *server.Hertz) {
 	contentpool.RegisterRoutes(engine)
 	production.RegisterRoutes(engine)
 	filetransfer.RegisterRoutes(engine)
-	fileservice.SetReferenceCheck(publishservice.CheckFileReferences)
+	fileservice.SetReferenceCheck(func(tx *gorm.DB, id int64) error {
+		if e := imageservice.CheckFileReferences(tx, id); e != nil {
+			return e
+		}
+		return publishservice.CheckFileReferences(tx, id)
+	})
 	files.RegisterRoutes(engine)
+	image.RegisterRoutes(engine)
 	publish.RegisterRoutes(engine)
 }
 

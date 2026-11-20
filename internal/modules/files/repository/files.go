@@ -22,7 +22,7 @@ func (s Store) SetLocation(id int64, key string) error {
 	return s.DB.Exec(`UPDATE operations_files SET object_key=? WHERE id=? AND uploaded_at IS NULL`, key, id).Error
 }
 func (s Store) Ready(f model.File) error {
-	r := s.DB.Exec(`UPDATE operations_files SET object_key=?,size_bytes=?,sha256=?,uploaded_at=?,updated_at=? WHERE id=? AND uploaded_at IS NULL`, f.ObjectKey, f.SizeBytes, f.SHA256, f.UploadedAt, f.UpdatedAt, f.ID)
+	r := s.DB.Exec(`UPDATE operations_files SET object_key=?,size_bytes=?,sha256=?,metadata_json=?,uploaded_at=?,updated_at=? WHERE id=? AND uploaded_at IS NULL`, f.ObjectKey, f.SizeBytes, f.SHA256, f.MetadataJSON, f.UploadedAt, f.UpdatedAt, f.ID)
 	if r.Error != nil {
 		return r.Error
 	}

@@ -1,0 +1,397 @@
+openapi: 3.1.0
+info:
+  title: WT Media Image API
+  version: 2026.11.21.1
+  description: CHG106 image registration and selection. Owner/team/category scope is enforced server-side. No publication
+    state or action changes.
+paths:
+  /api/v1/image-asset:
+    get:
+      operationId: listImageAsset
+      security:
+      - sessionCookie: []
+      description: 'Scoped by existing owner/team/category permissions. Filters: search, usage (cover/background),
+        category_id, enabled, aspect (landscape/portrait/square), page and page_size (1..100). Returns items,total,page,page_size.
+        Loading failure is not an empty list.'
+      responses:
+        '200':
+          description: errcode/message/data/logid; IDs and revisions are decimal strings.
+        '400':
+          description: Invalid input.
+        '401':
+          description: Authentication required.
+        '404':
+          description: Missing or outside scope.
+        '409':
+          description: Revision or file registration conflict.
+        '503':
+          description: Persistence or resource unavailable; never an empty success.
+      parameters:
+      - in: query
+        name: search
+        schema:
+          type: string
+          maxLength: 100
+      - in: query
+        name: usage
+        schema:
+          type: string
+          enum:
+          - cover
+          - background
+      - in: query
+        name: category_id
+        schema:
+          type: string
+          pattern: ^[1-9][0-9]*$
+      - in: query
+        name: enabled
+        schema:
+          type: boolean
+      - in: query
+        name: aspect
+        schema:
+          type: string
+          enum:
+          - landscape
+          - portrait
+          - square
+      - in: query
+        name: page
+        schema:
+          type: integer
+          minimum: 1
+          default: 1
+      - in: query
+        name: page_size
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 20
+    post:
+      operationId: registerImageAsset
+      security:
+      - sessionCookie: []
+      description: Register an accessible, fully uploaded image with decoded dimensions. At least one usage is required.
+        Empty category_ids means general. Enabled by default. Same file and same initial attributes replay the saved
+        asset; conflicting registration is rejected. team_id is only needed for an administrator registering an
+        upload without a team.
+      responses:
+        '200':
+          description: errcode/message/data/logid; IDs and revisions are decimal strings.
+        '400':
+          description: Invalid input.
+        '401':
+          description: Authentication required.
+        '404':
+          description: Missing or outside scope.
+        '409':
+          description: Revision or file registration conflict.
+        '503':
+          description: Persistence or resource unavailable; never an empty success.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+              - file_id
+              - name
+              - category_ids
+              properties:
+                file_id:
+                  type: string
+                  pattern: ^[1-9][0-9]*$
+                team_id:
+                  type: string
+                  pattern: ^[1-9][0-9]*$
+                name:
+                  type: string
+                  minLength: 1
+                  maxLength: 160
+                allow_as_cover:
+                  type: boolean
+                  default: false
+                allow_as_background:
+                  type: boolean
+                  default: false
+                category_ids:
+                  type: array
+                  maxItems: 100
+                  uniqueItems: true
+                  items:
+                    type: string
+                    pattern: ^[1-9][0-9]*$
+              anyOf:
+              - required:
+                - allow_as_cover
+                properties:
+                  allow_as_cover:
+                    const: true
+              - required:
+                - allow_as_background
+                properties:
+                  allow_as_background:
+                    const: true
+  /api/v1/image-asset/{id}:
+    parameters:
+    - in: path
+      name: id
+      required: true
+      schema:
+        type: string
+        pattern: ^[1-9][0-9]*$
+    get:
+      operationId: getImageAsset
+      security:
+      - sessionCookie: []
+      description: Return one accessible image and actual file metadata.
+      responses:
+        '200':
+          description: errcode/message/data/logid; IDs and revisions are decimal strings.
+        '400':
+          description: Invalid input.
+        '401':
+          description: Authentication required.
+        '404':
+          description: Missing or outside scope.
+        '409':
+          description: Revision or file registration conflict.
+        '503':
+          description: Persistence or resource unavailable; never an empty success.
+    put:
+      operationId: updateImageAsset
+      security:
+      - sessionCookie: []
+      description: Update name, usages and categories atomically against expected_revision; at least one usage remains
+        required. Does not mutate the underlying file or confirmed publications.
+      responses:
+        '200':
+          description: errcode/message/data/logid; IDs and revisions are decimal strings.
+        '400':
+          description: Invalid input.
+        '401':
+          description: Authentication required.
+        '404':
+          description: Missing or outside scope.
+        '409':
+          description: Revision or file registration conflict.
+        '503':
+          description: Persistence or resource unavailable; never an empty success.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+              - name
+              - category_ids
+              - expected_revision
+              properties:
+                name:
+                  type: string
+                  minLength: 1
+                  maxLength: 160
+                allow_as_cover:
+                  type: boolean
+                  default: false
+                allow_as_background:
+                  type: boolean
+                  default: false
+                category_ids:
+                  type: array
+                  maxItems: 100
+                  uniqueItems: true
+                  items:
+                    type: string
+                    pattern: ^[1-9][0-9]*$
+                expected_revision:
+                  type: string
+                  pattern: ^[1-9][0-9]*$
+              anyOf:
+              - required:
+                - allow_as_cover
+                properties:
+                  allow_as_cover:
+                    const: true
+              - required:
+                - allow_as_background
+                properties:
+                  allow_as_background:
+                    const: true
+  /api/v1/image-asset/{id}/usage:
+    parameters:
+    - in: path
+      name: id
+      required: true
+      schema:
+        type: string
+        pattern: ^[1-9][0-9]*$
+    put:
+      operationId: setImageAssetUsage
+      security:
+      - sessionCookie: []
+      description: Set enabled against expected_revision. Disabling prevents new selection without breaking saved
+        covers or history.
+      responses:
+        '200':
+          description: errcode/message/data/logid; IDs and revisions are decimal strings.
+        '400':
+          description: Invalid input.
+        '401':
+          description: Authentication required.
+        '404':
+          description: Missing or outside scope.
+        '409':
+          description: Revision or file registration conflict.
+        '503':
+          description: Persistence or resource unavailable; never an empty success.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+              - enabled
+              - expected_revision
+              properties:
+                enabled:
+                  type: boolean
+                expected_revision:
+                  type: string
+                  pattern: ^[1-9][0-9]*$
+  /api/v1/image-asset/select:
+    post:
+      operationId: selectImageAsset
+      security:
+      - sessionCookie: []
+      description: Select an enabled accessible image for the requested usage and minimum dimensions. Prefer the
+        requested category, then general; never choose another category as a fallback. Returns one fixed image or
+        data:null when no candidate exists. Does not reserve the file or create a task reference.
+      responses:
+        '200':
+          description: errcode/message/data/logid; IDs and revisions are decimal strings.
+        '400':
+          description: Invalid input.
+        '401':
+          description: Authentication required.
+        '404':
+          description: Missing or outside scope.
+        '409':
+          description: Revision or file registration conflict.
+        '503':
+          description: Persistence or resource unavailable; never an empty success.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+              - usage
+              - category_id
+              properties:
+                usage:
+                  type: string
+                  enum:
+                  - cover
+                  - background
+                category_id:
+                  type: string
+                  pattern: ^[1-9][0-9]*$
+                min_width:
+                  type: integer
+                  minimum: 0
+                min_height:
+                  type: integer
+                  minimum: 0
+                aspect:
+                  type: string
+                  enum:
+                  - ''
+                  - landscape
+                  - portrait
+                  - square
+components:
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: wt_media_session
+  schemas:
+    ImageAsset:
+      type: object
+      required:
+      - id
+      - file_id
+      - team_id
+      - name
+      - allow_as_cover
+      - allow_as_background
+      - category_ids
+      - enabled
+      - revision
+      - width
+      - height
+      - format
+      - size_bytes
+      - resource_path
+      - created_at
+      - updated_at
+      properties:
+        id:
+          type: string
+          pattern: ^[1-9][0-9]*$
+        file_id:
+          type: string
+          pattern: ^[1-9][0-9]*$
+        team_id:
+          type: string
+          pattern: ^[1-9][0-9]*$
+        name:
+          type: string
+          minLength: 1
+          maxLength: 160
+        allow_as_cover:
+          type: boolean
+        allow_as_background:
+          type: boolean
+        category_ids:
+          type: array
+          maxItems: 100
+          uniqueItems: true
+          items:
+            type: string
+            pattern: ^[1-9][0-9]*$
+        enabled:
+          type: boolean
+        revision:
+          type: string
+          pattern: ^[1-9][0-9]*$
+        width:
+          type: integer
+          minimum: 1
+        height:
+          type: integer
+          minimum: 1
+        format:
+          type: string
+        size_bytes:
+          type: integer
+          minimum: 1
+        resource_path:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
