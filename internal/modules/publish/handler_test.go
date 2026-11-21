@@ -43,7 +43,7 @@ func TestPublicationRoutesAndContractRequireSession(t *testing.T) {
 			}
 		}
 	}
-	if count != 12 {
+	if count != 13 {
 		t.Fatalf("route/contract count=%d", count)
 	}
 	for _, action := range []string{"execute", "authorize"} {

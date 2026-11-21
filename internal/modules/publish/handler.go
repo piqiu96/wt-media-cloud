@@ -33,6 +33,7 @@ func RegisterRoutes(h *server.Hertz) {
 	h.POST("/api/v1/publication/:id/retry", Retry)
 	h.POST("/api/v1/publication/:id/cancel", Cancel)
 	h.POST("/api/v1/publication/:id/abandon", Abandon)
+	h.GET("/api/v1/publication/:id/copy", Copy)
 	h.GET("/api/v1/cloud-agent/publication-task/:id/attempt/:attempt_id", localagent.RequireAgent(localagent.ReportSafeMode), OriginalAttempt)
 	h.GET("/api/v1/publication/:id/attempt", Attempt)
 	h.POST("/api/v1/cloud-agent/publication-task/claim", localagent.RequireAgent(localagent.StrictMode), Claim)

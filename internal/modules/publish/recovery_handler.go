@@ -125,3 +125,26 @@ func Abandon(_ context.Context, c *app.RequestContext) {
 	}
 	api.Success(c, v)
 }
+
+func Copy(_ context.Context, c *app.RequestContext) {
+	actor, ok := middleware.AuthenticateRequest(c)
+	if !ok {
+		return
+	}
+	id, err := taskID(c)
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	revision, err := strconv.ParseUint(c.Query("expected_revision"), 10, 64)
+	if err != nil || revision == 0 {
+		fail(c, service.ErrInvalid)
+		return
+	}
+	v, err := service.WiredRecovery().Copy(actor, id, revision)
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	api.Success(c, v)
+}

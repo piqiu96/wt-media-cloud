@@ -7,7 +7,7 @@ const services = vi.hoisted(() => ({
   draft: { get: vi.fn(), save: vi.fn(), clear: vi.fn(), remember: vi.fn(), persistent: false },
   chooseDraft: vi.fn(),
   images: { getImageAsset: vi.fn() },
-  publication: { findByRequest: vi.fn(), get: vi.fn(), attempt: vi.fn(), list: vi.fn(), edit: vi.fn(), create: vi.fn(), cancel: vi.fn(), abandon: vi.fn() },
+  publication: { copy: vi.fn(), findByRequest: vi.fn(), get: vi.fn(), attempt: vi.fn(), list: vi.fn(), edit: vi.fn(), create: vi.fn(), cancel: vi.fn(), abandon: vi.fn() },
   compose: { getComposeOutput: vi.fn() },
   accounts: { get: vi.fn() },
 }));
@@ -331,4 +331,60 @@ it('shows the running stop request without claiming final cancellation', async (
 it('hides running termination after submission permission or a previous stop request', async () => {
  expect(state.cancellable({...task('A'),status:'running',can_cancel:false})).toBe(false);
  expect(state.cancellable({...task('A'),status:'running',can_cancel:true,cancel_requested_at:'2026-11-21'})).toBe(false);
+});
+
+it('copies reusable text into a new unconfirmed form with no old resources or execution identity',async()=>{
+ services.publication.copy.mockResolvedValue({platform:'baidu',category_id:'1',content:{description:'可复用的人工文案',topics:'#话题',declaration:'无需声明'}});
+ await state.copyTask({...task('A'),status:'published'});
+ expect(services.publication.copy).toHaveBeenCalledWith('A','1');
+ expect(state.view.value).toBe('form');expect(state.editing.value).toBe(null);
+ expect(state.form.value.request_key).not.toBe('request-A');
+ expect(state.form.value.content).toEqual({description:'可复用的人工文案',topics:'#话题',declaration:'无需声明',cover_file_id:'',confirmed:false});
+ expect(state.form.value.media_account_id).toBe('');expect(state.form.value.composite_output_id).toBe('');
+ expect(state.account.value).toBe(null);expect(state.output.value).toBe(null);expect(state.cover.value).toBe(null);
+ expect(state.pendingRequest.value).toBe(null);expect(state.attempts.value).toEqual([]);
+ expect(services.publication.create).not.toHaveBeenCalled();
+ state.setOutput({id:'99',material_title:'新成片默认标题'});
+ expect(state.form.value.content.description).toBe('可复用的人工文案');
+});
+it('preserves an existing draft instead of replacing it with copied task text',async()=>{
+ services.publication.copy.mockResolvedValue({platform:'baidu',category_id:'1',content:{description:'旧任务文案',topics:'',declaration:'无需声明'}});
+ services.draft.get.mockResolvedValue({payload:{form:task('D'),schedule:''},revision:'2'});
+ services.chooseDraft.mockResolvedValue('continue');
+ await state.copyTask({...task('A'),status:'cancelled'});
+ expect(state.form.value.request_key).toBe('request-D');expect(state.form.value.content.description).toBe('标题-D');
+ expect(services.draft.clear).not.toHaveBeenCalled();expect(services.publication.create).not.toHaveBeenCalled();
+});
+it('keeps the list on rejected conditional copy and never initializes new work',async()=>{
+ services.publication.copy.mockRejectedValue(new Error('原尝试尚未安全结束'));
+ await state.copyTask({...task('A'),status:'failed'});
+ expect(state.view.value).toBe('list');expect(state.error.value).toContain('尚未安全结束');
+ expect(services.draft.get).not.toHaveBeenCalled();expect(services.publication.create).not.toHaveBeenCalled();
+});
+
+it('discards delayed copy content after the signed-in user changes before draft access',async()=>{
+ let finish;services.publication.copy.mockImplementation(()=>new Promise(resolve=>{finish=resolve;}));
+ const copying=state.copyTask({...task('A'),status:'published'});
+ await vi.waitFor(()=>expect(finish).toBeTypeOf('function'));
+ services.session.me.mockResolvedValue({id:'different-user'});
+ finish({platform:'baidu',category_id:'1',content:{description:'原账号私有文案',topics:'',declaration:''}});
+ await copying;
+ expect(state.view.value).toBe('list');expect(services.draft.get).not.toHaveBeenCalled();expect(services.draft.clear).not.toHaveBeenCalled();
+ expect(state.error.value).toContain('登录账号已变化');
+});
+it('does not clear an original draft after an account switch during the recovery choice',async()=>{
+ services.publication.copy.mockResolvedValue({platform:'baidu',category_id:'1',content:{description:'原账号私有文案',topics:'',declaration:''}});
+ services.draft.get.mockResolvedValue({payload:{form:task('D')},revision:'2'});
+ services.chooseDraft.mockImplementation(async()=>{services.session.me.mockResolvedValue({id:'different-user'});return 'restart';});
+ await state.copyTask({...task('A'),status:'published'});
+ expect(services.draft.clear).not.toHaveBeenCalled();expect(state.view.value).toBe('list');
+});
+it('discards a copy response after the page has been disposed',async()=>{
+ let finish;services.publication.copy.mockImplementation(()=>new Promise(resolve=>{finish=resolve;}));
+ const copying=state.copyTask({...task('A'),status:'published'});
+ await vi.waitFor(()=>expect(finish).toBeTypeOf('function'));
+ state.invalidateCreation();
+ finish({platform:'baidu',category_id:'1',content:{description:'迟到的文案',topics:'',declaration:''}});
+ await copying;
+ expect(services.draft.get).not.toHaveBeenCalled();expect(state.view.value).toBe('list');
 });

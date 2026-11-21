@@ -179,6 +179,37 @@ paths:
       responses:
         '200': {description: 'Explicitly abandons the current safely failed original attempt and releases only this task output occupancy. Original input, result and verification remain immutable.'}
         '409': {description: 'Stale revision/attempt, mismatched original account, unknown/publishable/open scene or state other than failed.'}
+  /api/v1/publication/{id}/copy:
+    get:
+      operationId: copyPublication
+      security: [{sessionCookie: []}]
+      parameters:
+        - {in: path, name: id, required: true, schema: {$ref: '#/components/schemas/ID'}}
+        - {in: query, name: expected_revision, required: true, schema: {$ref: '#/components/schemas/ID'}}
+      responses:
+        '200':
+          description: 'Read-only reusable new-form input after scope and current revision checks. Published/cancelled/abandoned allowed; failed requires the exact original safely resolved unsubmitted attempt. Does not create a task, authorize execution or acquire occupancy. New resources and human confirmation required.'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    required: [platform, category_id, content]
+                    additionalProperties: false
+                    properties:
+                      platform: {type: string}
+                      category_id: {$ref: '#/components/schemas/ID'}
+                      content:
+                        type: object
+                        required: [description, topics, declaration]
+                        additionalProperties: false
+                        properties:
+                          description: {type: string}
+                          topics: {type: string}
+                          declaration: {type: string}
+        '409': {description: 'Stale revision, unsafe original attempt or state that cannot be copied.'}
 components:
   securitySchemes:
     sessionCookie: {type: apiKey, in: cookie, name: wt_media_session}

@@ -8,6 +8,7 @@ export function createPublicationClient({
     list: (params) => api.get("/publication", params),
     outputs: (params) => api.get("/publication/output", params),
     get: (id) => api.get(`/publication/${id}`),
+    copy: (id, revision) => api.get(`/publication/${id}/copy`, { expected_revision: revision }),
     findByRequest: (requestKey) => api.get("/publication/request", { request_key: requestKey }),
     create: (input) => api.post("/publication", input),
     start: (id, input) => api.post(`/publication/${id}/start`, input),

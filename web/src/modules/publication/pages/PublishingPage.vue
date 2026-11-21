@@ -271,13 +271,20 @@ let draftClient = null;
 function draftPayload() {
   return capturePublicationDraft(form.value, schedule.value, cover.value, pendingRequest.value, coverConfig.value);
 }
-async function openCreate(sourceOutput = null) {
+async function openCreate(sourceOutput = null, copyInput = null, copyUserId = null) {
   if (busy.value) return false;
   busy.value = true;
   draftReady.value = false;
   error.value = "";
   try {
     const user = await createSessionClient().me();
+    if (disposed) return false;
+    if (copyInput && String(user.id) !== String(copyUserId)) throw new Error("登录账号已变化，已丢弃原账号的复制内容，请重新打开任务列表");
+    const verifyOwner = async () => {
+      const current = await createSessionClient().me();
+      if (disposed) throw new Error("页面已离开，已丢弃迟到内容");
+      if (String(current.id) !== String(user.id)) throw new Error("登录账号已变化，原草稿和复制内容未写入，请重新打开任务列表");
+    };
     draftClient = createPublicationDraftClient({ userId: user.id });
     draftPersistent.value = draftClient.persistent;
     const previous = await draftClient.get();
@@ -285,14 +292,25 @@ async function openCreate(sourceOutput = null) {
     if (previous.payload) {
       choice = await choosePublicationDraft(previous.saved_at);
       if (!choice) return false;
-      if (choice === "restart") await draftClient.clear();
+    }
+    await verifyOwner();
+    if (choice === "restart") {
+      await draftClient.clear();
+      await verifyOwner();
     }
     initializeCreate();
     draftResourceIssue.value = {};
     draftConflict.value = false;
     draftNotice.value = "";
     if (choice === "continue") await restoreDraft(previous.payload);
-    else if (sourceOutput?.id) {
+    else if (copyInput) {
+      form.value.platform = copyInput.platform;
+      form.value.category_id = String(copyInput.category_id);
+      form.value.content.description = copyInput.content.description;
+      form.value.content.topics = copyInput.content.topics;
+      form.value.content.declaration = copyInput.content.declaration;
+      draftNotice.value = "已复制文案、话题和声明；请重新选择账号、成片和封面，并核对确认内容。";
+    } else if (sourceOutput?.id) {
       source.value = true;
       setOutput(sourceOutput);
       form.value.category_id = String(sourceOutput.category_id);
@@ -301,6 +319,7 @@ async function openCreate(sourceOutput = null) {
     draftReady.value = true;
     return true;
   } catch (e) {
+    if (disposed) return false;
     error.value = e.message || "无法读取续编，原输入已保留，请重试";
     if (view.value === "form") formError.value = error.value;
     return false;
@@ -401,6 +420,21 @@ const editable = (task) => task.status === PublicationStatus.Pending && !task.cu
 const retryable = (task) => task.status === PublicationStatus.Failed && !task.cancel_requested_at;
 const cancellable = (task) => task.can_cancel === true && !task.cancel_requested_at;
 const abandonable = (task) => task.status === PublicationStatus.Failed && !!task.current_attempt_id;
+const copyable = (task) => [PublicationStatus.Failed, PublicationStatus.Published, PublicationStatus.Cancelled, PublicationStatus.Abandoned].includes(task.status);
+async function copyTask(row) {
+  if (busy.value) return;
+  busy.value = true; error.value = '';
+  let input, userId;
+  try {
+    userId = String((await createSessionClient().me()).id);
+    if (disposed) return;
+    input = await client.copy(row.id, row.revision);
+  }
+  catch (e) { if (!disposed) { await load(); error.value = e.message; } }
+  finally { busy.value = false; }
+  if (input && !disposed) await openCreate(null, input, userId);
+}
+
 async function openTermination(row, action) {
   if (busy.value) return;
   busy.value = true; error.value = '';
@@ -747,8 +781,9 @@ watch(needsExecutionRefresh, active => {
   if (executionTimer) clearInterval(executionTimer);
   executionTimer = active ? setInterval(refreshExecution, 5000) : null;
 });
+function invalidateCreation() { disposed = true; }
 onBeforeUnmount(() => {
-  disposed = true;
+  invalidateCreation();
   if (executionTimer) clearInterval(executionTimer);
   loadSequence++;
 });
@@ -890,6 +925,7 @@ onMounted(async () => {
                 <t-button v-if="editable(row)" variant="text" size="small" :disabled="busy" @click="edit(row)">编辑</t-button>
                 <t-button v-if="cancellable(row)" theme="danger" variant="text" size="small" :disabled="busy" @click="openTermination(row, 'cancel')">终止</t-button>
                 <t-button v-if="abandonable(row)" theme="danger" variant="text" size="small" :disabled="busy" @click="openTermination(row, 'abandon')">放弃</t-button>
+                <t-button v-if="copyable(row)" variant="text" size="small" :disabled="busy" @click="copyTask(row)">复制</t-button>
                 <t-button variant="text" size="small" :disabled="busy" @click="detailReturn = 'list'; openDetail(row)">详情</t-button>
               </ResourceRowActions>
             </template>
