@@ -5,6 +5,7 @@ import (
 	"errors"
 	"github.com/wt-media/wt-media-cloud/internal/modules/publish/model"
 	"gorm.io/gorm"
+	"reflect"
 	"time"
 )
 
@@ -105,7 +106,7 @@ func (s ExecutionStore) Report(candidate model.Task, user int64, r model.Executi
 			if err != nil && !errors.Is(err, ErrInputChanged) {
 				return err
 			}
-			if errors.Is(err, ErrInputChanged) || input != a.Input || (a.ErrorCode != nil && *a.ErrorCode == model.ExecutionInputChanged) {
+			if errors.Is(err, ErrInputChanged) || !reflect.DeepEqual(input, a.Input) || (a.ErrorCode != nil && *a.ErrorCode == model.ExecutionInputChanged) {
 				reason := model.ExecutionInputChanged
 				// Preserve the stage and submission barrier. Only the executor
 				// can prove no submission and a safely closed browser scene.
