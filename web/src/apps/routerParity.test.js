@@ -63,6 +63,7 @@ describe('cloud and desktop serve the same pages', () => {
     // 分母。空集会让下面每一条断言都空转通过。
     expect(sharedPaths.length).toBeGreaterThan(15)
     // 本 CHG 动过的两条必须在里面，否则「比过了」比的是别的东西。
+    expect(sharedPaths).toContain('work')
     expect(sharedPaths).toContain('material-library')
     expect(sharedPaths).toContain('my-material')
   })

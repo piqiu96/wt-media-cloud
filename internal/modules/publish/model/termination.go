@@ -14,7 +14,7 @@ type Abandonment struct {
 }
 
 func (a Abandonment) Valid() bool {
-	return (FailureResolution{AttemptID: a.AttemptID, ExpectedRevision: a.ExpectedRevision, Conclusion: StatusFailed, Evidence: a.Evidence}).Valid()
+	return (ResultResolution{AttemptID: a.AttemptID, ExpectedRevision: a.ExpectedRevision, Conclusion: StatusFailed, Evidence: a.Evidence}).Valid()
 }
 
 type Cancellation struct {

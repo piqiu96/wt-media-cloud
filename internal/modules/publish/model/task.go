@@ -23,14 +23,17 @@ type Content struct {
 	Confirmed   bool         `json:"confirmed"`
 }
 type Task struct {
-	CanCancel         bool       `json:"can_cancel" gorm:"->;-:migration"`
-	CancelRequestedAt *time.Time `json:"cancel_requested_at"`
-	AcceptedAt        *time.Time `json:"accepted_at"`
-	PublishedAt       *time.Time `json:"published_at"`
-	PlatformWorkID    *string    `json:"platform_work_id"`
-	WorkURL           *string    `json:"work_url"`
-	FailureCode       *string    `json:"failure_code"`
-	FailureMessage    *string    `json:"failure_message"`
+	CanCancel            bool       `json:"can_cancel" gorm:"->;-:migration"`
+	CancelRequestedAt    *time.Time `json:"cancel_requested_at"`
+	AcceptedAt           *time.Time `json:"accepted_at"`
+	PublishedAt          *time.Time `json:"published_at"`
+	PlatformSubmissionID *string    `json:"platform_submission_id"`
+	TargetURL            *string    `json:"target_url"`
+	WorkID               *uint64    `json:"work_id,string"`
+	PlatformWorkID       *string    `json:"platform_work_id"`
+	WorkURL              *string    `json:"work_url"`
+	FailureCode          *string    `json:"failure_code"`
+	FailureMessage       *string    `json:"failure_message"`
 
 	AuditActor         int64           `json:"-" gorm:"-"`
 	ID                 uint64          `json:"id,string"`

@@ -36,28 +36,28 @@ func unresolvedPublication(t *testing.T) (repo.ExecutionStore, model.Claim, mode
 	}
 	return s, *c, packet
 }
-func resolution(c model.Claim, v model.Task) model.FailureResolution {
-	return model.FailureResolution{AttemptID: c.Attempt.ID, ExpectedRevision: v.Revision, Conclusion: "failed", Evidence: model.VerificationEvidence{PlatformUID: c.Attempt.Input.PlatformUID, Reason: "执行在上传前失败", Basis: "已检查原账号稿件及本机原尝试，确认没有可继续发布稿件，原执行进程与浏览器已经结束", SceneClosed: true, NoPublishableWork: true}}
+func resolution(c model.Claim, v model.Task) model.ResultResolution {
+	return model.ResultResolution{AttemptID: c.Attempt.ID, ExpectedRevision: v.Revision, Conclusion: "failed", Evidence: model.VerificationEvidence{PlatformUID: c.Attempt.Input.PlatformUID, Reason: "执行在上传前失败", Basis: "已检查原账号稿件及本机原尝试，确认没有可继续发布稿件，原执行进程与浏览器已经结束", SceneClosed: true, NoPublishableWork: true}}
 }
-func TestLiveFailureResolutionAndRetryKeepOriginalAttemptAndOccupancy(t *testing.T) {
+func TestLiveResultResolutionAndRetryKeepOriginalAttemptAndOccupancy(t *testing.T) {
 	s, c, original := unresolvedPublication(t)
 	v, _ := s.Get(c.Task.ID)
 	now := time.Now().UTC()
 	in := resolution(c, v)
 	bad := in
 	bad.Evidence.SceneClosed = false
-	if _, e := s.ResolveFailure(v, 9, bad, now); !errors.Is(e, repo.ErrConflict) {
+	if _, e := s.ResolveResult(v, 9, bad, now); !errors.Is(e, repo.ErrConflict) {
 		t.Fatalf("open scene accepted: %v", e)
 	}
 	bad = in
 	bad.Evidence.PlatformUID = "foreign"
-	if _, e := s.ResolveFailure(v, 9, bad, now); !errors.Is(e, repo.ErrConflict) {
+	if _, e := s.ResolveResult(v, 9, bad, now); !errors.Is(e, repo.ErrConflict) {
 		t.Fatalf("foreign UID accepted: %v", e)
 	}
 	if _, e := s.Retry(v, v.Revision, 9, now); !errors.Is(e, repo.ErrConflict) {
 		t.Fatalf("unknown retry accepted: %v", e)
 	}
-	failed, e := s.ResolveFailure(v, 9, in, now)
+	failed, e := s.ResolveResult(v, 9, in, now)
 	if e != nil || failed.Status != "failed" {
 		t.Fatalf("%+v %v", failed, e)
 	}
@@ -111,7 +111,7 @@ func TestLiveResolvedFailureStillRechecksResourcesAndStopBeforeRetry(t *testing.
 	s, c, _ := unresolvedPublication(t)
 	v, _ := s.Get(c.Task.ID)
 	now := time.Now().UTC()
-	v, e := s.ResolveFailure(v, 9, resolution(c, v), now)
+	v, e := s.ResolveResult(v, 9, resolution(c, v), now)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -141,7 +141,7 @@ func TestLiveResolutionAuditFailureRollsBackAndUncertainKeepsHold(t *testing.T) 
 	in.Conclusion = "uncertain"
 	in.Evidence.SceneClosed = false
 	in.Evidence.NoPublishableWork = false
-	waiting, e := s.ResolveFailure(v, 9, in, now)
+	waiting, e := s.ResolveResult(v, 9, in, now)
 	if e != nil || waiting.Status != "uncertain" || waiting.Revision != v.Revision+1 {
 		t.Fatalf("%+v %v", waiting, e)
 	}
@@ -155,7 +155,7 @@ func TestLiveResolutionAuditFailureRollsBackAndUncertainKeepsHold(t *testing.T) 
 	if e = s.DB.Exec("DROP TABLE audit_logs").Error; e != nil {
 		t.Fatal(e)
 	}
-	if _, e = s.ResolveFailure(waiting, 9, resolution(c, waiting), now); e == nil {
+	if _, e = s.ResolveResult(waiting, 9, resolution(c, waiting), now); e == nil {
 		t.Fatal("audit failure ignored")
 	}
 	after, _ := s.Get(v.ID)
@@ -174,7 +174,7 @@ func TestLiveVerificationPreservesMaximumAllowedEvidence(t *testing.T) {
 	if !in.Valid() {
 		t.Fatal("contract-valid maximum evidence rejected")
 	}
-	failed, e := s.ResolveFailure(v, 9, in, time.Now().UTC())
+	failed, e := s.ResolveResult(v, 9, in, time.Now().UTC())
 	if e != nil || failed.Status != "failed" {
 		t.Fatalf("valid evidence did not persist: %v", e)
 	}
@@ -182,7 +182,7 @@ func TestLiveVerificationPreservesMaximumAllowedEvidence(t *testing.T) {
 	if e != nil || attempts[0].ResolutionNote == nil {
 		t.Fatal(e)
 	}
-	var saved model.FailureResolution
+	var saved model.ResultResolution
 	if e = json.Unmarshal([]byte(*attempts[0].ResolutionNote), &saved); e != nil || saved != in {
 		t.Fatalf("verification evidence truncated: %v", e)
 	}
@@ -207,7 +207,7 @@ func TestLiveConcurrentResolutionUsesVersions(t *testing.T) {
 	defer s.DB.Callback().Update().Remove("test:resolve-versions")
 	result := make(chan error, 2)
 	for i := 0; i < 2; i++ {
-		go func() { _, err := s.ResolveFailure(v, 9, in, time.Now().UTC()); result <- err }()
+		go func() { _, err := s.ResolveResult(v, 9, in, time.Now().UTC()); result <- err }()
 	}
 	for i := 0; i < 2; i++ {
 		select {

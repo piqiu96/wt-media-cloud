@@ -45,3 +45,12 @@ export function publicationCreatedRangeParams(range) {
     created_before: publicationScheduleUTC(`${nextDay.toISOString().slice(0, 10)}T00:00`),
   }
 }
+
+export function publicationPublishedUTC(value) {
+ if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/.test(value)) throw new Error('请填写平台实际发布时间（北京时间，精确到秒）');
+ const minute=publicationScheduleUTC(value.slice(0,16));
+ const second=Number(value.slice(-2));if(second>59)throw new Error('请选择有效的秒数');
+ const date=new Date(Date.parse(minute)+second*1000);
+ if(date.getTime()>Date.now())throw new Error('实际发布时间不能晚于现在');
+ return date.toISOString();
+}

@@ -10,7 +10,7 @@ type RecoveryRepository interface {
 	Get(uint64) (model.Task, error)
 	Cancel(model.Task, model.Cancellation, int64, time.Time) (model.Task, error)
 	Abandon(model.Task, int64, model.Abandonment, time.Time) (model.Task, error)
-	ResolveFailure(model.Task, int64, model.FailureResolution, time.Time) (model.Task, error)
+	ResolveResult(model.Task, int64, model.ResultResolution, time.Time) (model.Task, error)
 	Retry(model.Task, uint64, int64, time.Time) (model.Task, error)
 	OriginalAttempt(uint64, uint64, int64) (model.OriginalAttemptState, error)
 }
@@ -28,7 +28,7 @@ func (s *RecoveryService) readable(actor identity.PublicUser, id uint64) (model.
 	}
 	return v, e
 }
-func (s *RecoveryService) Resolve(actor identity.PublicUser, id uint64, in model.FailureResolution) (model.Task, error) {
+func (s *RecoveryService) Resolve(actor identity.PublicUser, id uint64, in model.ResultResolution) (model.Task, error) {
 	v, e := s.readable(actor, id)
 	if e != nil {
 		return v, e
@@ -36,7 +36,10 @@ func (s *RecoveryService) Resolve(actor identity.PublicUser, id uint64, in model
 	if !in.Valid() {
 		return model.Task{}, ErrInvalid
 	}
-	return s.Repo.ResolveFailure(v, int64(actor.ID), in, time.Now().UTC())
+	if v.Platform != "baidu" {
+		return model.Task{}, ErrClosed
+	}
+	return s.Repo.ResolveResult(v, int64(actor.ID), in, time.Now().UTC())
 }
 func (s *RecoveryService) Retry(actor identity.PublicUser, id, revision uint64) (model.Task, error) {
 	v, e := s.readable(actor, id)

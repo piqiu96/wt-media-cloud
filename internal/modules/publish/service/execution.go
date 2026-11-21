@@ -21,6 +21,8 @@ import (
 	profiles "github.com/wt-media/wt-media-cloud/internal/modules/profilebinding/service"
 	"github.com/wt-media/wt-media-cloud/internal/modules/publish/model"
 	"github.com/wt-media/wt-media-cloud/internal/modules/publish/repository"
+	workmodel "github.com/wt-media/wt-media-cloud/internal/modules/work/model"
+	work "github.com/wt-media/wt-media-cloud/internal/modules/work/service"
 	"gorm.io/gorm"
 )
 
@@ -54,7 +56,19 @@ func ExecutionStore() repository.ExecutionStore {
 	return NewExecutionStore(database.DB())
 }
 func NewExecutionStore(db *gorm.DB) repository.ExecutionStore {
-	return repository.ExecutionStore{Store: repository.Store{DB: db, LockFiles: files.LockAvailable}, ReadInput: readExecutionInput}
+	return repository.ExecutionStore{Store: repository.Store{DB: db, LockFiles: files.LockAvailable}, ReadInput: readExecutionInput, RecordWork: func(tx *gorm.DB, v model.Task, a model.Attempt, in model.ResultResolution, now time.Time) (uint64, error) {
+		var snapshot struct {
+			AccountName string `json:"account_name"`
+		}
+		if err := json.Unmarshal(v.ResourceSnapshot, &snapshot); err != nil {
+			return 0, err
+		}
+		w, err := work.RecordPublication(tx, workmodel.Work{AccountName: snapshot.AccountName, Platform: v.Platform, PlatformWorkID: in.PlatformWorkID, WorkURL: in.WorkURL, PlatformAccountUID: a.Input.PlatformUID, MediaAccountID: v.MediaAccountID, OperatorID: v.OperatorID, TeamID: v.TeamID, CategoryID: v.CategoryID, PublicationID: v.ID, AttemptID: a.ID, CompositeOutputID: v.CompositeOutputID, Title: a.Input.Content.Description, CoverFileID: a.Input.Content.CoverFileID, VideoSHA256: a.Input.VideoSHA256, PublishedAt: in.PublishedAt.UTC(), FirstObservedAt: now.UTC()})
+		if errors.Is(err, work.ErrConflict) || errors.Is(err, work.ErrInvalid) {
+			err = repository.ErrConflict
+		}
+		return w.ID, err
+	}}
 }
 func WiredExecution() *ExecutionService {
 	return &ExecutionService{Repo: ExecutionStore(), Grant: grantExecutionFiles}

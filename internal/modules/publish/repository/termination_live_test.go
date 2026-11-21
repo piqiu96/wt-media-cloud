@@ -78,7 +78,7 @@ func TestLiveAbandonRequiresOriginalSafeFailureAndReleasesOnlyThen(t *testing.T)
 	if _, err := s.Abandon(v, 9, input, now); !errors.Is(err, repo.ErrConflict) {
 		t.Fatalf("unknown abandoned: %v", err)
 	}
-	failed, err := s.ResolveFailure(v, 9, resolution(c, v), now)
+	failed, err := s.ResolveResult(v, 9, resolution(c, v), now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -165,7 +165,7 @@ func TestLiveAbandonAndRetryCannotBothWin(t *testing.T) {
 	s, c, _ := unresolvedPublication(t)
 	v, _ := s.Get(c.Task.ID)
 	now := time.Now().UTC()
-	failed, err := s.ResolveFailure(v, 9, resolution(c, v), now)
+	failed, err := s.ResolveResult(v, 9, resolution(c, v), now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -194,7 +194,7 @@ func TestLiveAbandonAuditFailureDoesNotRelease(t *testing.T) {
 	s, c, _ := unresolvedPublication(t)
 	v, _ := s.Get(c.Task.ID)
 	now := time.Now().UTC()
-	failed, err := s.ResolveFailure(v, 9, resolution(c, v), now)
+	failed, err := s.ResolveResult(v, 9, resolution(c, v), now)
 	if err != nil {
 		t.Fatal(err)
 	}

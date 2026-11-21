@@ -1,8 +1,8 @@
 openapi: 3.1.0
 info:
   title: WT Media Single Publication Preparation
-  version: 2026.11.21.1
-  description: Creating never authorizes execution or submits a platform post. Execution requires separate revision-bound start authorization. Baidu task preparation is available. IDs and revisions are decimal strings; timestamps RFC3339. Uses errcode/message/data/logid.
+  version: 2026.11.21.2
+  description: Task platform_submission_id/target_url contain original receipts; platform_work_id/work_url/work_id only identify verified public work (ADR-0035). Creating never authorizes execution or submits a platform post. Execution requires separate revision-bound start authorization. Baidu task preparation is available. IDs and revisions are decimal strings; timestamps RFC3339. Uses errcode/message/data/logid.
 paths:
   /api/v1/publication/request:
     get:
@@ -148,9 +148,9 @@ paths:
       operationId: resolvePublication
       security: [{sessionCookie: []}]
       parameters: [{in: path, name: id, required: true, schema: {$ref: '#/components/schemas/ID'}}]
-      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/FailureResolution'}}}}
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ResultResolution'}}}}
       responses:
-        '200': {description: 'Revision-checked current-attempt verification, preserving the original result. This revision supports confirmed failure or still uncertain only; no public-success inference. Failure requires explicit no-publishable-work and closed-scene evidence from the original account, not merely a missing submit flag.'}
+        '200': {description: 'Revision-checked current-attempt verification, preserving the original result. Supports four explicit conclusions for uncertain, or published supplement for reviewing. Published requires exact public identity, actual published_at and explicit public/content evidence. Work deduplication and task association are atomic. The original submission ID is preserved separately from public work ID. Failure requires explicit no-publishable-work and closed-scene evidence from the original account, not merely a missing submit flag.'}
         '409': {description: 'Stale revision/attempt, active scene, unsafe or unsupported conclusion. No input, occupancy or original result is changed.'}
   /api/v1/publication/{id}/retry:
     post:
@@ -214,14 +214,19 @@ components:
   securitySchemes:
     sessionCookie: {type: apiKey, in: cookie, name: wt_media_session}
   schemas:
-    FailureResolution:
+    ResultResolution:
       type: object
       additionalProperties: false
       required: [attempt_id, expected_revision, conclusion, evidence]
       properties:
         attempt_id: {$ref: '#/components/schemas/ID'}
         expected_revision: {$ref: '#/components/schemas/ID'}
-        conclusion: {type: string, enum: [failed, uncertain]}
+        conclusion: {type: string, enum: [failed, uncertain, reviewing, published]}
+        platform_submission_id: {type: string, maxLength: 255}
+        target_url: {type: string, maxLength: 2048}
+        platform_work_id: {type: string, maxLength: 255}
+        work_url: {type: string, maxLength: 2048}
+        published_at: {type: [string, 'null'], format: date-time}
         evidence:
           type: object
           additionalProperties: false
@@ -232,6 +237,8 @@ components:
             basis: {type: string, minLength: 10, maxLength: 2000}
             scene_closed: {type: boolean}
             no_publishable_work: {type: boolean}
+            work_matched: {type: boolean}
+            publicly_accessible: {type: boolean}
     Abandonment:
       type: object
       additionalProperties: false

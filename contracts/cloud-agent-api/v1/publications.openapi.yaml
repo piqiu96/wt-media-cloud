@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: WT Media Cloud-Agent Publication Execution
-  version: 2026.11.20.2
+  version: 2026.11.21.2
   description: >-
     Additive single-task execution. Agent bearer identifies the account owner; no device identity or
     generic lease. Claim requires a current Desktop session. Reports are report-safe only for the same
@@ -65,7 +65,7 @@ paths:
                       attempt_id: {$ref: '#/components/schemas/ID'}
                       result_hash: {type: [string, 'null']}
                       scene_resolved: {type: boolean}
-                      resolved_status: {type: string, enum: [failed, reviewing, ''], description: 'Original attempt disposition, never authorization for the task currently occupying this id.'}
+                      resolved_status: {type: string, enum: [failed, reviewing, published, ''], description: 'Original attempt disposition, never authorization for the task currently occupying this id.'}
         '404': {description: 'Original attempt missing, wrong publication or foreign owner.'}
 components:
   securitySchemes:

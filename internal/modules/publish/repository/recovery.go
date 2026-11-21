@@ -2,6 +2,7 @@ package repository
 
 import (
 	"encoding/json"
+	"errors"
 	"github.com/wt-media/wt-media-cloud/internal/modules/publish/model"
 	"gorm.io/gorm"
 	"time"
@@ -11,9 +12,9 @@ import (
 // attempt. It is never a permit to reopen the old scene or click again.
 func safeDisposition(a model.Attempt) model.Status {
 	if a.ResolvedAt != nil && a.ResolutionNote != nil {
-		var v model.FailureResolution
-		if json.Unmarshal([]byte(*a.ResolutionNote), &v) == nil && v.Valid() && v.AttemptID == a.ID && v.Conclusion == model.StatusFailed && v.Evidence.PlatformUID == a.Input.PlatformUID {
-			return model.StatusFailed
+		var v model.ResultResolution
+		if json.Unmarshal([]byte(*a.ResolutionNote), &v) == nil && v.Valid() && v.AttemptID == a.ID && (v.Conclusion == model.StatusFailed || v.Conclusion == model.StatusReviewing || v.Conclusion == model.StatusPublished) && v.Evidence.PlatformUID == a.Input.PlatformUID {
+			return v.Conclusion
 		}
 	}
 	if a.Status != model.AttemptStatusCompleted || a.ResultHash == nil {
@@ -44,7 +45,7 @@ func (s ExecutionStore) OriginalAttempt(task, attempt uint64, user int64) (model
 	status := safeDisposition(a)
 	return model.OriginalAttemptState{AttemptID: a.ID, ResultHash: a.ResultHash, SceneResolved: status != "", ResolvedStatus: status}, nil
 }
-func (s ExecutionStore) ResolveFailure(candidate model.Task, actor int64, in model.FailureResolution, now time.Time) (model.Task, error) {
+func (s ExecutionStore) ResolveResult(candidate model.Task, actor int64, in model.ResultResolution, now time.Time) (model.Task, error) {
 	if !in.Valid() {
 		return model.Task{}, ErrConflict
 	}
@@ -54,30 +55,64 @@ func (s ExecutionStore) ResolveFailure(candidate model.Task, actor int64, in mod
 		if e != nil {
 			return e
 		}
-		if !sameCandidate(v, candidate) || v.Revision != in.ExpectedRevision || v.Status != model.StatusUncertain || v.CurrentAttemptID == nil || *v.CurrentAttemptID != in.AttemptID {
+		if !sameCandidate(v, candidate) || v.Revision != in.ExpectedRevision || (v.Status != model.StatusUncertain && !(v.Status == model.StatusReviewing && in.Conclusion == model.StatusPublished)) || v.CurrentAttemptID == nil || *v.CurrentAttemptID != in.AttemptID {
 			return &ConflictError{TaskID: v.ID, Revision: v.Revision}
 		}
 		var a model.Attempt
 		if e := tx.First(&a, in.AttemptID).Error; e != nil {
 			return e
 		}
-		if a.PublicationID != v.ID || a.ExecutorUserID != v.OperatorID || a.ResolvedAt != nil || in.Evidence.PlatformUID != a.Input.PlatformUID || a.Status != model.AttemptStatusInterrupted {
+		if a.PublicationID != v.ID || a.ExecutorUserID != v.OperatorID || in.Evidence.PlatformUID != a.Input.PlatformUID || a.Input.PlatformUID != v.PlatformAccountUID || (v.Status == model.StatusUncertain && (a.ResolvedAt != nil || a.Status != model.AttemptStatusInterrupted)) || (v.Status == model.StatusReviewing && safeDisposition(a) != model.StatusReviewing) {
 			return ErrConflict
 		}
-		note := mustJSON(in)
-		changes := map[string]any{"resolution_note": note}
-		if in.Conclusion == model.StatusFailed {
+		if v.Platform != "baidu" {
+			return ErrConflict
+		}
+		if v.PlatformSubmissionID != nil && *v.PlatformSubmissionID != "" && (in.Conclusion == model.StatusReviewing || in.Conclusion == model.StatusPublished) && *v.PlatformSubmissionID != in.PlatformSubmissionID {
+			return ErrConflict
+		}
+		changes := map[string]any{"resolution_note": mustJSON(in)}
+		updates := map[string]any{"updated_at": now}
+		if in.Conclusion != model.StatusUncertain {
 			changes["resolved_at"] = now
 			changes["resolved_by"] = actor
+			updates["status"] = in.Conclusion
+			updates["failure_code"] = nil
+			updates["failure_message"] = nil
 		}
-		updates := map[string]any{"updated_at": now}
 		if in.Conclusion == model.StatusFailed {
-			updates["status"] = model.StatusFailed
 			updates["failure_code"] = "VERIFIED_NOT_PUBLISHED"
 			updates["failure_message"] = in.Evidence.Reason
 		}
+		if in.Conclusion == model.StatusReviewing || in.Conclusion == model.StatusPublished {
+			updates["platform_submission_id"] = in.PlatformSubmissionID
+			if in.TargetURL != "" {
+				updates["target_url"] = in.TargetURL
+			}
+			if v.AcceptedAt == nil {
+				updates["accepted_at"] = now
+			}
+		}
+		if in.Conclusion == model.StatusPublished {
+			updates["platform_work_id"] = in.PlatformWorkID
+			updates["work_url"] = in.WorkURL
+			updates["published_at"] = in.PublishedAt
+		}
 		if e := updateTask(tx, v, updates); e != nil {
 			return e
+		}
+		if in.Conclusion == model.StatusPublished {
+			if s.RecordWork == nil {
+				return errors.New("public work recorder is unavailable")
+			}
+			id, e := s.RecordWork(tx, v, a, in, now)
+			if e != nil {
+				return e
+			}
+			// This task row is already owned by the successful revision update.
+			if e = tx.Model(&model.Task{}).Where("id=? AND revision=?", v.ID, v.Revision+1).Update("work_id", id).Error; e != nil {
+				return e
+			}
 		}
 		if e := updateAttempt(tx, a, changes); e != nil {
 			return e

@@ -15,7 +15,7 @@ type recoveryFake struct {
 }
 
 func (f *recoveryFake) Get(uint64) (model.Task, error) { return f.task, nil }
-func (f *recoveryFake) ResolveFailure(v model.Task, a int64, in model.FailureResolution, n time.Time) (model.Task, error) {
+func (f *recoveryFake) ResolveResult(v model.Task, a int64, in model.ResultResolution, n time.Time) (model.Task, error) {
 	f.writes++
 	return v, nil
 }
@@ -31,7 +31,7 @@ func TestRecoveryRequiresCurrentScopeAndNeverUsesAnOldResultAsAuthorization(t *t
 	f := &recoveryFake{task: model.Task{ID: 1, OperatorID: 3, CategoryID: 4, TeamID: 1, Platform: "baidu"}}
 	s := RecoveryService{Repo: f}
 	owner := identity.PublicUser{ID: 3, Role: identity.RoleOperator, Status: identity.UserStatusEnabled, CategoryIDs: []identity.CategoryID{4}}
-	in := model.FailureResolution{AttemptID: 2, ExpectedRevision: 3, Conclusion: "uncertain", Evidence: model.VerificationEvidence{PlatformUID: "original", Reason: "等待人工核对", Basis: "平台安全验证尚未完成，保留原尝试待核实"}}
+	in := model.ResultResolution{AttemptID: 2, ExpectedRevision: 3, Conclusion: "uncertain", Evidence: model.VerificationEvidence{PlatformUID: "original", Reason: "等待人工核对", Basis: "平台安全验证尚未完成，保留原尝试待核实"}}
 	for _, actor := range []identity.PublicUser{{ID: 99, Role: identity.RoleOperator, Status: identity.UserStatusEnabled, CategoryIDs: owner.CategoryIDs}, {ID: 3, Role: identity.RoleOperator, Status: identity.UserStatusEnabled}, {ID: 3, Role: identity.RoleOperator, Status: identity.UserStatusDisabled, CategoryIDs: owner.CategoryIDs}} {
 		if _, e := s.Resolve(actor, 1, in); !errors.Is(e, ErrNotFound) {
 			t.Fatal(e)

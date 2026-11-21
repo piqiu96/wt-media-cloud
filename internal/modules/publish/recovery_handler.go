@@ -21,7 +21,7 @@ func Resolve(_ context.Context, c *app.RequestContext) {
 		fail(c, e)
 		return
 	}
-	var in model.FailureResolution
+	var in model.ResultResolution
 	if e = decode(c, &in); e != nil {
 		fail(c, e)
 		return

@@ -16,7 +16,7 @@ func TestLiveCopyChecksExactSafeAttemptWithoutCreatingWork(t *testing.T) {
 	if _, err := reader.Copy(actor, v.ID, v.Revision); err == nil {
 		t.Fatal("unknown copied")
 	}
-	v, err := s.ResolveFailure(v, 9, resolution(c, v), time.Now().UTC())
+	v, err := s.ResolveResult(v, 9, resolution(c, v), time.Now().UTC())
 	if err != nil {
 		t.Fatal(err)
 	}

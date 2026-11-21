@@ -484,7 +484,7 @@ async function openVerification(row) {
   error.value = "";
   try {
     const task = await client.get(row.id);
-    if (task.status !== PublicationStatus.Uncertain) throw new Error("任务状态已变化，请核对列表后操作");
+    if (![PublicationStatus.Uncertain,PublicationStatus.Reviewing].includes(task.status)) throw new Error("任务状态已变化，请核对列表后操作");
     recoveryTask.value = JSON.parse(JSON.stringify(task));
     recoveryError.value = "";
     recoveryVisible.value = true;
@@ -794,7 +794,9 @@ onMounted(async () => {
       scope: "all",
       enabled: true,
     });
-    const id = String(route.query.output_id || "");
+    const publicationId=String(route.query.publication_id||"");
+ if(/^[1-9][0-9]*$/.test(publicationId)){await openDetail({id:publicationId});return;}
+ const id = String(route.query.output_id || "");
     if (/^[1-9][0-9]*$/.test(id)) {
       const data = await compose.getComposeOutput(id);
       await openCreate(data.output);
@@ -920,11 +922,12 @@ onMounted(async () => {
             <template #op="{ row }">
               <ResourceRowActions>
                 <t-button v-if="editable(row)" class="is-primary" variant="text" size="small" :disabled="busy" @click="startExecution(row)">执行</t-button>
-                <t-button v-if="row.status === PublicationStatus.Uncertain" class="is-primary" variant="text" size="small" :disabled="busy" @click="openVerification(row)">核实结果</t-button>
+                <t-button v-if="[PublicationStatus.Uncertain,PublicationStatus.Reviewing].includes(row.status)" class="is-primary" variant="text" size="small" :disabled="busy" @click="openVerification(row)">{{row.status===PublicationStatus.Reviewing?'补录':'核实结果'}}</t-button>
                 <t-button v-if="retryable(row)" class="is-primary" variant="text" size="small" :disabled="busy" @click="retryExecution(row)">重试</t-button>
                 <t-button v-if="editable(row)" variant="text" size="small" :disabled="busy" @click="edit(row)">编辑</t-button>
                 <t-button v-if="cancellable(row)" theme="danger" variant="text" size="small" :disabled="busy" @click="openTermination(row, 'cancel')">终止</t-button>
                 <t-button v-if="abandonable(row)" theme="danger" variant="text" size="small" :disabled="busy" @click="openTermination(row, 'abandon')">放弃</t-button>
+                <t-button v-if="row.work_id" variant="text" size="small" @click="router.push({path:'/work',query:{work_id:row.work_id}})">查看作品</t-button>
                 <t-button v-if="copyable(row)" variant="text" size="small" :disabled="busy" @click="copyTask(row)">复制</t-button>
                 <t-button variant="text" size="small" :disabled="busy" @click="detailReturn = 'list'; openDetail(row)">详情</t-button>
               </ResourceRowActions>
@@ -1089,6 +1092,9 @@ onMounted(async () => {
           <t-descriptions-item label="内容类目">{{ categoryName(detail.category_id) }}</t-descriptions-item>
           <t-descriptions-item label="发布账号"><t-button v-if="detail.media_account_id" theme="primary" variant="text" size="small" @click="viewAccount(detail.media_account_id)">{{ detail.resources.account_name || "查看账号" }}</t-button><span v-else>—</span></t-descriptions-item>
           <t-descriptions-item label="真实 UID">{{ detail.platform_account_uid }}</t-descriptions-item>
+          <t-descriptions-item v-if="detail.platform_submission_id" label="投稿回执 ID">{{detail.platform_submission_id}}</t-descriptions-item>
+          <t-descriptions-item v-if="detail.work_id" label="关联作品"><t-button variant="text" @click="router.push({path:'/work',query:{work_id:detail.work_id}})">作品 {{detail.work_id}}</t-button></t-descriptions-item>
+          <t-descriptions-item v-if="detail.published_at" label="平台实际发布时间">{{formatDateTime(detail.published_at)}}</t-descriptions-item>
           <t-descriptions-item label="成片" full>{{ detail.resources.output_name || detail.composite_output_id }}</t-descriptions-item>
         </ResourceDescriptions>
       </ResourceSection></ResourceCard>

@@ -42,6 +42,9 @@ const menuItems = [
     { value: 'publishing', title: '发布管理', icon: 'send', children: [
       { title: '发布任务', path: '/publish', icon: 'send' },
     ] },
+    { value: 'work-management', title: '作品管理', icon: 'video', children: [
+      { title: '作品列表', path: '/work', icon: 'video' },
+    ]},
     { title: '互动管理', path: '/interact', icon: 'chat' },
   ] },
   { value: 'operation-resources', title: '运营资源', icon: 'folder', children: [

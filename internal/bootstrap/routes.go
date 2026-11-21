@@ -29,6 +29,8 @@ import (
 	"github.com/wt-media/wt-media-cloud/internal/modules/proxy"
 	"github.com/wt-media/wt-media-cloud/internal/modules/publish"
 	publishservice "github.com/wt-media/wt-media-cloud/internal/modules/publish/service"
+	"github.com/wt-media/wt-media-cloud/internal/modules/work"
+	workservice "github.com/wt-media/wt-media-cloud/internal/modules/work/service"
 	api "github.com/wt-media/wt-media-cloud/internal/shared/api"
 	"gorm.io/gorm"
 )
@@ -67,6 +69,7 @@ func registerModuleRoutes(engine *server.Hertz) {
 	files.RegisterRoutes(engine)
 	image.RegisterRoutes(engine)
 	publish.RegisterRoutes(engine)
+	work.RegisterRoutes(engine)
 }
 
 func bootstrapIdentity(username, password string) error {
@@ -102,7 +105,10 @@ func ConfigureFileReferences() {
 		if e := productionservice.CheckOutputFileReferences(tx, id); e != nil {
 			return e
 		}
-		return publishservice.CheckFileReferences(tx, id)
+		if e := publishservice.CheckFileReferences(tx, id); e != nil {
+			return e
+		}
+		return workservice.CheckFileReferences(tx, id)
 	})
 	imageservice.SetReferenceProvider(func(tx *gorm.DB, id int64) error {
 		if e := imageservice.CheckArtworkFileReferences(tx, id); e != nil {
@@ -114,7 +120,10 @@ func ConfigureFileReferences() {
 		if e := productionservice.CheckOutputFileReferences(tx, id); e != nil {
 			return e
 		}
-		return publishservice.CheckFileReferences(tx, id)
+		if e := publishservice.CheckFileReferences(tx, id); e != nil {
+			return e
+		}
+		return workservice.CheckFileReferences(tx, id)
 	}, func(a identityservice.PublicUser, id int64) ([]imagemodel.Reference, error) {
 		rows, e := publishservice.ListFileReference(a, id)
 		if e != nil {

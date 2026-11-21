@@ -108,7 +108,8 @@ func legacyAdmission(t *testing.T, n int, sameProfile bool) *gorm.DB {
 	if e := db.Exec("INSERT INTO browser_profiles VALUES(37),(38),(39),(40)").Error; e != nil {
 		t.Fatal(e)
 	}
-	v, e := store(db).Create(task("legacy-admission", 42, 1))
+	v := task("legacy-admission", 42, 1)
+	e := db.Omit("PlatformSubmissionID", "TargetURL", "WorkID").Create(&v).Error
 	if e != nil {
 		t.Fatal(e)
 	}
