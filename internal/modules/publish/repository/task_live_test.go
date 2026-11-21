@@ -25,7 +25,7 @@ import (
 // This creates an isolated, disposable schema, never test task rows in the live queue.
 func isolated(t *testing.T) *gorm.DB {
 	db := isolatedDB(t, true)
-	for _, name := range []string{"20261118_103_operations_file_delete_state.sql", "20261119_106_operations_file_deleted_at.sql", "20261119_107_publication_attempt_revision.sql", "20261120_108_publication_task_profile_reference.sql", "20261120_109_publication_attempt_admission.sql", "20261121_112_public_work.sql", "20261121_113_publication_human.sql"} {
+	for _, name := range []string{"20261118_103_operations_file_delete_state.sql", "20261119_106_operations_file_deleted_at.sql", "20261119_107_publication_attempt_revision.sql", "20261120_108_publication_task_profile_reference.sql", "20261120_109_publication_attempt_admission.sql", "20261121_112_public_work.sql", "20261121_113_publication_human.sql", "20261121_114_publication_observation.sql"} {
 		applyFileMigration(t, db, name)
 	}
 	return db

@@ -14,7 +14,7 @@ and an Agent Token is not accepted on user business API.
 - `v1/agent-token.openapi.yaml`: exchanging a Desktop session for a signed Agent Token.
 - `v1/file-transfer.openapi.yaml`: Local Agent lease, heartbeat, progress, completion, and cancellation-observation endpoints for `user_download` transfer tasks.
 
-- `v1/publications.openapi.yaml`: owner-only publication claim, unified report (keepalive/progress/pre-submit check) and report-safe original result. Agent routes use the singular `/api/v1/cloud-agent/publication-task` prefix.
+- `v1/publications.openapi.yaml`: owner-only publication claim, unified report (keepalive/progress/pre-submit check) and report-safe original result. Revision `2026.11.21.4` adds owner-only due original-submission check claims and independent revision/generation-bound observations; public work is recorded atomically without mutating the original attempt. Agent routes use the singular `/api/v1/cloud-agent/publication-task` prefix.
 
 ## Retired
 

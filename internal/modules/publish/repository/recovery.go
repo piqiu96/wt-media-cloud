@@ -2,7 +2,6 @@ package repository
 
 import (
 	"encoding/json"
-	"errors"
 	"github.com/wt-media/wt-media-cloud/internal/modules/publish/model"
 	"gorm.io/gorm"
 	"time"
@@ -102,15 +101,7 @@ func (s ExecutionStore) ResolveResult(candidate model.Task, actor int64, in mode
 			return e
 		}
 		if in.Conclusion == model.StatusPublished {
-			if s.RecordWork == nil {
-				return errors.New("public work recorder is unavailable")
-			}
-			id, e := s.RecordWork(tx, v, a, in, now)
-			if e != nil {
-				return e
-			}
-			// This task row is already owned by the successful revision update.
-			if e = tx.Model(&model.Task{}).Where("id=? AND revision=?", v.ID, v.Revision+1).Update("work_id", id).Error; e != nil {
+			if e := s.recordVerifiedWork(tx, v, a, in, now); e != nil {
 				return e
 			}
 		}

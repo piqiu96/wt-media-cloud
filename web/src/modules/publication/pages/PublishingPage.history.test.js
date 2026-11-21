@@ -93,7 +93,8 @@ it('refreshes the executing task and its history without leaving its detail', as
   expect(state.view.value).toBe('detail');
   expect(state.detail.value.status).toBe('reviewing');
   expect(state.attempts.value[0].id).toBe('accepted-attempt');
-  expect(state.needsExecutionRefresh.value).toBe(false);
+  expect(state.needsExecutionRefresh.value).toBe(true);
+  expect(state.executionRefreshInterval.value).toBe(30000);
 });
 
 it('does not overwrite a new task detail with an earlier background response', async () => {
@@ -418,4 +419,22 @@ it('never continues an original scene after the signed-in user changes',async()=
  expect(services.human).toHaveBeenCalledTimes(1);
  expect(state.humanError.value).toContain('登录身份已变化');
  expect(state.humanVisible.value).toBe(true);
+});
+
+it('refreshes reviewing results and pauses while the human supplementation dialog is open',async()=>{
+ const reviewing={...task('1'),status:'reviewing',revision:'5',current_attempt_id:'7'};
+ services.publication.get.mockResolvedValue(reviewing);
+ await state.openDetail(reviewing);
+ expect(state.needsExecutionRefresh.value).toBe(true);
+ expect(state.executionRefreshInterval.value).toBe(30000);
+ services.publication.get.mockClear();
+ state.recoveryVisible.value=true;
+ await state.refreshExecution();
+ expect(services.publication.get).not.toHaveBeenCalled();
+ state.recoveryVisible.value=false;
+ services.publication.get.mockResolvedValue({...reviewing,status:'published',revision:'6',work_id:'10',last_check_message:'指定作品已经公开'});
+ await state.refreshExecution();
+ expect(state.detail.value.status).toBe('published');
+ expect(state.detail.value.work_id).toBe('10');
+ expect(state.needsExecutionRefresh.value).toBe(false);
 });

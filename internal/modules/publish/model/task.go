@@ -23,6 +23,10 @@ type Content struct {
 	Confirmed   bool         `json:"confirmed"`
 }
 type Task struct {
+	NextCheckAt          *time.Time `json:"-"`
+	CheckGeneration      uint64     `json:"-"`
+	LastCheckedAt        *time.Time `json:"last_checked_at"`
+	LastCheckMessage     *string    `json:"last_check_message"`
 	CanCancel            bool       `json:"can_cancel" gorm:"->;-:migration"`
 	CancelRequestedAt    *time.Time `json:"cancel_requested_at"`
 	AcceptedAt           *time.Time `json:"accepted_at"`

@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: WT Media Cloud-Agent Publication Execution
-  version: 2026.11.21.3
+  version: 2026.11.21.4
   description: >-
     Additive single-task execution. Agent bearer identifies the account owner; no device identity or
     generic lease. Claim requires a current Desktop session. Reports are report-safe only for the same
@@ -100,12 +100,50 @@ paths:
       responses:
         '200': {description: 'Standard envelope data original ExecutionFeedback, running, allow_submit=false.'}
         '409': {description: Stale original identity/revision, submitted/lost scene, stop or changed input.}
+  /api/v1/cloud-agent/publication-task/check/claim:
+    post:
+      operationId: claimPublicCheck
+      security: [{agentBearer: []}]
+      description: Read one due original reviewing task for the current owner. Advances only the five-minute read schedule and observation generation. No publication attempt, upload, file grant or submit permission is created. A missing reply waits for the next read cycle.
+      responses:
+        '200': {description: Standard envelope with data null or PublicCheckClaim, content: {application/json: {schema: {type: object, properties: {data: {nullable: true, allOf: [{$ref: '#/components/schemas/PublicCheckClaim'}]}}}}}}
+        '401': {description: Current Desktop Agent session required.}
+  /api/v1/cloud-agent/publication-task/{id}/check:
+    post:
+      operationId: observePublication
+      security: [{agentBearer: []}]
+      parameters: [{$ref: '#/components/parameters/TaskID'}]
+      description: Record this exact original attempt and generation. Current task revision/input/owner fences manual supplementation and later checks. Only unknown/received/public observations are admitted. Unknown or inaccessible preserves reviewing. A credible public observation atomically records work, task, observation and audit without changing the original attempt. Exact recorded replay confirms the original observation without changing a newer task.
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/PublicCheckReport'}}}}
+      responses:
+        '200': {description: 'Standard envelope data {publication_id,attempt_id,generation,observation_hash}; IDs/generation decimal strings. No submit permission.'}
+        '400': {description: Invalid observation or unsupported conclusion.}
+        '401': {description: Current Desktop Agent session required.}
+        '409': {description: Original task revision/attempt/generation/input changed or observation conflicts.}
 components:
   securitySchemes:
     agentBearer: {type: http, scheme: bearer}
   parameters:
     TaskID: {in: path, name: id, required: true, schema: {$ref: '#/components/schemas/ID'}}
   schemas:
+    PublicCheckClaim:
+      type: object
+      required: [task, attempt, generation, expected_revision]
+      properties:
+        task: {type: object, description: 'Original reviewing task, immutable submission ID and exact platform-supplied target_url if known.'}
+        attempt: {type: object, description: 'Original frozen input and Profile, no file grants or execution authority.'}
+        generation: {type: string, pattern: '^[1-9][0-9]*$'}
+        expected_revision: {type: string, pattern: '^[1-9][0-9]*$'}
+    PublicCheckReport:
+      type: object
+      additionalProperties: false
+      required: [generation, observation]
+      properties:
+        generation: {type: string, pattern: '^[1-9][0-9]*$'}
+        observation:
+          allOf:
+            - {$ref: '../../cloud-api/v1/publication.openapi.yaml#/components/schemas/ResultResolution'}
+            - {type: object, properties: {conclusion: {type: string, enum: [uncertain, reviewing, published]}}}
     ID: {type: string, pattern: '^[1-9][0-9]*$'}
     Report:
       type: object

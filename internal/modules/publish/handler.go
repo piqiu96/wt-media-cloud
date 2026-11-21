@@ -38,6 +38,8 @@ func RegisterRoutes(h *server.Hertz) {
 	h.GET("/api/v1/publication/:id/attempt", Attempt)
 	h.GET("/api/v1/cloud-agent/publication-task/:id/attempt/:attempt_id/scene", localagent.RequireAgent(localagent.StrictMode), GetHumanScene)
 	h.POST("/api/v1/cloud-agent/publication-task/:id/resume", localagent.RequireAgent(localagent.StrictMode), Resume)
+	h.POST("/api/v1/cloud-agent/publication-task/check/claim", localagent.RequireAgent(localagent.StrictMode), ClaimPublicCheck)
+	h.POST("/api/v1/cloud-agent/publication-task/:id/check", localagent.RequireAgent(localagent.StrictMode), ObservePublication)
 	h.POST("/api/v1/cloud-agent/publication-task/claim", localagent.RequireAgent(localagent.StrictMode), Claim)
 	h.POST("/api/v1/cloud-agent/publication-task/:id/report", localagent.RequireAgent(localagent.ReportSafeMode), Report)
 	h.POST("/api/v1/cloud-agent/publication-task/:id/complete", localagent.RequireAgent(localagent.ReportSafeMode), Complete)
