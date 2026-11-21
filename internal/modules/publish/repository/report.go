@@ -98,6 +98,12 @@ func (s ExecutionStore) Report(candidate model.Task, user int64, r model.Executi
 				return ErrConflict
 			}
 		case model.AttemptStageAwaitingHuman:
+			if a.Stage != model.AttemptStageClaimed && a.Stage != model.AttemptStagePreparing && a.Stage != model.AttemptStageReady && a.Stage != model.AttemptStageAwaitingHuman {
+				return ErrConflict
+			}
+			if a.SubmitStartedAt != nil {
+				return ErrConflict
+			}
 		default:
 			return ErrConflict
 		}
@@ -123,6 +129,7 @@ func (s ExecutionStore) Report(candidate model.Task, user int64, r model.Executi
 			}
 		}
 		allowed := r.Stage == model.AttemptStageSubmitting && v.Status == model.StatusRunning && v.AuthorizedAt != nil && v.CancelRequestedAt == nil && (v.NotBefore == nil || !v.NotBefore.After(now))
+		previousStage := a.Stage
 		steps = append(steps, reportStep{Seq: r.Seq, Report: r, At: now})
 		a.Stage = r.Stage
 		a.ReportSeq = r.Seq
@@ -135,6 +142,8 @@ func (s ExecutionStore) Report(candidate model.Task, user int64, r model.Executi
 		taskUpdates := map[string]any{"updated_at": now}
 		awaitingHuman := r.Stage == model.AttemptStageAwaitingHuman && v.Status == model.StatusRunning
 		if awaitingHuman {
+			updates["paused_stage"] = previousStage
+			updates["last_resume_revision"] = nil
 			a.Status = model.AttemptStatusAwaitingHuman
 			v.Status = model.StatusAwaitingHuman
 			updates["status"] = a.Status

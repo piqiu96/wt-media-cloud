@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: WT Media Cloud-Agent Publication Execution
-  version: 2026.11.21.2
+  version: 2026.11.21.3
   description: >-
     Additive single-task execution. Agent bearer identifies the account owner; no device identity or
     generic lease. Claim requires a current Desktop session. Reports are report-safe only for the same
@@ -67,6 +67,39 @@ paths:
                       scene_resolved: {type: boolean}
                       resolved_status: {type: string, enum: [failed, reviewing, published, ''], description: 'Original attempt disposition, never authorization for the task currently occupying this id.'}
         '404': {description: 'Original attempt missing, wrong publication or foreign owner.'}
+  /api/v1/cloud-agent/publication-task/{id}/attempt/{attempt_id}/scene:
+    get:
+      operationId: inspectPublicationScene
+      security: [{agentBearer: []}]
+      description: Strict current Desktop session. Validate original owner, task revision, attempt, frozen input, paused pre-submit stage and stop state. Read only; never opens a browser or grants submit.
+      parameters:
+        - {$ref: '#/components/parameters/TaskID'}
+        - {in: path, name: attempt_id, required: true, schema: {$ref: '#/components/schemas/ID'}}
+        - {in: query, name: expected_revision, required: true, schema: {$ref: '#/components/schemas/ID'}}
+      responses:
+        '200': {description: 'Standard envelope data original attempt ExecutionFeedback, allow_submit=false.'}
+        '409': {description: Stale, unsafe, changed input or no original waiting scene eligibility.}
+  /api/v1/cloud-agent/publication-task/{id}/resume:
+    post:
+      operationId: resumePublication
+      security: [{agentBearer: []}]
+      description: Continue only a live original pre-submit scene, with current Desktop authentication. Restores the saved stage and original attempt, never creates an attempt or reuploads. Same original expected_revision can confirm a lost reply only while that exact resume remains safe. Submit permission is independently rechecked later.
+      parameters:
+        - {$ref: '#/components/parameters/TaskID'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [attempt_id, expected_revision]
+              properties:
+                attempt_id: {$ref: '#/components/schemas/ID'}
+                expected_revision: {$ref: '#/components/schemas/ID'}
+      responses:
+        '200': {description: 'Standard envelope data original ExecutionFeedback, running, allow_submit=false.'}
+        '409': {description: Stale original identity/revision, submitted/lost scene, stop or changed input.}
 components:
   securitySchemes:
     agentBearer: {type: http, scheme: bearer}

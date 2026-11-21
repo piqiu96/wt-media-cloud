@@ -110,7 +110,7 @@ func TestPublicationAgentRoutesRequireBearer(t *testing.T) {
 	if e = yaml.Unmarshal(raw, &doc); e != nil {
 		t.Fatal(e)
 	}
-	if len(doc.Paths) != 4 {
+	if len(doc.Paths) != 6 {
 		t.Fatalf("agent route count=%d", len(doc.Paths))
 	}
 	for path, methods := range doc.Paths {

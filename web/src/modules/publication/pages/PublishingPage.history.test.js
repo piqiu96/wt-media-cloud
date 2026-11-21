@@ -10,7 +10,9 @@ const services = vi.hoisted(() => ({
   publication: { copy: vi.fn(), findByRequest: vi.fn(), get: vi.fn(), attempt: vi.fn(), list: vi.fn(), edit: vi.fn(), create: vi.fn(), cancel: vi.fn(), abandon: vi.fn() },
   compose: { getComposeOutput: vi.fn() },
   accounts: { get: vi.fn() },
+  human: vi.fn(),
 }));
+vi.mock('../../../shared/api/publicationRun.js',()=>({handlePublicationHuman:services.human}));
 vi.mock('../../../shared/api/image.js', () => ({ createImageClient: () => services.images }));
 vi.mock('../../../shared/api/session.js', () => ({ createSessionClient: () => services.session }));
 vi.mock('../../../shared/api/publicationDraft.js', () => ({ createPublicationDraftClient: () => services.draft }));
@@ -387,4 +389,33 @@ it('discards a copy response after the page has been disposed',async()=>{
  finish({platform:'baidu',category_id:'1',content:{description:'迟到的文案',topics:'',declaration:''}});
  await copying;
  expect(services.draft.get).not.toHaveBeenCalled();expect(state.view.value).toBe('list');
+});
+
+it('handles human verification in the original task and retains retry context on a lost reply',async()=>{
+ const waiting={...task('1'),revision:'5',status:'awaiting_human',current_attempt_id:'7'};
+ services.publication.get.mockResolvedValue(waiting);
+ services.human.mockResolvedValue({attempt_id:'7',status:'awaiting_human'});
+ await state.openHumanScene(waiting);
+ expect(services.human).toHaveBeenCalledWith({task:waiting,userId:'9'});
+ expect(state.humanVisible.value).toBe(true);
+ services.human.mockRejectedValueOnce(new Error('继续应答丢失'));
+ await state.continueHumanScene();
+ expect(state.humanVisible.value).toBe(true);
+ expect(state.humanTask.value.revision).toBe('5');
+ expect(state.humanError.value).toBe('继续应答丢失');
+ services.human.mockResolvedValueOnce({attempt_id:'7',status:'running'});
+ await state.continueHumanScene();
+ expect(services.human).toHaveBeenLastCalledWith({task:waiting,userId:'9',resume:true});
+ expect(state.humanVisible.value).toBe(false);
+});
+it('never continues an original scene after the signed-in user changes',async()=>{
+ const waiting={...task('1'),status:'awaiting_human',current_attempt_id:'7'};
+ services.publication.get.mockResolvedValue(waiting);
+ services.human.mockResolvedValue({attempt_id:'7',status:'awaiting_human'});
+ await state.openHumanScene(waiting);
+ services.session.me.mockResolvedValue({id:'10'});
+ await state.continueHumanScene();
+ expect(services.human).toHaveBeenCalledTimes(1);
+ expect(state.humanError.value).toContain('登录身份已变化');
+ expect(state.humanVisible.value).toBe(true);
 });

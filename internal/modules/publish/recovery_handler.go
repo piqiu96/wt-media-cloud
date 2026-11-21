@@ -148,3 +148,55 @@ func Copy(_ context.Context, c *app.RequestContext) {
 	}
 	api.Success(c, v)
 }
+
+func GetHumanScene(_ context.Context, c *app.RequestContext) {
+	auth, ok := localagent.AgentAuthFrom(c)
+	if !ok {
+		fail(c, service.ErrNotFound)
+		return
+	}
+	id, err := taskID(c)
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	attempt, err := strconv.ParseUint(c.Param("attempt_id"), 10, 64)
+	if err != nil || attempt == 0 {
+		fail(c, service.ErrInvalid)
+		return
+	}
+	revision, err := strconv.ParseUint(c.Query("expected_revision"), 10, 64)
+	if err != nil || revision == 0 {
+		fail(c, service.ErrInvalid)
+		return
+	}
+	v, err := service.WiredRecovery().GetHumanScene(auth.Claims.UserID, id, model.HumanContinuation{AttemptID: attempt, ExpectedRevision: revision})
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	api.Success(c, v)
+}
+func Resume(_ context.Context, c *app.RequestContext) {
+	auth, ok := localagent.AgentAuthFrom(c)
+	if !ok {
+		fail(c, service.ErrNotFound)
+		return
+	}
+	id, err := taskID(c)
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	var in model.HumanContinuation
+	if err = decode(c, &in); err != nil {
+		fail(c, err)
+		return
+	}
+	v, err := service.WiredRecovery().Resume(auth.Claims.UserID, id, in)
+	if err != nil {
+		fail(c, err)
+		return
+	}
+	api.Success(c, v)
+}

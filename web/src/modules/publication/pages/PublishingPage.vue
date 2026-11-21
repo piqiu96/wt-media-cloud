@@ -29,6 +29,7 @@ import { createComposeClient } from "../../../shared/api/compose.js";
 import { createMediaAccountClient } from "../../../shared/api/mediaAccounts.js";
 import { createSessionClient } from "../../../shared/api/session.js";
 import { createImageClient } from "../../../shared/api/image.js";
+import { handlePublicationHuman } from "../../../shared/api/publicationRun.js";
 import { createPublicationDraftClient } from "../../../shared/api/publicationDraft.js";
 import { choosePublicationDraft, capturePublicationDraft } from "../draftRecovery.js";
 import { accountUnavailable } from "../eligibility.js";
@@ -67,6 +68,7 @@ function viewAccount(id) {
   accountSummaryId.value = String(id);
   accountSummaryVisible.value = true;
 }
+const humanVisible=ref(false),humanTask=ref(null),humanUserId=ref(""),humanError=ref("");
 const recoveryVisible=ref(false),recoveryTask=ref(null),recoveryError=ref("");
 const terminationVisible = ref(false), terminationTask = ref(null), terminationAction = ref(""), terminationError = ref(""), terminationSubmitted = ref(false);
 const summary = ref(null),
@@ -478,6 +480,35 @@ async function startExecution(row) {
     error.value = message;
   } finally { busy.value = false; }
 }
+async function openHumanScene(row) {
+  if (busy.value) return;
+  busy.value=true;error.value='';
+  try {
+    const [task,user]=await Promise.all([client.get(row.id),createSessionClient().me()]);
+    if (disposed) return;
+    if (task.status!==PublicationStatus.AwaitingHuman || !task.current_attempt_id) throw new Error('任务状态已变化，请刷新后核对');
+    await handlePublicationHuman({task,userId:String(user.id)});
+    if (disposed) return;
+    humanTask.value=task;humanUserId.value=String(user.id);humanError.value='';humanVisible.value=true;
+  } catch(e) {if (!disposed) error.value=e.message || '原发布现场不可用，请刷新后核实原任务';}
+  finally {busy.value=false;}
+}
+async function continueHumanScene() {
+  if (busy.value || !humanTask.value) return;
+  busy.value=true;humanError.value='';
+  try {
+    const user=await createSessionClient().me();
+    if (disposed) return;
+    if (String(user.id)!==humanUserId.value) throw new Error('登录身份已变化，请关闭后重新打开原任务');
+    await handlePublicationHuman({task:humanTask.value,userId:humanUserId.value,resume:true});
+    if (disposed) return;
+    humanVisible.value=false;
+    feedback.toast.success('已继续原发布尝试，请在任务中查看后续结果');
+    await load();
+    if (view.value==='detail' && detail.value?.id===humanTask.value.id) detail.value=await client.get(humanTask.value.id);
+  } catch(e) {if (!disposed) humanError.value=e.message || '未收到继续确认，请保留原现场后重试';}
+  finally {busy.value=false;}
+}
 async function openVerification(row) {
   if (busy.value) return;
   busy.value = true;
@@ -759,7 +790,7 @@ const needsExecutionRefresh = computed(() => view.value === "list"
   : view.value === "detail" && isExecuting(detail.value));
 let executionTimer = null, refreshInFlight = false, disposed = false;
 async function refreshExecution() {
-  if (disposed || !needsExecutionRefresh.value || busy.value || loading.value || recoveryVisible.value || terminationVisible.value || refreshInFlight
+  if (disposed || !needsExecutionRefresh.value || busy.value || loading.value || recoveryVisible.value || humanVisible.value || terminationVisible.value || refreshInFlight
       || (typeof document !== "undefined" && document.hidden)) return;
   refreshInFlight = true;
   const originalDetail = detail.value;
@@ -767,7 +798,7 @@ async function refreshExecution() {
     if (view.value === "list") await load({ background: true });
     else {
       const [task, history] = await Promise.all([client.get(originalDetail.id), client.attempt(originalDetail.id)]);
-      if (!disposed && view.value === "detail" && detail.value === originalDetail && !busy.value && !loading.value && !recoveryVisible.value && !terminationVisible.value) {
+      if (!disposed && view.value === "detail" && detail.value === originalDetail && !busy.value && !loading.value && !recoveryVisible.value && !humanVisible.value && !terminationVisible.value) {
         detail.value = task;
         attempts.value = history;
         error.value = "";
@@ -922,6 +953,7 @@ onMounted(async () => {
             <template #op="{ row }">
               <ResourceRowActions>
                 <t-button v-if="editable(row)" class="is-primary" variant="text" size="small" :disabled="busy" @click="startExecution(row)">执行</t-button>
+                <t-button v-if="row.status===PublicationStatus.AwaitingHuman" class="is-primary" variant="text" size="small" :disabled="busy" @click="openHumanScene(row)">去处理</t-button>
                 <t-button v-if="[PublicationStatus.Uncertain,PublicationStatus.Reviewing].includes(row.status)" class="is-primary" variant="text" size="small" :disabled="busy" @click="openVerification(row)">{{row.status===PublicationStatus.Reviewing?'补录':'核实结果'}}</t-button>
                 <t-button v-if="retryable(row)" class="is-primary" variant="text" size="small" :disabled="busy" @click="retryExecution(row)">重试</t-button>
                 <t-button v-if="editable(row)" variant="text" size="small" :disabled="busy" @click="edit(row)">编辑</t-button>
@@ -1129,6 +1161,13 @@ onMounted(async () => {
     </ResourceOverlay>
     <MediaPreview form-actions v-model:visible="preview" :images="previewImages" title="发布封面预览" />
     <PublishingTerminationDialog v-model:visible="terminationVisible" :task="terminationTask" :action="terminationAction" :busy="busy" :error="terminationError" :submitted="terminationSubmitted" @submit="saveTermination" />
+    <ResourceOverlay :visible="humanVisible" title="处理人工验证" :width="560" :busy="busy" form-actions @update:visible="humanVisible=$event">
+      <FeedbackAlert v-if="humanError" theme="error" :message="humanError" />
+      <p>请在已打开的原账号页面完成登录或安全验证，然后继续原发布尝试。</p>
+      <p v-if="humanTask">任务 {{humanTask.id}} · 账号 {{humanTask.resources?.account_name || humanTask.platform_account_uid}} · 原尝试 {{humanTask.current_attempt_id}}</p>
+      <p>请保留原页面，完成验证后不要自行点击平台的发布按钮。继续后会再次核对账号，并按原任务执行。</p>
+      <template #footer><t-button theme="default" variant="outline" :disabled="busy" @click="humanVisible=false">暂不处理</t-button><t-button :loading="busy" @click="continueHumanScene">已经处理，继续原尝试</t-button></template>
+    </ResourceOverlay>
     <PublishingRecoveryDialog v-model:visible="recoveryVisible" :task="recoveryTask" :busy="busy" :error="recoveryError" @submit="saveVerification" />
     <PublishingResourcePicker
       :visible="!!picker"
