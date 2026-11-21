@@ -64,3 +64,9 @@ access-denied that reads like a permissions problem.
 ### 运营文件公共域名
 
 `storage/object_storage.toml` 的 `files_public_base_url` 配置当前bucket对应的公共HTTPS origin（不含路径、查询参数或凭据）。仅运营文件API用它和持久化完整对象位置生成 `public_url`；不拼当前全局prefix，不改变素材/成片的授权规则。部署前需确认该域名能匿名读取运营文件；配置不会修改bucket ACL。旧 `resource_path` 保留兼容与附件下载。
+
+## AI 文案（DeepSeek）
+
+`app.toml` 的 `[publication_generation]` 配置模型、HTTPS `base_url` 和单次调用 `timeout`；两套配置树保持同构。M6 使用 `deepseek-flash`，非思考模式生成完整 JSON，单次最多2048 tokens，不自动重试。调用取消沿生成连接传播，超时不超过180秒。此客户端在 `internal/infra/client/deepseek/`，使用支持进行中取消的标准 HTTP 客户端，由HTTP进程统一装配；Scheduler/Worker不加载它。
+
+本机从 `config/credentials/deepseek.toml` 读取 `api_key`，文件已忽略提交，建议权限0600；模板为同目录 `.example`。上线从 `WT_MEDIA_DEEPSEEK_API_KEY` 渲染凭据模板。缺少密钥仍可启动，生成接口明确拒绝。提示词、文案、密钥和模型原始错误正文不写日志；请求只带经授权素材标题与当前文字，不发送视频或平台登录信息。

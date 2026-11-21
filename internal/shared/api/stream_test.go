@@ -63,3 +63,27 @@ func TestStreamCompletesWithSingleItemResult(t *testing.T) {
 		t.Fatal(text)
 	}
 }
+
+func TestGenerationCanUseAIWindowWithoutExtendingCoverDeadline(t *testing.T) {
+	for _, duration := range []time.Duration{60 * time.Second, 180 * time.Second} {
+		c := app.NewContext(0)
+		run := func(ctx context.Context, _ func(string) error) (any, error) {
+			deadline, ok := ctx.Deadline()
+			if !ok || time.Until(deadline) > duration || time.Until(deadline) < duration-time.Second {
+				t.Errorf("wrong operation deadline for %s", duration)
+			}
+			return map[string]string{"ok": "complete"}, nil
+		}
+		if duration == 60*time.Second {
+			StreamOne(c, StreamItem{UserID: 999}, run)
+		} else {
+			StreamOneWithTimeout(c, StreamItem{UserID: 999}, duration, run)
+		}
+		body := c.Response.BodyStream()
+		_, err := io.ReadAll(body)
+		_ = body.(io.Closer).Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+}

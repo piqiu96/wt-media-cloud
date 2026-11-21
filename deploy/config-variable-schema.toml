@@ -92,3 +92,10 @@ type = "string"
 required = false
 secret = false
 allow_empty = true
+
+[[variables]]
+name = "WT_MEDIA_DEEPSEEK_API_KEY"
+type = "string"
+required = false
+secret = true
+allow_empty = true

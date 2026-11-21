@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/wt-media/wt-media-cloud/internal/infra/client/deepseek"
 	"github.com/wt-media/wt-media-cloud/internal/infra/database"
 	filemodel "github.com/wt-media/wt-media-cloud/internal/modules/files/model"
 	files "github.com/wt-media/wt-media-cloud/internal/modules/files/service"
@@ -41,16 +42,19 @@ type Repository interface {
 	Edit(model.Task, uint64) (model.Task, error)
 }
 type Service struct {
-	OutputPage func(context.Context, identity.PublicUser, production.ListComposeOutputsInput) (OutputPage, error)
-	SavedFile  func(context.Context, int64) (filemodel.File, error)
-	Repo       Repository
-	Account    func(identity.PublicUser, string) (accounts.Account, error)
-	Output     func(identity.PublicUser, int64) (production.ComposeOutputDetail, error)
-	File       func(context.Context, identity.PublicUser, int64, int64) (filemodel.File, error)
+	GenerateJSON func(context.Context, string, string) (string, error)
+	OutputPage   func(context.Context, identity.PublicUser, production.ListComposeOutputsInput) (OutputPage, error)
+	SavedFile    func(context.Context, int64) (filemodel.File, error)
+	Repo         Repository
+	Account      func(identity.PublicUser, string) (accounts.Account, error)
+	Output       func(identity.PublicUser, int64) (production.ComposeOutputDetail, error)
+	File         func(context.Context, identity.PublicUser, int64, int64) (filemodel.File, error)
 }
 
 func Wired() *Service {
-	return &Service{OutputPage: func(ctx context.Context, a identity.PublicUser, in production.ListComposeOutputsInput) (OutputPage, error) {
+	return &Service{GenerateJSON: func(ctx context.Context, system, user string) (string, error) {
+		return deepseek.Get().CompleteJSON(ctx, system, user)
+	}, OutputPage: func(ctx context.Context, a identity.PublicUser, in production.ListComposeOutputsInput) (OutputPage, error) {
 		page, err := production.ListComposeOutputPage(ctx, a, in)
 		return OutputPage{Items: page.Items, Total: page.Total, Page: page.Page, PageSize: page.PageSize}, err
 	}, SavedFile: func(ctx context.Context, id int64) (filemodel.File, error) {

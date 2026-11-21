@@ -27,6 +27,7 @@ func RegisterRoutes(h *server.Hertz) {
 	h.GET("/api/v1/publication/output", OutputCandidates)
 	h.GET("/api/v1/publication/request", FindByRequest)
 	h.POST("/api/v1/publication", Create)
+	h.POST("/api/v1/publication/generate", GeneratePublicationContent)
 	h.GET("/api/v1/publication/:id", Get)
 	h.PUT("/api/v1/publication/:id/content", Edit)
 	h.POST("/api/v1/publication/:id/start", Start)

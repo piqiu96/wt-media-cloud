@@ -40,6 +40,11 @@ func (s cancelStream) Close() error { s.cancel(); return s.PipeReader.Close() }
 // StreamOne serves one bounded M6 generation operation. Validation and permission
 // errors must be returned before calling it. The operation owns no request context.
 func StreamOne(c *app.RequestContext, item StreamItem, run func(context.Context, func(string) error) (any, error)) {
+	StreamOneWithTimeout(c, item, 60*time.Second, run)
+}
+
+// StreamOneWithTimeout preserves the shared stream lifecycle with an operation deadline.
+func StreamOneWithTimeout(c *app.RequestContext, item StreamItem, timeout time.Duration, run func(context.Context, func(string) error) (any, error)) {
 	generationUser.Lock()
 	if generationUser.count[item.UserID] >= 2 {
 		generationUser.Unlock()
@@ -64,7 +69,7 @@ func StreamOne(c *app.RequestContext, item StreamItem, run func(context.Context,
 		}
 		generationUser.Unlock()
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	reader, writer := io.Pipe()
 	c.SetStatusCode(200)
 	c.Header("Content-Type", "text/event-stream")

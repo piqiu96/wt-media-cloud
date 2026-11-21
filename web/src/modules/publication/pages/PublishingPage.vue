@@ -41,6 +41,7 @@ import {
 } from "../eligibility.js";
 import { PublicationStatus, publicationStatuses } from "../status.js";
 import { publicationTitleForOutput } from "../title.js";
+import PublicationContentGenerator from "../components/PublicationContentGenerator.vue";
 import PublishingCoverEditor from "../components/PublishingCoverEditor.vue";
 import { emptyCoverConfig, coverConfigFromReference, coverReference } from "../coverPreparation.js";
 import PublishingExecutionHistory from "../components/PublishingExecutionHistory.vue";
@@ -118,6 +119,15 @@ const view = ref("list"),
   baseline = ref(""),
   pendingRequest = ref(null);
 const coverConfig = ref(emptyCoverConfig());
+const generationContext = computed(() => ({ rowKey: form.value?.request_key || String(editing.value?.id || ''), platform: form.value?.platform, categoryId: form.value?.category_id, outputId: form.value?.composite_output_id, identityKey: JSON.stringify([form.value?.media_account_id,coverConfig.value.method,coverConfig.value.template_id,coverConfig.value.published_revision]) }));
+const generationValues = computed(() => ({ description: form.value?.content.description || '', topics: form.value?.content.topics || '', cover_title: coverConfig.value.title || '' }));
+function adoptGeneratedContent(field,value) {
+ if (frozen.value || !form.value) return;
+ if (field === 'cover_title') { updateCoverConfig({ ...coverConfig.value, title: value }); return; }
+ if (!['description','topics'].includes(field) || form.value.content[field] === value) return;
+ form.value.content[field] = value; invalidate();
+}
+
 const videoVisible = ref(false), videoURL = ref(""), videoLoading = ref(false), videoError = ref("");
 let videoSequence = 0;
 async function previewOutput() {
@@ -1050,7 +1060,7 @@ onMounted(async () => {
           </div>
         </section>
         <section v-if="output || form.composite_output_id" class="resource-editor-section quick-block">
-          <h3><span>02</span>发布内容</h3>
+          <div class="quick-content-heading"><h3><span>02</span>发布内容</h3><PublicationContentGenerator :context="generationContext" :values="generationValues" :template="coverConfig.method === 'template'" :disabled="frozen" @adopt="adoptGeneratedContent" /></div>
           <div class="quick-copy-fields">
           <label
             ><ResourceRequiredLabel>发布标题</ResourceRequiredLabel><t-textarea
@@ -1212,6 +1222,7 @@ onMounted(async () => {
 }
 .quick-copy-fields { display: flex; flex-direction: column; gap: 24px; }
 .quick-block :deep(.t-input.t-is-disabled), .quick-block :deep(.t-input__inner:disabled) { color: var(--wt-text-secondary); -webkit-text-fill-color: var(--wt-text-secondary); background: var(--wt-color-bg-subtle); }
+.quick-content-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .quick-block h3 {
   margin: 0;
   display: flex;

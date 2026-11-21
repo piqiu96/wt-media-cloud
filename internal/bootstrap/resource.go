@@ -12,6 +12,7 @@ import (
 	"github.com/cloudwego/hertz/pkg/common/hlog"
 	"github.com/wt-media/wt-media-cloud/internal/config"
 	agentclient "github.com/wt-media/wt-media-cloud/internal/infra/client/agent"
+	"github.com/wt-media/wt-media-cloud/internal/infra/client/deepseek"
 	"github.com/wt-media/wt-media-cloud/internal/infra/client/observe"
 	douyinclient "github.com/wt-media/wt-media-cloud/internal/infra/client/platforms/douyin"
 	"github.com/wt-media/wt-media-cloud/internal/infra/database"
@@ -48,6 +49,7 @@ func serverResourcePlan() []resourceStep {
 		databaseResource(),
 		storageResource(),
 		clientsResource(),
+		deepSeekResource(),
 	}
 }
 
@@ -329,4 +331,13 @@ func selectHTTPClientConfigs(configs []httpclient.Config, names ...string) ([]ht
 		return nil, fmt.Errorf("HTTP client config not found: %s", strings.Join(missing, ", "))
 	}
 	return filtered, nil
+}
+
+// The model adapter uses a context-cancellable HTTP request; Hertz does not
+// interrupt an in-flight response read when the generation stream disconnects.
+func deepSeekResource() resourceStep {
+	return resourceStep{name: "deepseek", open: func() (func() error, error) {
+		cfg := config.Get()
+		return deepseek.Initialize(cfg.App.PublicationGeneration, cfg.Credentials.DeepSeek)
+	}}
 }

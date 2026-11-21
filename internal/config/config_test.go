@@ -730,3 +730,26 @@ func writeConfigFile(t *testing.T, root, name, contents string) {
 		t.Fatalf("write config file: %v", err)
 	}
 }
+
+func TestDeepSeekCredentialIsOptionalPrivateAndRequiresValidModelConnection(t *testing.T) {
+	dir := t.TempDir()
+	writeValidConfig(t, dir)
+	cfg, err := LoadFromDir(dir)
+	if err != nil || cfg.Credentials.DeepSeek.APIKey != "" {
+		t.Fatal("missing optional AI credential must remain loadable")
+	}
+	app, err := os.ReadFile(filepath.Join(dir, "app.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeConfigFile(t, dir, "app.toml", string(app)+"\n[publication_generation]\nmodel='deepseek-flash'\nbase_url='https://api.deepseek.com'\ntimeout='170s'\n")
+	writeConfigFile(t, dir, "credentials/deepseek.toml", "api_key='test-model-key'\n")
+	cfg, err = LoadFromDir(dir)
+	if err != nil || cfg.Credentials.DeepSeek.APIKey != "test-model-key" || cfg.App.PublicationGeneration.Model != "deepseek-flash" {
+		t.Fatal("configured AI credential or model not loaded")
+	}
+	cfg.App.PublicationGeneration.BaseURL = "http://api.deepseek.com"
+	if cfg.Validate() == nil {
+		t.Fatal("cleartext credential destination allowed")
+	}
+}
