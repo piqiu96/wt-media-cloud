@@ -10,6 +10,7 @@ import (
 	"github.com/cloudwego/hertz/pkg/protocol/consts"
 	"github.com/wt-media/wt-media-cloud/internal/middleware"
 	files "github.com/wt-media/wt-media-cloud/internal/modules/files/service"
+	images "github.com/wt-media/wt-media-cloud/internal/modules/image/service"
 	"github.com/wt-media/wt-media-cloud/internal/modules/localagent"
 	accounts "github.com/wt-media/wt-media-cloud/internal/modules/mediaaccount/service"
 	production "github.com/wt-media/wt-media-cloud/internal/modules/production/service"
@@ -46,9 +47,9 @@ func RegisterRoutes(h *server.Hertz) {
 }
 func fail(c *app.RequestContext, err error) {
 	switch {
-	case errors.Is(err, service.ErrInvalid), errors.Is(err, files.ErrInvalid), errors.Is(err, production.ErrComposeOutputInvalid):
+	case errors.Is(err, images.ErrInvalid), errors.Is(err, service.ErrInvalid), errors.Is(err, files.ErrInvalid), errors.Is(err, production.ErrComposeOutputInvalid):
 		api.FailureNamed(c, consts.StatusBadRequest, errcode.PublishInvalid, "请检查发布资源并确认文案、封面和声明", "publication_invalid")
-	case errors.Is(err, service.ErrNotFound), errors.Is(err, files.ErrNotFound), errors.Is(err, accounts.ErrNotFound), errors.Is(err, accounts.ErrForbidden), errors.Is(err, production.ErrComposeOutputNotFound), errors.Is(err, production.ErrComposeOutputForbidden):
+	case errors.Is(err, images.ErrNotFound), errors.Is(err, service.ErrNotFound), errors.Is(err, files.ErrNotFound), errors.Is(err, accounts.ErrNotFound), errors.Is(err, accounts.ErrForbidden), errors.Is(err, production.ErrComposeOutputNotFound), errors.Is(err, production.ErrComposeOutputForbidden):
 		api.FailureNamed(c, consts.StatusNotFound, errcode.PublishNotFound, "任务或资源不存在，或没有访问权限", "publication_not_found")
 	case errors.Is(err, service.ErrConflict):
 		var conflict *service.ConflictError

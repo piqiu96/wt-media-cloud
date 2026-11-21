@@ -3,6 +3,7 @@ package render
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"golang.org/x/image/draw"
 	"golang.org/x/image/font"
@@ -43,6 +44,9 @@ func parseColor(s string) (color.NRGBA, error) {
 	}
 	return color.NRGBA{R: uint8(v >> 24), G: uint8(v >> 16), B: uint8(v >> 8), A: uint8(v)}, nil
 }
+
+var errTextOverflow = errors.New("文字区域不足，请缩短标题或调整文字区域")
+
 func Render(ctx context.Context, d Document, title string, background image.Image) ([]byte, []Issue, error) {
 	if e := ValidateDraft(d); e != nil {
 		return nil, nil, e
@@ -55,15 +59,15 @@ func Render(ctx context.Context, d Document, title string, background image.Imag
 		}
 	}
 	issues := publicationIssues(d)
-	add := func(l Layer, message string) {
-		issues = append(issues, Issue{Level: "error", Code: "layout", Message: message, LayerID: l.ID, LayerName: l.Name})
+	add := func(l Layer, code, field, message string) {
+		issues = append(issues, Issue{Level: "error", Code: code, Field: field, Message: message, LayerID: l.ID, LayerName: l.Name})
 	}
 	out := image.NewRGBA(image.Rect(0, 0, d.Width, d.Height))
 	bg, _ := parseColor(d.Background)
 	stddraw.Draw(out, out.Bounds(), image.NewUniform(bg), image.Point{}, stddraw.Src)
 	if d.BackgroundMode != "solid" {
 		if background == nil {
-			add(Layer{ID: "background", Name: "背景"}, "缺少可读取的底图")
+			add(Layer{ID: "background", Name: "背景"}, "background", "image", "缺少可读取的底图")
 		} else {
 			fitBackground(out, background, d)
 		}
@@ -84,8 +88,17 @@ func Render(ctx context.Context, d Document, title string, background image.Imag
 			stddraw.Draw(out, r, image.NewUniform(c), image.Point{}, stddraw.Over)
 			continue
 		}
+		count := utf8.RuneCountInString(l.Text)
+		if l.MaxChars > 0 && count > l.MaxChars {
+			add(l, "max_chars", "maxChars", fmt.Sprintf("共%d字，超过上限%d字，请缩短文字或调整最多字数", count, l.MaxChars))
+			continue
+		}
 		if e := drawText(out, l); e != nil {
-			add(l, e.Error())
+			code, field := "font", "fontFamily"
+			if errors.Is(e, errTextOverflow) {
+				code, field = "layout", "w"
+			}
+			add(l, code, field, e.Error())
 		}
 	}
 	for _, issue := range issues {
@@ -172,7 +185,7 @@ func layout(l Layer) (textLayout, error) {
 			}
 			lines = append(lines, line)
 		}
-		overflow := len(lines) > l.MaxLines || float64(len(lines))*size*l.LineHeight > l.H || l.MaxChars > 0 && utf8.RuneCountInString(l.Text) > l.MaxChars
+		overflow := len(lines) > l.MaxLines || float64(len(lines))*size*l.LineHeight > l.H
 		for _, line := range lines {
 			overflow = overflow || width(line) > l.W
 		}
@@ -184,7 +197,7 @@ func layout(l Layer) (textLayout, error) {
 			break
 		}
 	}
-	return textLayout{}, fmt.Errorf("文字溢出，请缩短标题或调整文字区域")
+	return textLayout{}, errTextOverflow
 }
 func drawText(out *image.RGBA, l Layer) error {
 	result, e := layout(l)

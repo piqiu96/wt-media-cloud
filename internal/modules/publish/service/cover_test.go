@@ -27,7 +27,7 @@ func TestCreateAndEditRequireMatchingFrozenRenderedCover(t *testing.T) {
 			t.Run(operation+"/"+change, func(t *testing.T) {
 				s, a, in := fixture()
 				f, ref := renderedCoverFixture()
-				s.File = func(context.Context, identity.PublicUser, int64) (filemodel.File, error) { return f, nil }
+				s.File = func(context.Context, identity.PublicUser, int64, int64) (filemodel.File, error) { return f, nil }
 				s.SavedFile = func(context.Context, int64) (filemodel.File, error) { return f, nil }
 				in.Content.CoverRender = ref
 				original := in

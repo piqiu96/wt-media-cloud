@@ -101,7 +101,8 @@ func (s *ArtworkService) RenderDocument(ctx context.Context, a identity.PublicUs
 		return result, nil, e
 	}
 	if backgroundFileID != 0 {
-		f, e := fileService.Read(a, backgroundFileID)
+		// backgroundFile already authorized the image asset or production output.
+		f, e := fileService.SavedReference(backgroundFileID)
 		if e != nil {
 			return result, nil, e
 		}

@@ -285,3 +285,40 @@ func TestPreviewArtworkCannotBeRegisteredAsPublicationImage(t *testing.T) {
 		t.Fatal("preview registered as formal image")
 	}
 }
+
+func TestFileUseRequiresRegisteredAssetScopePurposeStateAndTargetCategory(t *testing.T) {
+	svc, repo, actor := assetFixture()
+	asset, err := svc.RegisterImageAsset(context.Background(), actor, assetInput())
+	if err != nil {
+		t.Fatal(err)
+	}
+	senior := actor
+	senior.ID = 2
+	senior.Role = identity.RoleSeniorOperator
+	registered, err := svc.AuthorizeImageAssetFile(senior, asset.FileID, "cover", 2)
+	if err != nil || !registered {
+		t.Fatalf("team asset denied: %v", err)
+	}
+	for _, change := range []string{"disabled", "purpose", "category", "foreign"} {
+		candidate := asset
+		user := senior
+		switch change {
+		case "disabled":
+			candidate.Enabled = false
+		case "purpose":
+			candidate.AllowAsCover = false
+		case "category":
+			candidate.CategoryIDs = []string{"3"}
+		case "foreign":
+			team := identity.TeamID(11)
+			user.TeamID = &team
+		}
+		repo.rows[asset.ID] = candidate
+		if _, err = svc.AuthorizeImageAssetFile(user, asset.FileID, "cover", 2); err == nil {
+			t.Fatalf("invalid %s asset authorized", change)
+		}
+	}
+	if registered, err = svc.AuthorizeImageAssetFile(actor, 99, "cover", 2); err != nil || registered {
+		t.Fatal("unregistered file granted asset access")
+	}
+}

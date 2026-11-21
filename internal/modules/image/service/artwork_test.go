@@ -1,13 +1,19 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"github.com/wt-media/wt-media-cloud/internal/infra/storage"
 	filemodel "github.com/wt-media/wt-media-cloud/internal/modules/files/model"
+	files "github.com/wt-media/wt-media-cloud/internal/modules/files/service"
 	identity "github.com/wt-media/wt-media-cloud/internal/modules/identity/service"
+	imagemodel "github.com/wt-media/wt-media-cloud/internal/modules/image/model"
 	"github.com/wt-media/wt-media-cloud/internal/modules/image/render"
 	productionmodel "github.com/wt-media/wt-media-cloud/internal/modules/production/model"
 	production "github.com/wt-media/wt-media-cloud/internal/modules/production/service"
+	"io"
+	"strings"
 	"testing"
 )
 
@@ -82,5 +88,53 @@ func TestArtworkReferenceRejectsChangedInputAndPreview(t *testing.T) {
 	f.MetadataJSON, _ = json.Marshal(metadata)
 	if _, err := VerifyArtwork(f, ref); err == nil {
 		t.Fatal("preview accepted")
+	}
+}
+
+type assignedImageFile struct {
+	files.Repository
+	file filemodel.File
+}
+
+func (r assignedImageFile) Find(id int64) (filemodel.File, error) {
+	if id != r.file.ID {
+		return filemodel.File{}, files.ErrNotFound
+	}
+	return r.file, nil
+}
+
+type assignedImageObject struct {
+	storage.ImmutableStore
+	reached *bool
+	failure error
+}
+
+func (o assignedImageObject) Open(context.Context, string) (io.ReadCloser, error) {
+	*o.reached = true
+	return nil, o.failure
+}
+func TestRenderUsesAuthorizedImageReferenceWithoutExpandingRawFileAccess(t *testing.T) {
+	team := identity.TeamID(10)
+	actor := identity.PublicUser{ID: 2, Role: identity.RoleSeniorOperator, Status: identity.UserStatusEnabled, TeamID: &team, CategoryIDs: []identity.CategoryID{2}}
+	// The administrator assigned this asset to the team; their raw upload has no team.
+	asset := imagemodel.ImageAsset{ID: 1, FileID: 7, TeamID: 10, CreatedBy: 1, Enabled: true, AllowAsBackground: true, CategoryIDs: []string{"2"}, MetadataJSON: json.RawMessage(`{"width":640,"height":360,"format":"png"}`)}
+	reached := false
+	sentinel := errors.New("authorized object reached")
+	fs := &files.Service{Repo: assignedImageFile{file: filemodel.File{ID: 7, OwnerID: 1, Type: "image", SizeBytes: 10, SHA256: strings.Repeat("a", 64)}}, Objects: assignedImageObject{reached: &reached, failure: sentinel}, MaxBytes: 1024}
+	if _, err := fs.Read(actor, 7); !errors.Is(err, files.ErrNotFound) {
+		t.Fatal("raw file scope unexpectedly expanded")
+	}
+	svc := &ArtworkService{Assets: &Service{Repo: &memoryAsset{rows: map[uint64]imagemodel.ImageAsset{1: asset}}}, FileService: func() (*files.Service, error) { return fs, nil }}
+	doc := render.DefaultDocument(640, 360)
+	doc.BackgroundMode = "business"
+	_, _, err := svc.RenderDocument(context.Background(), actor, doc, "实际标题", 1, false, ArtworkInput{})
+	if !errors.Is(err, sentinel) || !reached {
+		t.Fatalf("authorized asset rejected by raw upload ownership: %v", err)
+	}
+	reached = false
+	other := identity.TeamID(11)
+	actor.TeamID = &other
+	if _, _, err = svc.RenderDocument(context.Background(), actor, doc, "实际标题", 1, false, ArtworkInput{}); err == nil || reached {
+		t.Fatal("foreign asset reached object storage")
 	}
 }

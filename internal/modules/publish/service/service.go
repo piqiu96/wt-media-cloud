@@ -46,7 +46,7 @@ type Service struct {
 	Repo       Repository
 	Account    func(identity.PublicUser, string) (accounts.Account, error)
 	Output     func(identity.PublicUser, int64) (production.ComposeOutputDetail, error)
-	File       func(context.Context, identity.PublicUser, int64) (filemodel.File, error)
+	File       func(context.Context, identity.PublicUser, int64, int64) (filemodel.File, error)
 }
 
 func Wired() *Service {
@@ -59,17 +59,8 @@ func Wired() *Service {
 			return filemodel.File{}, e
 		}
 		return s.ReadSavedReference(ctx, id)
-	}, Repo: repository.Store{DB: database.DB(), LockFiles: files.LockAvailable}, Account: accounts.GetAccount, Output: production.GetComposeOutput, File: func(ctx context.Context, a identity.PublicUser, id int64) (filemodel.File, error) {
-		s, e := files.Wired()
-		if e != nil {
-			return filemodel.File{}, e
-		}
-		f, e := s.Read(a, id)
-		if e != nil {
-			return f, e
-		}
-		return s.ResolveToken(ctx, f.ResourceToken)
-	}}
+	}, Repo: repository.Store{DB: database.DB(), LockFiles: files.LockAvailable}, Account: accounts.GetAccount, Output: production.GetComposeOutput, File: readCoverFile,
+	}
 }
 func CheckFileReferences(tx *gorm.DB, id int64) error {
 	used, err := repository.FileReferenced(tx, id)
@@ -213,7 +204,7 @@ func (s *Service) Create(ctx context.Context, a identity.PublicUser, in CreateIn
 	if int64(o.CategoryID) != in.CategoryID || o.TeamID != int64(*account.TeamID) || o.PublishStatus == productionmodel.OutputPublishArchived || o.Video.Status != string(productionmodel.VideoReady) || o.FileSizeBytes <= 0 || len(o.SHA256) != 64 {
 		return model.Task{}, ErrInvalid
 	}
-	cover, err := s.File(ctx, a, in.Content.CoverFileID)
+	cover, err := s.File(ctx, a, in.Content.CoverFileID, in.CategoryID)
 	if err != nil {
 		return model.Task{}, err
 	}
@@ -244,7 +235,7 @@ func (s *Service) Edit(ctx context.Context, a identity.PublicUser, id uint64, in
 	if in.Content.CoverFileID == v.CoverFileID && s.SavedFile != nil {
 		cover, err = s.SavedFile(ctx, v.CoverFileID)
 	} else {
-		cover, err = s.File(ctx, a, in.Content.CoverFileID)
+		cover, err = s.File(ctx, a, in.Content.CoverFileID, v.CategoryID)
 	}
 	if err != nil {
 		return model.Task{}, err

@@ -20,7 +20,7 @@ func fixture() (*Service, identity.PublicUser, CreateInput) {
 		return accounts.Account{ID: "12", UserID: 9, TeamID: &team, CategoryIDs: []identity.CategoryID{1}, Enabled: true, Platform: "baidu", PlatformAccountID: "real-uid", BrowserProfileID: "profile", IdentificationStatus: "identified", PlatformLoginStatus: "normal"}, nil
 	}, Output: func(identity.PublicUser, int64) (production.ComposeOutputDetail, error) {
 		return production.ComposeOutputDetail{Output: outputmodel.CompositeOutput{ID: 42, TeamID: 7, CategoryID: 1, OperatorID: &owner, PublishStatus: "pending_publish", Platforms: []string{"baidu"}, ObjectKey: "video", FileSizeBytes: 3, SHA256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Video: outputmodel.ComposeOutputVideo{Status: "ready"}}}, nil
-	}, File: func(context.Context, identity.PublicUser, int64) (filemodel.File, error) {
+	}, File: func(context.Context, identity.PublicUser, int64, int64) (filemodel.File, error) {
 		return filemodel.File{ID: 5, Type: "image", ObjectKey: "cover", SizeBytes: 3, SHA256: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}, nil
 	}}
 	return s, actor, CreateInput{RequestKey: "request-1", Platform: "baidu", CategoryID: 1, MediaAccountID: 12, CompositeOutputID: 42, Content: model.Content{Description: "真实作品描述", CoverFileID: 5, Declaration: "无需声明", Confirmed: true}}
@@ -114,7 +114,7 @@ func TestCreateRejectsUnavailableResourcesAndPlatform(t *testing.T) {
 			case "outside-category":
 				in.CategoryID = 2
 			case "file-unavailable":
-				s.File = func(context.Context, identity.PublicUser, int64) (filemodel.File, error) {
+				s.File = func(context.Context, identity.PublicUser, int64, int64) (filemodel.File, error) {
 					return filemodel.File{}, errors.New("missing object")
 				}
 			case "output-unavailable":
@@ -175,8 +175,8 @@ func TestBaiduPreparationNeedsNoFeatureSwitch(t *testing.T) {
 func TestCreateAndEditRejectRendererPreview(t *testing.T) {
 	s, a, in := fixture()
 	original := s.File
-	preview := func(ctx context.Context, a identity.PublicUser, id int64) (filemodel.File, error) {
-		f, e := original(ctx, a, id)
+	preview := func(ctx context.Context, a identity.PublicUser, id, categoryID int64) (filemodel.File, error) {
+		f, e := original(ctx, a, id, categoryID)
 		f.MetadataJSON = []byte(`{"preview":true}`)
 		return f, e
 	}

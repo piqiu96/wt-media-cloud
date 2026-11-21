@@ -436,3 +436,33 @@ func CheckFileReferences(tx *gorm.DB, id int64) error {
 	}
 	return CheckArtworkFileReferences(tx, id)
 }
+
+// AuthorizeImageAssetFile checks a registered image's business scope before its
+// saved file can be used. An unregistered file remains subject to Files scope.
+func (s *Service) AuthorizeImageAssetFile(a identity.PublicUser, fileID int64, usage string, categoryID int64) (bool, error) {
+	if fileID <= 0 || categoryID <= 0 || usage != "cover" && usage != "background" {
+		return false, ErrInvalid
+	}
+	asset, err := s.Repo.ByFile(fileID)
+	if errors.Is(err, ErrNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if !canReadImageAsset(a, asset) {
+		return true, ErrNotFound
+	}
+	if !asset.Enabled || usage == "cover" && !asset.AllowAsCover || usage == "background" && !asset.AllowAsBackground || !canUseCategory(a, strconv.FormatInt(categoryID, 10)) {
+		return true, ErrInvalid
+	}
+	if len(asset.CategoryIDs) > 0 {
+		for _, category := range asset.CategoryIDs {
+			if category == strconv.FormatInt(categoryID, 10) {
+				return true, nil
+			}
+		}
+		return true, ErrInvalid
+	}
+	return true, nil
+}

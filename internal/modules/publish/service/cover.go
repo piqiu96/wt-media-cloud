@@ -1,9 +1,12 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	filemodel "github.com/wt-media/wt-media-cloud/internal/modules/files/model"
+	files "github.com/wt-media/wt-media-cloud/internal/modules/files/service"
+	identity "github.com/wt-media/wt-media-cloud/internal/modules/identity/service"
 	image "github.com/wt-media/wt-media-cloud/internal/modules/image/service"
 	"github.com/wt-media/wt-media-cloud/internal/modules/publish/model"
 )
@@ -29,4 +32,23 @@ func verifyCoverRender(file filemodel.File, content model.Content, outputID int6
 	}
 	raw, err := json.Marshal(snapshot)
 	return raw, err
+}
+
+func readCoverFile(ctx context.Context, a identity.PublicUser, id, categoryID int64) (filemodel.File, error) {
+	registered, err := image.Wired().AuthorizeImageAssetFile(a, id, "cover", categoryID)
+	if err != nil {
+		return filemodel.File{}, err
+	}
+	fs, err := files.Wired()
+	if err != nil {
+		return filemodel.File{}, err
+	}
+	if registered {
+		return fs.ReadSavedReference(ctx, id)
+	}
+	f, err := fs.Read(a, id)
+	if err != nil {
+		return filemodel.File{}, err
+	}
+	return fs.ResolveToken(ctx, f.ResourceToken)
 }

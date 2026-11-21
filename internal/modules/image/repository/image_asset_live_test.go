@@ -288,3 +288,41 @@ func TestLiveImageDeleteProtectsReferenceAndRevision(t *testing.T) {
 		t.Fatalf("library removal changed independent file: %d %v", n, e)
 	}
 }
+
+func TestLiveAdminAssignedTeamImageUsesAssetScopeWithoutChangingRawFileScope(t *testing.T) {
+	db := isolated(t)
+	seedFile(t, db, 7, 640, 360)
+	if err := db.Exec("UPDATE operations_files SET team_id=NULL WHERE id=7").Error; err != nil {
+		t.Fatal(err)
+	}
+	svc, admin := fixture(db)
+	admin.Role = identity.RoleAdmin
+	admin.TeamID = nil
+	svc.TeamAllowed = func(_ identity.PublicUser, id int64) (bool, error) { return id == 10, nil }
+	asset, err := svc.RegisterImageAsset(context.Background(), admin, service.RegisterInput{FileID: 7, TeamID: 10, Name: "管理员分配的团队图片", AllowAsCover: true, AllowAsBackground: true, CategoryIDs: []string{"2"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	team := identity.TeamID(10)
+	senior := identity.PublicUser{ID: 2, Role: identity.RoleSeniorOperator, Status: identity.UserStatusEnabled, TeamID: &team, CategoryIDs: []identity.CategoryID{2}}
+	fs := &files.Service{Repo: filerepo.Store{DB: db}}
+	if _, err = fs.Read(senior, 7); !errors.Is(err, files.ErrNotFound) {
+		t.Fatal("raw file authorization expanded")
+	}
+	if _, err = svc.GetImageAsset(senior, asset.ID); err != nil {
+		t.Fatal(err)
+	}
+	if registered, e := svc.AuthorizeImageAssetFile(senior, 7, "cover", 2); e != nil || !registered {
+		t.Fatalf("authorized business reference denied: %v", e)
+	}
+	if file, e := fs.SavedReference(7); e != nil || file.TeamID != nil {
+		t.Fatal("reference changed original file team")
+	}
+	enabled := false
+	if _, err = svc.SetImageAssetUsage(admin, asset.ID, service.UsageInput{ExpectedRevision: asset.Revision, Enabled: &enabled}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = svc.AuthorizeImageAssetFile(senior, 7, "cover", 2); err == nil {
+		t.Fatal("disabled registered asset remained eligible")
+	}
+}

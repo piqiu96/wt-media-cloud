@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"image/png"
+	"strings"
 	"testing"
 )
 
@@ -46,5 +47,20 @@ func TestRenderRejectsMissingImageAndUnknownFont(t *testing.T) {
 	d.Layers[0].FontFamily = "not-installed"
 	if _, _, e := Render(context.Background(), d, "主标题", nil); e == nil {
 		t.Fatal("unknown font accepted")
+	}
+}
+
+func TestCharacterLimitIsSeparateFromLayoutAndLocatesItsControl(t *testing.T) {
+	d := DefaultDocument(1080, 1440)
+	d.Layers[0].MaxChars = 2
+	_, issues, err := Render(context.Background(), d, "三个字", nil)
+	if err == nil || len(issues) != 1 || issues[0].Code != "max_chars" || issues[0].Field != "maxChars" || !strings.Contains(issues[0].Message, "3字") || !strings.Contains(issues[0].Message, "2字") {
+		t.Fatalf("character limit was confused with layout: %+v %v", issues, err)
+	}
+	d.Layers[0].MaxChars = 0
+	d.Layers[0].W = 10
+	_, issues, err = Render(context.Background(), d, "三个字", nil)
+	if err == nil || len(issues) == 0 || issues[0].Code != "layout" || issues[0].Field != "w" {
+		t.Fatalf("layout did not locate text area: %+v %v", issues, err)
 	}
 }
