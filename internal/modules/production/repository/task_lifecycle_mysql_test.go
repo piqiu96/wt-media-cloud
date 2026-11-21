@@ -3,6 +3,7 @@ package repository
 import (
 	"encoding/json"
 	"errors"
+	"gorm.io/gorm"
 	"regexp"
 	"testing"
 	"time"
@@ -197,7 +198,7 @@ func TestCommitComposeOutputWritesAssetAndSuccessInOneTransaction(t *testing.T) 
 		WithArgs(`{"step":"commit","label":"保存成片记录","outcome":"success","started_at":"2026-10-14T09:06:58Z","finished_at":"2026-10-14T09:07:00Z","duration_ms":2000,"error_code":"","error_label":"","metrics":{"output_id":55}}`, now, int64(77), 1).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
-	commit, err := commitComposeOutput(db, out, "outputs/final", 9, 1, step, now)
+	commit, err := commitComposeOutput(db, out, "outputs/final", 9, 1, step, now, nil)
 	if err != nil || commit.OutputID != 55 || commit.TaskID != 77 {
 		t.Fatalf("commit=%+v err=%v", commit, err)
 	}
@@ -211,7 +212,7 @@ func TestCommitComposeOutputRollsBackWhenTheTaskRowIsGone(t *testing.T) {
 	mock.ExpectExec("INSERT INTO `composite_outputs`").WillReturnResult(sqlmock.NewResult(55, 1))
 	mock.ExpectExec("UPDATE compose_tasks SET status = 'success', error_code = '', error_message = ''").WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectRollback()
-	if _, err := commitComposeOutput(db, composeOutputFixture(77), "outputs/final", 9, 1, closingCommitStep(now), now); !errors.Is(err, ErrComposeCommitLost) {
+	if _, err := commitComposeOutput(db, composeOutputFixture(77), "outputs/final", 9, 1, closingCommitStep(now), now, nil); !errors.Is(err, ErrComposeCommitLost) {
 		t.Fatalf("want ErrComposeCommitLost, got %v", err)
 	}
 	assertExpectations(t, mock)
@@ -529,6 +530,25 @@ func TestArchiveComposeOutputFlipsOnlyPendingPublishAndAudits(t *testing.T) {
 	ok, err = archiveComposeOutput(db, 55, 9, now)
 	if err != nil || ok {
 		t.Fatalf("refused archive: ok=%v err=%v", ok, err)
+	}
+	assertExpectations(t, mock)
+}
+
+func TestCommitComposeOutputLocksThumbnailBeforeWritingReference(t *testing.T) {
+	db, mock := newMockGORM(t)
+	now := time.Now()
+	output := composeOutputFixture(77)
+	output.Media = json.RawMessage(`{"thumbnail_file_id":"9007199254740993"}`)
+	mock.ExpectBegin()
+	mock.ExpectRollback()
+	stopped := errors.New("file deletion already began")
+	locked := false
+	_, err := commitComposeOutput(db, output, "outputs/final", 9, 1, closingCommitStep(now), now, func(tx *gorm.DB, ids []int64) error {
+		locked = tx != nil && len(ids) == 1 && ids[0] == 9007199254740993
+		return stopped
+	})
+	if !locked || !errors.Is(err, stopped) {
+		t.Fatalf("reference committed without available file: locked=%v err=%v", locked, err)
 	}
 	assertExpectations(t, mock)
 }

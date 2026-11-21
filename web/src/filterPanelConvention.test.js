@@ -66,10 +66,10 @@ function filterRowBlock(text, at) {
 function titleOf(block, controlAt) {
   const labelAt = block.lastIndexOf('<label', controlAt)
   if (labelAt === -1) return null
-  if (block.slice(labelAt, controlAt).includes('</label>')) return null
+  if (/<\/label\s*>/.test(block.slice(labelAt, controlAt))) return null
   const labelTag = openingTag(block, labelAt)
   if (!labelTag.includes('filter-field')) return null
-  const span = /<span\b[^>]*>([^<]+)<\/span>/.exec(block.slice(labelAt, controlAt))
+  const span = /<span\b[^>]*>([^<]+)<\/span\s*>/.exec(block.slice(labelAt, controlAt))
   return span ? span[1].trim() : null
 }
 
@@ -129,6 +129,12 @@ function perPage(rows) {
 }
 
 describe('filter panel convention', () => {
+  it('reads a visible title with formatted multiline closing tags', () => {
+    const block='<label class="wt-filter-field"><span class="wt-filter-field__label">图片名称</span\n><t-input />';
+    expect(titleOf(block,block.indexOf('<t-input'))).toBe('图片名称');
+    const closed=block+'</label\n><t-select />';
+    expect(titleOf(closed,closed.indexOf('<t-select'))).toBe(null);
+  })
   // 分母先钉住：扫不到筛选行的扫描器会让下面每条断言在空集上静默通过。
   // 本轮全部管理列表都使用 filter-bar；固定分母防止扫描器在空集上误通过。
   it('scans every filter row in the app', () => {

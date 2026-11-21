@@ -125,7 +125,9 @@ func operator(id, team int64, role identity.Role) identity.PublicUser {
 func testService() (*Service, *memoryFiles, *memoryObjects) {
 	r := &memoryFiles{records: map[int64]model.File{}}
 	o := &memoryObjects{contents: map[string]string{}}
-	return &Service{Repo: r, Objects: o, PublicBaseURL: "https://wt-media.bucket.example", Bucket: "wt-media", MaxBytes: 64, Inspect: func(context.Context, string, string) (string, string, error) { return "image", "image/png", nil }}, r, o
+	return &Service{Repo: r, Objects: o, PublicBaseURL: "https://wt-media.bucket.example", Bucket: "wt-media", MaxBytes: 64, Inspect: func(context.Context, string, string) (string, string, media.Info, error) {
+		return "image", "image/png", media.Info{Width: 640, Height: 360}, nil
+	}}, r, o
 }
 
 func TestUploadRequiresNameAndNeverPublishesFailedObject(t *testing.T) {
@@ -329,5 +331,39 @@ func TestDeletionTimestampSurvivesFailedRetries(t *testing.T) {
 	objects.removeErr = nil
 	if err := s.Delete(context.Background(), actor, file.ID); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// Reject losing the actual decoded dimensions between upload and read-back.
+func TestUploadReturnsInspectedImageMetadata(t *testing.T) {
+	s, _, _ := testService()
+	f, err := s.Upload(context.Background(), operator(1, 10, identity.RoleOperator), "封面", "cover.png", strings.NewReader("png"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := json.Marshal(f)
+	var v struct {
+		Metadata struct {
+			Width  int    `json:"width"`
+			Height int    `json:"height"`
+			Format string `json:"format"`
+		} `json:"metadata"`
+	}
+	if err := json.Unmarshal(b, &v); err != nil {
+		t.Fatal(err)
+	}
+	if v.Metadata.Width != 640 || v.Metadata.Height != 360 || v.Metadata.Format != "png" {
+		t.Fatalf("decoded image metadata lost: %s", b)
+	}
+}
+
+func TestUploadRejectsUnknownImageSizeBeforeAllocation(t *testing.T) {
+	s, r, o := testService()
+	s.Inspect = func(context.Context, string, string) (string, string, media.Info, error) {
+		return "image", "image/png", media.Info{}, nil
+	}
+	_, err := s.Upload(context.Background(), operator(1, 10, identity.RoleOperator), "封面", "cover.png", strings.NewReader("png"))
+	if !errors.Is(err, ErrInvalid) || len(r.records) != 0 || len(o.contents) != 0 {
+		t.Fatalf("unknown dimensions accepted: %v", err)
 	}
 }

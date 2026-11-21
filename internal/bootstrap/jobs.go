@@ -72,6 +72,9 @@ func runWorkerProcess() error {
 	runner.Register("publication-enqueue", 5*time.Second, func(context.Context) error {
 		return publishing.ExecutionStore().QueueDue(time.Now().UTC())
 	})
+	runner.Register("publication-public-check", 30*time.Second, func(context.Context) error {
+		return publishing.ExecutionStore().SchedulePublicCheck(time.Now().UTC())
+	})
 	runner.Register("publication-reconcile", 30*time.Second, func(context.Context) error {
 		return publishing.ExecutionStore().InterruptStale(time.Now().UTC())
 	})

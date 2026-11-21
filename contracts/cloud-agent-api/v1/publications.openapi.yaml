@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: WT Media Cloud-Agent Publication Execution
-  version: 2026.11.20.2
+  version: 2026.11.21.4
   description: >-
     Additive single-task execution. Agent bearer identifies the account owner; no device identity or
     generic lease. Claim requires a current Desktop session. Reports are report-safe only for the same
@@ -32,7 +32,7 @@ paths:
       parameters: [{$ref: '#/components/parameters/TaskID'}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/Report'}}}}
       responses:
-        '200': {description: '{task_status,attempt_status,attempt_id,report_seq,stop_requested,stop_reason?,allow_submit}. Omit stage for lightweight keepalive: no history append, resource revalidation or submit permission. Supply stage for progress and pre-submit checks. Invalidated execution input persists stop_reason=PUBLICATION_INPUT_CHANGED without advancing the stage; keepalive returns this stop until the executor safely completes or the attempt is reconciled. Only a fresh submitting report can grant one click; replay never grants it again.'}
+        '200': {description: '{task_status,attempt_status,attempt_id,report_seq,stop_requested,stop_reason?,allow_submit}. Omit stage for lightweight keepalive: no history append, resource revalidation or submit permission. Supply stage for progress and pre-submit checks. Invalidated execution input persists stop_reason=PUBLICATION_INPUT_CHANGED without advancing the stage; keepalive returns this stop until the executor safely completes or the attempt is reconciled. Only a fresh submitting report can grant one click; replay never grants it again. A task stop request fences permission with the same task revision. Explicit stop_requested=true and allow_submit=false denies permission; only that received denial plus verified original scene closure proves no click. Missing/failed responses remain uncertain.'}
         '409': {description: Stale/conflicting report, invalid transition, changed input or unsafe scene.}
   /api/v1/cloud-agent/publication-task/{id}/complete:
     post:
@@ -65,14 +65,85 @@ paths:
                       attempt_id: {$ref: '#/components/schemas/ID'}
                       result_hash: {type: [string, 'null']}
                       scene_resolved: {type: boolean}
-                      resolved_status: {type: string, enum: [failed, reviewing, ''], description: 'Original attempt disposition, never authorization for the task currently occupying this id.'}
+                      resolved_status: {type: string, enum: [failed, reviewing, published, ''], description: 'Original attempt disposition, never authorization for the task currently occupying this id.'}
         '404': {description: 'Original attempt missing, wrong publication or foreign owner.'}
+  /api/v1/cloud-agent/publication-task/{id}/attempt/{attempt_id}/scene:
+    get:
+      operationId: inspectPublicationScene
+      security: [{agentBearer: []}]
+      description: Strict current Desktop session. Validate original owner, task revision, attempt, frozen input, paused pre-submit stage and stop state. Read only; never opens a browser or grants submit.
+      parameters:
+        - {$ref: '#/components/parameters/TaskID'}
+        - {in: path, name: attempt_id, required: true, schema: {$ref: '#/components/schemas/ID'}}
+        - {in: query, name: expected_revision, required: true, schema: {$ref: '#/components/schemas/ID'}}
+      responses:
+        '200': {description: 'Standard envelope data original attempt ExecutionFeedback, allow_submit=false.'}
+        '409': {description: Stale, unsafe, changed input or no original waiting scene eligibility.}
+  /api/v1/cloud-agent/publication-task/{id}/resume:
+    post:
+      operationId: resumePublication
+      security: [{agentBearer: []}]
+      description: Continue only a live original pre-submit scene, with current Desktop authentication. Restores the saved stage and original attempt, never creates an attempt or reuploads. Same original expected_revision can confirm a lost reply only while that exact resume remains safe. Submit permission is independently rechecked later.
+      parameters:
+        - {$ref: '#/components/parameters/TaskID'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [attempt_id, expected_revision]
+              properties:
+                attempt_id: {$ref: '#/components/schemas/ID'}
+                expected_revision: {$ref: '#/components/schemas/ID'}
+      responses:
+        '200': {description: 'Standard envelope data original ExecutionFeedback, running, allow_submit=false.'}
+        '409': {description: Stale original identity/revision, submitted/lost scene, stop or changed input.}
+  /api/v1/cloud-agent/publication-task/check/claim:
+    post:
+      operationId: claimPublicCheck
+      security: [{agentBearer: []}]
+      description: Read one due original reviewing task for the current owner. Advances only the five-minute read schedule and observation generation. No publication attempt, upload, file grant or submit permission is created. A missing reply waits for the next read cycle.
+      responses:
+        '200': {description: Standard envelope with data null or PublicCheckClaim, content: {application/json: {schema: {type: object, properties: {data: {nullable: true, allOf: [{$ref: '#/components/schemas/PublicCheckClaim'}]}}}}}}
+        '401': {description: Current Desktop Agent session required.}
+  /api/v1/cloud-agent/publication-task/{id}/check:
+    post:
+      operationId: observePublication
+      security: [{agentBearer: []}]
+      parameters: [{$ref: '#/components/parameters/TaskID'}]
+      description: Record this exact original attempt and generation. Current task revision/input/owner fences manual supplementation and later checks. Only unknown/received/public observations are admitted. Unknown or inaccessible preserves reviewing. A credible public observation atomically records work, task, observation and audit without changing the original attempt. Exact recorded replay confirms the original observation without changing a newer task.
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/PublicCheckReport'}}}}
+      responses:
+        '200': {description: 'Standard envelope data {publication_id,attempt_id,generation,observation_hash}; IDs/generation decimal strings. No submit permission.'}
+        '400': {description: Invalid observation or unsupported conclusion.}
+        '401': {description: Current Desktop Agent session required.}
+        '409': {description: Original task revision/attempt/generation/input changed or observation conflicts.}
 components:
   securitySchemes:
     agentBearer: {type: http, scheme: bearer}
   parameters:
     TaskID: {in: path, name: id, required: true, schema: {$ref: '#/components/schemas/ID'}}
   schemas:
+    PublicCheckClaim:
+      type: object
+      required: [task, attempt, generation, expected_revision]
+      properties:
+        task: {type: object, description: 'Original reviewing task, immutable submission ID and exact platform-supplied target_url if known.'}
+        attempt: {type: object, description: 'Original frozen input and Profile, no file grants or execution authority.'}
+        generation: {type: string, pattern: '^[1-9][0-9]*$'}
+        expected_revision: {type: string, pattern: '^[1-9][0-9]*$'}
+    PublicCheckReport:
+      type: object
+      additionalProperties: false
+      required: [generation, observation]
+      properties:
+        generation: {type: string, pattern: '^[1-9][0-9]*$'}
+        observation:
+          allOf:
+            - {$ref: '../../cloud-api/v1/publication.openapi.yaml#/components/schemas/ResultResolution'}
+            - {type: object, properties: {conclusion: {type: string, enum: [uncertain, reviewing, published]}}}
     ID: {type: string, pattern: '^[1-9][0-9]*$'}
     Report:
       type: object

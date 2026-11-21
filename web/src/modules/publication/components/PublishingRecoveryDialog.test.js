@@ -1,0 +1,80 @@
+import { createSSRApp } from "vue";
+import { renderToString } from "vue/server-renderer";
+import { expect, it, vi } from "vitest";
+import Dialog from "./PublishingRecoveryDialog.vue";
+async function mount(
+  task = {
+    id: "1",
+    current_attempt_id: "7",
+    revision: "2",
+    status: "uncertain",
+    platform_account_uid: "6572476037",
+  },
+) {
+  let state;
+  const emit = vi.fn();
+  await renderToString(
+    createSSRApp({
+      setup() {
+        state = Dialog.setup(
+          { visible: true, task, busy: false, error: "" },
+          { emit, expose: () => {} },
+        );
+        return () => null;
+      },
+    }),
+  );
+  return { state, emit };
+}
+it("requires actual scene and no-work confirmation instead of asserting them automatically", async () => {
+  const { state: s, emit } = await mount();
+  s.conclusion.value = "failed";
+  s.reason.value = "已核对";
+  s.basis.value = "已经检查原账号稿件和原执行现场";
+  s.submit();
+  expect(emit).not.toHaveBeenCalled();
+  s.sceneClosed.value = true;
+  s.noPublishableWork.value = true;
+  s.submit();
+  expect(emit).toHaveBeenCalledWith(
+    "submit",
+    expect.objectContaining({
+      evidence: expect.objectContaining({
+        scene_closed: true,
+        no_publishable_work: true,
+      }),
+    }),
+  );
+});
+it("supplements reviewing with the original receipt, distinct work ID and explicit public evidence", async () => {
+  const { state: s, emit } = await mount({
+    id: "1",
+    current_attempt_id: "7",
+    revision: "3",
+    status: "reviewing",
+    platform_account_uid: "6572476037",
+    platform_submission_id: "1882371730190912814",
+  });
+  s.conclusion.value = "published";
+  s.reason.value = "已核实公开";
+  s.basis.value = "已核对原账号和视频，匿名可访问指定作品";
+  s.submissionId.value = "1882371730190912814";
+  s.workId.value = "7000395122085014122";
+  s.workUrl.value =
+    "https://mbd.baidu.com/newspage/data/videolanding?nid=sv_7000395122085014122";
+  s.publishedTime.value = "2026-11-20T18:12:53";
+  s.sceneClosed.value = true;
+  s.workMatched.value = true;
+  s.submit();
+  expect(emit).not.toHaveBeenCalled();
+  s.publiclyAccessible.value = true;
+  s.submit();
+  expect(emit).toHaveBeenCalledWith(
+    "submit",
+    expect.objectContaining({
+      platform_submission_id: "1882371730190912814",
+      platform_work_id: "7000395122085014122",
+      published_at: "2026-11-20T10:12:53.000Z",
+    }),
+  );
+});

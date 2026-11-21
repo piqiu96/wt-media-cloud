@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -39,11 +40,18 @@ type Config struct {
 	Compose     ComposeConfig
 }
 
+type PublicationGenerationConfig struct {
+	Model   string   `toml:"model"`
+	BaseURL string   `toml:"base_url"`
+	Timeout Duration `toml:"timeout"`
+}
+
 type AppConfig struct {
-	Name         string             `toml:"name"`
-	Server       ServerConfig       `toml:"server"`
-	InitialAdmin InitialAdminConfig `toml:"initial_admin"`
-	BitBrowser   BitBrowserConfig   `toml:"bitbrowser"`
+	PublicationGeneration PublicationGenerationConfig `toml:"publication_generation"`
+	Name                  string                      `toml:"name"`
+	Server                ServerConfig                `toml:"server"`
+	InitialAdmin          InitialAdminConfig          `toml:"initial_admin"`
+	BitBrowser            BitBrowserConfig            `toml:"bitbrowser"`
 }
 
 type ServerConfig struct {
@@ -110,7 +118,12 @@ type ClientsConfig struct {
 	HTTP []httpclient.Config
 }
 
+type DeepSeekCredentialConfig struct {
+	APIKey string `toml:"api_key"`
+}
+
 type CredentialsConfig struct {
+	DeepSeek      DeepSeekCredentialConfig
 	Agent         AgentCredentialConfig
 	AgentToken    AgentTokenCredentialConfig
 	Douyin        DouyinCredentialConfig
@@ -376,6 +389,9 @@ func LoadFromDir(root string) (Config, error) {
 	if err := optionalTOML(filepath.Join(root, "credentials", "douyin.toml"), &cfg.Credentials.Douyin); err != nil {
 		return Config{}, err
 	}
+	if err := optionalTOML(filepath.Join(root, "credentials", "deepseek.toml"), &cfg.Credentials.DeepSeek); err != nil {
+		return Config{}, err
+	}
 	if err := requiredTOML(filepath.Join(root, "scheduler", "scheduler.toml"), &cfg.Scheduler); err != nil {
 		return Config{}, err
 	}
@@ -409,6 +425,15 @@ func LoadFromDir(root string) (Config, error) {
 }
 
 func (c Config) Validate() error {
+	if settings := c.App.PublicationGeneration; settings.Model != "" {
+		u, err := url.Parse(settings.BaseURL)
+		if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.Path != "" || u.RawQuery != "" || u.Fragment != "" || settings.Timeout.Duration <= 0 || settings.Timeout.Duration > 180*time.Second {
+			return errors.New("DeepSeek connection configuration invalid")
+		}
+	}
+	if key := c.Credentials.DeepSeek.APIKey; key != "" && (strings.TrimSpace(key) != key || strings.ContainsAny(key, "\r\n") || strings.TrimSpace(c.App.PublicationGeneration.Model) == "") {
+		return errors.New("DeepSeek credential and model configuration invalid")
+	}
 	if strings.TrimSpace(c.App.Name) == "" {
 		return errors.New("app.name is required")
 	}

@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: WT Media Operations Files API
-  version: 2026.11.19.1
+  version: 2026.11.21.1
   description: Independent image/video uploads. JSON responses use errcode/message/data/logid. Ordinary operators manage their own uploads, senior operators their team, administrators all files. Only verified uploads are visible. Stored objects are immutable; renaming changes display/download names only.
 paths:
   /api/v1/files:
@@ -76,6 +76,15 @@ components:
       type: object
       required: [id, name, filename, type, content_type, size_bytes, sha256, owner_id, created_at, resource_path, public_url]
       properties:
+        metadata:
+          type: object
+          description: Actual inspected image dimensions and format; omitted for non-image files.
+          required: [width, height, format, source]
+          properties:
+            width: {type: integer, minimum: 1}
+            height: {type: integer, minimum: 1}
+            format: {type: string, enum: [png, jpg, jpeg, webp, gif]}
+            source: {type: string, enum: [upload]}
         deleted_at: {type: [string, 'null'], format: date-time, description: Logical deletion time; non-null files cannot be selected or accessed and allow DELETE retry.}
         id: {type: integer, format: int64}
         name: {type: string}

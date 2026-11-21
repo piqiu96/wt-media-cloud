@@ -122,6 +122,8 @@ type ComposeInputGate struct {
 // ComposeExecutorDeps carries the collaborators of one attempt. Everything is
 // an interface or a function so the unit tests substitute memory fakes.
 type ComposeExecutorDeps struct {
+	RemoveThumbnail     func(context.Context, model.ComposeTask, int64) error
+	CreateThumbnail     func(context.Context, model.ComposeTask, int64, string, string) (int64, error)
 	ResolveFileResource func(context.Context, string) (frozenResource, error)
 	InspectResource     func(context.Context, string) (executor.MediaInput, error)
 	Tasks               composeTaskLifecycle
@@ -293,7 +295,22 @@ func RunComposeAttempt(ctx context.Context, deps ComposeExecutorDeps, task model
 	if settingName == "" {
 		settingName = "默认成片"
 	}
-	mediaFacts := map[string]int64{"duration_ms": output.DurationMS}
+	if deps.CreateThumbnail == nil || deps.RemoveThumbnail == nil {
+		return failTerminal(deps.Tasks, task, nodeID, commitStep, composeErrStorageError, "output thumbnail writer is not configured")
+	}
+	thumbnailID, err := deps.CreateThumbnail(ctx, task, outputID, digest, output.Path)
+	if err != nil || thumbnailID <= 0 {
+		return transientFailureInContext(ctx, deps, task, nodeID, commitStep, composeErrStorageError, "output thumbnail could not be saved")
+	}
+	preserveThumbnail := false
+	defer func() {
+		if !preserveThumbnail {
+			cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+			defer cancel()
+			_ = deps.RemoveThumbnail(cleanupCtx, task, thumbnailID)
+		}
+	}()
+	mediaFacts := map[string]any{"duration_ms": output.DurationMS, "thumbnail_file_id": strconv.FormatInt(thumbnailID, 10)}
 	if output.Width > 0 {
 		mediaFacts["width"] = int64(output.Width)
 	}
@@ -318,12 +335,14 @@ func RunComposeAttempt(ctx context.Context, deps ComposeExecutorDeps, task model
 	closing := finishedStep(commitStep)
 	closing.Outcome = model.ComposeStepOutcomeSuccess
 	preserveFormal = true // A lost response may still mean the transaction committed.
+	preserveThumbnail = true
 	if _, err := deps.Tasks.CommitComposeOutput(out, formalKey, nodeID, task.AttemptCount, closing); err != nil {
 		// ErrComposeCommitLost proves the transaction rolled back. Other
 		// errors may be a lost response after commit; deleting the formal
 		// object then could leave a success row pointing at missing bytes.
 		if errors.Is(err, repository.ErrComposeCommitLost) {
 			preserveFormal = false
+			preserveThumbnail = false
 		}
 		// The attempt is left for the recovery scan, so this entry is what
 		// tells the operator the run stopped here with an unknown result.

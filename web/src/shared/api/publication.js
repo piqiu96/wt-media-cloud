@@ -5,13 +5,18 @@ export function createPublicationClient({
 } = {}) {
   const api = createApiClient({ base, fetchImpl: fetch });
   return {
+    generate: (input, options) => api.stream("/publication/generate", input, options),
     list: (params) => api.get("/publication", params),
     outputs: (params) => api.get("/publication/output", params),
     get: (id) => api.get(`/publication/${id}`),
+    copy: (id, revision) => api.get(`/publication/${id}/copy`, { expected_revision: revision }),
+    findByRequest: (requestKey) => api.get("/publication/request", { request_key: requestKey }),
     create: (input) => api.post("/publication", input),
     start: (id, input) => api.post(`/publication/${id}/start`, input),
     resolve: (id, input) => api.post(`/publication/${id}/resolve`, input),
     retry: (id, input) => api.post(`/publication/${id}/retry`, input),
+    cancel: (id, input) => api.post(`/publication/${id}/cancel`, input),
+    abandon: (id, input) => api.post(`/publication/${id}/abandon`, input),
     attempt: (id) => api.get(`/publication/${id}/attempt`),
     edit: (id, input) => api.put(`/publication/${id}/content`, input),
   };

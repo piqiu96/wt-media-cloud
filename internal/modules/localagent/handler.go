@@ -2,6 +2,7 @@ package localagent
 
 import (
 	"context"
+	"strconv"
 
 	hertzapp "github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/common/hlog"
@@ -54,6 +55,7 @@ func IssueAgentToken(_ context.Context, c *hertzapp.RequestContext) {
 	}
 	api.Success(c, map[string]any{
 		"token":      token,
+		"user_id":    strconv.FormatUint(uint64(authContext.User.ID), 10),
 		"expires_at": claims.ExpiresAt,
 	})
 }

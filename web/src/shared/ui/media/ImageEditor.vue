@@ -4,7 +4,7 @@ import MediaPreview from "./MediaPreview.vue";
 import ResourceNotice from "../resource/ResourceNotice.vue";
 import { BrowseIcon, BrowseOffIcon, LockOnIcon, LockOffIcon, ChevronUpIcon, ChevronDownIcon } from "tdesign-icons-vue-next";
 import { layoutText } from "./textLayout.js";
-const props = defineProps({ modelValue: Object, fixedSize: Boolean, templateMode: Boolean, backgroundPreview: String });
+const props = defineProps({ modelValue: Object, fixedSize: Boolean, templateMode: Boolean, backgroundPreview: String, fontRevision: Number, fontFamilyMap: { type: Object, default: () => ({}) } });
 const emit = defineEmits(["update:modelValue", "export", "ready"]);
 const base = () => ({
   width: 1200,
@@ -69,9 +69,11 @@ const ctx =
   typeof document !== "undefined"
     ? document.createElement("canvas").getContext("2d")
     : null;
+function resolvedFont(family) { return props.fontFamilyMap[family] || family || "sans-serif"; }
 function textLayout(l) {
+  void props.fontRevision;
   return layoutText(l, (s, size) => {
-    ctx.font = `${l.weight || 400} ${size}px ${l.fontFamily || "sans-serif"}`;
+    ctx.font = `${l.weight || 400} ${size}px ${JSON.stringify(resolvedFont(l.fontFamily))}`;
     return ctx.measureText(s).width;
   });
 }
@@ -586,7 +588,7 @@ onMounted(async () => {
               />
               <text
                 v-else
-                :font-family="l.fontFamily"
+                :font-family="resolvedFont(l.fontFamily)"
                 :font-size="textLayout(l).size"
                 :font-weight="l.weight"
                 :fill="l.color"

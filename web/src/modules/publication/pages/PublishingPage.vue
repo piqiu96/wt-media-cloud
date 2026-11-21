@@ -27,6 +27,12 @@ import { feedback } from "../../../shared/ui/feedback/index.js";
 import { createPublicationClient } from "../../../shared/api/publication.js";
 import { createComposeClient } from "../../../shared/api/compose.js";
 import { createMediaAccountClient } from "../../../shared/api/mediaAccounts.js";
+import { createSessionClient } from "../../../shared/api/session.js";
+import { createImageClient } from "../../../shared/api/image.js";
+import { handlePublicationHuman } from "../../../shared/api/publicationRun.js";
+import { createPublicationDraftClient } from "../../../shared/api/publicationDraft.js";
+import { choosePublicationDraft, capturePublicationDraft } from "../draftRecovery.js";
+import { accountUnavailable } from "../eligibility.js";
 import { createFilesClient } from "../../../shared/api/files.js";
 import {
   definitivePublicationRejection,
@@ -35,9 +41,13 @@ import {
 } from "../eligibility.js";
 import { PublicationStatus, publicationStatuses } from "../status.js";
 import { publicationTitleForOutput } from "../title.js";
+import PublicationContentGenerator from "../components/PublicationContentGenerator.vue";
+import PublishingCoverEditor from "../components/PublishingCoverEditor.vue";
+import { emptyCoverConfig, coverConfigFromReference, coverReference } from "../coverPreparation.js";
 import PublishingExecutionHistory from "../components/PublishingExecutionHistory.vue";
 import PublishingResourcePicker from "../components/PublishingResourcePicker.vue";
 import PublishingRecoveryDialog from "../components/PublishingRecoveryDialog.vue";
+import PublishingTerminationDialog from "../components/PublishingTerminationDialog.vue";
 import AccountSummaryDialog from "../../accounts/components/AccountSummaryDialog.vue";
 const client = createPublicationClient(),
   compose = createComposeClient(),
@@ -59,7 +69,9 @@ function viewAccount(id) {
   accountSummaryId.value = String(id);
   accountSummaryVisible.value = true;
 }
+const humanVisible=ref(false),humanTask=ref(null),humanUserId=ref(""),humanError=ref("");
 const recoveryVisible=ref(false),recoveryTask=ref(null),recoveryError=ref("");
+const terminationVisible = ref(false), terminationTask = ref(null), terminationAction = ref(""), terminationError = ref(""), terminationSubmitted = ref(false);
 const summary = ref(null),
   advanced = ref(false);
 const metricItems = computed(() => [
@@ -106,6 +118,16 @@ const view = ref("list"),
   picker = ref(""),
   baseline = ref(""),
   pendingRequest = ref(null);
+const coverConfig = ref(emptyCoverConfig());
+const generationContext = computed(() => ({ rowKey: form.value?.request_key || String(editing.value?.id || ''), platform: form.value?.platform, categoryId: form.value?.category_id, outputId: form.value?.composite_output_id, identityKey: JSON.stringify([form.value?.media_account_id,coverConfig.value.method,coverConfig.value.template_id,coverConfig.value.published_revision]) }));
+const generationValues = computed(() => ({ description: form.value?.content.description || '', topics: form.value?.content.topics || '', cover_title: coverConfig.value.title || '' }));
+function adoptGeneratedContent(field,value) {
+ if (frozen.value || !form.value) return;
+ if (field === 'cover_title') { updateCoverConfig({ ...coverConfig.value, title: value }); return; }
+ if (!['description','topics'].includes(field) || form.value.content[field] === value) return;
+ form.value.content[field] = value; invalidate();
+}
+
 const videoVisible = ref(false), videoURL = ref(""), videoLoading = ref(false), videoError = ref("");
 let videoSequence = 0;
 async function previewOutput() {
@@ -147,7 +169,7 @@ const columns = [
   { colKey: "account", title: "发布账号", width: 180 },
   { colKey: "status", title: "状态", width: 120 },
   { colKey: "created_at", title: "创建时间", width: 170 },
-  { colKey: "op", title: "操作", width: opColumnWidth(["执行", "编辑", "详情"], { variant: "text", primary: true }), fixed: "right" },
+  { colKey: "op", title: "操作", width: opColumnWidth(["执行", "编辑", "终止", "详情"], { variant: "text", primary: true }), fixed: "right" },
 ];
 watch(view, async (next, previous) => {
   const container = pageRoot.value?.closest(".content-area");
@@ -162,7 +184,7 @@ const frozen = computed(() => busy.value || !!pendingRequest.value);
 const dirty = computed(
   () =>
     form.value &&
-    JSON.stringify({ form: form.value, schedule: schedule.value }) !==
+    JSON.stringify({ form: form.value, schedule: schedule.value, cover_config:coverConfig.value }) !==
       baseline.value,
 );
 const statusLabel = (v) => publicationStatuses[v] || v;
@@ -218,7 +240,7 @@ function invalidate() {
   if (form.value) form.value.content.confirmed = false;
 }
 async function changeCategory(category) {
-  if (frozen.value) return;
+  if (frozen.value || String(category) === String(form.value.category_id)) return;
   if (account.value || output.value) {
     if (
       !(await feedback.confirmWarning({
@@ -229,14 +251,17 @@ async function changeCategory(category) {
     )
       return;
   }
+  draftResourceIssue.value = {};
+  draftNotice.value = "";
   form.value = emptyForm();
   form.value.category_id = category;
   account.value = null;
   output.value = null;
   cover.value = null;
+  coverConfig.value = emptyCoverConfig();
   schedule.value = "";
 }
-function openCreate() {
+function initializeCreate() {
   source.value = false;
   editing.value = null;
   detail.value = null;
@@ -244,13 +269,151 @@ function openCreate() {
   account.value = null;
   output.value = null;
   cover.value = null;
+  coverConfig.value = emptyCoverConfig();
   schedule.value = "";
   form.value = emptyForm();
   formError.value = "";
   pendingRequest.value = null;
-  baseline.value = JSON.stringify({ form: form.value, schedule: "" });
+  baseline.value = JSON.stringify({ form: form.value, schedule: "", cover_config:coverConfig.value });
   view.value = "form";
 }
+const draftPersistent = ref(false), draftReady = ref(false), draftNotice = ref("");
+const draftResourceIssue = ref({}), draftConflict = ref(false);
+let draftClient = null;
+function draftPayload() {
+  return capturePublicationDraft(form.value, schedule.value, cover.value, pendingRequest.value, coverConfig.value);
+}
+async function openCreate(sourceOutput = null, copyInput = null, copyUserId = null) {
+  if (busy.value) return false;
+  busy.value = true;
+  draftReady.value = false;
+  error.value = "";
+  try {
+    const user = await createSessionClient().me();
+    if (disposed) return false;
+    if (copyInput && String(user.id) !== String(copyUserId)) throw new Error("登录账号已变化，已丢弃原账号的复制内容，请重新打开任务列表");
+    const verifyOwner = async () => {
+      const current = await createSessionClient().me();
+      if (disposed) throw new Error("页面已离开，已丢弃迟到内容");
+      if (String(current.id) !== String(user.id)) throw new Error("登录账号已变化，原草稿和复制内容未写入，请重新打开任务列表");
+    };
+    draftClient = createPublicationDraftClient({ userId: user.id });
+    draftPersistent.value = draftClient.persistent;
+    const previous = await draftClient.get();
+    let choice = null;
+    if (previous.payload) {
+      choice = await choosePublicationDraft(previous.saved_at);
+      if (!choice) return false;
+    }
+    await verifyOwner();
+    if (choice === "restart") {
+      await draftClient.clear();
+      await verifyOwner();
+    }
+    initializeCreate();
+    draftResourceIssue.value = {};
+    draftConflict.value = false;
+    draftNotice.value = "";
+    if (choice === "continue") await restoreDraft(previous.payload);
+    else if (copyInput) {
+      form.value.platform = copyInput.platform;
+      form.value.category_id = String(copyInput.category_id);
+      form.value.content.description = copyInput.content.description;
+      form.value.content.topics = copyInput.content.topics;
+      form.value.content.declaration = copyInput.content.declaration;
+      draftNotice.value = "已复制文案、话题和声明；请重新选择账号、成片和封面，并核对确认内容。";
+    } else if (sourceOutput?.id) {
+      source.value = true;
+      setOutput(sourceOutput);
+      form.value.category_id = String(sourceOutput.category_id);
+    }
+    baseline.value = JSON.stringify({ form: form.value, schedule: schedule.value, cover_config:coverConfig.value });
+    draftReady.value = true;
+    return true;
+  } catch (e) {
+    if (disposed) return false;
+    error.value = e.message || "无法读取续编，原输入已保留，请重试";
+    if (view.value === "form") formError.value = error.value;
+    return false;
+  } finally { busy.value = false; }
+}
+async function restoreDraft(payload) {
+  if (!payload?.form?.content || !payload.form.request_key || payload.form.platform !== "baidu") throw new Error("续编输入无法读取，请保留原草稿后核对");
+  form.value = capturePublicationDraft(payload.form, payload.schedule, null, null).form;
+  coverConfig.value = payload.cover_config || (form.value.content.cover_render ? coverConfigFromReference(form.value.content.cover_render) : emptyCoverConfig());
+  schedule.value = String(payload.schedule || "");
+  pendingRequest.value = payload.pending_request || null;
+  // Restoring user input never re-confirms resources or replaces human text.
+  if (!pendingRequest.value) form.value.content.confirmed = false;
+  const results = await Promise.allSettled([
+    form.value.media_account_id ? accounts.get(form.value.media_account_id) : null,
+    form.value.composite_output_id ? compose.getComposeOutput(form.value.composite_output_id) : null,
+    payload.image_asset_id ? createImageClient().getImageAsset(payload.image_asset_id) : null,
+    form.value.content.cover_render ? createImageClient().getCover(form.value.content.cover_file_id) : null,
+  ]);
+  const [a, o, c, artwork] = results.map(result => result.status === "fulfilled" ? result.value : null);
+  account.value = a;
+  output.value = o?.output || null;
+  if (form.value.media_account_id) draftResourceIssue.value.account = !a ? "原账号不可用，请恢复原账号或重新选择" : accountUnavailable(a, form.value.category_id);
+  if (form.value.composite_output_id) draftResourceIssue.value.output = !output.value ? "原成片不可用，填写内容已保留" : outputUnavailable(output.value, form.value.category_id, a);
+  if (form.value.content.cover_file_id) {
+    cover.value = { id: form.value.content.cover_file_id, image_asset_id: String(payload.image_asset_id || ""), origin: String(payload.cover_origin || ""), output_id: String(payload.cover_output_id || ""), name: "原封面暂不可用" };
+    const thumbnail = output.value?.thumbnail;
+    if (artwork && JSON.stringify(coverReference(artwork)) === JSON.stringify(form.value.content.cover_render)) {
+      cover.value = {...artwork.file,origin:"template"};
+      coverConfig.value = payload.cover_config || coverConfigFromReference(form.value.content.cover_render, artwork.snapshot);
+    } else if (payload.cover_origin === "output" && String(payload.cover_output_id) === form.value.composite_output_id && thumbnail && String(thumbnail.file_id) === form.value.content.cover_file_id) {
+      cover.value = { ...thumbnail, id: String(thumbnail.file_id), origin: "output", output_id: form.value.composite_output_id, name: "成片封面" };
+    } else if (c && String(c.file_id) === form.value.content.cover_file_id && c.enabled && c.allow_as_cover && (!c.category_ids?.length || c.category_ids.map(String).includes(form.value.category_id))) {
+      cover.value = { ...c, id: c.file_id, image_asset_id: c.id };
+    } else {
+      draftResourceIssue.value.cover = "原封面不可用，请恢复原图片或重新选择";
+    }
+  }
+  draftNotice.value = "已恢复填写，资源可用性已重新检查；请重新核对内容。";
+}
+watch([form, schedule, pendingRequest, coverConfig], () => {
+  if (draftReady.value && draftClient && view.value === "form" && !editing.value && !busy.value) {
+    const hasInput = form.value.category_id || form.value.media_account_id || form.value.composite_output_id || form.value.content.description || schedule.value;
+    draftClient.remember(hasInput ? draftPayload() : null);
+  }
+}, { deep: true });
+async function saveDraft() {
+  if (busy.value || !draftReady.value || editing.value) return false;
+  busy.value = true;
+  formError.value = "";
+  try {
+    await draftClient.save(draftPayload());
+    baseline.value = JSON.stringify({ form: form.value, schedule: schedule.value, cover_config:coverConfig.value });
+    feedback.toast.success(draftPersistent.value ? "草稿已保存，重启后可继续；不占用成片" : "已暂存当前填写；刷新、关闭或退出后清空");
+    return true;
+  } catch (e) { draftConflict.value = e.code === "draft_revision_conflict"; formError.value = e.message || "保存失败，填写内容已保留"; return false; }
+  finally { busy.value = false; }
+}
+async function reloadDraft() {
+  if (busy.value || editing.value || !draftClient) return;
+  if (!(await feedback.confirmWarning({ title: "读取最新草稿？", message: "最新草稿会替换当前填写，当前未保存修改将丢失。", confirmText: "读取最新草稿", cancelText: "保留当前填写" }))) return;
+  busy.value = true;
+  formError.value = "";
+  try {
+    const current = await draftClient.get({ reload: true });
+    draftResourceIssue.value = {};
+    if (current.payload) await restoreDraft(current.payload);
+    else initializeCreate();
+    draftConflict.value = false;
+    baseline.value = JSON.stringify({ form: form.value, schedule: schedule.value, cover_config:coverConfig.value });
+  } catch (e) { formError.value = e.message || "读取失败，填写内容已保留"; }
+  finally { busy.value = false; }
+}
+async function clearCreatedDraft() {
+  if (!draftClient || editing.value) return "";
+  let warning = "";
+  try { await draftClient.clear(); }
+  catch (e) { warning = `任务已创建；续编未清除，请重新打开后核对原任务。${e.message || ""}`; }
+  draftReady.value = false;
+  return warning;
+}
+
 async function openDetail(row) {
   loading.value = true;
   error.value = "";
@@ -267,6 +430,48 @@ async function openDetail(row) {
 }
 const editable = (task) => task.status === PublicationStatus.Pending && !task.current_attempt_id && !task.authorized_at && !task.cancel_requested_at;
 const retryable = (task) => task.status === PublicationStatus.Failed && !task.cancel_requested_at;
+const cancellable = (task) => task.can_cancel === true && !task.cancel_requested_at;
+const abandonable = (task) => task.status === PublicationStatus.Failed && !!task.current_attempt_id;
+const copyable = (task) => [PublicationStatus.Failed, PublicationStatus.Published, PublicationStatus.Cancelled, PublicationStatus.Abandoned].includes(task.status);
+async function copyTask(row) {
+  if (busy.value) return;
+  busy.value = true; error.value = '';
+  let input, userId;
+  try {
+    userId = String((await createSessionClient().me()).id);
+    if (disposed) return;
+    input = await client.copy(row.id, row.revision);
+  }
+  catch (e) { if (!disposed) { await load(); error.value = e.message; } }
+  finally { busy.value = false; }
+  if (input && !disposed) await openCreate(null, input, userId);
+}
+
+async function openTermination(row, action) {
+  if (busy.value) return;
+  busy.value = true; error.value = '';
+  try {
+    const task = await client.get(row.id);
+    if (task.revision !== row.revision || !(action === 'cancel' ? cancellable(task) : action === 'abandon' && abandonable(task))) throw new Error('任务内容或状态已变化，请核对更新后的列表再操作');
+    terminationTask.value = JSON.parse(JSON.stringify(task));
+    terminationAction.value = action; terminationError.value = ''; terminationSubmitted.value = false; terminationVisible.value = true;
+  } catch (e) { await load(); error.value = e.message; }
+  finally { busy.value = false; }
+}
+async function saveTermination(input) {
+  if (busy.value || terminationSubmitted.value || !terminationTask.value) return;
+  busy.value = true; terminationError.value = ''; terminationSubmitted.value = true;
+  try {
+    const action = terminationAction.value;
+    const result = await client[action](terminationTask.value.id, input);
+    terminationVisible.value = false;
+    await load();
+    feedback.toast.success(action === 'abandon' ? '已安全放弃，成片占用已释放' : result.status === PublicationStatus.Cancelled ? '已终止任务，保留成片占用' : '已请求安全停止，等待执行端确认；请查看任务结果');
+  } catch (e) {
+    await load();
+    terminationError.value = e.message + '；请保留依据，返回任务列表查询核对结果。';
+  } finally { busy.value = false; }
+}
 async function startExecution(row) {
   if (busy.value) return;
   busy.value = true;
@@ -285,13 +490,42 @@ async function startExecution(row) {
     error.value = message;
   } finally { busy.value = false; }
 }
+async function openHumanScene(row) {
+  if (busy.value) return;
+  busy.value=true;error.value='';
+  try {
+    const [task,user]=await Promise.all([client.get(row.id),createSessionClient().me()]);
+    if (disposed) return;
+    if (task.status!==PublicationStatus.AwaitingHuman || !task.current_attempt_id) throw new Error('任务状态已变化，请刷新后核对');
+    await handlePublicationHuman({task,userId:String(user.id)});
+    if (disposed) return;
+    humanTask.value=task;humanUserId.value=String(user.id);humanError.value='';humanVisible.value=true;
+  } catch(e) {if (!disposed) error.value=e.message || '原发布现场不可用，请刷新后核实原任务';}
+  finally {busy.value=false;}
+}
+async function continueHumanScene() {
+  if (busy.value || !humanTask.value) return;
+  busy.value=true;humanError.value='';
+  try {
+    const user=await createSessionClient().me();
+    if (disposed) return;
+    if (String(user.id)!==humanUserId.value) throw new Error('登录身份已变化，请关闭后重新打开原任务');
+    await handlePublicationHuman({task:humanTask.value,userId:humanUserId.value,resume:true});
+    if (disposed) return;
+    humanVisible.value=false;
+    feedback.toast.success('已继续原发布尝试，请在任务中查看后续结果');
+    await load();
+    if (view.value==='detail' && detail.value?.id===humanTask.value.id) detail.value=await client.get(humanTask.value.id);
+  } catch(e) {if (!disposed) humanError.value=e.message || '未收到继续确认，请保留原现场后重试';}
+  finally {busy.value=false;}
+}
 async function openVerification(row) {
   if (busy.value) return;
   busy.value = true;
   error.value = "";
   try {
     const task = await client.get(row.id);
-    if (task.status !== PublicationStatus.Uncertain) throw new Error("任务状态已变化，请核对列表后操作");
+    if (![PublicationStatus.Uncertain,PublicationStatus.Reviewing].includes(task.status)) throw new Error("任务状态已变化，请核对列表后操作");
     recoveryTask.value = JSON.parse(JSON.stringify(task));
     recoveryError.value = "";
     recoveryVisible.value = true;
@@ -343,6 +577,10 @@ async function edit(row) {
       accounts.get(v.media_account_id),
       compose.getComposeOutput(v.composite_output_id),
     ]);
+    draftReady.value = false;
+    draftResourceIssue.value = {};
+    draftNotice.value = "";
+    draftConflict.value = false;
     editing.value = v;
     account.value = a;
     output.value = o.output;
@@ -351,6 +589,8 @@ async function edit(row) {
       name: v.resources.cover_name,
       resource_path: v.resources.cover_resource_path,
     };
+    coverConfig.value = v.content.cover_render ? coverConfigFromReference(v.content.cover_render,v.resources.cover_render) : emptyCoverConfig();
+    if(v.content.cover_render) cover.value.origin="template";
     form.value = {
       request_key: v.request_key,
       platform: v.platform,
@@ -363,6 +603,7 @@ async function edit(row) {
     baseline.value = JSON.stringify({
       form: form.value,
       schedule: schedule.value,
+      cover_config:coverConfig.value,
     });
     formError.value = "";
     pendingRequest.value = null;
@@ -374,12 +615,57 @@ async function edit(row) {
   }
 }
 function setOutput(row) {
+  const backgroundChanged=String(output.value?.id || "")!==String(row?.id || "") || String(output.value?.thumbnail?.file_id || "")!==String(row?.thumbnail?.file_id || "");
   form.value.content.description = publicationTitleForOutput(form.value.content.description, output.value, row);
   output.value = row;
   form.value.composite_output_id = row ? String(row.id) : "";
+  if (coverConfig.value.method === "template" && coverConfig.value.background_mode === "business" && coverConfig.value.background_source === "output" && backgroundChanged) {
+    clearRenderedCover();
+  } else if (coverConfig.value.method === "image" && (!cover.value || cover.value.origin === "output")) {
+    const thumbnail = row?.thumbnail;
+    cover.value = thumbnail?.file_id ? { ...thumbnail, id: String(thumbnail.file_id), origin: "output", output_id: String(row.id), name: "成片封面" } : null;
+    form.value.content.cover_file_id = cover.value ? cover.value.id : "";
+    delete draftResourceIssue.value.cover;
+  }
+}
+function clearRenderedCover() {
+  cover.value=null;
+  form.value.content.cover_file_id="";
+  delete form.value.content.cover_render;
+  delete draftResourceIssue.value.cover;
+  invalidate();
+}
+function updateCoverConfig(config) {
+  if(frozen.value || JSON.stringify(config)===JSON.stringify(coverConfig.value))return;
+  coverConfig.value=config;
+  clearRenderedCover();
+  if(config.method==="image")useOutputCover();
+}
+function useOutputCover() {
+  if(frozen.value || !output.value?.thumbnail?.file_id)return;
+  const thumbnail=output.value.thumbnail;
+  const previous=reviewedInput();
+  cover.value={...thumbnail,id:String(thumbnail.file_id),origin:"output",output_id:String(output.value.id),name:"成片封面"};
+  form.value.content.cover_file_id=cover.value.id;
+  delete form.value.content.cover_render;
+  delete draftResourceIssue.value.cover;
+  if(reviewedInput()!==previous)invalidate();
+}
+function useRenderedCover(artwork) {
+  if(frozen.value || coverConfig.value.method!=="template")return;
+  cover.value={...artwork.file,origin:"template"};
+  form.value.content.cover_file_id=String(artwork.file.id);
+  form.value.content.cover_render=coverReference(artwork);
+  delete draftResourceIssue.value.cover;
+  invalidate();
+}
+function reviewedInput() {
+  return JSON.stringify({ platform: form.value.platform, category: form.value.category_id, account: form.value.media_account_id, output: form.value.composite_output_id, description: form.value.content.description, topics: form.value.content.topics, declaration: form.value.content.declaration, cover: form.value.content.cover_file_id, cover_render:form.value.content.cover_render });
 }
 function picked(row) {
+  const previousInput = reviewedInput();
   if (picker.value === "account") {
+    delete draftResourceIssue.value.account;
     account.value = row;
     form.value.media_account_id = String(row.id);
     if (
@@ -388,26 +674,48 @@ function picked(row) {
     ) {
       setOutput(null);
     }
-    invalidate();
   } else if (picker.value === "output") {
+    delete draftResourceIssue.value.output;
     setOutput(row);
-    invalidate();
   } else {
+    delete draftResourceIssue.value.cover;
+    delete form.value.content.cover_render;
+    coverConfig.value = {...coverConfig.value,method:"image"};
     cover.value = row;
     form.value.content.cover_file_id = String(row.id);
-    invalidate();
   }
+  if (reviewedInput() !== previousInput) invalidate();
+  else formError.value = "";
   picker.value = "";
 }
 async function submit() {
+  if (busy.value) return;
   formError.value = "";
-  const problem = contentProblem(form.value);
+  const problem = !pendingRequest.value && ((!editing.value && Object.values(draftResourceIssue.value).find(Boolean)) || contentProblem(form.value));
   if (problem) {
     formError.value = problem;
     return;
   }
   busy.value = true;
+  let sent = false;
+  const wasPending = !!pendingRequest.value;
   try {
+    if (wasPending && !editing.value) {
+      let existing = null;
+      try { existing = await client.findByRequest(pendingRequest.value.request_key); }
+      catch (e) { if (e.errcode !== 18002) throw e; }
+      if (existing) {
+        const cleanupWarning = await clearCreatedDraft();
+        error.value = cleanupWarning;
+        pendingRequest.value = null;
+        attempts.value = [];
+        detail.value = existing;
+        view.value = "detail";
+        try { attempts.value = await client.attempt(existing.id); } catch (e) { error.value = e.message; }
+        feedback.toast.success("已找到原任务，未重复创建");
+        return;
+      }
+    }
     const not_before = publicationScheduleUTC(schedule.value);
     const payload =
       pendingRequest.value ||
@@ -419,13 +727,17 @@ async function submit() {
           }
         : { ...form.value, content: { ...form.value.content }, not_before });
     pendingRequest.value = payload;
+    if (!editing.value) await draftClient.save(draftPayload());
+    sent = true;
     const saved = editing.value
       ? await client.edit(editing.value.id, payload)
       : await client.create(payload);
+    const cleanupWarning = await clearCreatedDraft();
     pendingRequest.value = null;
     baseline.value = JSON.stringify({
       form: form.value,
       schedule: schedule.value,
+      cover_config:coverConfig.value,
     });
     // Created or editable tasks have no execution history. Drop any records
     // retained from a different task detail before showing the saved task.
@@ -437,10 +749,20 @@ async function submit() {
       editing.value ? "发布内容已保存" : "任务已创建，尚未执行",
     );
     await load();
+    if (cleanupWarning) error.value = cleanupWarning;
   } catch (e) {
     formError.value = e.message;
-    if (definitivePublicationRejection(e)) pendingRequest.value = null;
-    else formError.value += "。结果尚未确认，请保留当前输入并重试。";
+    draftConflict.value = e.code === "draft_revision_conflict";
+    if (definitivePublicationRejection(e) || (!sent && !wasPending)) {
+      pendingRequest.value = null;
+      if (!editing.value && draftClient) {
+        draftClient.remember(draftPayload());
+        if (sent && definitivePublicationRejection(e)) {
+          try { await draftClient.save(draftPayload()); }
+          catch (saveError) { draftConflict.value = saveError.code === "draft_revision_conflict"; formError.value += `；本机输入未更新，请保留当前填写。${saveError.message || ""}`; }
+        }
+      }
+    } else formError.value += "。结果尚未确认，原请求和输入已保留；请先查询原任务。";
   } finally {
     busy.value = false;
   }
@@ -448,6 +770,10 @@ async function submit() {
 async function canLeave() {
   if (busy.value) return false;
   if (!dirty.value && !pendingRequest.value) return true;
+  if (!editing.value && !pendingRequest.value) {
+    if (!(await feedback.confirmWarning({ title: "保存草稿后返回？", message: draftPersistent.value ? "保存后重启可继续；不会占用成片或启动任务。" : "当前应用中可继续；刷新、关闭或退出后清空。", confirmText: "保存并返回", cancelText: "继续编辑" }))) return false;
+    return saveDraft();
+  }
   return feedback.confirmWarning({
     title: "离开发布内容",
     message: pendingRequest.value
@@ -469,12 +795,12 @@ async function back() {
 }
 onBeforeRouteLeave(async () => !busy.value && (view.value !== "form" || (await canLeave())));
 const isExecuting = task => [PublicationStatus.Queued, PublicationStatus.Running].includes(task?.status);
-const needsExecutionRefresh = computed(() => view.value === "list"
-  ? rows.value.some(isExecuting)
-  : view.value === "detail" && isExecuting(detail.value));
+const observedTasks = computed(() => view.value === "list" ? rows.value : view.value === "detail" && detail.value ? [detail.value] : []);
+const needsExecutionRefresh = computed(() => observedTasks.value.some(task => isExecuting(task) || [PublicationStatus.AwaitingHuman,PublicationStatus.Reviewing].includes(task.status)));
+const executionRefreshInterval = computed(() => !needsExecutionRefresh.value ? 0 : observedTasks.value.some(isExecuting) ? 5000 : 30000);
 let executionTimer = null, refreshInFlight = false, disposed = false;
 async function refreshExecution() {
-  if (disposed || !needsExecutionRefresh.value || busy.value || loading.value || recoveryVisible.value || refreshInFlight
+  if (disposed || !needsExecutionRefresh.value || busy.value || loading.value || recoveryVisible.value || humanVisible.value || terminationVisible.value || refreshInFlight
       || (typeof document !== "undefined" && document.hidden)) return;
   refreshInFlight = true;
   const originalDetail = detail.value;
@@ -482,7 +808,7 @@ async function refreshExecution() {
     if (view.value === "list") await load({ background: true });
     else {
       const [task, history] = await Promise.all([client.get(originalDetail.id), client.attempt(originalDetail.id)]);
-      if (!disposed && view.value === "detail" && detail.value === originalDetail && !busy.value && !loading.value && !recoveryVisible.value) {
+      if (!disposed && view.value === "detail" && detail.value === originalDetail && !busy.value && !loading.value && !recoveryVisible.value && !humanVisible.value && !terminationVisible.value) {
         detail.value = task;
         attempts.value = history;
         error.value = "";
@@ -492,12 +818,13 @@ async function refreshExecution() {
     if (!disposed && view.value === "detail" && detail.value === originalDetail) error.value = e.message;
   } finally { refreshInFlight = false; }
 }
-watch(needsExecutionRefresh, active => {
+watch(executionRefreshInterval, interval => {
   if (executionTimer) clearInterval(executionTimer);
-  executionTimer = active ? setInterval(refreshExecution, 5000) : null;
+  executionTimer = interval ? setInterval(refreshExecution, interval) : null;
 });
+function invalidateCreation() { disposed = true; }
 onBeforeUnmount(() => {
-  disposed = true;
+  invalidateCreation();
   if (executionTimer) clearInterval(executionTimer);
   loadSequence++;
 });
@@ -508,13 +835,12 @@ onMounted(async () => {
       scope: "all",
       enabled: true,
     });
-    const id = String(route.query.output_id || "");
+    const publicationId=String(route.query.publication_id||"");
+ if(/^[1-9][0-9]*$/.test(publicationId)){await openDetail({id:publicationId});return;}
+ const id = String(route.query.output_id || "");
     if (/^[1-9][0-9]*$/.test(id)) {
       const data = await compose.getComposeOutput(id);
-      openCreate();
-      source.value = true;
-      setOutput(data.output);
-      form.value.category_id = String(data.output.category_id);
+      await openCreate(data.output);
     }
   } catch (e) {
     error.value = e.message;
@@ -526,7 +852,7 @@ onMounted(async () => {
     <template v-if="view === 'list'">
       <ResourcePageHeader title="发布任务"
         ><template #actions
-          ><t-button @click="openCreate"
+          ><t-button :loading="busy" @click="openCreate"
             >快速发布</t-button
           ></template
         ></ResourcePageHeader
@@ -630,16 +956,21 @@ onMounted(async () => {
             >
             <template #status="{ row }"
               ><ResourceStatusBadge
-                :label="statusLabel(row.status)" /></template
+                :label="statusLabel(row.status)" /><small v-if="row.cancel_requested_at && row.status === PublicationStatus.Running" class="publication-sub">已请求安全停止，等待确认</small></template
             ><template #created_at="{ row }">{{
               formatDateTime(row.created_at)
             }}</template>
             <template #op="{ row }">
               <ResourceRowActions>
                 <t-button v-if="editable(row)" class="is-primary" variant="text" size="small" :disabled="busy" @click="startExecution(row)">执行</t-button>
-                <t-button v-if="row.status === PublicationStatus.Uncertain" class="is-primary" variant="text" size="small" :disabled="busy" @click="openVerification(row)">核实结果</t-button>
+                <t-button v-if="row.status===PublicationStatus.AwaitingHuman" class="is-primary" variant="text" size="small" :disabled="busy" @click="openHumanScene(row)">去处理</t-button>
+                <t-button v-if="[PublicationStatus.Uncertain,PublicationStatus.Reviewing].includes(row.status)" class="is-primary" variant="text" size="small" :disabled="busy" @click="openVerification(row)">{{row.status===PublicationStatus.Reviewing?'补录':'核实结果'}}</t-button>
                 <t-button v-if="retryable(row)" class="is-primary" variant="text" size="small" :disabled="busy" @click="retryExecution(row)">重试</t-button>
                 <t-button v-if="editable(row)" variant="text" size="small" :disabled="busy" @click="edit(row)">编辑</t-button>
+                <t-button v-if="cancellable(row)" theme="danger" variant="text" size="small" :disabled="busy" @click="openTermination(row, 'cancel')">终止</t-button>
+                <t-button v-if="abandonable(row)" theme="danger" variant="text" size="small" :disabled="busy" @click="openTermination(row, 'abandon')">放弃</t-button>
+                <t-button v-if="row.work_id" variant="text" size="small" @click="router.push({path:'/work',query:{work_id:row.work_id}})">查看作品</t-button>
+                <t-button v-if="copyable(row)" variant="text" size="small" :disabled="busy" @click="copyTask(row)">复制</t-button>
                 <t-button variant="text" size="small" :disabled="busy" @click="detailReturn = 'list'; openDetail(row)">详情</t-button>
               </ResourceRowActions>
             </template>
@@ -669,6 +1000,10 @@ onMounted(async () => {
       @back="back"
     >
       <FeedbackAlert v-if="formError" theme="error" :message="formError" />
+      <FeedbackAlert v-if="!editing" theme="info" :message="draftPersistent ? '保存草稿后重启可继续；不占用成片，也不会启动发布。' : '填写仅暂存于当前应用；刷新、关闭或退出登录后清空。'" />
+      <t-button v-if="draftConflict" theme="default" variant="outline" :disabled="busy" @click="reloadDraft">读取最新草稿</t-button>
+      <FeedbackAlert v-if="draftNotice" theme="info" :message="draftNotice" />
+      <FeedbackAlert v-if="Object.values(draftResourceIssue).some(Boolean)" theme="warning" :message="Object.values(draftResourceIssue).filter(Boolean).join('；')" />
       <div class="quick-publish">
         <section class="resource-editor-section quick-block">
           <h3>
@@ -724,8 +1059,8 @@ onMounted(async () => {
             ><t-button v-if="output" theme="default" variant="outline" :disabled="busy" @click="previewOutput">预览成片</t-button>
           </div>
         </section>
-        <section v-if="output" class="resource-editor-section quick-block">
-          <h3><span>02</span>发布内容</h3>
+        <section v-if="output || form.composite_output_id" class="resource-editor-section quick-block">
+          <div class="quick-content-heading"><h3><span>02</span>发布内容</h3><PublicationContentGenerator :context="generationContext" :values="generationValues" :template="coverConfig.method === 'template'" :disabled="frozen" @adopt="adoptGeneratedContent" /></div>
           <div class="quick-copy-fields">
           <label
             ><ResourceRequiredLabel>发布标题</ResourceRequiredLabel><t-textarea
@@ -738,18 +1073,10 @@ onMounted(async () => {
               @change="invalidate"
           /></label>
           <div class="quick-cover-field">
-            <label class="quick-field-heading"><ResourceRequiredLabel>发布封面</ResourceRequiredLabel><ResourceFieldHelp label="发布封面" content="本阶段使用现成图片，可从已有文件中选择。按原图预览，不改变文件内容。" /></label>
+            <label class="quick-field-heading"><ResourceRequiredLabel>发布封面</ResourceRequiredLabel><ResourceFieldHelp label="发布封面" content="使用现成图片或选择模板添加文字。默认使用成片真实封面；横竖封面规格待平台核验，当前按原图预览。" /></label>
             <div class="quick-cover-workspace">
-              <button v-if="cover?.resource_path" type="button" class="publication-image-button" aria-label="预览发布封面" @click="previewImage(cover.resource_path, cover.name)"><img :src="files.resourceURL(cover)" alt="当前发布封面" /><span>预览封面</span></button>
-              <div>
-                <strong>{{ cover?.name || "请选择现成图片" }}</strong
-                ><t-button
-                  variant="outline"
-                  :disabled="frozen"
-                  @click="picker = 'image'"
-                  >{{ cover ? "更换图片" : "选择图片" }}</t-button
-                >
-              </div>
+              <div class="publication-cover-preview"><button v-if="cover?.resource_path" type="button" class="publication-image-button" aria-label="预览发布封面" @click="previewImage(cover.resource_path, cover.name)"><img :src="files.resourceURL(cover)" alt="当前发布封面" /><span>预览封面</span></button><div v-else class="publication-cover-empty">请选择图片或生成封面</div></div>
+              <PublishingCoverEditor :config="coverConfig" :output="output" :category="form.category_id" :disabled="frozen" @update:config="updateCoverConfig" @rendered="useRenderedCover" @choose-image="picker='image'" @use-output="useOutputCover" />
             </div>
           </div>
           <label
@@ -771,11 +1098,11 @@ onMounted(async () => {
           /></label>
           </div>
         </section>
-        <section v-if="output" class="resource-editor-section quick-block">
+        <section v-if="output || form.composite_output_id" class="resource-editor-section quick-block">
           <h3><span>03</span>发布设置</h3>
           <div class="quick-resource-grid two">
             <label>发布方式<t-input value="自动发布" disabled /></label>
-            <label><span class="quick-field-heading">最早执行时间<ResourceFieldHelp label="最早执行时间" content="留空表示确认执行后尽快发布；指定时间为最早开始执行时间。创建任务后仍需单独确认执行。" /></span><ResourceDateTime v-model:value="schedule" aria-label="最早执行时间" :disabled="frozen" @change="invalidate" /></label>
+            <label><span class="quick-field-heading">最早执行时间<ResourceFieldHelp label="最早执行时间" content="留空表示确认执行后尽快发布；指定时间为最早开始执行时间。创建任务后仍需单独确认执行。" /></span><ResourceDateTime v-model:value="schedule" aria-label="最早执行时间" :disabled="frozen" /></label>
           </div>
           <t-checkbox v-model="form.content.confirmed" :disabled="frozen"
             >已核对当前文案、封面和声明，确认内容可用</t-checkbox
@@ -783,8 +1110,9 @@ onMounted(async () => {
         </section>
       </div>
       <template #footer
+        ><t-button v-if="!editing" theme="default" variant="outline" :disabled="busy" @click="saveDraft">保存草稿</t-button
         ><t-button :loading="busy" @click="submit">{{
-          pendingRequest ? "重试确认结果" : editing ? "保存" : "创建任务"
+          pendingRequest ? "查询创建结果" : editing ? "保存" : "创建任务"
         }}</t-button></template
       >
     </ResourceEditorPage>
@@ -801,11 +1129,16 @@ onMounted(async () => {
       <ResourceCard class="detail-card"><ResourceSection title="任务信息">
         <ResourceDescriptions>
           <t-descriptions-item label="任务 ID">{{ detail.id }}</t-descriptions-item>
-          <t-descriptions-item label="任务状态"><ResourceStatusBadge :label="statusLabel(detail.status)" /></t-descriptions-item>
+          <t-descriptions-item label="任务状态"><ResourceStatusBadge :label="statusLabel(detail.status)" /><small v-if="detail.cancel_requested_at && detail.status === PublicationStatus.Running" class="publication-sub">已请求安全停止，等待确认</small></t-descriptions-item>
           <t-descriptions-item label="发布平台">{{ platformLabel(detail.platform) }}</t-descriptions-item>
           <t-descriptions-item label="内容类目">{{ categoryName(detail.category_id) }}</t-descriptions-item>
           <t-descriptions-item label="发布账号"><t-button v-if="detail.media_account_id" theme="primary" variant="text" size="small" @click="viewAccount(detail.media_account_id)">{{ detail.resources.account_name || "查看账号" }}</t-button><span v-else>—</span></t-descriptions-item>
           <t-descriptions-item label="真实 UID">{{ detail.platform_account_uid }}</t-descriptions-item>
+          <t-descriptions-item v-if="detail.last_checked_at" label="最近核验">{{formatDateTime(detail.last_checked_at)}}</t-descriptions-item>
+          <t-descriptions-item v-if="detail.last_check_message" label="核验说明" full>{{detail.last_check_message}}</t-descriptions-item>
+          <t-descriptions-item v-if="detail.platform_submission_id" label="投稿回执 ID">{{detail.platform_submission_id}}</t-descriptions-item>
+          <t-descriptions-item v-if="detail.work_id" label="关联作品"><t-button variant="text" @click="router.push({path:'/work',query:{work_id:detail.work_id}})">作品 {{detail.work_id}}</t-button></t-descriptions-item>
+          <t-descriptions-item v-if="detail.published_at" label="平台实际发布时间">{{formatDateTime(detail.published_at)}}</t-descriptions-item>
           <t-descriptions-item label="成片" full>{{ detail.resources.output_name || detail.composite_output_id }}</t-descriptions-item>
         </ResourceDescriptions>
       </ResourceSection></ResourceCard>
@@ -839,6 +1172,14 @@ onMounted(async () => {
       <template #footer><t-button v-if="videoError" theme="default" variant="outline" @click="previewOutput">重试预览</t-button></template>
     </ResourceOverlay>
     <MediaPreview form-actions v-model:visible="preview" :images="previewImages" title="发布封面预览" />
+    <PublishingTerminationDialog v-model:visible="terminationVisible" :task="terminationTask" :action="terminationAction" :busy="busy" :error="terminationError" :submitted="terminationSubmitted" @submit="saveTermination" />
+    <ResourceOverlay :visible="humanVisible" title="处理人工验证" :width="560" :busy="busy" form-actions @update:visible="humanVisible=$event">
+      <FeedbackAlert v-if="humanError" theme="error" :message="humanError" />
+      <p>请在已打开的原账号页面完成登录或安全验证，然后继续原发布尝试。</p>
+      <p v-if="humanTask">任务 {{humanTask.id}} · 账号 {{humanTask.resources?.account_name || humanTask.platform_account_uid}} · 原尝试 {{humanTask.current_attempt_id}}</p>
+      <p>请保留原页面，完成验证后不要自行点击平台的发布按钮。继续后会再次核对账号，并按原任务执行。</p>
+      <template #footer><t-button theme="default" variant="outline" :disabled="busy" @click="humanVisible=false">暂不处理</t-button><t-button :loading="busy" @click="continueHumanScene">已经处理，继续原尝试</t-button></template>
+    </ResourceOverlay>
     <PublishingRecoveryDialog v-model:visible="recoveryVisible" :task="recoveryTask" :busy="busy" :error="recoveryError" @submit="saveVerification" />
     <PublishingResourcePicker
       :visible="!!picker"
@@ -881,6 +1222,7 @@ onMounted(async () => {
 }
 .quick-copy-fields { display: flex; flex-direction: column; gap: 24px; }
 .quick-block :deep(.t-input.t-is-disabled), .quick-block :deep(.t-input__inner:disabled) { color: var(--wt-text-secondary); -webkit-text-fill-color: var(--wt-text-secondary); background: var(--wt-color-bg-subtle); }
+.quick-content-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .quick-block h3 {
   margin: 0;
   display: flex;
@@ -945,6 +1287,7 @@ onMounted(async () => {
   flex-direction: column;
   gap: 8px;
 }
+.publication-cover-empty { width:100%;min-height:160px;display:grid;place-items:center;background:var(--td-bg-color-secondarycontainer);color:var(--td-text-color-secondary);font-size:12px; }
 .quick-cover-workspace { display: grid; grid-template-columns: 220px minmax(0, 1fr); align-items: start; gap: 24px; min-width: 0; }
 .quick-cover-workspace > div { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; min-width: 0; }
 .quick-cover-workspace strong { font-size: 14px; font-weight: 400; overflow-wrap: anywhere; }

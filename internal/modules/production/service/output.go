@@ -8,6 +8,8 @@ import (
 	"gorm.io/gorm"
 	"time"
 
+	filemodel "github.com/wt-media/wt-media-cloud/internal/modules/files/model"
+	files "github.com/wt-media/wt-media-cloud/internal/modules/files/service"
 	transferdto "github.com/wt-media/wt-media-cloud/internal/modules/filetransfer/dto"
 	transfermodel "github.com/wt-media/wt-media-cloud/internal/modules/filetransfer/model"
 	transferservice "github.com/wt-media/wt-media-cloud/internal/modules/filetransfer/service"
@@ -133,13 +135,14 @@ type ComposeOutputDetail struct {
 }
 
 type ComposeOutputService struct {
-	outputs    ComposeOutputRepository
-	materials  composeOutputTraceMaterialSource
-	usages     composeOutputTraceUsageSource
-	strategies composeOutputTraceStrategySource
-	tasks      composeOutputTraceTaskSource
-	links      composeOutputLinker
-	operators  func() ([]identity.PublicUser, error)
+	thumbnailFile func(context.Context, int64) (filemodel.File, error)
+	outputs       ComposeOutputRepository
+	materials     composeOutputTraceMaterialSource
+	usages        composeOutputTraceUsageSource
+	strategies    composeOutputTraceStrategySource
+	tasks         composeOutputTraceTaskSource
+	links         composeOutputLinker
+	operators     func() ([]identity.PublicUser, error)
 	// transfers is the download path's only dependency: a consumer-side
 	// interface narrowed to the one call a download of an already-verified object
 	// needs — an output is never prepared in the cloud, so this service has no
@@ -171,6 +174,13 @@ func NewComposeOutputService(outputs ComposeOutputRepository, materials composeO
 func wiredComposeOutputService() *ComposeOutputService {
 	service := NewComposeOutputService(repository.ComposeOutputStore{}, mysqlStore{}, mysqlStore{}, repository.StrategyStore{}, repository.ComposeTaskStore{}, productionObjectLinker{}, productionTransferCreator{})
 	service.operators = identity.ListUsers
+	service.thumbnailFile = func(ctx context.Context, id int64) (filemodel.File, error) {
+		svc, err := files.Wired()
+		if err != nil {
+			return filemodel.File{}, err
+		}
+		return svc.ReadSavedReference(ctx, id)
+	}
 	return service
 }
 
@@ -211,7 +221,16 @@ func (s *ComposeOutputService) List(actor identity.PublicUser, input ListCompose
 	if err != nil {
 		return nil, err
 	}
-	return s.withOperatorNames(items)
+	items, err = s.withOperatorNames(items)
+	if err != nil {
+		return nil, err
+	}
+	for i := range items {
+		if err = s.decorateThumbnail(context.Background(), &items[i]); err != nil {
+			return nil, err
+		}
+	}
+	return items, nil
 }
 
 func (s *ComposeOutputService) withOperatorNames(items []model.CompositeOutput) ([]model.CompositeOutput, error) {

@@ -266,6 +266,9 @@ func safeOutputSchema(raw json.RawMessage) json.RawMessage {
 	return out
 }
 func (s *ComposeOutputService) decorateOutput(ctx context.Context, actor identity.PublicUser, o *model.CompositeOutput) error {
+	if err := s.decorateThumbnail(ctx, o); err != nil {
+		return err
+	}
 	status, err := s.checkObject(ctx, o.ObjectKey)
 	if err != nil {
 		return err

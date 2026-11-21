@@ -5,6 +5,7 @@ import (
 	"errors"
 	"github.com/wt-media/wt-media-cloud/internal/modules/publish/model"
 	"gorm.io/gorm"
+	"reflect"
 	"time"
 )
 
@@ -97,6 +98,12 @@ func (s ExecutionStore) Report(candidate model.Task, user int64, r model.Executi
 				return ErrConflict
 			}
 		case model.AttemptStageAwaitingHuman:
+			if a.Stage != model.AttemptStageClaimed && a.Stage != model.AttemptStagePreparing && a.Stage != model.AttemptStageReady && a.Stage != model.AttemptStageAwaitingHuman {
+				return ErrConflict
+			}
+			if a.SubmitStartedAt != nil {
+				return ErrConflict
+			}
 		default:
 			return ErrConflict
 		}
@@ -105,7 +112,7 @@ func (s ExecutionStore) Report(candidate model.Task, user int64, r model.Executi
 			if err != nil && !errors.Is(err, ErrInputChanged) {
 				return err
 			}
-			if errors.Is(err, ErrInputChanged) || input != a.Input || (a.ErrorCode != nil && *a.ErrorCode == model.ExecutionInputChanged) {
+			if errors.Is(err, ErrInputChanged) || !reflect.DeepEqual(input, a.Input) || (a.ErrorCode != nil && *a.ErrorCode == model.ExecutionInputChanged) {
 				reason := model.ExecutionInputChanged
 				// Preserve the stage and submission barrier. Only the executor
 				// can prove no submission and a safely closed browser scene.
@@ -122,6 +129,7 @@ func (s ExecutionStore) Report(candidate model.Task, user int64, r model.Executi
 			}
 		}
 		allowed := r.Stage == model.AttemptStageSubmitting && v.Status == model.StatusRunning && v.AuthorizedAt != nil && v.CancelRequestedAt == nil && (v.NotBefore == nil || !v.NotBefore.After(now))
+		previousStage := a.Stage
 		steps = append(steps, reportStep{Seq: r.Seq, Report: r, At: now})
 		a.Stage = r.Stage
 		a.ReportSeq = r.Seq
@@ -134,6 +142,8 @@ func (s ExecutionStore) Report(candidate model.Task, user int64, r model.Executi
 		taskUpdates := map[string]any{"updated_at": now}
 		awaitingHuman := r.Stage == model.AttemptStageAwaitingHuman && v.Status == model.StatusRunning
 		if awaitingHuman {
+			updates["paused_stage"] = previousStage
+			updates["last_resume_revision"] = nil
 			a.Status = model.AttemptStatusAwaitingHuman
 			v.Status = model.StatusAwaitingHuman
 			updates["status"] = a.Status
@@ -206,7 +216,16 @@ func (s ExecutionStore) Complete(candidate model.Task, user int64, r model.Compl
 		// links may later be corrected by an explicit verification.
 		evidence := r.Result
 		updates := map[string]any{"status": attemptStatus, "stage": model.AttemptStageFinished, "report_seq": r.Seq, "heartbeat_at": now, "finished_at": now, "result_status": status, "result_hash": r.ResultHash, "evidence_json": string(evidence), "error_code": optional(result.ErrorCode), "error_message": optional(result.ErrorMessage)}
-		taskUpdates := map[string]any{"status": status, "updated_at": now, "platform_work_id": optional(result.PlatformWorkID), "work_url": optional(result.WorkURL), "failure_code": optional(result.ErrorCode), "failure_message": optional(result.ErrorMessage)}
+		taskUpdates := map[string]any{"status": status, "updated_at": now, "platform_submission_id": optional(result.PlatformWorkID), "target_url": optional(result.WorkURL), "failure_code": optional(result.ErrorCode), "failure_message": optional(result.ErrorMessage)}
+		taskStatus := status
+		if status == model.StatusFailed && v.CancelRequestedAt != nil {
+			// The failed branch above has verified the original, closed,
+			// unsubmitted scene. Keep that observation on the immutable attempt.
+			taskStatus = model.StatusCancelled
+			taskUpdates["status"] = taskStatus
+			taskUpdates["failure_code"] = nil
+			taskUpdates["failure_message"] = nil
+		}
 		if status == model.StatusReviewing {
 			taskUpdates["accepted_at"] = now
 		}
@@ -219,7 +238,7 @@ func (s ExecutionStore) Complete(candidate model.Task, user int64, r model.Compl
 		if e := audit(tx, user, v.ID, "publication.result", v.Revision+1); e != nil {
 			return e
 		}
-		v.Status = status
+		v.Status = taskStatus
 		v.Revision++
 		a.Status = attemptStatus
 		a.ReportSeq = r.Seq

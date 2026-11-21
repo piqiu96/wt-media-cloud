@@ -5,21 +5,39 @@ import (
 	"time"
 )
 
+type CoverRender struct {
+	TemplateID             uint64 `json:"template_id,string"`
+	PublishedRevision      uint32 `json:"published_revision"`
+	Title                  string `json:"title"`
+	BackgroundImageAssetID uint64 `json:"background_image_asset_id,string"`
+	BackgroundOutputID     int64  `json:"background_output_id,string"`
+	RenderInputHash        string `json:"render_input_hash"`
+}
+
 type Content struct {
-	Description string `json:"description"`
-	CoverFileID int64  `json:"cover_file_id,string"`
-	Topics      string `json:"topics"`
-	Declaration string `json:"declaration"`
-	Confirmed   bool   `json:"confirmed"`
+	CoverRender *CoverRender `json:"cover_render,omitempty"`
+	Description string       `json:"description"`
+	CoverFileID int64        `json:"cover_file_id,string"`
+	Topics      string       `json:"topics"`
+	Declaration string       `json:"declaration"`
+	Confirmed   bool         `json:"confirmed"`
 }
 type Task struct {
-	CancelRequestedAt *time.Time `json:"cancel_requested_at"`
-	AcceptedAt        *time.Time `json:"accepted_at"`
-	PublishedAt       *time.Time `json:"published_at"`
-	PlatformWorkID    *string    `json:"platform_work_id"`
-	WorkURL           *string    `json:"work_url"`
-	FailureCode       *string    `json:"failure_code"`
-	FailureMessage    *string    `json:"failure_message"`
+	NextCheckAt          *time.Time `json:"-"`
+	CheckGeneration      uint64     `json:"-"`
+	LastCheckedAt        *time.Time `json:"last_checked_at"`
+	LastCheckMessage     *string    `json:"last_check_message"`
+	CanCancel            bool       `json:"can_cancel" gorm:"->;-:migration"`
+	CancelRequestedAt    *time.Time `json:"cancel_requested_at"`
+	AcceptedAt           *time.Time `json:"accepted_at"`
+	PublishedAt          *time.Time `json:"published_at"`
+	PlatformSubmissionID *string    `json:"platform_submission_id"`
+	TargetURL            *string    `json:"target_url"`
+	WorkID               *uint64    `json:"work_id,string"`
+	PlatformWorkID       *string    `json:"platform_work_id"`
+	WorkURL              *string    `json:"work_url"`
+	FailureCode          *string    `json:"failure_code"`
+	FailureMessage       *string    `json:"failure_message"`
 
 	AuditActor         int64           `json:"-" gorm:"-"`
 	ID                 uint64          `json:"id,string"`

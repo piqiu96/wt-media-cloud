@@ -1,4 +1,5 @@
 import { createApiClient, setSessionToken } from './http.js'
+import { resetPublicationDraftSession } from './publicationDraft.js'
 
 export function createSessionClient({ base = '/api/v1', fetch = globalThis.fetch } = {}) {
   const api = createApiClient({ base, fetchImpl: fetch })
@@ -29,6 +30,7 @@ export function createSessionClient({ base = '/api/v1', fetch = globalThis.fetch
         return await api.post('/auth/logout')
       } finally {
         setSessionToken('')
+        await resetPublicationDraftSession()
       }
     },
   }

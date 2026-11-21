@@ -1,0 +1,8 @@
+schema_version: 1
+revision: "2026.11.21.1"
+errors:
+  image_invalid: {http_status: 400, errcode: 19001, retryable: false}
+  image_not_found: {http_status: 404, errcode: 19002, retryable: false}
+  image_conflict: {http_status: 409, errcode: 19003, retryable: false, recovery_action: reload}
+  image_unavailable: {http_status: 503, errcode: 19004, retryable: true, recovery_action: retry}
+  generation_busy: {http_status: 429, errcode: 19004, retryable: true, recovery_action: retry}

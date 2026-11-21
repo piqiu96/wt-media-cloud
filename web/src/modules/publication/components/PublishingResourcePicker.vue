@@ -7,18 +7,20 @@ import ResourceFilterBar from "../../../shared/ui/resource/ResourceFilterBar.vue
 import FeedbackAlert from "../../../shared/ui/feedback/FeedbackAlert.vue";
 import { createMediaAccountClient } from "../../../shared/api/mediaAccounts.js";
 import { createPublicationClient } from "../../../shared/api/publication.js";
+import { createImageClient } from "../../../shared/api/image.js";
 import { createFilesClient } from "../../../shared/api/files.js";
 import { accountUnavailable, outputUnavailable } from "../eligibility.js";
 const props = defineProps({
   visible: Boolean,
   kind: String,
+  usage: {type:String, default:"cover"},
   category: String,
   account: Object,
 });
 const emit = defineEmits(["update:visible", "selected", "view-account"]);
 const accounts = createMediaAccountClient(),
   publication = createPublicationClient(),
-  files = createFilesClient();
+  files = createFilesClient(), images = createImageClient();
 const rows = ref([]),
   total = ref(0),
   page = ref(1),
@@ -56,7 +58,7 @@ async function load() {
       data = await accounts.listPage({ ...params, platform: "baidu" });
     else if (props.kind === "output")
       data = await publication.outputs({ ...params, platform: "baidu" });
-    else data = await files.list({ ...params, type: "image" });
+    else data = await images.listImageAsset({ ...params, usage: props.usage, enabled: true, category_id: props.category });
     if (n !== sequence) return;
     if (props.kind === "output" && (data.items || []).some(row => typeof row.occupied !== "boolean"))
       throw new Error("暂时无法确认成片占用，请重新查询");
@@ -83,7 +85,7 @@ function reason(row) {
 }
 function select(row) {
   if (busy.value || reason(row)) return;
-  emit("selected", row);
+  emit("selected", props.kind === "image" ? { ...row, image_asset_id: row.id, id: row.file_id } : row);
   emit("update:visible", false);
 }
 watch(

@@ -1,9 +1,53 @@
 openapi: 3.1.0
 info:
   title: WT Media Single Publication Preparation
-  version: 2026.11.20.1
-  description: Creating never authorizes execution or submits a platform post. Execution requires separate revision-bound start authorization. Baidu task preparation is available. IDs and revisions are decimal strings; timestamps RFC3339. Uses errcode/message/data/logid.
+  version: 2026.11.21.4
+  description: Task platform_submission_id/target_url contain original receipts; platform_work_id/work_url/work_id only identify verified public work (ADR-0035). Creating never authorizes execution or submits a platform post. Execution requires separate revision-bound start authorization. Baidu task preparation is available. IDs and revisions are decimal strings; timestamps RFC3339. Uses errcode/message/data/logid.
 paths:
+  /api/v1/publication/generate:
+    post:
+      operationId: generatePublicationContent
+      security: [{sessionCookie: []}]
+      description: Generate one complete DeepSeek JSON suggestion after authorizing the actual output and category. Does not adopt, confirm, create tasks or publish. No automatic POST replay. Selected fields only; declarations are never generated. Client applies each field only when row/input/field revision and latest request still match. Deadline 180 seconds, connection close cancels unfinished work.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [row_key, input_revision, platform, category_id, composite_output_id, fields, field_revisions, content]
+              properties:
+                row_key: {type: string, minLength: 1, maxLength: 64}
+                input_revision: {type: string, pattern: '^[1-9][0-9]*$'}
+                platform: {type: string, enum: [baidu]}
+                category_id: {$ref: '#/components/schemas/ID'}
+                composite_output_id: {$ref: '#/components/schemas/ID'}
+                fields: {type: array, minItems: 1, maxItems: 3, uniqueItems: true, items: {type: string, enum: [description, cover_title, topics]}}
+                field_revisions: {type: object, additionalProperties: {type: string, pattern: '^(0|[1-9][0-9]*)$'}, description: Exactly the selected fields.}
+                content: {type: object, additionalProperties: false, properties: {description: {type: string, maxLength: 1000}, cover_title: {type: string, maxLength: 2000}, topics: {type: string, maxLength: 200}}}
+                instruction: {type: string, maxLength: 500}
+      responses:
+        '200':
+          description: 'SSE start/progress/item_result or item_error/done. Each item echoes row_key/input_revision. item_result.result contains content (exact selected fields) and field_revisions. Partial, malformed, extra or overlong model output is an item_error; current inputs remain unchanged.'
+          content:
+            text/event-stream: {schema: {type: string}}
+        '400': {description: Invalid fields or generation basis.}
+        '401': {description: Authentication required.}
+        '404': {description: Output absent or outside actor scope.}
+        '429': {description: Generation concurrency limit reached before opening stream.}
+        '503': {description: DeepSeek credentials or model unavailable before opening stream.}
+  /api/v1/publication/request:
+    get:
+      operationId: findPublicationByRequest
+      security: [{sessionCookie: []}]
+      summary: Find the current creator's original task after a lost creation reply.
+      parameters:
+        - {in: query, name: request_key, required: true, schema: {type: string, minLength: 1, maxLength: 64}}
+      responses:
+        '200': {description: Original Publication, still subject to current account/team/category read permissions.}
+        '400': {description: Invalid request key.}
+        '404': {description: No accessible original task for this creator and key.}
   /api/v1/publication:
     get:
       operationId: listPublications
@@ -137,9 +181,9 @@ paths:
       operationId: resolvePublication
       security: [{sessionCookie: []}]
       parameters: [{in: path, name: id, required: true, schema: {$ref: '#/components/schemas/ID'}}]
-      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/FailureResolution'}}}}
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ResultResolution'}}}}
       responses:
-        '200': {description: 'Revision-checked current-attempt verification, preserving the original result. This revision supports confirmed failure or still uncertain only; no public-success inference. Failure requires explicit no-publishable-work and closed-scene evidence from the original account, not merely a missing submit flag.'}
+        '200': {description: 'Revision-checked current-attempt verification, preserving the original result. Supports four explicit conclusions for uncertain, or published supplement for reviewing. Published requires exact public identity, actual published_at and explicit public/content evidence. Work deduplication and task association are atomic. The original submission ID is preserved separately from public work ID. Failure requires explicit no-publishable-work and closed-scene evidence from the original account, not merely a missing submit flag.'}
         '409': {description: 'Stale revision/attempt, active scene, unsafe or unsupported conclusion. No input, occupancy or original result is changed.'}
   /api/v1/publication/{id}/retry:
     post:
@@ -150,18 +194,72 @@ paths:
       responses:
         '200': {description: 'Same failed task queued after current resource and safe-resolution checks; keeps input, output occupancy and history. Only claim creates the next attempt. No editing, replacement resources or implicit retry of unknown work.'}
         '409': {description: 'Stale revision, unresolved/publishable old scene, stopped task or unavailable original resources.'}
+  /api/v1/publication/{id}/cancel:
+    post:
+      operationId: cancelPublication
+      security: [{sessionCookie: []}]
+      parameters: [{in: path, name: id, required: true, schema: {$ref: '#/components/schemas/ID'}}]
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [expected_revision, reason], additionalProperties: false, properties: {expected_revision: {$ref: '#/components/schemas/ID'}, reason: {type: string, minLength: 1, maxLength: 200}}}}}}
+      responses:
+        '200': {description: 'Unclaimed pending/queued task cancelled atomically against claim. Running original attempt without issued submission permission receives a stop request and remains running until verified original safe-close/unsubmitted completion projects cancelled. Unknown completion remains uncertain. Retains output occupancy, authorization history and immutable original attempt result. Task read models include advisory boolean can_cancel; command always rechecks atomically.'}
+        '409': {description: 'Stale revision, issued submission permission, prior stop request or unsafe state. Missing submission timestamp never proves safe closure.'}
+  /api/v1/publication/{id}/abandon:
+    post:
+      operationId: abandonPublication
+      security: [{sessionCookie: []}]
+      parameters: [{in: path, name: id, required: true, schema: {$ref: '#/components/schemas/ID'}}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/Abandonment'}}}}
+      responses:
+        '200': {description: 'Explicitly abandons the current safely failed original attempt and releases only this task output occupancy. Original input, result and verification remain immutable.'}
+        '409': {description: 'Stale revision/attempt, mismatched original account, unknown/publishable/open scene or state other than failed.'}
+  /api/v1/publication/{id}/copy:
+    get:
+      operationId: copyPublication
+      security: [{sessionCookie: []}]
+      parameters:
+        - {in: path, name: id, required: true, schema: {$ref: '#/components/schemas/ID'}}
+        - {in: query, name: expected_revision, required: true, schema: {$ref: '#/components/schemas/ID'}}
+      responses:
+        '200':
+          description: 'Read-only reusable new-form input after scope and current revision checks. Published/cancelled/abandoned allowed; failed requires the exact original safely resolved unsubmitted attempt. Does not create a task, authorize execution or acquire occupancy. New resources and human confirmation required.'
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    required: [platform, category_id, content]
+                    additionalProperties: false
+                    properties:
+                      platform: {type: string}
+                      category_id: {$ref: '#/components/schemas/ID'}
+                      content:
+                        type: object
+                        required: [description, topics, declaration]
+                        additionalProperties: false
+                        properties:
+                          description: {type: string}
+                          topics: {type: string}
+                          declaration: {type: string}
+        '409': {description: 'Stale revision, unsafe original attempt or state that cannot be copied.'}
 components:
   securitySchemes:
     sessionCookie: {type: apiKey, in: cookie, name: wt_media_session}
   schemas:
-    FailureResolution:
+    ResultResolution:
       type: object
       additionalProperties: false
       required: [attempt_id, expected_revision, conclusion, evidence]
       properties:
         attempt_id: {$ref: '#/components/schemas/ID'}
         expected_revision: {$ref: '#/components/schemas/ID'}
-        conclusion: {type: string, enum: [failed, uncertain]}
+        conclusion: {type: string, enum: [failed, uncertain, reviewing, published]}
+        platform_submission_id: {type: string, maxLength: 255}
+        target_url: {type: string, maxLength: 2048}
+        platform_work_id: {type: string, maxLength: 255}
+        work_url: {type: string, maxLength: 2048}
+        published_at: {type: [string, 'null'], format: date-time}
         evidence:
           type: object
           additionalProperties: false
@@ -172,13 +270,45 @@ components:
             basis: {type: string, minLength: 10, maxLength: 2000}
             scene_closed: {type: boolean}
             no_publishable_work: {type: boolean}
+            work_matched: {type: boolean}
+            publicly_accessible: {type: boolean}
+    Abandonment:
+      type: object
+      additionalProperties: false
+      required: [attempt_id, expected_revision, evidence]
+      properties:
+        attempt_id: {$ref: '#/components/schemas/ID'}
+        expected_revision: {$ref: '#/components/schemas/ID'}
+        evidence:
+          type: object
+          additionalProperties: false
+          required: [platform_uid, reason, basis, scene_closed, no_publishable_work]
+          properties:
+            platform_uid: {type: string, minLength: 1, maxLength: 255}
+            reason: {type: string, minLength: 1, maxLength: 200}
+            basis: {type: string, minLength: 10, maxLength: 2000}
+            scene_closed: {type: boolean, const: true}
+            no_publishable_work: {type: boolean, const: true}
     ID: {type: string, pattern: '^[1-9][0-9]*$'}
+    # Formal generated artifacts require matching cover_render even after the original template is disabled.
+    CoverRender:
+      type: object
+      additionalProperties: false
+      required: [template_id, published_revision, title, background_image_asset_id, background_output_id, render_input_hash]
+      properties:
+        template_id: {$ref: '#/components/schemas/ID'}
+        published_revision: {type: integer, minimum: 1}
+        title: {type: string, minLength: 1, maxLength: 2000}
+        background_image_asset_id: {type: string, pattern: '^(0|[1-9][0-9]*)$'}
+        background_output_id: {type: string, pattern: '^(0|[1-9][0-9]*)$'}
+        render_input_hash: {type: string, pattern: '^[a-f0-9]{64}$'}
     Content:
       type: object
       additionalProperties: false
       required: [description, cover_file_id, declaration, confirmed]
       properties:
         description: {type: string, minLength: 1, maxLength: 1000}
+        cover_render: {$ref: '#/components/schemas/CoverRender'}
         cover_file_id: {$ref: '#/components/schemas/ID'}
         topics: {type: string, maxLength: 200}
         declaration: {type: string, enum: [无需声明]}
@@ -195,3 +325,5 @@ components:
         composite_output_id: {$ref: '#/components/schemas/ID'}
         content: {$ref: '#/components/schemas/Content'}
         resources: {type: object}
+        last_checked_at: {type: [string, 'null'], format: date-time, readOnly: true, description: Most recent independent original-submission observation time; never the platform publication time.}
+        last_check_message: {type: [string, 'null'], readOnly: true, description: Latest read-only observation reason. Incomplete evidence keeps the task reviewing.}

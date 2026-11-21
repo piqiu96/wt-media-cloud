@@ -35,3 +35,7 @@ config_online/credentials/object_storage.toml
 # rebuild with that script instead of committing them.
 .claude
 .codex
+
+# Runtime model credential; never committed.
+config/credentials/deepseek.toml
+config_online/credentials/deepseek.toml
