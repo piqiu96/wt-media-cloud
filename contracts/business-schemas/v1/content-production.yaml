@@ -1,5 +1,5 @@
 schema_version: 1
-revision: "2026.11.07.1"
+revision: "2026.11.21.1"
 
 # 描述 Cloud 当前返回的 body；未知的可选属性省略，内部对象存储引用不返回。
 
@@ -570,6 +570,7 @@ schemas:
     - platforms
     - video
     - actions
+    - thumbnail
     properties:
       id:
         type: integer
@@ -678,6 +679,15 @@ schemas:
           - bilibili
           - baidu
           - xiaohongshu
+      thumbnail:
+        type: [object, 'null']
+        description: Actual final-video first-frame PNG, never source art or a placeholder.
+        required: [file_id, resource_path, width, height]
+        properties:
+          file_id: {type: string, pattern: '^[1-9][0-9]*$'}
+          resource_path: {type: string}
+          width: {type: integer, minimum: 1}
+          height: {type: integer, minimum: 1}
       video:
         ref: ComposeOutputVideo
       actions:

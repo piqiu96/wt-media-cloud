@@ -262,3 +262,39 @@ it('keeps abandonment evidence on failure and sends the frozen original attempt'
  expect(state.terminationTask.value.current_attempt_id).toBe('21');
  expect(state.terminationVisible.value).toBe(true);
 });
+
+it('uses the real output thumbnail by default and follows an output change without replacing a chosen image', async () => {
+ await state.openCreate();
+ state.setOutput({id:'10',material_title:'新成片',thumbnail:{file_id:'9007199254740993',resource_path:'/api/v1/file-resources/'+'a'.repeat(64),width:640,height:360}});
+ expect(state.form.value.content.cover_file_id).toBe('9007199254740993');
+ expect(state.cover.value.origin).toBe('output');
+ state.setOutput({id:'12',thumbnail:null});
+ expect(state.form.value.content.cover_file_id).toBe('');
+ state.cover.value={id:'88',image_asset_id:'3',origin:'image'};state.form.value.content.cover_file_id='88';
+ state.setOutput({id:'13',thumbnail:{file_id:'99'}});
+ expect(state.form.value.content.cover_file_id).toBe('88');
+});
+it('restores an output thumbnail only when the current exact output still owns the saved file', async () => {
+ services.draft.get.mockResolvedValue({payload:{form:task('D'),cover_origin:'output',cover_output_id:'10'},revision:'1'});
+ services.chooseDraft.mockResolvedValue('continue');
+ services.compose.getComposeOutput.mockResolvedValue({output:{id:'10',thumbnail:{file_id:'11',resource_path:'/api/v1/file-resources/'+'a'.repeat(64)}}});
+ await state.openCreate();
+ expect(state.cover.value.origin).toBe('output');expect(state.draftResourceIssue.value.cover).toBeFalsy();
+ services.compose.getComposeOutput.mockResolvedValue({output:{id:'10',thumbnail:{file_id:'12'}}});
+ await state.openCreate();
+ expect(state.form.value.content.cover_file_id).toBe('11');expect(state.draftResourceIssue.value.cover).toContain('原封面不可用');
+});
+
+it('keeps output cover provenance through an offline draft save so it can recover later', async () => {
+ const payload={form:task('D'),cover_origin:'output',cover_output_id:'10'};
+ services.draft.get.mockResolvedValue({payload,revision:'1'});services.chooseDraft.mockResolvedValue('continue');
+ services.compose.getComposeOutput.mockRejectedValue(new Error('offline'));
+ await state.openCreate();
+ await state.saveDraft();
+ const saved=services.draft.save.mock.calls.at(-1)[0];
+ expect(saved.cover_origin).toBe('output');expect(saved.cover_output_id).toBe('10');expect(saved.form.content.cover_file_id).toBe('11');
+ services.draft.get.mockResolvedValue({payload:saved,revision:'2'});
+ services.compose.getComposeOutput.mockResolvedValue({output:{id:'10',thumbnail:{file_id:'11',resource_path:'/api/v1/file-resources/'+'a'.repeat(64)}}});
+ await state.openCreate();
+ expect(state.cover.value.origin).toBe('output');expect(state.draftResourceIssue.value.cover).toBeFalsy();
+});

@@ -225,12 +225,24 @@ func confirmComposeCancel(db *gorm.DB, taskID, nodeID int64, attempt int, now ti
 // reports are one fact. step carries what the worker measured (its start, its
 // finish, its duration) and leaves the outcome to this write; the output row
 // id is filled in here because only the INSERT knows it.
-func (ComposeTaskStore) CommitComposeOutput(out model.CompositeOutput, outputKey string, nodeID int64, attempt int, step model.ComposeTaskAttemptStep) (model.ComposeOutputCommit, error) {
-	return commitComposeOutput(database.DB(), out, outputKey, nodeID, attempt, step, time.Now())
+func (s ComposeTaskStore) CommitComposeOutput(out model.CompositeOutput, outputKey string, nodeID int64, attempt int, step model.ComposeTaskAttemptStep) (model.ComposeOutputCommit, error) {
+	return commitComposeOutput(database.DB(), out, outputKey, nodeID, attempt, step, time.Now(), s.LockFiles)
 }
 
-func commitComposeOutput(db *gorm.DB, out model.CompositeOutput, outputKey string, nodeID int64, attempt int, step model.ComposeTaskAttemptStep, now time.Time) (model.ComposeOutputCommit, error) {
+func commitComposeOutput(db *gorm.DB, out model.CompositeOutput, outputKey string, nodeID int64, attempt int, step model.ComposeTaskAttemptStep, now time.Time, lockFiles func(*gorm.DB, []int64) error) (model.ComposeOutputCommit, error) {
 	err := db.Transaction(func(tx *gorm.DB) error {
+		thumbnailID, err := out.ThumbnailFileID()
+		if err != nil {
+			return err
+		}
+		if thumbnailID > 0 {
+			if lockFiles == nil {
+				return errors.New("thumbnail file locking unavailable")
+			}
+			if err = lockFiles(tx, []int64{thumbnailID}); err != nil {
+				return err
+			}
+		}
 		out.CreatedAt, out.UpdatedAt = now, now
 		if err := tx.Create(&out).Error; err != nil {
 			return err

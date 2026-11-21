@@ -93,6 +93,7 @@ const fileSize = computed(() => {
                 {
                   publication: "发布任务",
                   publication_attempt: "执行记录",
+                  composite_output: "成片缩略图",
                   cover_template: "封面模板",
                 }[r.kind] || r.kind
               }}

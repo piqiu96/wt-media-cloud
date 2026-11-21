@@ -52,6 +52,8 @@ export function capturePublicationDraft(form, schedule, cover, pendingRequest) {
     },
     schedule: text(schedule),
     image_asset_id: text(cover?.image_asset_id),
+    cover_origin: text(cover?.origin),
+    cover_output_id: text(cover?.output_id),
     pending_request: pendingRequest
       ? JSON.parse(JSON.stringify(pendingRequest))
       : null,

@@ -319,8 +319,11 @@ async function restoreDraft(payload) {
   if (form.value.media_account_id) draftResourceIssue.value.account = !a ? "原账号不可用，请恢复原账号或重新选择" : accountUnavailable(a, form.value.category_id);
   if (form.value.composite_output_id) draftResourceIssue.value.output = !output.value ? "原成片不可用，填写内容已保留" : outputUnavailable(output.value, form.value.category_id, a);
   if (form.value.content.cover_file_id) {
-    cover.value = { id: form.value.content.cover_file_id, image_asset_id: String(payload.image_asset_id || ""), name: "原封面暂不可用" };
-    if (c && String(c.file_id) === form.value.content.cover_file_id && c.enabled && c.allow_as_cover && (!c.category_ids?.length || c.category_ids.map(String).includes(form.value.category_id))) {
+    cover.value = { id: form.value.content.cover_file_id, image_asset_id: String(payload.image_asset_id || ""), origin: String(payload.cover_origin || ""), output_id: String(payload.cover_output_id || ""), name: "原封面暂不可用" };
+    const thumbnail = output.value?.thumbnail;
+    if (payload.cover_origin === "output" && String(payload.cover_output_id) === form.value.composite_output_id && thumbnail && String(thumbnail.file_id) === form.value.content.cover_file_id) {
+      cover.value = { ...thumbnail, id: String(thumbnail.file_id), origin: "output", output_id: form.value.composite_output_id, name: "成片封面" };
+    } else if (c && String(c.file_id) === form.value.content.cover_file_id && c.enabled && c.allow_as_cover && (!c.category_ids?.length || c.category_ids.map(String).includes(form.value.category_id))) {
       cover.value = { ...c, id: c.file_id, image_asset_id: c.id };
     } else {
       draftResourceIssue.value.cover = "原封面不可用，请恢复原图片或重新选择";
@@ -527,6 +530,12 @@ function setOutput(row) {
   form.value.content.description = publicationTitleForOutput(form.value.content.description, output.value, row);
   output.value = row;
   form.value.composite_output_id = row ? String(row.id) : "";
+  if (!cover.value || cover.value.origin === "output") {
+    const thumbnail = row?.thumbnail;
+    cover.value = thumbnail?.file_id ? { ...thumbnail, id: String(thumbnail.file_id), origin: "output", output_id: String(row.id), name: "成片封面" } : null;
+    form.value.content.cover_file_id = cover.value ? cover.value.id : "";
+    delete draftResourceIssue.value.cover;
+  }
 }
 function reviewedInput() {
   return JSON.stringify({ platform: form.value.platform, category: form.value.category_id, account: form.value.media_account_id, output: form.value.composite_output_id, description: form.value.content.description, topics: form.value.content.topics, declaration: form.value.content.declaration, cover: form.value.content.cover_file_id });
@@ -933,7 +942,7 @@ onMounted(async () => {
               @change="invalidate"
           /></label>
           <div class="quick-cover-field">
-            <label class="quick-field-heading"><ResourceRequiredLabel>发布封面</ResourceRequiredLabel><ResourceFieldHelp label="发布封面" content="本阶段使用现成图片，可从已有文件中选择。按原图预览，不改变文件内容。" /></label>
+            <label class="quick-field-heading"><ResourceRequiredLabel>发布封面</ResourceRequiredLabel><ResourceFieldHelp label="发布封面" content="默认使用成片真实封面，可从图片库更换。未生成封面的成片需选择图片；按原图预览，不改变文件内容。" /></label>
             <div class="quick-cover-workspace">
               <button v-if="cover?.resource_path" type="button" class="publication-image-button" aria-label="预览发布封面" @click="previewImage(cover.resource_path, cover.name)"><img :src="files.resourceURL(cover)" alt="当前发布封面" /><span>预览封面</span></button>
               <div>

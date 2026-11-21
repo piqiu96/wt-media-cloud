@@ -23,6 +23,7 @@ import (
 	"github.com/wt-media/wt-media-cloud/internal/modules/localagent"
 	"github.com/wt-media/wt-media-cloud/internal/modules/mediaaccount"
 	"github.com/wt-media/wt-media-cloud/internal/modules/production"
+	productionservice "github.com/wt-media/wt-media-cloud/internal/modules/production/service"
 	"github.com/wt-media/wt-media-cloud/internal/modules/profilebinding"
 	profileservice "github.com/wt-media/wt-media-cloud/internal/modules/profilebinding/service"
 	"github.com/wt-media/wt-media-cloud/internal/modules/proxy"
@@ -62,32 +63,8 @@ func registerModuleRoutes(engine *server.Hertz) {
 	contentpool.RegisterRoutes(engine)
 	production.RegisterRoutes(engine)
 	filetransfer.RegisterRoutes(engine)
-	fileservice.SetReferenceCheck(func(tx *gorm.DB, id int64) error {
-		if e := imageservice.CheckFileReferences(tx, id); e != nil {
-			return e
-		}
-		return publishservice.CheckFileReferences(tx, id)
-	})
+	ConfigureFileReferences()
 	files.RegisterRoutes(engine)
-	imageservice.SetReferenceProvider(func(tx *gorm.DB, id int64) error {
-		if e := imageservice.CheckTemplateFileReferences(tx, id); e != nil {
-			return e
-		}
-		return publishservice.CheckFileReferences(tx, id)
-	}, func(a identityservice.PublicUser, id int64) ([]imagemodel.Reference, error) {
-		rows, e := publishservice.ListFileReference(a, id)
-		if e != nil {
-			return nil, e
-		}
-		out, e := imageservice.ListTemplateFileReference(a, id)
-		if e != nil {
-			return nil, e
-		}
-		for _, row := range rows {
-			out = append(out, imagemodel.Reference{Kind: row.Kind, ID: row.ID})
-		}
-		return out, nil
-	})
 	image.RegisterRoutes(engine)
 	publish.RegisterRoutes(engine)
 }
@@ -113,5 +90,47 @@ func registerHealthRoutes(h *server.Hertz) {
 	h.GET("/healthz", func(_ context.Context, c *hertzapp.RequestContext) { c.String(consts.StatusOK, "ok") })
 	h.GET("/api/v1/health", func(_ context.Context, c *hertzapp.RequestContext) {
 		api.Success(c, map[string]string{"status": "ok"})
+	})
+}
+
+// ConfigureFileReferences injects the same provider checks into HTTP and Worker processes.
+func ConfigureFileReferences() {
+	fileservice.SetReferenceCheck(func(tx *gorm.DB, id int64) error {
+		if e := imageservice.CheckFileReferences(tx, id); e != nil {
+			return e
+		}
+		if e := productionservice.CheckOutputFileReferences(tx, id); e != nil {
+			return e
+		}
+		return publishservice.CheckFileReferences(tx, id)
+	})
+	imageservice.SetReferenceProvider(func(tx *gorm.DB, id int64) error {
+		if e := imageservice.CheckTemplateFileReferences(tx, id); e != nil {
+			return e
+		}
+		if e := productionservice.CheckOutputFileReferences(tx, id); e != nil {
+			return e
+		}
+		return publishservice.CheckFileReferences(tx, id)
+	}, func(a identityservice.PublicUser, id int64) ([]imagemodel.Reference, error) {
+		rows, e := publishservice.ListFileReference(a, id)
+		if e != nil {
+			return nil, e
+		}
+		out, e := imageservice.ListTemplateFileReference(a, id)
+		if e != nil {
+			return nil, e
+		}
+		for _, row := range rows {
+			out = append(out, imagemodel.Reference{Kind: row.Kind, ID: row.ID})
+		}
+		outputIDs, e := productionservice.ListOutputFileReference(a, id)
+		if e != nil {
+			return nil, e
+		}
+		for _, outputID := range outputIDs {
+			out = append(out, imagemodel.Reference{Kind: "composite_output", ID: outputID})
+		}
+		return out, nil
 	})
 }

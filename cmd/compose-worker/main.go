@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/wt-media/wt-media-cloud/internal/bootstrap"
 	"github.com/wt-media/wt-media-cloud/internal/config"
 	"github.com/wt-media/wt-media-cloud/internal/infra/database"
 	"github.com/wt-media/wt-media-cloud/internal/infra/ffmpeg"
@@ -20,6 +21,7 @@ import (
 	"github.com/wt-media/wt-media-cloud/internal/infra/storage"
 	storagerepository "github.com/wt-media/wt-media-cloud/internal/infra/storage/repository"
 	"github.com/wt-media/wt-media-cloud/internal/jobs"
+	fileservice "github.com/wt-media/wt-media-cloud/internal/modules/files/service"
 	transferservice "github.com/wt-media/wt-media-cloud/internal/modules/filetransfer/service"
 	"github.com/wt-media/wt-media-cloud/internal/modules/production/compose"
 	"github.com/wt-media/wt-media-cloud/internal/modules/production/executor"
@@ -91,11 +93,14 @@ func runWorker(ctx context.Context) error {
 		return err
 	}
 	runner := compose.Runner{FFmpegPath: cfg.Media.FFmpeg.FFmpegPath, FFprobePath: cfg.Media.FFmpeg.FFprobePath, Registry: registry}
+	bootstrap.ConfigureFileReferences()
 	executorDeps := productionservice.ComposeExecutorDeps{
+		RemoveThumbnail: productionservice.RemoveOutputThumbnail,
+		CreateThumbnail: productionservice.OutputThumbnailWriter(cfg.Media.FFmpeg.FFmpegPath),
 		InspectResource: func(ctx context.Context, path string) (executor.MediaInput, error) {
 			return compose.InspectMedia(ctx, cfg.Media.FFmpeg.FFprobePath, path)
 		},
-		Tasks:     repository.ComposeTaskStore{},
+		Tasks:     repository.ComposeTaskStore{LockFiles: fileservice.LockAvailable},
 		Materials: materialSource{},
 		Registry:  registry,
 		Store:     storage.Get(),
