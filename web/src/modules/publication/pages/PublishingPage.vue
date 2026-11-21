@@ -399,7 +399,7 @@ async function openDetail(row) {
 }
 const editable = (task) => task.status === PublicationStatus.Pending && !task.current_attempt_id && !task.authorized_at && !task.cancel_requested_at;
 const retryable = (task) => task.status === PublicationStatus.Failed && !task.cancel_requested_at;
-const cancellable = (task) => [PublicationStatus.Pending, PublicationStatus.Queued].includes(task.status) && !task.current_attempt_id && !task.cancel_requested_at;
+const cancellable = (task) => task.can_cancel === true && !task.cancel_requested_at;
 const abandonable = (task) => task.status === PublicationStatus.Failed && !!task.current_attempt_id;
 async function openTermination(row, action) {
   if (busy.value) return;
@@ -417,10 +417,10 @@ async function saveTermination(input) {
   busy.value = true; terminationError.value = ''; terminationSubmitted.value = true;
   try {
     const action = terminationAction.value;
-    await client[action](terminationTask.value.id, input);
+    const result = await client[action](terminationTask.value.id, input);
     terminationVisible.value = false;
     await load();
-    feedback.toast.success(action === 'abandon' ? '已安全放弃，成片占用已释放' : '已终止任务，保留成片占用');
+    feedback.toast.success(action === 'abandon' ? '已安全放弃，成片占用已释放' : result.status === PublicationStatus.Cancelled ? '已终止任务，保留成片占用' : '已请求安全停止，等待执行端确认；请查看任务结果');
   } catch (e) {
     await load();
     terminationError.value = e.message + '；请保留依据，返回任务列表查询核对结果。';
@@ -878,7 +878,7 @@ onMounted(async () => {
             >
             <template #status="{ row }"
               ><ResourceStatusBadge
-                :label="statusLabel(row.status)" /></template
+                :label="statusLabel(row.status)" /><small v-if="row.cancel_requested_at && row.status === PublicationStatus.Running" class="publication-sub">已请求安全停止，等待确认</small></template
             ><template #created_at="{ row }">{{
               formatDateTime(row.created_at)
             }}</template>
@@ -1048,7 +1048,7 @@ onMounted(async () => {
       <ResourceCard class="detail-card"><ResourceSection title="任务信息">
         <ResourceDescriptions>
           <t-descriptions-item label="任务 ID">{{ detail.id }}</t-descriptions-item>
-          <t-descriptions-item label="任务状态"><ResourceStatusBadge :label="statusLabel(detail.status)" /></t-descriptions-item>
+          <t-descriptions-item label="任务状态"><ResourceStatusBadge :label="statusLabel(detail.status)" /><small v-if="detail.cancel_requested_at && detail.status === PublicationStatus.Running" class="publication-sub">已请求安全停止，等待确认</small></t-descriptions-item>
           <t-descriptions-item label="发布平台">{{ platformLabel(detail.platform) }}</t-descriptions-item>
           <t-descriptions-item label="内容类目">{{ categoryName(detail.category_id) }}</t-descriptions-item>
           <t-descriptions-item label="发布账号"><t-button v-if="detail.media_account_id" theme="primary" variant="text" size="small" @click="viewAccount(detail.media_account_id)">{{ detail.resources.account_name || "查看账号" }}</t-button><span v-else>—</span></t-descriptions-item>

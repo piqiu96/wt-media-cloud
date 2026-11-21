@@ -46,14 +46,26 @@ func missing(err error) error {
 	}
 	return err
 }
+
+// cancellationProjection is an advisory read model. Commands recheck under the
+// same revision fence used to issue the one-time submission permission.
+const cancellationProjection = `publication_task.*, (cancel_requested_at IS NULL AND (
+ (status IN ('pending','queued') AND current_attempt_id IS NULL) OR
+ (status='running' AND EXISTS (SELECT 1 FROM publication_attempt AS active_attempt
+ WHERE active_attempt.id=publication_task.current_attempt_id
+ AND active_attempt.publication_id=publication_task.id
+ AND active_attempt.executor_user_id=publication_task.operator_id
+ AND active_attempt.status='running' AND active_attempt.submit_started_at IS NULL
+ AND active_attempt.result_hash IS NULL AND active_attempt.resolved_at IS NULL)))) AS can_cancel`
+
 func (s Store) ByRequest(actor int64, key string) (model.Task, error) {
 	var v model.Task
-	err := s.DB.Where("created_by=? AND request_key=?", actor, key).First(&v).Error
+	err := s.DB.Select(cancellationProjection).Where("created_by=? AND request_key=?", actor, key).First(&v).Error
 	return v, missing(err)
 }
 func (s Store) Get(id uint64) (model.Task, error) {
 	var v model.Task
-	err := s.DB.First(&v, id).Error
+	err := s.DB.Select(cancellationProjection).First(&v, id).Error
 	return v, missing(err)
 }
 func (s Store) Create(v model.Task) (model.Task, error) {
@@ -165,7 +177,7 @@ func (s Store) List(f Filter) ([]model.Task, int64, error) {
 		return nil, 0, err
 	}
 	out := []model.Task{}
-	err := q.Order("id DESC").Offset((f.Page - 1) * f.PageSize).Limit(f.PageSize).Find(&out).Error
+	err := q.Select(cancellationProjection).Order("id DESC").Offset((f.Page - 1) * f.PageSize).Limit(f.PageSize).Find(&out).Error
 	return out, total, err
 }
 func audit(tx *gorm.DB, actor int64, task uint64, action string, revision uint64) error {

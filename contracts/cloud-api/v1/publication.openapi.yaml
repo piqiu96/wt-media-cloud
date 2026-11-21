@@ -168,8 +168,8 @@ paths:
       parameters: [{in: path, name: id, required: true, schema: {$ref: '#/components/schemas/ID'}}]
       requestBody: {required: true, content: {application/json: {schema: {type: object, required: [expected_revision, reason], additionalProperties: false, properties: {expected_revision: {$ref: '#/components/schemas/ID'}, reason: {type: string, minLength: 1, maxLength: 200}}}}}}
       responses:
-        '200': {description: 'Unclaimed pending/queued task cancelled atomically against claim. Retains output occupancy and authorization history.'}
-        '409': {description: 'Stale revision, claimed scene or unsafe state. Missing submission timestamp is not safe-stop evidence.'}
+        '200': {description: 'Unclaimed pending/queued task cancelled atomically against claim. Running original attempt without issued submission permission receives a stop request and remains running until verified original safe-close/unsubmitted completion projects cancelled. Unknown completion remains uncertain. Retains output occupancy, authorization history and immutable original attempt result. Task read models include advisory boolean can_cancel; command always rechecks atomically.'}
+        '409': {description: 'Stale revision, issued submission permission, prior stop request or unsafe state. Missing submission timestamp never proves safe closure.'}
   /api/v1/publication/{id}/abandon:
     post:
       operationId: abandonPublication

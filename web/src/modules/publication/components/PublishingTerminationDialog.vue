@@ -38,7 +38,7 @@ function submit() {
         <t-checkbox v-model="sceneClosed" :disabled="busy || submitted">已核实原执行进程与浏览器现场安全结束</t-checkbox>
         <t-checkbox v-model="noPublishableWork" :disabled="busy || submitted">已核实原账号没有可继续发布的稿件或公开作品</t-checkbox>
       </template>
-      <template v-else><p>仅未领取且安全的任务可终止。终止后保留成片占用，原任务不恢复；这不会撤回平台投稿。</p><label><ResourceRequiredLabel>终止原因</ResourceRequiredLabel><t-input v-model="reason" aria-label="终止原因" :maxlength="200" :disabled="busy || submitted" /></label></template>
+      <template v-else><p>{{ task?.status === 'running' ? '将先请求停止，确认原执行现场已安全关闭且尚未投稿后才会取消；无法确认时需核实结果。' : '未领取任务确认后取消。' }}终止后保留成片占用，原任务不恢复；这不会撤回平台投稿。</p><label><ResourceRequiredLabel>终止原因</ResourceRequiredLabel><t-input v-model="reason" aria-label="终止原因" :maxlength="200" :disabled="busy || submitted" /></label></template>
     </div>
     <template #footer>
       <t-button theme="default" variant="outline" :disabled="busy" @click="emit('update:visible', false)">{{ submitted ? '返回查询结果' : '取消' }}</t-button>

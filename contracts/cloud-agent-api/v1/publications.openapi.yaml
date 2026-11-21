@@ -32,7 +32,7 @@ paths:
       parameters: [{$ref: '#/components/parameters/TaskID'}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/Report'}}}}
       responses:
-        '200': {description: '{task_status,attempt_status,attempt_id,report_seq,stop_requested,stop_reason?,allow_submit}. Omit stage for lightweight keepalive: no history append, resource revalidation or submit permission. Supply stage for progress and pre-submit checks. Invalidated execution input persists stop_reason=PUBLICATION_INPUT_CHANGED without advancing the stage; keepalive returns this stop until the executor safely completes or the attempt is reconciled. Only a fresh submitting report can grant one click; replay never grants it again.'}
+        '200': {description: '{task_status,attempt_status,attempt_id,report_seq,stop_requested,stop_reason?,allow_submit}. Omit stage for lightweight keepalive: no history append, resource revalidation or submit permission. Supply stage for progress and pre-submit checks. Invalidated execution input persists stop_reason=PUBLICATION_INPUT_CHANGED without advancing the stage; keepalive returns this stop until the executor safely completes or the attempt is reconciled. Only a fresh submitting report can grant one click; replay never grants it again. A task stop request fences permission with the same task revision. Explicit stop_requested=true and allow_submit=false denies permission; only that received denial plus verified original scene closure proves no click. Missing/failed responses remain uncertain.'}
         '409': {description: Stale/conflicting report, invalid transition, changed input or unsafe scene.}
   /api/v1/cloud-agent/publication-task/{id}/complete:
     post:

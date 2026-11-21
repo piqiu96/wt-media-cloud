@@ -23,6 +23,7 @@ type Content struct {
 	Confirmed   bool         `json:"confirmed"`
 }
 type Task struct {
+	CanCancel         bool       `json:"can_cancel" gorm:"->;-:migration"`
 	CancelRequestedAt *time.Time `json:"cancel_requested_at"`
 	AcceptedAt        *time.Time `json:"accepted_at"`
 	PublishedAt       *time.Time `json:"published_at"`

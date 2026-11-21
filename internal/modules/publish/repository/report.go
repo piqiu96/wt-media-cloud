@@ -208,6 +208,15 @@ func (s ExecutionStore) Complete(candidate model.Task, user int64, r model.Compl
 		evidence := r.Result
 		updates := map[string]any{"status": attemptStatus, "stage": model.AttemptStageFinished, "report_seq": r.Seq, "heartbeat_at": now, "finished_at": now, "result_status": status, "result_hash": r.ResultHash, "evidence_json": string(evidence), "error_code": optional(result.ErrorCode), "error_message": optional(result.ErrorMessage)}
 		taskUpdates := map[string]any{"status": status, "updated_at": now, "platform_work_id": optional(result.PlatformWorkID), "work_url": optional(result.WorkURL), "failure_code": optional(result.ErrorCode), "failure_message": optional(result.ErrorMessage)}
+		taskStatus := status
+		if status == model.StatusFailed && v.CancelRequestedAt != nil {
+			// The failed branch above has verified the original, closed,
+			// unsubmitted scene. Keep that observation on the immutable attempt.
+			taskStatus = model.StatusCancelled
+			taskUpdates["status"] = taskStatus
+			taskUpdates["failure_code"] = nil
+			taskUpdates["failure_message"] = nil
+		}
 		if status == model.StatusReviewing {
 			taskUpdates["accepted_at"] = now
 		}
@@ -220,7 +229,7 @@ func (s ExecutionStore) Complete(candidate model.Task, user int64, r model.Compl
 		if e := audit(tx, user, v.ID, "publication.result", v.Revision+1); e != nil {
 			return e
 		}
-		v.Status = status
+		v.Status = taskStatus
 		v.Revision++
 		a.Status = attemptStatus
 		a.ReportSeq = r.Seq

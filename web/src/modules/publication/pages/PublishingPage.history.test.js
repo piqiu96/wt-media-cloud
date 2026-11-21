@@ -22,9 +22,10 @@ vi.mock('../../../shared/api/files.js', () => ({ createFilesClient: () => ({}) }
 vi.mock('../../../shared/ui/feedback/index.js', () => ({ feedback: { toast: { success: vi.fn() }, confirmWarning: vi.fn(async () => true) } }));
 vi.mock('vue-router', () => ({ useRoute: () => ({ query: {} }), useRouter: () => ({ push: vi.fn() }), onBeforeRouteLeave: vi.fn() }));
 import PublishingPage from './PublishingPage.vue';
+import { feedback } from '../../../shared/ui/feedback/index.js';
 
 const task = id => ({
-  id, revision: '1', status: 'pending', request_key: `request-${id}`,
+  id, revision: '1', status: 'pending', can_cancel: true, request_key: `request-${id}`,
   category_id: '1', media_account_id: '9', composite_output_id: '10', platform: 'baidu',
   content: { description: `标题-${id}`, cover_file_id: '11', declaration: '无需声明', confirmed: true },
   resources: {},
@@ -315,4 +316,19 @@ it('keeps the frozen generated cover through draft restore without rereading the
  await state.openCreate();expect(state.cover.value.origin).toBe('template');expect(state.draftResourceIssue.value.cover).toBeFalsy();
  await state.saveDraft();expect(services.draft.save.mock.calls.at(-1)[0].form.content.cover_render).toEqual(ref);
  expect(state.coverConfig.value.method).toBe('template');
+});
+
+it('shows the running stop request without claiming final cancellation', async () => {
+ const running = {...task('A'), status:'running',current_attempt_id:'21',can_cancel:true};
+ services.publication.get.mockResolvedValue(running);
+ await state.openTermination(running,'cancel');
+ expect(state.terminationVisible.value).toBe(true);
+ services.publication.cancel.mockResolvedValue({...running,cancel_requested_at:'2026-11-21T00:00:00Z',can_cancel:false});
+ await state.saveTermination({expected_revision:'1',reason:'停止当前安排'});
+ expect(feedback.toast.success).toHaveBeenCalledWith('已请求安全停止，等待执行端确认；请查看任务结果');
+ expect(state.terminationVisible.value).toBe(false);
+});
+it('hides running termination after submission permission or a previous stop request', async () => {
+ expect(state.cancellable({...task('A'),status:'running',can_cancel:false})).toBe(false);
+ expect(state.cancellable({...task('A'),status:'running',can_cancel:true,cancel_requested_at:'2026-11-21'})).toBe(false);
 });
