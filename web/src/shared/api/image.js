@@ -22,6 +22,7 @@ export function createImageClient({
       ),
     validateCoverTemplate: (id, input, options) =>
       api.stream(`/cover-template/${id}/validate`, input, options),
+    getCover: (id) => api.get(`/cover/${id}`),
     renderCover: (input, options) =>
       api.stream("/cover/render", input, options),
     getImageFont: (family, weight) =>

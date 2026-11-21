@@ -319,6 +319,9 @@ func (s *Service) upload(ctx context.Context, actor identity.PublicUser, name, o
 		return model.FileView{}, err
 	}
 	f.SizeBytes, f.SHA256 = size, hex.EncodeToString(hash.Sum(nil))
+	if provenance != nil {
+		f.ReferenceFileIDs = append([]int64(nil), provenance.ReferenceFileIDs...)
+	}
 	result, err := s.view(f)
 	if err != nil {
 		return model.FileView{}, err

@@ -153,7 +153,7 @@ async function render() {
         document: documentInput(doc.value),
         title: sample.value,
         background_image_asset_id: String(
-          props.images.find((i) => i.src === businessImage.value)?.id || "0",
+          doc.value.backgroundMode === "business" ? props.images.find((i) => i.src === businessImage.value)?.id || "0" : "0",
         ),
       },
       { signal: renderAbort.signal },

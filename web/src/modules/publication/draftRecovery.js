@@ -1,3 +1,4 @@
+import { emptyCoverConfig } from "./coverPreparation.js";
 import { DialogPlugin } from "tdesign-vue-next";
 
 export function choosePublicationDraft(savedAt) {
@@ -33,7 +34,7 @@ export function choosePublicationDraft(savedAt) {
 }
 
 // Input references and human text only; never store resource bodies or signed URLs.
-export function capturePublicationDraft(form, schedule, cover, pendingRequest) {
+export function capturePublicationDraft(form, schedule, cover, pendingRequest, config) {
   const text = (value) => String(value ?? "");
   return {
     form: {
@@ -48,8 +49,10 @@ export function capturePublicationDraft(form, schedule, cover, pendingRequest) {
         topics: text(form.content.topics),
         declaration: text(form.content.declaration),
         confirmed: !!form.content.confirmed,
+        ...(form.content.cover_render ? {cover_render: captureCoverReference(form.content.cover_render)} : {}),
       },
     },
+    cover_config: config ? captureCoverConfig(config) : undefined,
     schedule: text(schedule),
     image_asset_id: text(cover?.image_asset_id),
     cover_origin: text(cover?.origin),
@@ -58,4 +61,13 @@ export function capturePublicationDraft(form, schedule, cover, pendingRequest) {
       ? JSON.parse(JSON.stringify(pendingRequest))
       : null,
   };
+}
+
+function captureCoverReference(ref) {
+ return {template_id:String(ref.template_id || ""),published_revision:Number(ref.published_revision || 0),title:String(ref.title || ""),background_image_asset_id:String(ref.background_image_asset_id || "0"),background_output_id:String(ref.background_output_id || "0"),render_input_hash:String(ref.render_input_hash || "")};
+}
+function captureCoverConfig(config) {
+ const result=emptyCoverConfig();
+ for(const key of Object.keys(result))result[key]=typeof result[key]==="number" ? Number(config[key] || 0) : String(config[key] ?? result[key]);
+ return result;
 }

@@ -431,5 +431,8 @@ func CheckFileReferences(tx *gorm.DB, id int64) error {
 	if used {
 		return files.ErrInUse
 	}
-	return CheckTemplateFileReferences(tx, id)
+	if e := CheckTemplateFileReferences(tx, id); e != nil {
+		return e
+	}
+	return CheckArtworkFileReferences(tx, id)
 }

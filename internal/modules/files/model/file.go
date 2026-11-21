@@ -6,17 +6,19 @@ import (
 )
 
 type ImageMetadata struct {
-	Width           int             `json:"width"`
-	Height          int             `json:"height"`
-	Format          string          `json:"format"`
-	Source          string          `json:"source"`
-	RenderInputHash string          `json:"render_input_hash,omitempty"`
-	RenderVersion   string          `json:"render_version,omitempty"`
-	RenderInput     json.RawMessage `json:"render_input,omitempty"`
-	Preview         bool            `json:"preview,omitempty"`
+	ReferenceFileIDs []int64         `json:"-"` // Trusted in-process reference locks, never accepted from upload metadata.
+	Width            int             `json:"width"`
+	Height           int             `json:"height"`
+	Format           string          `json:"format"`
+	Source           string          `json:"source"`
+	RenderInputHash  string          `json:"render_input_hash,omitempty"`
+	RenderVersion    string          `json:"render_version,omitempty"`
+	RenderInput      json.RawMessage `json:"render_input,omitempty"`
+	Preview          bool            `json:"preview,omitempty"`
 }
 
 type File struct {
+	ReferenceFileIDs []int64 `gorm:"-"`
 	// Ready writes metadata atomically with successful upload finalization.
 	MetadataJSON  json.RawMessage `gorm:"type:json;->"`
 	ID            int64

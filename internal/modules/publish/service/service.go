@@ -220,7 +220,11 @@ func (s *Service) Create(ctx context.Context, a identity.PublicUser, in CreateIn
 	if cover.Type != "image" || cover.SizeBytes <= 0 || len(cover.SHA256) != 64 || previewCover(cover) {
 		return model.Task{}, ErrInvalid
 	}
-	snapshot, _ := json.Marshal(map[string]any{"account_name": account.PlatformName, "account_owner": account.UserName, "browser_profile_id": account.BrowserProfileID, "output_name": o.Name, "video_sha256": o.SHA256, "video_size": o.FileSizeBytes, "cover_sha256": cover.SHA256, "cover_name": cover.Name, "cover_resource_path": "/api/v1/file-resources/" + cover.ResourceToken})
+	coverSnapshot, err := verifyCoverRender(cover, in.Content, in.CompositeOutputID)
+	if err != nil {
+		return model.Task{}, err
+	}
+	snapshot, _ := json.Marshal(map[string]any{"cover_render": coverSnapshot, "account_name": account.PlatformName, "account_owner": account.UserName, "browser_profile_id": account.BrowserProfileID, "output_name": o.Name, "video_sha256": o.SHA256, "video_size": o.FileSizeBytes, "cover_sha256": cover.SHA256, "cover_name": cover.Name, "cover_resource_path": "/api/v1/file-resources/" + cover.ResourceToken})
 	now := time.Now().UTC()
 	v := model.Task{TeamID: int64(*account.TeamID), OperatorID: int64(account.UserID), Platform: in.Platform, CategoryID: in.CategoryID, MediaAccountID: in.MediaAccountID, CompositeOutputID: in.CompositeOutputID, PlatformAccountUID: account.PlatformAccountID, CoverFileID: cover.ID, ResourceSnapshot: snapshot, Content: in.Content, Status: model.StatusPending, NotBefore: in.NotBefore, Revision: 1, CreatedBy: int64(a.ID), RequestKey: in.RequestKey, RequestHash: digest, CreatedAt: now, UpdatedAt: now}
 	return s.Repo.Create(v)
@@ -248,10 +252,15 @@ func (s *Service) Edit(ctx context.Context, a identity.PublicUser, id uint64, in
 	if cover.Type != "image" || cover.SizeBytes <= 0 || len(cover.SHA256) != 64 || previewCover(cover) {
 		return model.Task{}, ErrInvalid
 	}
+	coverSnapshot, err := verifyCoverRender(cover, in.Content, v.CompositeOutputID)
+	if err != nil {
+		return model.Task{}, err
+	}
 	var snapshot map[string]any
 	if err := json.Unmarshal(v.ResourceSnapshot, &snapshot); err != nil {
 		return model.Task{}, err
 	}
+	snapshot["cover_render"] = coverSnapshot
 	snapshot["cover_sha256"] = cover.SHA256
 	snapshot["cover_name"] = cover.Name
 	snapshot["cover_resource_path"] = "/api/v1/file-resources/" + cover.ResourceToken

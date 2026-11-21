@@ -219,12 +219,25 @@ components:
             scene_closed: {type: boolean, const: true}
             no_publishable_work: {type: boolean, const: true}
     ID: {type: string, pattern: '^[1-9][0-9]*$'}
+    # Formal generated artifacts require matching cover_render even after the original template is disabled.
+    CoverRender:
+      type: object
+      additionalProperties: false
+      required: [template_id, published_revision, title, background_image_asset_id, background_output_id, render_input_hash]
+      properties:
+        template_id: {$ref: '#/components/schemas/ID'}
+        published_revision: {type: integer, minimum: 1}
+        title: {type: string, minLength: 1, maxLength: 2000}
+        background_image_asset_id: {type: string, pattern: '^(0|[1-9][0-9]*)$'}
+        background_output_id: {type: string, pattern: '^(0|[1-9][0-9]*)$'}
+        render_input_hash: {type: string, pattern: '^[a-f0-9]{64}$'}
     Content:
       type: object
       additionalProperties: false
       required: [description, cover_file_id, declaration, confirmed]
       properties:
         description: {type: string, minLength: 1, maxLength: 1000}
+        cover_render: {$ref: '#/components/schemas/CoverRender'}
         cover_file_id: {$ref: '#/components/schemas/ID'}
         topics: {type: string, maxLength: 200}
         declaration: {type: string, enum: [无需声明]}

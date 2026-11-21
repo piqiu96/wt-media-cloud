@@ -105,6 +105,9 @@ func ConfigureFileReferences() {
 		return publishservice.CheckFileReferences(tx, id)
 	})
 	imageservice.SetReferenceProvider(func(tx *gorm.DB, id int64) error {
+		if e := imageservice.CheckArtworkFileReferences(tx, id); e != nil {
+			return e
+		}
 		if e := imageservice.CheckTemplateFileReferences(tx, id); e != nil {
 			return e
 		}
@@ -121,6 +124,11 @@ func ConfigureFileReferences() {
 		if e != nil {
 			return nil, e
 		}
+		artwork, e := imageservice.ListArtworkFileReference(a, id)
+		if e != nil {
+			return nil, e
+		}
+		out = append(out, artwork...)
 		for _, row := range rows {
 			out = append(out, imagemodel.Reference{Kind: row.Kind, ID: row.ID})
 		}

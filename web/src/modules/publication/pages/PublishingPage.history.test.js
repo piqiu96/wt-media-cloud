@@ -298,3 +298,21 @@ it('keeps output cover provenance through an offline draft save so it can recove
  await state.openCreate();
  expect(state.cover.value.origin).toBe('output');expect(state.draftResourceIssue.value.cover).toBeFalsy();
 });
+
+it('preserves a rendered cover and confirmation when reselecting the same output', async()=>{
+ await state.openCreate();const o={id:'71',thumbnail:{file_id:'81'}};state.setOutput(o);
+ state.coverConfig.value={method:'template',background_mode:'business',background_source:'output'};
+ state.cover.value={id:'91',origin:'template'};state.form.value.content.cover_file_id='91';state.form.value.content.cover_render={title:'实际标题'};state.form.value.content.confirmed=true;
+ state.setOutput({...o,thumbnail:{...o.thumbnail}});
+ expect(state.form.value.content.cover_file_id).toBe('91');expect(state.form.value.content.confirmed).toBe(true);
+ state.setOutput({...o,thumbnail:{file_id:'82'}});expect(state.form.value.content.cover_file_id).toBe('');expect(state.form.value.content.confirmed).toBe(false);
+});
+it('keeps the frozen generated cover through draft restore without rereading the current template',async()=>{
+ const ref={template_id:'8',published_revision:2,title:'实际标题',background_image_asset_id:'0',background_output_id:'10',render_input_hash:'a'.repeat(64)};
+ const draft=task('D');draft.content.cover_render=ref;
+ services.images.getCover=vi.fn().mockResolvedValue({file:{id:'11',resource_path:'/actual'},snapshot:{...ref,document:{backgroundMode:'business'}},render_input_hash:ref.render_input_hash});
+ services.draft.get.mockResolvedValue({payload:{form:draft,cover_origin:'template'},revision:'1'});services.chooseDraft.mockResolvedValue('continue');
+ await state.openCreate();expect(state.cover.value.origin).toBe('template');expect(state.draftResourceIssue.value.cover).toBeFalsy();
+ await state.saveDraft();expect(services.draft.save.mock.calls.at(-1)[0].form.content.cover_render).toEqual(ref);
+ expect(state.coverConfig.value.method).toBe('template');
+});

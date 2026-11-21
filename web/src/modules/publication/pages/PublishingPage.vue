@@ -40,6 +40,8 @@ import {
 } from "../eligibility.js";
 import { PublicationStatus, publicationStatuses } from "../status.js";
 import { publicationTitleForOutput } from "../title.js";
+import PublishingCoverEditor from "../components/PublishingCoverEditor.vue";
+import { emptyCoverConfig, coverConfigFromReference, coverReference } from "../coverPreparation.js";
 import PublishingExecutionHistory from "../components/PublishingExecutionHistory.vue";
 import PublishingResourcePicker from "../components/PublishingResourcePicker.vue";
 import PublishingRecoveryDialog from "../components/PublishingRecoveryDialog.vue";
@@ -113,6 +115,7 @@ const view = ref("list"),
   picker = ref(""),
   baseline = ref(""),
   pendingRequest = ref(null);
+const coverConfig = ref(emptyCoverConfig());
 const videoVisible = ref(false), videoURL = ref(""), videoLoading = ref(false), videoError = ref("");
 let videoSequence = 0;
 async function previewOutput() {
@@ -169,7 +172,7 @@ const frozen = computed(() => busy.value || !!pendingRequest.value);
 const dirty = computed(
   () =>
     form.value &&
-    JSON.stringify({ form: form.value, schedule: schedule.value }) !==
+    JSON.stringify({ form: form.value, schedule: schedule.value, cover_config:coverConfig.value }) !==
       baseline.value,
 );
 const statusLabel = (v) => publicationStatuses[v] || v;
@@ -243,6 +246,7 @@ async function changeCategory(category) {
   account.value = null;
   output.value = null;
   cover.value = null;
+  coverConfig.value = emptyCoverConfig();
   schedule.value = "";
 }
 function initializeCreate() {
@@ -253,18 +257,19 @@ function initializeCreate() {
   account.value = null;
   output.value = null;
   cover.value = null;
+  coverConfig.value = emptyCoverConfig();
   schedule.value = "";
   form.value = emptyForm();
   formError.value = "";
   pendingRequest.value = null;
-  baseline.value = JSON.stringify({ form: form.value, schedule: "" });
+  baseline.value = JSON.stringify({ form: form.value, schedule: "", cover_config:coverConfig.value });
   view.value = "form";
 }
 const draftPersistent = ref(false), draftReady = ref(false), draftNotice = ref("");
 const draftResourceIssue = ref({}), draftConflict = ref(false);
 let draftClient = null;
 function draftPayload() {
-  return capturePublicationDraft(form.value, schedule.value, cover.value, pendingRequest.value);
+  return capturePublicationDraft(form.value, schedule.value, cover.value, pendingRequest.value, coverConfig.value);
 }
 async function openCreate(sourceOutput = null) {
   if (busy.value) return false;
@@ -292,7 +297,7 @@ async function openCreate(sourceOutput = null) {
       setOutput(sourceOutput);
       form.value.category_id = String(sourceOutput.category_id);
     }
-    baseline.value = JSON.stringify({ form: form.value, schedule: schedule.value });
+    baseline.value = JSON.stringify({ form: form.value, schedule: schedule.value, cover_config:coverConfig.value });
     draftReady.value = true;
     return true;
   } catch (e) {
@@ -304,6 +309,7 @@ async function openCreate(sourceOutput = null) {
 async function restoreDraft(payload) {
   if (!payload?.form?.content || !payload.form.request_key || payload.form.platform !== "baidu") throw new Error("续编输入无法读取，请保留原草稿后核对");
   form.value = capturePublicationDraft(payload.form, payload.schedule, null, null).form;
+  coverConfig.value = payload.cover_config || (form.value.content.cover_render ? coverConfigFromReference(form.value.content.cover_render) : emptyCoverConfig());
   schedule.value = String(payload.schedule || "");
   pendingRequest.value = payload.pending_request || null;
   // Restoring user input never re-confirms resources or replaces human text.
@@ -312,8 +318,9 @@ async function restoreDraft(payload) {
     form.value.media_account_id ? accounts.get(form.value.media_account_id) : null,
     form.value.composite_output_id ? compose.getComposeOutput(form.value.composite_output_id) : null,
     payload.image_asset_id ? createImageClient().getImageAsset(payload.image_asset_id) : null,
+    form.value.content.cover_render ? createImageClient().getCover(form.value.content.cover_file_id) : null,
   ]);
-  const [a, o, c] = results.map(result => result.status === "fulfilled" ? result.value : null);
+  const [a, o, c, artwork] = results.map(result => result.status === "fulfilled" ? result.value : null);
   account.value = a;
   output.value = o?.output || null;
   if (form.value.media_account_id) draftResourceIssue.value.account = !a ? "原账号不可用，请恢复原账号或重新选择" : accountUnavailable(a, form.value.category_id);
@@ -321,7 +328,10 @@ async function restoreDraft(payload) {
   if (form.value.content.cover_file_id) {
     cover.value = { id: form.value.content.cover_file_id, image_asset_id: String(payload.image_asset_id || ""), origin: String(payload.cover_origin || ""), output_id: String(payload.cover_output_id || ""), name: "原封面暂不可用" };
     const thumbnail = output.value?.thumbnail;
-    if (payload.cover_origin === "output" && String(payload.cover_output_id) === form.value.composite_output_id && thumbnail && String(thumbnail.file_id) === form.value.content.cover_file_id) {
+    if (artwork && JSON.stringify(coverReference(artwork)) === JSON.stringify(form.value.content.cover_render)) {
+      cover.value = {...artwork.file,origin:"template"};
+      coverConfig.value = payload.cover_config || coverConfigFromReference(form.value.content.cover_render, artwork.snapshot);
+    } else if (payload.cover_origin === "output" && String(payload.cover_output_id) === form.value.composite_output_id && thumbnail && String(thumbnail.file_id) === form.value.content.cover_file_id) {
       cover.value = { ...thumbnail, id: String(thumbnail.file_id), origin: "output", output_id: form.value.composite_output_id, name: "成片封面" };
     } else if (c && String(c.file_id) === form.value.content.cover_file_id && c.enabled && c.allow_as_cover && (!c.category_ids?.length || c.category_ids.map(String).includes(form.value.category_id))) {
       cover.value = { ...c, id: c.file_id, image_asset_id: c.id };
@@ -331,7 +341,7 @@ async function restoreDraft(payload) {
   }
   draftNotice.value = "已恢复填写，资源可用性已重新检查；请重新核对内容。";
 }
-watch([form, schedule, pendingRequest], () => {
+watch([form, schedule, pendingRequest, coverConfig], () => {
   if (draftReady.value && draftClient && view.value === "form" && !editing.value && !busy.value) {
     const hasInput = form.value.category_id || form.value.media_account_id || form.value.composite_output_id || form.value.content.description || schedule.value;
     draftClient.remember(hasInput ? draftPayload() : null);
@@ -343,7 +353,7 @@ async function saveDraft() {
   formError.value = "";
   try {
     await draftClient.save(draftPayload());
-    baseline.value = JSON.stringify({ form: form.value, schedule: schedule.value });
+    baseline.value = JSON.stringify({ form: form.value, schedule: schedule.value, cover_config:coverConfig.value });
     feedback.toast.success(draftPersistent.value ? "草稿已保存，重启后可继续；不占用成片" : "已暂存当前填写；刷新、关闭或退出后清空");
     return true;
   } catch (e) { draftConflict.value = e.code === "draft_revision_conflict"; formError.value = e.message || "保存失败，填写内容已保留"; return false; }
@@ -360,7 +370,7 @@ async function reloadDraft() {
     if (current.payload) await restoreDraft(current.payload);
     else initializeCreate();
     draftConflict.value = false;
-    baseline.value = JSON.stringify({ form: form.value, schedule: schedule.value });
+    baseline.value = JSON.stringify({ form: form.value, schedule: schedule.value, cover_config:coverConfig.value });
   } catch (e) { formError.value = e.message || "读取失败，填写内容已保留"; }
   finally { busy.value = false; }
 }
@@ -504,6 +514,8 @@ async function edit(row) {
       name: v.resources.cover_name,
       resource_path: v.resources.cover_resource_path,
     };
+    coverConfig.value = v.content.cover_render ? coverConfigFromReference(v.content.cover_render,v.resources.cover_render) : emptyCoverConfig();
+    if(v.content.cover_render) cover.value.origin="template";
     form.value = {
       request_key: v.request_key,
       platform: v.platform,
@@ -516,6 +528,7 @@ async function edit(row) {
     baseline.value = JSON.stringify({
       form: form.value,
       schedule: schedule.value,
+      cover_config:coverConfig.value,
     });
     formError.value = "";
     pendingRequest.value = null;
@@ -527,18 +540,52 @@ async function edit(row) {
   }
 }
 function setOutput(row) {
+  const backgroundChanged=String(output.value?.id || "")!==String(row?.id || "") || String(output.value?.thumbnail?.file_id || "")!==String(row?.thumbnail?.file_id || "");
   form.value.content.description = publicationTitleForOutput(form.value.content.description, output.value, row);
   output.value = row;
   form.value.composite_output_id = row ? String(row.id) : "";
-  if (!cover.value || cover.value.origin === "output") {
+  if (coverConfig.value.method === "template" && coverConfig.value.background_mode === "business" && coverConfig.value.background_source === "output" && backgroundChanged) {
+    clearRenderedCover();
+  } else if (coverConfig.value.method === "image" && (!cover.value || cover.value.origin === "output")) {
     const thumbnail = row?.thumbnail;
     cover.value = thumbnail?.file_id ? { ...thumbnail, id: String(thumbnail.file_id), origin: "output", output_id: String(row.id), name: "成片封面" } : null;
     form.value.content.cover_file_id = cover.value ? cover.value.id : "";
     delete draftResourceIssue.value.cover;
   }
 }
+function clearRenderedCover() {
+  cover.value=null;
+  form.value.content.cover_file_id="";
+  delete form.value.content.cover_render;
+  delete draftResourceIssue.value.cover;
+  invalidate();
+}
+function updateCoverConfig(config) {
+  if(frozen.value || JSON.stringify(config)===JSON.stringify(coverConfig.value))return;
+  coverConfig.value=config;
+  clearRenderedCover();
+  if(config.method==="image")useOutputCover();
+}
+function useOutputCover() {
+  if(frozen.value || !output.value?.thumbnail?.file_id)return;
+  const thumbnail=output.value.thumbnail;
+  const previous=reviewedInput();
+  cover.value={...thumbnail,id:String(thumbnail.file_id),origin:"output",output_id:String(output.value.id),name:"成片封面"};
+  form.value.content.cover_file_id=cover.value.id;
+  delete form.value.content.cover_render;
+  delete draftResourceIssue.value.cover;
+  if(reviewedInput()!==previous)invalidate();
+}
+function useRenderedCover(artwork) {
+  if(frozen.value || coverConfig.value.method!=="template")return;
+  cover.value={...artwork.file,origin:"template"};
+  form.value.content.cover_file_id=String(artwork.file.id);
+  form.value.content.cover_render=coverReference(artwork);
+  delete draftResourceIssue.value.cover;
+  invalidate();
+}
 function reviewedInput() {
-  return JSON.stringify({ platform: form.value.platform, category: form.value.category_id, account: form.value.media_account_id, output: form.value.composite_output_id, description: form.value.content.description, topics: form.value.content.topics, declaration: form.value.content.declaration, cover: form.value.content.cover_file_id });
+  return JSON.stringify({ platform: form.value.platform, category: form.value.category_id, account: form.value.media_account_id, output: form.value.composite_output_id, description: form.value.content.description, topics: form.value.content.topics, declaration: form.value.content.declaration, cover: form.value.content.cover_file_id, cover_render:form.value.content.cover_render });
 }
 function picked(row) {
   const previousInput = reviewedInput();
@@ -557,6 +604,8 @@ function picked(row) {
     setOutput(row);
   } else {
     delete draftResourceIssue.value.cover;
+    delete form.value.content.cover_render;
+    coverConfig.value = {...coverConfig.value,method:"image"};
     cover.value = row;
     form.value.content.cover_file_id = String(row.id);
   }
@@ -613,6 +662,7 @@ async function submit() {
     baseline.value = JSON.stringify({
       form: form.value,
       schedule: schedule.value,
+      cover_config:coverConfig.value,
     });
     // Created or editable tasks have no execution history. Drop any records
     // retained from a different task detail before showing the saved task.
@@ -942,18 +992,10 @@ onMounted(async () => {
               @change="invalidate"
           /></label>
           <div class="quick-cover-field">
-            <label class="quick-field-heading"><ResourceRequiredLabel>发布封面</ResourceRequiredLabel><ResourceFieldHelp label="发布封面" content="默认使用成片真实封面，可从图片库更换。未生成封面的成片需选择图片；按原图预览，不改变文件内容。" /></label>
+            <label class="quick-field-heading"><ResourceRequiredLabel>发布封面</ResourceRequiredLabel><ResourceFieldHelp label="发布封面" content="使用现成图片或选择模板添加文字。默认使用成片真实封面；横竖封面规格待平台核验，当前按原图预览。" /></label>
             <div class="quick-cover-workspace">
-              <button v-if="cover?.resource_path" type="button" class="publication-image-button" aria-label="预览发布封面" @click="previewImage(cover.resource_path, cover.name)"><img :src="files.resourceURL(cover)" alt="当前发布封面" /><span>预览封面</span></button>
-              <div>
-                <strong>{{ cover?.name || "请选择现成图片" }}</strong
-                ><t-button
-                  variant="outline"
-                  :disabled="frozen"
-                  @click="picker = 'image'"
-                  >{{ cover ? "更换图片" : "选择图片" }}</t-button
-                >
-              </div>
+              <div class="publication-cover-preview"><button v-if="cover?.resource_path" type="button" class="publication-image-button" aria-label="预览发布封面" @click="previewImage(cover.resource_path, cover.name)"><img :src="files.resourceURL(cover)" alt="当前发布封面" /><span>预览封面</span></button><div v-else class="publication-cover-empty">请选择图片或生成封面</div></div>
+              <PublishingCoverEditor :config="coverConfig" :output="output" :category="form.category_id" :disabled="frozen" @update:config="updateCoverConfig" @rendered="useRenderedCover" @choose-image="picker='image'" @use-output="useOutputCover" />
             </div>
           </div>
           <label
@@ -1151,6 +1193,7 @@ onMounted(async () => {
   flex-direction: column;
   gap: 8px;
 }
+.publication-cover-empty { width:100%;min-height:160px;display:grid;place-items:center;background:var(--td-bg-color-secondarycontainer);color:var(--td-text-color-secondary);font-size:12px; }
 .quick-cover-workspace { display: grid; grid-template-columns: 220px minmax(0, 1fr); align-items: start; gap: 24px; min-width: 0; }
 .quick-cover-workspace > div { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; min-width: 0; }
 .quick-cover-workspace strong { font-size: 14px; font-weight: 400; overflow-wrap: anywhere; }

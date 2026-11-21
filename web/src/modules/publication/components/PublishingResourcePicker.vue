@@ -13,6 +13,7 @@ import { accountUnavailable, outputUnavailable } from "../eligibility.js";
 const props = defineProps({
   visible: Boolean,
   kind: String,
+  usage: {type:String, default:"cover"},
   category: String,
   account: Object,
 });
@@ -57,7 +58,7 @@ async function load() {
       data = await accounts.listPage({ ...params, platform: "baidu" });
     else if (props.kind === "output")
       data = await publication.outputs({ ...params, platform: "baidu" });
-    else data = await images.listImageAsset({ ...params, usage: "cover", enabled: true, category_id: props.category });
+    else data = await images.listImageAsset({ ...params, usage: props.usage, enabled: true, category_id: props.category });
     if (n !== sequence) return;
     if (props.kind === "output" && (data.items || []).some(row => typeof row.occupied !== "boolean"))
       throw new Error("暂时无法确认成片占用，请重新查询");

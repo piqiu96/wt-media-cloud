@@ -6,6 +6,16 @@ info:
     Entity IDs and optimistic revisions are decimal strings; published_revision is
     an integer version counter. Session scope matches image assets.
 paths:
+  /api/v1/cover/{id}:
+    get:
+      operationId: getCover
+      description: Read an authorized actual non-preview template artwork, file, render_input_hash and frozen snapshot. Does not regenerate or require the original template to remain enabled. Unavailable files are errors.
+      parameters:
+      - {in: path, name: id, required: true, schema: {$ref: '#/components/schemas/EntityID'}}
+      responses:
+        '200': {description: Artwork with preview false and frozen source/template snapshot.}
+        '404': {description: File missing or outside caller scope.}
+        '400': {description: Not a valid formal template artwork.}
   /api/v1/cover-template:
     get:
       operationId: listCoverTemplate
@@ -35,8 +45,7 @@ paths:
       operationId: getCoverTemplate
       responses:
         '200':
-          description: Draft and current published configuration
-          revisions and actual thumbnail.: null
+          description: Draft and current published configuration, revisions and actual thumbnail.
     delete:
       operationId: deleteCoverTemplate
       description: expected_revision query; only never-published unreferenced drafts
@@ -169,11 +178,11 @@ paths:
   /api/v1/cover/render:
     post:
       operationId: renderCover
-      description: template_id, expected_published_revision, title, background_image_asset_id,
+      description: template_id, expected_published_revision, title, background_image_asset_id or background_output_id,
         row_key and input_revision. Only an enabled published template and enabled
         permitted background may produce a formal result. Returns fixed actual file,
         input hash, full template/input snapshot and renderer version through start/progress/item_result|item_error/done
-        events. No task or content confirmation is created.
+        events. Business background requires exactly one source; output is resolved via the production service and must have an actual thumbnail. Fixed/solid backgrounds reject extra business sources. Snapshot includes background_file_id and background_output_id as decimal strings (zero when absent). Result is artwork and issues. No task or content confirmation is created.
       responses:
         '200':
           description: text/event-stream; each item has exactly one terminal event.
@@ -352,6 +361,9 @@ components:
           type: string
           minLength: 1
           maxLength: 2000
+        background_output_id:
+          type: string
+          pattern: ^[1-9][0-9]*$
         background_image_asset_id:
           type: string
           pattern: ^[0-9]+$

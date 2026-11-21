@@ -11,6 +11,7 @@ import (
 	files "github.com/wt-media/wt-media-cloud/internal/modules/files/service"
 	identity "github.com/wt-media/wt-media-cloud/internal/modules/identity/service"
 	"github.com/wt-media/wt-media-cloud/internal/modules/image/render"
+	production "github.com/wt-media/wt-media-cloud/internal/modules/production/service"
 	_ "golang.org/x/image/webp"
 	"image"
 	_ "image/gif"
@@ -25,15 +26,26 @@ import (
 var artworkSlots = make(chan struct{}, 4)
 
 type ArtworkService struct {
+	Output      func(identity.PublicUser, int64) (production.ComposeOutputDetail, error)
 	Assets      *Service
 	FileService func() (*files.Service, error)
 }
 
 func WiredArtwork() *ArtworkService {
-	return &ArtworkService{Assets: Wired(), FileService: files.Wired}
+	return &ArtworkService{Assets: Wired(), FileService: files.Wired, Output: production.GetComposeOutput}
+}
+
+type ArtworkReference struct {
+	TemplateID             uint64 `json:"template_id,string"`
+	PublishedRevision      uint32 `json:"published_revision"`
+	Title                  string `json:"title"`
+	BackgroundImageAssetID uint64 `json:"background_image_asset_id,string"`
+	BackgroundOutputID     int64  `json:"background_output_id,string"`
+	RenderInputHash        string `json:"render_input_hash"`
 }
 
 type ArtworkInput struct {
+	BackgroundOutputID     int64  `json:"background_output_id,string"`
 	TemplateID             uint64 `json:"template_id,string"`
 	PublishedRevision      uint32 `json:"expected_published_revision"`
 	Title                  string `json:"title"`
@@ -42,6 +54,7 @@ type ArtworkInput struct {
 	InputRevision          string `json:"input_revision"`
 }
 type ArtworkSnapshot struct {
+	BackgroundOutputID     int64           `json:"background_output_id,string"`
 	TemplateID             uint64          `json:"template_id,string"`
 	PublishedRevision      uint32          `json:"published_revision"`
 	Document               render.Document `json:"document"`
@@ -82,23 +95,13 @@ func (s *ArtworkService) RenderDocument(ctx context.Context, a identity.PublicUs
 		return result, nil, e
 	}
 	var background image.Image
-	var backgroundFileID int64
-	if d.BackgroundMode != "solid" {
-		id := bgID
-		if d.BackgroundMode == "fixed" {
-			id = d.ImageAssetID
-		}
-		if id == 0 {
-			return result, nil, fmt.Errorf("%w: 请选择可用底图", ErrInvalid)
-		}
-		asset, e := s.Assets.GetImageAsset(a, id)
-		if e != nil {
-			return result, nil, e
-		}
-		if !asset.Enabled || !asset.AllowAsBackground {
-			return result, nil, fmt.Errorf("%w: 底图已停用或用途不匹配", ErrInvalid)
-		}
-		f, e := fileService.Read(a, asset.FileID)
+	input.BackgroundImageAssetID = bgID
+	backgroundFileID, bgID, outputID, e := s.backgroundFile(a, d, input)
+	if e != nil {
+		return result, nil, e
+	}
+	if backgroundFileID != 0 {
+		f, e := fileService.Read(a, backgroundFileID)
 		if e != nil {
 			return result, nil, e
 		}
@@ -129,12 +132,8 @@ func (s *ArtworkService) RenderDocument(ctx context.Context, a identity.PublicUs
 		if e != nil {
 			return result, nil, e
 		}
-		backgroundFileID = f.ID
-		bgID = id
-	} else {
-		bgID = 0
 	}
-	result.Snapshot = ArtworkSnapshot{TemplateID: input.TemplateID, PublishedRevision: input.PublishedRevision, Document: d, Title: title, BackgroundImageAssetID: bgID, BackgroundFileID: backgroundFileID, RendererVersion: render.Version}
+	result.Snapshot = ArtworkSnapshot{BackgroundOutputID: outputID, TemplateID: input.TemplateID, PublishedRevision: input.PublishedRevision, Document: d, Title: title, BackgroundImageAssetID: bgID, BackgroundFileID: backgroundFileID, RendererVersion: render.Version}
 	// Resource paths are presentation data, not render input identity.
 	result.Snapshot.Document.Image = ""
 	result.RenderInputHash = templateHash(result.Snapshot)
@@ -147,7 +146,7 @@ func (s *ArtworkService) RenderDocument(ctx context.Context, a identity.PublicUs
 	if preview {
 		prefix = "预览样例"
 	}
-	stored, e := fileService.UploadGeneratedImage(ctx, a, prefix+"-"+result.RenderInputHash[:16], bytes.NewReader(data), filemodel.ImageMetadata{RenderInputHash: result.RenderInputHash, RenderVersion: render.Version, RenderInput: provenance, Preview: preview})
+	stored, e := fileService.UploadGeneratedImage(ctx, a, prefix+"-"+result.RenderInputHash[:16], bytes.NewReader(data), filemodel.ImageMetadata{ReferenceFileIDs: artworkReferenceFileIDs(backgroundFileID), RenderInputHash: result.RenderInputHash, RenderVersion: render.Version, RenderInput: provenance, Preview: preview})
 	result.File = ArtworkFile{FileView: stored, ID: stored.ID, OwnerID: stored.OwnerID, TeamID: stored.TeamID}
 	return result, issues, e
 }
@@ -199,4 +198,11 @@ type ValidateTemplateInput struct {
 	Document               *render.Document `json:"document"`
 	Title                  string           `json:"title"`
 	BackgroundImageAssetID uint64           `json:"background_image_asset_id,string"`
+}
+
+func artworkReferenceFileIDs(id int64) []int64 {
+	if id > 0 {
+		return []int64{id}
+	}
+	return nil
 }

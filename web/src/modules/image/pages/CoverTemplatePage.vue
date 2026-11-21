@@ -425,7 +425,8 @@ async function openPublish(t) {
   checkAbort = new AbortController();
   try {
     await loadImagesForPublish();
-    const background = images.value.find((i) => i.enabled)?.id || "0";
+    const document=t.draft?.document || t.document;
+    const background = document?.backgroundMode === "business" ? images.value.find((i) => i.enabled)?.id || "0" : "0";
     let result,
       issues = [];
     for (const title of [samples.short, samples.long]) {

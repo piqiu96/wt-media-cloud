@@ -5,12 +5,22 @@ import (
 	"time"
 )
 
+type CoverRender struct {
+	TemplateID             uint64 `json:"template_id,string"`
+	PublishedRevision      uint32 `json:"published_revision"`
+	Title                  string `json:"title"`
+	BackgroundImageAssetID uint64 `json:"background_image_asset_id,string"`
+	BackgroundOutputID     int64  `json:"background_output_id,string"`
+	RenderInputHash        string `json:"render_input_hash"`
+}
+
 type Content struct {
-	Description string `json:"description"`
-	CoverFileID int64  `json:"cover_file_id,string"`
-	Topics      string `json:"topics"`
-	Declaration string `json:"declaration"`
-	Confirmed   bool   `json:"confirmed"`
+	CoverRender *CoverRender `json:"cover_render,omitempty"`
+	Description string       `json:"description"`
+	CoverFileID int64        `json:"cover_file_id,string"`
+	Topics      string       `json:"topics"`
+	Declaration string       `json:"declaration"`
+	Confirmed   bool         `json:"confirmed"`
 }
 type Task struct {
 	CancelRequestedAt *time.Time `json:"cancel_requested_at"`

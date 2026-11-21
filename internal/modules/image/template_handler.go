@@ -26,6 +26,7 @@ func registerTemplateRoutes(h *server.Hertz) {
 	h.PUT("/api/v1/cover-template/:id/usage", SetCoverTemplateUsage)
 	h.POST("/api/v1/cover-template/:id/copy", CopyCoverTemplate)
 	h.POST("/api/v1/cover/render", RenderCover)
+	h.GET("/api/v1/cover/:id", GetCover)
 	h.GET("/api/v1/image-font/:family/:weight", GetImageFont)
 }
 func ListCoverTemplate(_ context.Context, c *app.RequestContext) {
@@ -329,4 +330,22 @@ func failTemplate(c *app.RequestContext, e error) {
 		return
 	}
 	fail(c, e)
+}
+
+func GetCover(ctx context.Context, c *app.RequestContext) {
+	a, ok := middleware.AuthenticateRequest(c)
+	if !ok {
+		return
+	}
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || id <= 0 {
+		failTemplate(c, service.ErrInvalid)
+		return
+	}
+	result, err := service.WiredArtwork().GetCover(ctx, a, id)
+	if err != nil {
+		failTemplate(c, err)
+		return
+	}
+	api.Success(c, result)
 }
