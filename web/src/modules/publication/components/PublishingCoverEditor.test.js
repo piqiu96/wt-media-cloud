@@ -59,6 +59,7 @@ it("reserves generation before preflight so a double click cannot start two rend
   await pending;
   expect(services.renderCover).toHaveBeenCalledOnce();
   expect(state.error.value).toContain("render failed");
+  expect(state.progress.value).toBe("");
   expect(props.config.title).toBe("实际标题");
 });
 it("discards preflight after the title changes, without starting rendering", async () => {

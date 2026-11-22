@@ -180,8 +180,10 @@ async function generate() {
     emit("rendered", result);
     progress.value = "已生成实际封面，请预览并核对";
   } catch (e) {
-    if (sequence === renderSequence && e.name !== "AbortError")
+    if (sequence === renderSequence && e.name !== "AbortError") {
+      progress.value = "";
       error.value = e.message || "封面生成失败，配置已保留，请重试";
+    }
   } finally {
     if (sequence === renderSequence) rendering.value = false;
   }
@@ -297,7 +299,7 @@ onBeforeUnmount(() => {
             :variant="
               config.background_source === 'output' ? 'base' : 'outline'
             "
-            :disabled="disabled || !output?.thumbnail?.file_id || !coverMatchesRatio(output.thumbnail,...aspect)"
+            :disabled="disabled || !output?.thumbnail?.file_id"
             @click="
               update({
                 background_source: 'output',

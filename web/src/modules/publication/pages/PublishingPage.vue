@@ -1188,10 +1188,13 @@ onMounted(async () => {
           /></label>
           <div class="quick-cover-field">
             <label class="quick-field-heading"><ResourceRequiredLabel>发布封面</ResourceRequiredLabel><ResourceFieldHelp label="发布封面" content="使用现成图片或选择模板添加文字。默认使用成片真实封面；百度需要16:9横版和3:4竖版封面，单张不超过5MB；分别选择图片或匹配模板生成。" /></label>
+            <h4>横版封面 · 16:9</h4>
             <div class="quick-cover-workspace">
-              <h4>横版封面 · 16:9</h4><div class="publication-cover-preview"><button v-if="cover?.resource_path" type="button" class="publication-image-button" aria-label="预览发布封面" @click="previewImage(cover.resource_path, cover.name)"><img :src="files.resourceURL(cover)" alt="当前发布封面" /><span>预览封面</span></button><div v-else class="publication-cover-empty">请选择图片或生成封面</div></div>
+              <div class="publication-cover-preview"><button v-if="cover?.resource_path" type="button" class="publication-image-button" aria-label="预览发布封面" @click="previewImage(cover.resource_path, cover.name)"><img :src="files.resourceURL(cover)" alt="当前发布封面" /><span>预览封面</span></button><div v-else class="publication-cover-empty">请选择图片或生成封面</div></div>
               <PublishingCoverEditor :config="coverConfig" :output="output" :category="form.category_id" :disabled="frozen" @update:config="updateCoverConfig" @rendered="useRenderedCover" @choose-image="chooseCoverImage('horizontal')" @use-output="useOutputCover" />
-              <h4>竖版封面 · 3:4</h4>
+            </div>
+            <h4>竖版封面 · 3:4</h4>
+            <div class="quick-cover-workspace">
               <div class="publication-cover-preview"><button v-if="portraitCover?.resource_path" type="button" class="publication-image-button" aria-label="预览竖版封面" @click="previewImage(portraitCover.resource_path, portraitCover.name)"><img :src="files.resourceURL(portraitCover)" alt="当前竖版封面" /><span>预览封面</span></button><div v-else class="publication-cover-empty">请选择图片或生成竖版封面</div></div>
               <PublishingCoverEditor :config="portraitCoverConfig" :aspect="[3,4]" :output="output" :category="form.category_id" :disabled="frozen" @update:config="updatePortraitConfig" @rendered="usePortraitArtwork" @choose-image="chooseCoverImage('portrait')" @use-output="usePortraitOutput" />
             </div>
@@ -1408,7 +1411,7 @@ onMounted(async () => {
 }
 .publication-cover-empty { width:100%;min-height:160px;display:grid;place-items:center;background:var(--td-bg-color-secondarycontainer);color:var(--td-text-color-secondary);font-size:12px; }
 .quick-cover-workspace { display: grid; grid-template-columns: 220px minmax(0, 1fr); align-items: start; gap: 24px; min-width: 0; }
-.quick-cover-workspace > div { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; min-width: 0; }
+.quick-cover-workspace > .publication-cover-preview { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; min-width: 0; }
 .quick-cover-workspace strong { font-size: 14px; font-weight: 400; overflow-wrap: anywhere; }
 .publication-video { display: block; width: 100%; max-height: 65vh; background: var(--wt-color-bg-subtle); }
 .publication-image-button { display: block; padding: 0; border: 1px solid var(--wt-border); border-radius: 4px; overflow: hidden; background: var(--wt-color-bg-subtle); cursor: zoom-in; max-width: 100%; }
