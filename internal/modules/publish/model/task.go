@@ -23,6 +23,9 @@ type Content struct {
 	Confirmed   bool         `json:"confirmed"`
 }
 type Task struct {
+	CheckBrowserUsedAt   *time.Time `json:"-"`
+	CheckNotFoundCount   uint32     `json:"-"`
+	CheckStoppedAt       *time.Time `json:"-"`
 	NextCheckAt          *time.Time `json:"-"`
 	CheckGeneration      uint64     `json:"-"`
 	LastCheckedAt        *time.Time `json:"last_checked_at"`

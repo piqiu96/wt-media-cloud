@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"math/rand/v2"
 	"reflect"
 	"time"
 
@@ -12,10 +13,30 @@ import (
 	"gorm.io/gorm"
 )
 
-const publicCheckInterval = 5 * time.Minute
+const publicCheckLifetime = 24 * time.Hour
 
+func publicCheckDelay(age time.Duration) time.Duration {
+	low, high := 4*time.Minute, 6*time.Minute
+	if age >= 3*time.Hour {
+		low, high = 25*time.Minute, 35*time.Minute
+	} else if age >= 30*time.Minute {
+		low, high = 10*time.Minute, 15*time.Minute
+	}
+	return low + time.Duration(rand.Int64N(int64((high-low)/time.Second)+1))*time.Second
+}
+func missingCheckDelay(count uint32) time.Duration {
+	low, high := 45*time.Second, 75*time.Second
+	if count >= 2 {
+		low, high = 150*time.Second, 210*time.Second
+	}
+	return low + time.Duration(rand.Int64N(int64((high-low)/time.Second)+1))*time.Second
+}
 func (s ExecutionStore) SchedulePublicCheck(now time.Time) error {
-	return s.DB.Model(&model.Task{}).Where("status=? AND platform=? AND current_attempt_id IS NOT NULL AND platform_submission_id IS NOT NULL AND platform_submission_id<>'' AND next_check_at IS NULL", model.StatusReviewing, "baidu").UpdateColumn("next_check_at", now).Error
+	base := s.DB.Model(&model.Task{}).Where("status=? AND platform=? AND check_stopped_at IS NULL AND accepted_at IS NOT NULL", model.StatusReviewing, "baidu")
+	if err := base.Session(&gorm.Session{}).Where("accepted_at<=?", now.Add(-publicCheckLifetime)).UpdateColumns(map[string]any{"check_stopped_at": now, "next_check_at": nil, "last_check_message": "已超过24小时自动核验期限，请人工核实或补录结果"}).Error; err != nil {
+		return err
+	}
+	return s.DB.Model(&model.Task{}).Where("status=? AND platform=? AND current_attempt_id IS NOT NULL AND platform_submission_id IS NOT NULL AND platform_submission_id<>'' AND next_check_at IS NULL AND check_stopped_at IS NULL AND accepted_at>?", model.StatusReviewing, "baidu", now.Add(-publicCheckLifetime)).UpdateColumn("next_check_at", now).Error
 }
 
 func (s ExecutionStore) ClaimPublicCheck(user int64, now time.Time) (*model.PublicCheckClaim, error) {
@@ -23,7 +44,7 @@ func (s ExecutionStore) ClaimPublicCheck(user int64, now time.Time) (*model.Publ
 		return nil, ErrNotFound
 	}
 	var candidates []model.Task
-	if err := s.DB.Where("operator_id=? AND status=? AND platform=? AND next_check_at<=?", user, model.StatusReviewing, "baidu", now).Order("next_check_at,id").Limit(20).Find(&candidates).Error; err != nil {
+	if err := s.DB.Where("operator_id=? AND status=? AND platform=? AND next_check_at<=? AND check_stopped_at IS NULL AND accepted_at>?", user, model.StatusReviewing, "baidu", now, now.Add(-publicCheckLifetime)).Order("next_check_at,id").Limit(20).Find(&candidates).Error; err != nil {
 		return nil, err
 	}
 	for _, candidate := range candidates {
@@ -33,15 +54,19 @@ func (s ExecutionStore) ClaimPublicCheck(user int64, now time.Time) (*model.Publ
 			if err != nil {
 				return err
 			}
-			if v.OperatorID != user || v.Status != model.StatusReviewing || v.CurrentAttemptID == nil || v.PlatformSubmissionID == nil || v.NextCheckAt == nil || v.NextCheckAt.After(now) {
+			if v.OperatorID != user || v.Status != model.StatusReviewing || v.CurrentAttemptID == nil || v.PlatformSubmissionID == nil || v.NextCheckAt == nil || v.NextCheckAt.After(now) || v.CheckStoppedAt != nil || v.AcceptedAt == nil || !now.Before(v.AcceptedAt.Add(publicCheckLifetime)) {
 				return nil
 			}
 			_, a, err := currentAttempt(tx, v.ID, user, *v.CurrentAttemptID)
 			if err != nil {
 				return err
 			}
+			next := now.Add(publicCheckDelay(now.Sub(*v.AcceptedAt)))
+			if deadline := v.AcceptedAt.Add(publicCheckLifetime); next.After(deadline) {
+				next = deadline
+			}
 			// Schedule only another read. This is never a publishing attempt or permission.
-			result := tx.Model(&model.Task{}).Where("id=? AND revision=? AND status=? AND check_generation=? AND next_check_at<=?", v.ID, v.Revision, model.StatusReviewing, v.CheckGeneration, now).UpdateColumns(map[string]any{"check_generation": v.CheckGeneration + 1, "next_check_at": now.Add(publicCheckInterval)})
+			result := tx.Model(&model.Task{}).Where("id=? AND revision=? AND status=? AND check_generation=? AND next_check_at<=? AND check_stopped_at IS NULL", v.ID, v.Revision, model.StatusReviewing, v.CheckGeneration, now).UpdateColumns(map[string]any{"check_generation": v.CheckGeneration + 1, "next_check_at": next})
 			if result.Error != nil {
 				return result.Error
 			}
@@ -61,7 +86,7 @@ func (s ExecutionStore) ClaimPublicCheck(user int64, now time.Time) (*model.Publ
 			if !reflect.DeepEqual(input, a.Input) {
 				return nil
 			}
-			claim = &model.PublicCheckClaim{Task: v, Attempt: a, Generation: v.CheckGeneration + 1, ExpectedRevision: v.Revision}
+			claim = &model.PublicCheckClaim{BrowserFallbackAllowed: v.CheckBrowserUsedAt == nil, Task: v, Attempt: a, Generation: v.CheckGeneration + 1, ExpectedRevision: v.Revision}
 			return nil
 		})
 		if err != nil {
@@ -106,7 +131,7 @@ func (s ExecutionStore) ObservePublication(candidate model.Task, user int64, r m
 			return err
 		}
 		in := r.Observation
-		if v.Status != model.StatusReviewing || v.Revision != in.ExpectedRevision || v.CheckGeneration != r.Generation || v.PlatformSubmissionID == nil || v.CurrentAttemptID == nil || *v.CurrentAttemptID != in.AttemptID {
+		if v.CheckStoppedAt != nil || v.AcceptedAt == nil || !now.Before(v.AcceptedAt.Add(publicCheckLifetime)) || v.Status != model.StatusReviewing || v.Revision != in.ExpectedRevision || v.CheckGeneration != r.Generation || v.PlatformSubmissionID == nil || v.CurrentAttemptID == nil || *v.CurrentAttemptID != in.AttemptID {
 			return ErrConflict
 		}
 		_, a, err := currentAttempt(tx, v.ID, user, in.AttemptID)
@@ -127,6 +152,36 @@ func (s ExecutionStore) ObservePublication(candidate model.Task, user int64, r m
 			return ErrConflict
 		}
 		updates := map[string]any{"last_checked_at": now, "last_check_message": in.Evidence.Reason, "updated_at": now}
+		if r.BrowserUsed {
+			updates["check_browser_used_at"] = now
+		}
+		switch r.LookupResult {
+		case "not_found":
+			count := v.CheckNotFoundCount + 1
+			updates["check_not_found_count"] = count
+			if count >= 3 {
+				updates["check_stopped_at"] = now
+				updates["next_check_at"] = nil
+				updates["last_check_message"] = "连续3次未找到原投稿，已停止自动核验，请人工核实或补录结果"
+			} else {
+				next := now.Add(missingCheckDelay(count))
+				if deadline := v.AcceptedAt.Add(publicCheckLifetime); next.After(deadline) {
+					next = deadline
+				}
+				updates["next_check_at"] = next
+			}
+		case "found":
+			updates["check_not_found_count"] = 0
+		case "blocked":
+			updates["last_check_message"] = in.Evidence.Reason + "；自动核验已停止，请人工核实或补录"
+			updates["check_stopped_at"] = now
+			updates["next_check_at"] = nil
+		}
+		if in.Conclusion == model.StatusPublished {
+			updates["check_stopped_at"] = now
+			updates["next_check_at"] = nil
+		}
+
 		if in.TargetURL != "" {
 			if v.TargetURL != nil && *v.TargetURL != "" && *v.TargetURL != in.TargetURL {
 				return ErrConflict
@@ -141,7 +196,7 @@ func (s ExecutionStore) ObservePublication(candidate model.Task, user int64, r m
 			updates["failure_code"] = nil
 			updates["failure_message"] = nil
 		}
-		if err = updateTask(tx.Where("check_generation=?", r.Generation), v, updates); err != nil {
+		if err = updateTask(tx.Where("check_generation=? AND check_stopped_at IS NULL", r.Generation), v, updates); err != nil {
 			return err
 		}
 		if in.Conclusion == model.StatusPublished {

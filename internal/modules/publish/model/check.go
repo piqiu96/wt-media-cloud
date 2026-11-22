@@ -6,18 +6,22 @@ import (
 )
 
 type PublicCheckClaim struct {
-	Task             Task    `json:"task"`
-	Attempt          Attempt `json:"attempt"`
-	Generation       uint64  `json:"generation,string"`
-	ExpectedRevision uint64  `json:"expected_revision,string"`
+	BrowserFallbackAllowed bool    `json:"browser_fallback_allowed"`
+	Task                   Task    `json:"task"`
+	Attempt                Attempt `json:"attempt"`
+	Generation             uint64  `json:"generation,string"`
+	ExpectedRevision       uint64  `json:"expected_revision,string"`
 }
 type PublicCheckReport struct {
-	Generation  uint64           `json:"generation,string"`
-	Observation ResultResolution `json:"observation"`
+	BrowserUsed  bool             `json:"browser_used,omitempty"`
+	LookupResult string           `json:"lookup_result,omitempty"`
+	Generation   uint64           `json:"generation,string"`
+	Observation  ResultResolution `json:"observation"`
 }
 
 func (r PublicCheckReport) Valid() bool {
-	return r.Generation > 0 && r.Observation.Valid() && (r.Observation.Conclusion == StatusUncertain || r.Observation.Conclusion == StatusReviewing || r.Observation.Conclusion == StatusPublished)
+	lookupValid := r.LookupResult == "" || ((r.LookupResult == "found") && (r.Observation.Conclusion == StatusReviewing || r.Observation.Conclusion == StatusPublished)) || (r.LookupResult == "not_found" && r.Observation.Conclusion == StatusUncertain && r.Observation.Evidence.SceneClosed && !r.Observation.Evidence.WorkMatched) || (r.LookupResult == "blocked" && r.Observation.Conclusion == StatusUncertain)
+	return lookupValid && r.Generation > 0 && r.Observation.Valid() && (r.Observation.Conclusion == StatusUncertain || r.Observation.Conclusion == StatusReviewing || r.Observation.Conclusion == StatusPublished)
 }
 
 type PublicCheckAcknowledgement struct {

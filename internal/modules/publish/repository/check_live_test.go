@@ -1,6 +1,7 @@
 package repository_test
 
 import (
+	"encoding/json"
 	"errors"
 	"reflect"
 	"sync"
@@ -222,5 +223,98 @@ func TestLiveNewCheckClaimFencesAnObservationAlreadyBeingValidated(t *testing.T)
 	s.DB.Model(&model.PublicationObservation{}).Count(&count)
 	if current.Status != model.StatusReviewing || current.WorkID != nil || count != 0 {
 		t.Fatal("stale observation wrote public state")
+	}
+}
+
+func TestLivePublicCheckStopsAfterThreeMissingReadsAndSurvivesSchedulerRestart(t *testing.T) {
+	s, c, v := reviewingPublication(t)
+	now := time.Now().UTC()
+	for i := 0; i < 3; i++ {
+		if err := s.SchedulePublicCheck(now); err != nil {
+			t.Fatal(err)
+		}
+		check, err := s.ClaimPublicCheck(9, now)
+		if err != nil || check == nil {
+			t.Fatalf("check %d: %+v %v", i, check, err)
+		}
+		in := model.PublicCheckReport{Generation: check.Generation, Observation: model.ResultResolution{AttemptID: c.Attempt.ID, ExpectedRevision: check.ExpectedRevision, Conclusion: model.StatusUncertain, Evidence: model.VerificationEvidence{PlatformUID: c.Attempt.Input.PlatformUID, Reason: "原账号内容列表未找到指定投稿", Basis: "已核对原账号并完成平台列表全部实际分页，没有找到原投稿", SceneClosed: true}}}
+		raw, _ := json.Marshal(in)
+		var body map[string]any
+		json.Unmarshal(raw, &body)
+		body["lookup_result"] = "not_found"
+		raw, _ = json.Marshal(body)
+		json.Unmarshal(raw, &in)
+		if _, err = s.ObservePublication(v, 9, in, now); err != nil {
+			t.Fatal(err)
+		}
+		v, _ = s.Get(v.ID)
+		if i < 2 {
+			if v.NextCheckAt == nil {
+				t.Fatal("missing retry")
+			}
+			delay := v.NextCheckAt.Sub(now)
+			lo, hi := 45*time.Second, 75*time.Second
+			if i == 1 {
+				lo, hi = 150*time.Second, 210*time.Second
+			}
+			if delay < lo || delay > hi {
+				t.Fatalf("retry %d delay %v", i, delay)
+			}
+			now = *v.NextCheckAt
+		}
+	}
+	if v.Status != model.StatusReviewing || v.WorkID != nil {
+		t.Fatal("missing read changed publication")
+	}
+	if err := s.SchedulePublicCheck(now.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := s.ClaimPublicCheck(9, now.Add(time.Hour)); err != nil || got != nil {
+		t.Fatal("stopped task rescheduled")
+	}
+}
+func TestLivePublicCheckExpiresFromOriginalAcceptance(t *testing.T) {
+	s, _, v := reviewingPublication(t)
+	now := v.AcceptedAt.Add(24 * time.Hour)
+	if err := s.SchedulePublicCheck(now); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := s.ClaimPublicCheck(9, now); err != nil || got != nil {
+		t.Fatal("expired task admitted")
+	}
+	v, _ = s.Get(v.ID)
+	if v.Status != model.StatusReviewing || v.LastCheckMessage == nil {
+		t.Fatal("expiry changed status or omitted explanation")
+	}
+	if err := s.SchedulePublicCheck(now.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.ClaimPublicCheck(9, now.Add(time.Hour)); got != nil {
+		t.Fatal("restart resurrected expired check")
+	}
+}
+
+func TestLivePublicCheckUnknownDoesNotConsumeMissingRetriesAndFallbackPersists(t *testing.T) {
+	s, c, v := reviewingPublication(t)
+	now := time.Now().UTC()
+	s.SchedulePublicCheck(now)
+	check, err := s.ClaimPublicCheck(9, now)
+	if err != nil || check == nil {
+		t.Fatal(err)
+	}
+	if !check.BrowserFallbackAllowed {
+		t.Fatal("first fallback not allowed")
+	}
+	report := model.PublicCheckReport{Generation: check.Generation, BrowserUsed: true, Observation: model.ResultResolution{AttemptID: c.Attempt.ID, ExpectedRevision: check.ExpectedRevision, Conclusion: model.StatusUncertain, Evidence: model.VerificationEvidence{PlatformUID: c.Attempt.Input.PlatformUID, Reason: "网络暂不可用", Basis: "本轮网络请求异常，未完成完整列表查询，不能判定为未找到"}}}
+	if _, err = s.ObservePublication(v, 9, report, now); err != nil {
+		t.Fatal(err)
+	}
+	v, _ = s.Get(v.ID)
+	if v.CheckNotFoundCount != 0 || v.CheckStoppedAt != nil || v.NextCheckAt == nil {
+		t.Fatal("network error counted as missing or stopped")
+	}
+	next, err := s.ClaimPublicCheck(9, *v.NextCheckAt)
+	if err != nil || next == nil || next.BrowserFallbackAllowed {
+		t.Fatal("restart restored browser fallback")
 	}
 }

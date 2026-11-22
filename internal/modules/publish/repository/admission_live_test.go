@@ -109,7 +109,7 @@ func legacyAdmission(t *testing.T, n int, sameProfile bool) *gorm.DB {
 		t.Fatal(e)
 	}
 	v := task("legacy-admission", 42, 1)
-	e := db.Omit("PlatformSubmissionID", "TargetURL", "WorkID", "NextCheckAt", "CheckGeneration", "LastCheckedAt", "LastCheckMessage").Create(&v).Error
+	e := db.Omit("PlatformSubmissionID", "TargetURL", "WorkID", "CheckBrowserUsedAt", "CheckNotFoundCount", "CheckStoppedAt", "NextCheckAt", "CheckGeneration", "LastCheckedAt", "LastCheckMessage").Create(&v).Error
 	if e != nil {
 		t.Fatal(e)
 	}

@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: WT Media Cloud-Agent Publication Execution
-  version: 2026.11.21.4
+  version: 2026.11.22.1
   description: >-
     Additive single-task execution. Agent bearer identifies the account owner; no device identity or
     generic lease. Claim requires a current Desktop session. Reports are report-safe only for the same
@@ -130,6 +130,7 @@ components:
       type: object
       required: [task, attempt, generation, expected_revision]
       properties:
+        browser_fallback_allowed: {type: boolean, description: "False after the task already used a browser fallback. Explicit public-media verification may still use a browser; ordinary lookup failures must not reopen it."}
         task: {type: object, description: 'Original reviewing task, immutable submission ID and exact platform-supplied target_url if known.'}
         attempt: {type: object, description: 'Original frozen input and Profile, no file grants or execution authority.'}
         generation: {type: string, pattern: '^[1-9][0-9]*$'}
@@ -139,6 +140,8 @@ components:
       additionalProperties: false
       required: [generation, observation]
       properties:
+        browser_used: {type: boolean, description: "This read opened an owned Profile scene, which must be safely closed."}
+        lookup_result: {type: string, enum: [found, not_found, blocked], description: "Optional lookup outcome. not_found requires a complete successful original-account search; blocked stops automatic reads pending operator action."}
         generation: {type: string, pattern: '^[1-9][0-9]*$'}
         observation:
           allOf:
