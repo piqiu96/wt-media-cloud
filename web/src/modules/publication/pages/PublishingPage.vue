@@ -1252,7 +1252,7 @@ onMounted(async () => {
           <t-descriptions-item label="发布账号"><t-button v-if="detail.media_account_id" theme="primary" variant="text" size="small" @click="viewAccount(detail.media_account_id)">{{ detail.resources.account_name || "查看账号" }}</t-button><span v-else>—</span></t-descriptions-item>
           <t-descriptions-item label="真实 UID">{{ detail.platform_account_uid }}</t-descriptions-item>
           <t-descriptions-item v-if="detail.last_checked_at" label="最近核验">{{formatDateTime(detail.last_checked_at)}}</t-descriptions-item>
-          <t-descriptions-item v-if="detail.last_check_message" label="核验说明" full>{{detail.last_check_message}}</t-descriptions-item>
+          <t-descriptions-item v-if="detail.last_check_message && detail.status !== PublicationStatus.Published" label="核验说明" full>{{detail.last_check_message}}</t-descriptions-item>
           <t-descriptions-item v-if="detail.platform_submission_id" label="投稿回执 ID">{{detail.platform_submission_id}}</t-descriptions-item>
           <t-descriptions-item v-if="detail.work_id" label="关联作品"><t-button variant="text" @click="router.push({path:'/work',query:{work_id:detail.work_id}})">作品 {{detail.work_id}}</t-button></t-descriptions-item>
           <t-descriptions-item v-if="detail.published_at" label="平台实际发布时间">{{formatDateTime(detail.published_at)}}</t-descriptions-item>

@@ -93,6 +93,10 @@ func (s ExecutionStore) ResolveResult(candidate model.Task, actor int64, in mode
 			}
 		}
 		if in.Conclusion == model.StatusPublished {
+			updates["next_check_at"] = nil
+			updates["check_stopped_at"] = now
+			updates["last_checked_at"] = now
+			updates["last_check_message"] = in.Evidence.Reason
 			updates["platform_work_id"] = in.PlatformWorkID
 			updates["work_url"] = in.WorkURL
 			updates["published_at"] = in.PublishedAt

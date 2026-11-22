@@ -165,3 +165,32 @@ func TestLiveWorkMigrationPreservesExternalReceipt(t *testing.T) {
 		t.Fatal("receipt lost or promoted")
 	}
 }
+
+func TestLiveManualPublicResolutionEndsOutstandingCheck(t *testing.T) {
+	s, c, _ := unresolvedPublication(t)
+	v, _ := s.Get(c.Task.ID)
+	in := publicResolution(c, v)
+	in.Conclusion = model.StatusReviewing
+	in.PlatformWorkID = ""
+	in.WorkURL = ""
+	in.PublishedAt = nil
+	in.Evidence.PubliclyAccessible = false
+	now := time.Now().UTC()
+	reviewing, err := s.ResolveResult(v, 9, in, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	next := now.Add(time.Hour)
+	if err = s.DB.Model(&model.Task{}).Where("id=?", v.ID).UpdateColumns(map[string]any{"next_check_at": next, "last_check_message": "自动核验已停止，请人工核实或补录"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	reviewing, _ = s.Get(reviewing.ID)
+	pub := publicResolution(c, reviewing)
+	done, err := s.ResolveResult(reviewing, 9, pub, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if done.NextCheckAt != nil || done.CheckStoppedAt == nil || done.LastCheckMessage == nil || *done.LastCheckMessage != pub.Evidence.Reason {
+		t.Fatalf("manual result left stale check state: %+v", done)
+	}
+}
