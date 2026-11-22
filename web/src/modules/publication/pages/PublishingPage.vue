@@ -21,7 +21,7 @@ import ResourceEditorPage from "../../../shared/ui/resource/ResourceEditorPage.v
 import ResourceDetailPage from "../../../shared/ui/resource/ResourceDetailPage.vue";
 import ResourceRowActions from "../../../shared/ui/resource/ResourceRowActions.vue";
 import { opColumnWidth } from "../../../shared/ui/resource/opColumnWidth.js";
-import ResourceStatusBadge from "../../../shared/ui/resource/ResourceStatusBadge.vue";
+import BusinessStatus from "../../../shared/ui/BusinessStatus.vue";
 import FeedbackAlert from "../../../shared/ui/feedback/FeedbackAlert.vue";
 import { feedback } from "../../../shared/ui/feedback/index.js";
 import { createPublicationClient } from "../../../shared/api/publication.js";
@@ -1069,8 +1069,8 @@ onMounted(async () => {
               }}</small></template
             >
             <template #status="{ row }"
-              ><ResourceStatusBadge
-                :label="statusLabel(row.status)" /><small v-if="row.cancel_requested_at && row.status === PublicationStatus.Running" class="publication-sub">已请求安全停止，等待确认</small></template
+              ><BusinessStatus
+                :status="row.status" :label="statusLabel(row.status)" /><small v-if="row.cancel_requested_at && row.status === PublicationStatus.Running" class="publication-sub">已请求安全停止，等待确认</small></template
             ><template #created_at="{ row }">{{
               formatDateTime(row.created_at)
             }}</template>
@@ -1249,7 +1249,7 @@ onMounted(async () => {
       <ResourceCard class="detail-card"><ResourceSection title="任务信息">
         <ResourceDescriptions>
           <t-descriptions-item label="任务 ID">{{ detail.id }}</t-descriptions-item>
-          <t-descriptions-item label="任务状态"><ResourceStatusBadge :label="statusLabel(detail.status)" /><small v-if="detail.cancel_requested_at && detail.status === PublicationStatus.Running" class="publication-sub">已请求安全停止，等待确认</small></t-descriptions-item>
+          <t-descriptions-item label="任务状态"><BusinessStatus :status="detail.status" :label="statusLabel(detail.status)" /><small v-if="detail.cancel_requested_at && detail.status === PublicationStatus.Running" class="publication-sub">已请求安全停止，等待确认</small></t-descriptions-item>
           <t-descriptions-item label="发布平台">{{ platformLabel(detail.platform) }}</t-descriptions-item>
           <t-descriptions-item label="内容类目">{{ categoryName(detail.category_id) }}</t-descriptions-item>
           <t-descriptions-item label="发布账号"><t-button v-if="detail.media_account_id" theme="primary" variant="text" size="small" @click="viewAccount(detail.media_account_id)">{{ detail.resources.account_name || "查看账号" }}</t-button><span v-else>—</span></t-descriptions-item>

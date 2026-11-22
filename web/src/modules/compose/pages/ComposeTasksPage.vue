@@ -20,7 +20,7 @@ import { createMaterialsClient } from '../../../shared/api/materials.js'
 import { createSessionClient } from '../../../shared/api/session.js'
 import ResourceCard from '../../../shared/ui/resource/ResourceCard.vue'
 import ResourcePageHeader from '../../../shared/ui/resource/ResourcePageHeader.vue'
-import ResourceStatusBadge from '../../../shared/ui/resource/ResourceStatusBadge.vue'
+import BusinessStatus from '../../../shared/ui/BusinessStatus.vue'
 import { opColumnWidth } from '../../../shared/ui/resource/opColumnWidth.js'
 import { formatDateTime } from '../../../shared/utils/datetime.js'
 import { createdRangeParams } from '../createdRange.js'
@@ -70,7 +70,6 @@ const pagination = ref({ current: 1, pageSize: 20 })
 const createVisible = ref(false)
 
 const statusLabels = { pending: '排队中', running: '处理中', success: '成功', failed: '失败', cancelled: '已取消' }
-const statusTones = { pending: 'warning', running: 'info', success: 'success', failed: 'danger', cancelled: 'neutral' }
 const stageLabels = {
   pending: '等待源素材',
   validating_input: '校验素材',
@@ -513,7 +512,7 @@ onMounted(() => {
             <template #operator="{ row }">{{ row.operator_name || '未记录' }}</template>
             <template #output="{ row }"><t-link v-if="outputID(row)" theme="primary" @click="openOutput(outputID(row))">成片 {{ outputID(row) }}</t-link><span v-else>—</span></template>
             <template #progress="{row}"><ComposeBatchProgress :counts="row.counts" compact /></template>
-            <template #status="{ row }"><ResourceStatusBadge :tone="statusTones[row.status] || 'default'" :label="statusText(row)" /></template>
+            <template #status="{ row }"><BusinessStatus :status="row.status" :label="statusText(row)" /></template>
             <template #created_at="{ row }">{{ formatDateTime(row.created_at) }}</template>
             <template #finished_at="{ row }">{{ formatDateTime(row.finished_at) }}</template>
             <template #op="{ row }">
@@ -624,7 +623,7 @@ onMounted(() => {
 .compose-task-subline{display:block;margin-top:5px;font-size:12px;color:var(--wt-text-tertiary);}
 .compose-detail__snapshot-fields { margin-top: 16px; }
 /* 失败态用 --wt-danger：它定义在入口加载的 design-token.css 里，
-   且与紧邻「当前状态」的失败徽标（statusTones.failed=danger）同色。 */
+   且与紧邻「当前状态」的失败徽标（failed=danger）同色。 */
 .compose-detail__failure-reason { color: var(--wt-danger); font-weight: 500; }
 .compose-detail__hint { margin: 0; color: var(--wt-text-secondary); font-size: 12px; line-height: 1.5; }
 .compose-detail__grid + .compose-detail__hint, .compose-detail__empty + .compose-detail__hint, .compose-detail__section > .compose-detail__hint + .compose-detail__grid { margin-top: 12px; }
