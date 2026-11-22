@@ -15,12 +15,14 @@ type CoverRender struct {
 }
 
 type Content struct {
-	CoverRender *CoverRender `json:"cover_render,omitempty"`
-	Description string       `json:"description"`
-	CoverFileID int64        `json:"cover_file_id,string"`
-	Topics      string       `json:"topics"`
-	Declaration string       `json:"declaration"`
-	Confirmed   bool         `json:"confirmed"`
+	PortraitCoverFileID int64        `json:"portrait_cover_file_id,string"`
+	PortraitCoverRender *CoverRender `json:"portrait_cover_render,omitempty"`
+	CoverRender         *CoverRender `json:"cover_render,omitempty"`
+	Description         string       `json:"description"`
+	CoverFileID         int64        `json:"cover_file_id,string"`
+	Topics              string       `json:"topics"`
+	Declaration         string       `json:"declaration"`
+	Confirmed           bool         `json:"confirmed"`
 }
 type Task struct {
 	CheckBrowserUsedAt   *time.Time `json:"-"`

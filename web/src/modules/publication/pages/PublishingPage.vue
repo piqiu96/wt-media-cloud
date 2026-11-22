@@ -43,7 +43,7 @@ import { PublicationStatus, publicationStatuses } from "../status.js";
 import { publicationTitleForOutput } from "../title.js";
 import PublicationContentGenerator from "../components/PublicationContentGenerator.vue";
 import PublishingCoverEditor from "../components/PublishingCoverEditor.vue";
-import { emptyCoverConfig, coverConfigFromReference, coverReference } from "../coverPreparation.js";
+import { emptyCoverConfig, coverConfigFromReference, coverReference, coverMatchesRatio } from "../coverPreparation.js";
 import PublishingExecutionHistory from "../components/PublishingExecutionHistory.vue";
 import PublishingResourcePicker from "../components/PublishingResourcePicker.vue";
 import PublishingRecoveryDialog from "../components/PublishingRecoveryDialog.vue";
@@ -119,6 +119,7 @@ const view = ref("list"),
   baseline = ref(""),
   pendingRequest = ref(null);
 const coverConfig = ref(emptyCoverConfig());
+const portraitCover=ref(null), portraitCoverConfig=ref(emptyCoverConfig()), coverTarget=ref("horizontal");
 const generationContext = computed(() => ({ rowKey: form.value?.request_key || String(editing.value?.id || ''), platform: form.value?.platform, categoryId: form.value?.category_id, outputId: form.value?.composite_output_id, identityKey: JSON.stringify([form.value?.media_account_id,coverConfig.value.method,coverConfig.value.template_id,coverConfig.value.published_revision]) }));
 const generationValues = computed(() => ({ description: form.value?.content.description || '', topics: form.value?.content.topics || '', cover_title: coverConfig.value.title || '' }));
 function adoptGeneratedContent(field,value) {
@@ -184,7 +185,7 @@ const frozen = computed(() => busy.value || !!pendingRequest.value);
 const dirty = computed(
   () =>
     form.value &&
-    JSON.stringify({ form: form.value, schedule: schedule.value, cover_config:coverConfig.value }) !==
+    JSON.stringify({ form: form.value, schedule: schedule.value, cover_config:coverConfig.value,portrait_cover_config:portraitCoverConfig.value }) !==
       baseline.value,
 );
 const statusLabel = (v) => publicationStatuses[v] || v;
@@ -199,6 +200,7 @@ const emptyForm = () => ({
   content: {
     description: "",
     cover_file_id: "",
+    portrait_cover_file_id: "",
     topics: "",
     declaration: "",
     confirmed: false,
@@ -258,6 +260,8 @@ async function changeCategory(category) {
   account.value = null;
   output.value = null;
   cover.value = null;
+  portraitCover.value=null;
+  portraitCoverConfig.value=emptyCoverConfig();
   coverConfig.value = emptyCoverConfig();
   schedule.value = "";
 }
@@ -269,19 +273,21 @@ function initializeCreate() {
   account.value = null;
   output.value = null;
   cover.value = null;
+  portraitCover.value=null;
+  portraitCoverConfig.value=emptyCoverConfig();
   coverConfig.value = emptyCoverConfig();
   schedule.value = "";
   form.value = emptyForm();
   formError.value = "";
   pendingRequest.value = null;
-  baseline.value = JSON.stringify({ form: form.value, schedule: "", cover_config:coverConfig.value });
+  baseline.value = JSON.stringify({ form: form.value, schedule: "", cover_config:coverConfig.value,portrait_cover_config:portraitCoverConfig.value });
   view.value = "form";
 }
 const draftPersistent = ref(false), draftReady = ref(false), draftNotice = ref("");
 const draftResourceIssue = ref({}), draftConflict = ref(false);
 let draftClient = null;
 function draftPayload() {
-  return capturePublicationDraft(form.value, schedule.value, cover.value, pendingRequest.value, coverConfig.value);
+  return capturePublicationDraft(form.value, schedule.value, cover.value, pendingRequest.value, coverConfig.value,portraitCover.value,portraitCoverConfig.value);
 }
 async function openCreate(sourceOutput = null, copyInput = null, copyUserId = null) {
   if (busy.value) return false;
@@ -327,7 +333,7 @@ async function openCreate(sourceOutput = null, copyInput = null, copyUserId = nu
       setOutput(sourceOutput);
       form.value.category_id = String(sourceOutput.category_id);
     }
-    baseline.value = JSON.stringify({ form: form.value, schedule: schedule.value, cover_config:coverConfig.value });
+    baseline.value = JSON.stringify({ form: form.value, schedule: schedule.value, cover_config:coverConfig.value,portrait_cover_config:portraitCoverConfig.value });
     draftReady.value = true;
     return true;
   } catch (e) {
@@ -341,6 +347,7 @@ async function restoreDraft(payload) {
   if (!payload?.form?.content || !payload.form.request_key || payload.form.platform !== "baidu") throw new Error("续编输入无法读取，请保留原草稿后核对");
   form.value = capturePublicationDraft(payload.form, payload.schedule, null, null).form;
   coverConfig.value = payload.cover_config || (form.value.content.cover_render ? coverConfigFromReference(form.value.content.cover_render) : emptyCoverConfig());
+  portraitCoverConfig.value=payload.portrait_cover_config || emptyCoverConfig();
   schedule.value = String(payload.schedule || "");
   pendingRequest.value = payload.pending_request || null;
   // Restoring user input never re-confirms resources or replaces human text.
@@ -370,9 +377,59 @@ async function restoreDraft(payload) {
       draftResourceIssue.value.cover = "原封面不可用，请恢复原图片或重新选择";
     }
   }
+  await restorePortraitCover(payload);
   draftNotice.value = "已恢复填写，资源可用性已重新检查；请重新核对内容。";
 }
-watch([form, schedule, pendingRequest, coverConfig], () => {
+async function restorePortraitCover(payload) {
+  portraitCover.value = null;
+  const id = form.value.content.portrait_cover_file_id;
+  if (!id) return;
+  try {
+    const ref = form.value.content.portrait_cover_render;
+    if (ref) {
+      const item = await createImageClient().getCover(id);
+      if (JSON.stringify(coverReference(item)) !== JSON.stringify(ref))
+        throw new Error();
+      portraitCover.value = { ...item.file, origin: "template" };
+      portraitCoverConfig.value =
+        payload.portrait_cover_config ||
+        coverConfigFromReference(ref, item.snapshot);
+    } else if (
+      payload.portrait_cover_origin === "output" &&
+      String(output.value?.thumbnail?.file_id) === id
+    ) {
+      portraitCover.value = {
+        ...output.value.thumbnail,
+        id,
+        origin: "output",
+        output_id: form.value.composite_output_id,
+      };
+    } else {
+      const item = await createImageClient().getImageAsset(
+        payload.portrait_image_asset_id,
+      );
+      if (
+        String(item.file_id) !== id ||
+        !item.enabled ||
+        !item.allow_as_cover ||
+        (item.category_ids?.length &&
+          !item.category_ids.map(String).includes(form.value.category_id))
+      )
+        throw new Error();
+      portraitCover.value = {
+        ...item,
+        id,
+        item_asset_id: item.id,
+        image_asset_id: item.id,
+      };
+    }
+    if (!coverMatchesRatio(portraitCover.value, 3, 4)) throw new Error();
+  } catch {
+    draftResourceIssue.value.portrait_cover =
+      "原竖版封面不可用，请重新选择或生成";
+  }
+}
+watch([form, schedule, pendingRequest, coverConfig,portraitCoverConfig], () => {
   if (draftReady.value && draftClient && view.value === "form" && !editing.value && !busy.value) {
     const hasInput = form.value.category_id || form.value.media_account_id || form.value.composite_output_id || form.value.content.description || schedule.value;
     draftClient.remember(hasInput ? draftPayload() : null);
@@ -384,7 +441,7 @@ async function saveDraft() {
   formError.value = "";
   try {
     await draftClient.save(draftPayload());
-    baseline.value = JSON.stringify({ form: form.value, schedule: schedule.value, cover_config:coverConfig.value });
+    baseline.value = JSON.stringify({ form: form.value, schedule: schedule.value, cover_config:coverConfig.value,portrait_cover_config:portraitCoverConfig.value });
     feedback.toast.success(draftPersistent.value ? "草稿已保存，重启后可继续；不占用成片" : "已暂存当前填写；刷新、关闭或退出后清空");
     return true;
   } catch (e) { draftConflict.value = e.code === "draft_revision_conflict"; formError.value = e.message || "保存失败，填写内容已保留"; return false; }
@@ -401,7 +458,7 @@ async function reloadDraft() {
     if (current.payload) await restoreDraft(current.payload);
     else initializeCreate();
     draftConflict.value = false;
-    baseline.value = JSON.stringify({ form: form.value, schedule: schedule.value, cover_config:coverConfig.value });
+    baseline.value = JSON.stringify({ form: form.value, schedule: schedule.value, cover_config:coverConfig.value,portrait_cover_config:portraitCoverConfig.value });
   } catch (e) { formError.value = e.message || "读取失败，填写内容已保留"; }
   finally { busy.value = false; }
 }
@@ -591,6 +648,8 @@ async function edit(row) {
     };
     coverConfig.value = v.content.cover_render ? coverConfigFromReference(v.content.cover_render,v.resources.cover_render) : emptyCoverConfig();
     if(v.content.cover_render) cover.value.origin="template";
+    portraitCover.value={id:v.content.portrait_cover_file_id,name:v.resources.portrait_cover_name,resource_path:v.resources.portrait_cover_resource_path};
+    portraitCoverConfig.value=v.content.portrait_cover_render ? coverConfigFromReference(v.content.portrait_cover_render,v.resources.portrait_cover_render) : emptyCoverConfig();
     form.value = {
       request_key: v.request_key,
       platform: v.platform,
@@ -603,7 +662,7 @@ async function edit(row) {
     baseline.value = JSON.stringify({
       form: form.value,
       schedule: schedule.value,
-      cover_config:coverConfig.value,
+      cover_config:coverConfig.value,portrait_cover_config:portraitCoverConfig.value,
     });
     formError.value = "";
     pendingRequest.value = null;
@@ -618,12 +677,14 @@ function setOutput(row) {
   const backgroundChanged=String(output.value?.id || "")!==String(row?.id || "") || String(output.value?.thumbnail?.file_id || "")!==String(row?.thumbnail?.file_id || "");
   form.value.content.description = publicationTitleForOutput(form.value.content.description, output.value, row);
   output.value = row;
+  if(portraitCoverConfig.value.method==="template" && portraitCoverConfig.value.background_mode==="business" && portraitCoverConfig.value.background_source==="output" && backgroundChanged)clearPortraitCover();
+  else if(portraitCover.value?.origin==="output" && backgroundChanged)clearPortraitCover();
   form.value.composite_output_id = row ? String(row.id) : "";
   if (coverConfig.value.method === "template" && coverConfig.value.background_mode === "business" && coverConfig.value.background_source === "output" && backgroundChanged) {
     clearRenderedCover();
   } else if (coverConfig.value.method === "image" && (!cover.value || cover.value.origin === "output")) {
     const thumbnail = row?.thumbnail;
-    cover.value = thumbnail?.file_id ? { ...thumbnail, id: String(thumbnail.file_id), origin: "output", output_id: String(row.id), name: "成片封面" } : null;
+    cover.value = thumbnail?.file_id && coverMatchesRatio(thumbnail,16,9) ? { ...thumbnail, id: String(thumbnail.file_id), origin: "output", output_id: String(row.id), name: "成片封面" } : null;
     form.value.content.cover_file_id = cover.value ? cover.value.id : "";
     delete draftResourceIssue.value.cover;
   }
@@ -642,7 +703,7 @@ function updateCoverConfig(config) {
   if(config.method==="image")useOutputCover();
 }
 function useOutputCover() {
-  if(frozen.value || !output.value?.thumbnail?.file_id)return;
+  if(frozen.value || !output.value?.thumbnail?.file_id || !coverMatchesRatio(output.value.thumbnail,16,9))return;
   const thumbnail=output.value.thumbnail;
   const previous=reviewedInput();
   cover.value={...thumbnail,id:String(thumbnail.file_id),origin:"output",output_id:String(output.value.id),name:"成片封面"};
@@ -660,7 +721,51 @@ function useRenderedCover(artwork) {
   invalidate();
 }
 function reviewedInput() {
-  return JSON.stringify({ platform: form.value.platform, category: form.value.category_id, account: form.value.media_account_id, output: form.value.composite_output_id, description: form.value.content.description, topics: form.value.content.topics, declaration: form.value.content.declaration, cover: form.value.content.cover_file_id, cover_render:form.value.content.cover_render });
+  return JSON.stringify({ platform: form.value.platform, category: form.value.category_id, account: form.value.media_account_id, output: form.value.composite_output_id, description: form.value.content.description, topics: form.value.content.topics, declaration: form.value.content.declaration, cover: form.value.content.cover_file_id, cover_render:form.value.content.cover_render,portrait_cover:form.value.content.portrait_cover_file_id,portrait_cover_render:form.value.content.portrait_cover_render });
+}
+function clearPortraitCover() {
+  portraitCover.value = null;
+  form.value.content.portrait_cover_file_id = "";
+  delete form.value.content.portrait_cover_render;
+  delete draftResourceIssue.value.portrait_cover;
+  invalidate();
+}
+function updatePortraitConfig(config) {
+  if (
+    frozen.value ||
+    JSON.stringify(config) === JSON.stringify(portraitCoverConfig.value)
+  )
+    return;
+  portraitCoverConfig.value = config;
+  clearPortraitCover();
+  if (config.method === "image") usePortraitOutput();
+}
+function usePortraitOutput() {
+  const image = output.value?.thumbnail;
+  if (frozen.value || !image?.file_id || !coverMatchesRatio(image, 3, 4))
+    return;
+  portraitCover.value = {
+    ...image,
+    id: String(image.file_id),
+    origin: "output",
+    output_id: String(output.value.id),
+  };
+  form.value.content.portrait_cover_file_id = String(image.file_id);
+  delete form.value.content.portrait_cover_render;
+  delete draftResourceIssue.value.portrait_cover;
+  invalidate();
+}
+function usePortraitArtwork(item) {
+  if (frozen.value || portraitCoverConfig.value.method !== "template") return;
+  portraitCover.value = { ...item.file, origin: "template" };
+  form.value.content.portrait_cover_file_id = String(item.file.id);
+  form.value.content.portrait_cover_render = coverReference(item);
+  delete draftResourceIssue.value.portrait_cover;
+  invalidate();
+}
+function chooseCoverImage(target) {
+  coverTarget.value = target;
+  picker.value = "image";
 }
 function picked(row) {
   const previousInput = reviewedInput();
@@ -677,7 +782,15 @@ function picked(row) {
   } else if (picker.value === "output") {
     delete draftResourceIssue.value.output;
     setOutput(row);
+  } else if(coverTarget.value==="portrait") {
+    if(!coverMatchesRatio(row,3,4)){formError.value="请选择3:4且不超过5MB的竖版封面";return;}
+    portraitCover.value=row;
+    portraitCoverConfig.value={...portraitCoverConfig.value,method:"image"};
+    form.value.content.portrait_cover_file_id=String(row.id);
+    delete form.value.content.portrait_cover_render;
+    delete draftResourceIssue.value.portrait_cover;
   } else {
+    if(!coverMatchesRatio(row,16,9)){formError.value="请选择16:9且不超过5MB的横版封面";return;}
     delete draftResourceIssue.value.cover;
     delete form.value.content.cover_render;
     coverConfig.value = {...coverConfig.value,method:"image"};
@@ -737,7 +850,7 @@ async function submit() {
     baseline.value = JSON.stringify({
       form: form.value,
       schedule: schedule.value,
-      cover_config:coverConfig.value,
+      cover_config:coverConfig.value,portrait_cover_config:portraitCoverConfig.value,
     });
     // Created or editable tasks have no execution history. Drop any records
     // retained from a different task detail before showing the saved task.
@@ -964,7 +1077,7 @@ onMounted(async () => {
               <ResourceRowActions>
                 <t-button v-if="editable(row)" class="is-primary" variant="text" size="small" :disabled="busy" @click="startExecution(row)">执行</t-button>
                 <t-button v-if="row.status===PublicationStatus.AwaitingHuman" class="is-primary" variant="text" size="small" :disabled="busy" @click="openHumanScene(row)">去处理</t-button>
-                <t-button v-if="[PublicationStatus.Uncertain,PublicationStatus.Reviewing].includes(row.status)" class="is-primary" variant="text" size="small" :disabled="busy" @click="openVerification(row)">{{row.status===PublicationStatus.Reviewing?'补录':'核实结果'}}</t-button>
+                <t-button v-if="[PublicationStatus.Uncertain,PublicationStatus.Reviewing].includes(row.status)" class="is-primary" variant="text" size="small" :disabled="busy" @click="openVerification(row)">{{row.status===PublicationStatus.Reviewing?'补录结果':'核实结果'}}</t-button>
                 <t-button v-if="retryable(row)" class="is-primary" variant="text" size="small" :disabled="busy" @click="retryExecution(row)">重试</t-button>
                 <t-button v-if="editable(row)" variant="text" size="small" :disabled="busy" @click="edit(row)">编辑</t-button>
                 <t-button v-if="cancellable(row)" theme="danger" variant="text" size="small" :disabled="busy" @click="openTermination(row, 'cancel')">终止</t-button>
@@ -1073,10 +1186,13 @@ onMounted(async () => {
               @change="invalidate"
           /></label>
           <div class="quick-cover-field">
-            <label class="quick-field-heading"><ResourceRequiredLabel>发布封面</ResourceRequiredLabel><ResourceFieldHelp label="发布封面" content="使用现成图片或选择模板添加文字。默认使用成片真实封面；横竖封面规格待平台核验，当前按原图预览。" /></label>
+            <label class="quick-field-heading"><ResourceRequiredLabel>发布封面</ResourceRequiredLabel><ResourceFieldHelp label="发布封面" content="使用现成图片或选择模板添加文字。默认使用成片真实封面；百度需要16:9横版和3:4竖版封面，单张不超过5MB；分别选择图片或匹配模板生成。" /></label>
             <div class="quick-cover-workspace">
-              <div class="publication-cover-preview"><button v-if="cover?.resource_path" type="button" class="publication-image-button" aria-label="预览发布封面" @click="previewImage(cover.resource_path, cover.name)"><img :src="files.resourceURL(cover)" alt="当前发布封面" /><span>预览封面</span></button><div v-else class="publication-cover-empty">请选择图片或生成封面</div></div>
-              <PublishingCoverEditor :config="coverConfig" :output="output" :category="form.category_id" :disabled="frozen" @update:config="updateCoverConfig" @rendered="useRenderedCover" @choose-image="picker='image'" @use-output="useOutputCover" />
+              <h4>横版封面 · 16:9</h4><div class="publication-cover-preview"><button v-if="cover?.resource_path" type="button" class="publication-image-button" aria-label="预览发布封面" @click="previewImage(cover.resource_path, cover.name)"><img :src="files.resourceURL(cover)" alt="当前发布封面" /><span>预览封面</span></button><div v-else class="publication-cover-empty">请选择图片或生成封面</div></div>
+              <PublishingCoverEditor :config="coverConfig" :output="output" :category="form.category_id" :disabled="frozen" @update:config="updateCoverConfig" @rendered="useRenderedCover" @choose-image="chooseCoverImage('horizontal')" @use-output="useOutputCover" />
+              <h4>竖版封面 · 3:4</h4>
+              <div class="publication-cover-preview"><button v-if="portraitCover?.resource_path" type="button" class="publication-image-button" aria-label="预览竖版封面" @click="previewImage(portraitCover.resource_path, portraitCover.name)"><img :src="files.resourceURL(portraitCover)" alt="当前竖版封面" /><span>预览封面</span></button><div v-else class="publication-cover-empty">请选择图片或生成竖版封面</div></div>
+              <PublishingCoverEditor :config="portraitCoverConfig" :aspect="[3,4]" :output="output" :category="form.category_id" :disabled="frozen" @update:config="updatePortraitConfig" @rendered="usePortraitArtwork" @choose-image="chooseCoverImage('portrait')" @use-output="usePortraitOutput" />
             </div>
           </div>
           <label
@@ -1152,6 +1268,7 @@ onMounted(async () => {
             </div>
           </t-descriptions-item>
           <t-descriptions-item label="话题" full>{{ detail.content.topics || "—" }}</t-descriptions-item>
+          <t-descriptions-item label="竖版封面" full><button v-if="detail.resources.portrait_cover_resource_path" type="button" class="publication-image-button" @click="previewImage(detail.resources.portrait_cover_resource_path,detail.resources.portrait_cover_name)"><img :src="files.resourceURL({resource_path:detail.resources.portrait_cover_resource_path})" alt="竖版封面" /><span>预览封面</span></button><span>{{detail.resources.portrait_cover_name || '—'}}</span></t-descriptions-item>
           <t-descriptions-item label="创作声明">{{ detail.content.declaration }}</t-descriptions-item>
         </ResourceDescriptions>
       </ResourceSection></ResourceCard>
@@ -1184,6 +1301,7 @@ onMounted(async () => {
     <PublishingResourcePicker
       :visible="!!picker"
       :kind="picker"
+      :aspect="picker==='image' ? (coverTarget==='portrait' ? [3,4] : [16,9]) : undefined"
       :category="form?.category_id"
       :account="account"
       @update:visible="!$event && (picker = '')"

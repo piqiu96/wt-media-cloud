@@ -5,9 +5,10 @@ import ResourceRequiredLabel from "../../../shared/ui/resource/ResourceRequiredL
 import ResourceFieldHelp from "../../../shared/ui/resource/ResourceFieldHelp.vue";
 import FeedbackAlert from "../../../shared/ui/feedback/FeedbackAlert.vue";
 import PublishingResourcePicker from "./PublishingResourcePicker.vue";
-import { coverRenderInput, coverResultMatches } from "../coverPreparation.js";
+import { coverRenderInput, coverResultMatches, coverMatchesRatio } from "../coverPreparation.js";
 const props = defineProps({
   config: Object,
+  aspect: {type:Array, default:()=>[16,9]},
   output: Object,
   category: String,
   disabled: Boolean,
@@ -63,7 +64,7 @@ async function loadTemplate(search = "") {
       page: 1,
       page_size: 100,
     });
-    if (sequence === lookupSequence) templates.value = page.items || [];
+    if (sequence === lookupSequence) templates.value = (page.items || []).filter(t => coverMatchesRatio({width:t.canvas_width,height:t.canvas_height},...props.aspect));
   } catch (e) {
     if (sequence === lookupSequence)
       error.value = e.message || "模板读取失败，请重试";
@@ -109,6 +110,7 @@ async function selectTemplate(id) {
     update({ template_id: "", published_revision: 0 });
     return;
   }
+  if(!coverMatchesRatio({width:item.canvas_width,height:item.canvas_height},...props.aspect)) {error.value="模板比例不匹配，请重新选择";return;}
   selectedTemplate.value = item;
   update({
     template_id: String(item.id),
@@ -146,6 +148,7 @@ async function generate() {
     )
       return;
     if (
+      !coverMatchesRatio({width:current.canvas_width,height:current.canvas_height},...props.aspect) ||
       !current.enabled ||
       current.published_revision !== config.published_revision
     )
@@ -236,7 +239,7 @@ onBeforeUnmount(() => {
       >
         <input
           type="radio"
-          name="publication-cover-method"
+          :name="`publication-cover-method-${aspect.join('-')}`"
           :value="choice.value"
           :checked="config.method === choice.value"
           :disabled="disabled"
@@ -252,7 +255,7 @@ onBeforeUnmount(() => {
       <div class="publication-cover-image-actions">
         <t-button
           variant="outline"
-          :disabled="disabled || !output?.thumbnail?.file_id"
+          :disabled="disabled || !output?.thumbnail?.file_id || !coverMatchesRatio(output.thumbnail,...aspect)"
           @click="emit('use-output')"
           >使用成片封面</t-button
         ><t-button
@@ -294,7 +297,7 @@ onBeforeUnmount(() => {
             :variant="
               config.background_source === 'output' ? 'base' : 'outline'
             "
-            :disabled="disabled || !output?.thumbnail?.file_id"
+            :disabled="disabled || !output?.thumbnail?.file_id || !coverMatchesRatio(output.thumbnail,...aspect)"
             @click="
               update({
                 background_source: 'output',

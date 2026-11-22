@@ -93,3 +93,13 @@ export function coverConfigFromReference(ref, snapshot) {
         : ref.background_image_asset_id,
   };
 }
+
+export function coverMatchesRatio(file, width, height) {
+  const metadata = file?.metadata || file;
+  return (
+    Number(metadata?.width) > 0 &&
+    Number(metadata?.height) > 0 &&
+    Number(metadata.width) * height === Number(metadata.height) * width &&
+    (!file?.size_bytes || Number(file.size_bytes) <= 5 * 1024 * 1024)
+  );
+}

@@ -38,7 +38,7 @@ func TestLiveTemplateSnapshotComparedByValueAcrossExecutionReports(t *testing.T)
 			}
 			for n, stage := range []model.AttemptStage{model.AttemptStagePreparing, model.AttemptStageReady, model.AttemptStageSubmitting} {
 				in := c.Attempt.Input
-				feedback, err := s.Report(c.Task, 9, model.ExecutionReport{AttemptID: c.Attempt.ID, Seq: uint64(n + 1), Stage: stage, PlatformUID: in.PlatformUID, BitProfileID: in.BitProfileID, VideoSHA256: in.VideoSHA256, CoverSHA256: in.CoverSHA256}, true, now)
+				feedback, err := s.Report(c.Task, 9, model.ExecutionReport{AttemptID: c.Attempt.ID, Seq: uint64(n + 1), Stage: stage, PlatformUID: in.PlatformUID, BitProfileID: in.BitProfileID, VideoSHA256: in.VideoSHA256, CoverSHA256: in.CoverSHA256, PortraitCoverSHA256: in.PortraitCoverSHA256}, true, now)
 				if err != nil {
 					t.Fatal(err)
 				}

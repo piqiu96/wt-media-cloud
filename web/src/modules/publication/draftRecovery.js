@@ -34,7 +34,15 @@ export function choosePublicationDraft(savedAt) {
 }
 
 // Input references and human text only; never store resource bodies or signed URLs.
-export function capturePublicationDraft(form, schedule, cover, pendingRequest, config) {
+export function capturePublicationDraft(
+  form,
+  schedule,
+  cover,
+  pendingRequest,
+  config,
+  portraitCover,
+  portraitConfig,
+) {
   const text = (value) => String(value ?? "");
   return {
     form: {
@@ -46,13 +54,29 @@ export function capturePublicationDraft(form, schedule, cover, pendingRequest, c
       content: {
         description: text(form.content.description),
         cover_file_id: text(form.content.cover_file_id),
+        portrait_cover_file_id: text(form.content.portrait_cover_file_id),
+        ...(form.content.portrait_cover_render
+          ? {
+              portrait_cover_render: captureCoverReference(
+                form.content.portrait_cover_render,
+              ),
+            }
+          : {}),
         topics: text(form.content.topics),
         declaration: text(form.content.declaration),
         confirmed: !!form.content.confirmed,
-        ...(form.content.cover_render ? {cover_render: captureCoverReference(form.content.cover_render)} : {}),
+        ...(form.content.cover_render
+          ? { cover_render: captureCoverReference(form.content.cover_render) }
+          : {}),
       },
     },
     cover_config: config ? captureCoverConfig(config) : undefined,
+    portrait_cover_config: portraitConfig
+      ? captureCoverConfig(portraitConfig)
+      : undefined,
+    portrait_image_asset_id: text(portraitCover?.image_asset_id),
+    portrait_cover_origin: text(portraitCover?.origin),
+    portrait_cover_output_id: text(portraitCover?.output_id),
     schedule: text(schedule),
     image_asset_id: text(cover?.image_asset_id),
     cover_origin: text(cover?.origin),
@@ -64,10 +88,21 @@ export function capturePublicationDraft(form, schedule, cover, pendingRequest, c
 }
 
 function captureCoverReference(ref) {
- return {template_id:String(ref.template_id || ""),published_revision:Number(ref.published_revision || 0),title:String(ref.title || ""),background_image_asset_id:String(ref.background_image_asset_id || "0"),background_output_id:String(ref.background_output_id || "0"),render_input_hash:String(ref.render_input_hash || "")};
+  return {
+    template_id: String(ref.template_id || ""),
+    published_revision: Number(ref.published_revision || 0),
+    title: String(ref.title || ""),
+    background_image_asset_id: String(ref.background_image_asset_id || "0"),
+    background_output_id: String(ref.background_output_id || "0"),
+    render_input_hash: String(ref.render_input_hash || ""),
+  };
 }
 function captureCoverConfig(config) {
- const result=emptyCoverConfig();
- for(const key of Object.keys(result))result[key]=typeof result[key]==="number" ? Number(config[key] || 0) : String(config[key] ?? result[key]);
- return result;
+  const result = emptyCoverConfig();
+  for (const key of Object.keys(result))
+    result[key] =
+      typeof result[key] === "number"
+        ? Number(config[key] || 0)
+        : String(config[key] ?? result[key]);
+  return result;
 }

@@ -161,7 +161,7 @@ func TestLiveHeartbeatPreventsStaleFinalization(t *testing.T) {
 
 func TestLiveConcurrentSubmitPermissionGrantedOnce(t *testing.T) {
 	s, c, now := runningClaim(t)
-	r := model.ExecutionReport{AttemptID: c.Attempt.ID, Seq: 1, Stage: model.AttemptStageReady, PlatformUID: c.Attempt.Input.PlatformUID, BitProfileID: c.Attempt.Input.BitProfileID, VideoSHA256: c.Attempt.Input.VideoSHA256, CoverSHA256: c.Attempt.Input.CoverSHA256}
+	r := model.ExecutionReport{AttemptID: c.Attempt.ID, Seq: 1, Stage: model.AttemptStageReady, PlatformUID: c.Attempt.Input.PlatformUID, BitProfileID: c.Attempt.Input.BitProfileID, VideoSHA256: c.Attempt.Input.VideoSHA256, CoverSHA256: c.Attempt.Input.CoverSHA256, PortraitCoverSHA256: c.Attempt.Input.PortraitCoverSHA256}
 	if _, e := s.Report(c.Task, 9, r, true, now); e != nil {
 		t.Fatal(e)
 	}
@@ -285,7 +285,7 @@ func TestLiveAttemptRevisionMigrationPreservesExistingReport(t *testing.T) {
 
 func TestLiveReportKeepaliveDoesNotRecordProgressOrRepeatPermission(t *testing.T) {
 	s, c, now := runningClaim(t)
-	r := model.ExecutionReport{AttemptID: c.Attempt.ID, Seq: 1, Stage: model.AttemptStageReady, PlatformUID: c.Attempt.Input.PlatformUID, BitProfileID: c.Attempt.Input.BitProfileID, VideoSHA256: c.Attempt.Input.VideoSHA256, CoverSHA256: c.Attempt.Input.CoverSHA256}
+	r := model.ExecutionReport{AttemptID: c.Attempt.ID, Seq: 1, Stage: model.AttemptStageReady, PlatformUID: c.Attempt.Input.PlatformUID, BitProfileID: c.Attempt.Input.BitProfileID, VideoSHA256: c.Attempt.Input.VideoSHA256, CoverSHA256: c.Attempt.Input.CoverSHA256, PortraitCoverSHA256: c.Attempt.Input.PortraitCoverSHA256}
 	if _, e := s.Report(c.Task, 9, r, true, now); e != nil {
 		t.Fatal(e)
 	}

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	filemodel "github.com/wt-media/wt-media-cloud/internal/modules/files/model"
 	identity "github.com/wt-media/wt-media-cloud/internal/modules/identity/service"
@@ -20,10 +21,15 @@ func fixture() (*Service, identity.PublicUser, CreateInput) {
 		return accounts.Account{ID: "12", UserID: 9, TeamID: &team, CategoryIDs: []identity.CategoryID{1}, Enabled: true, Platform: "baidu", PlatformAccountID: "real-uid", BrowserProfileID: "profile", IdentificationStatus: "identified", PlatformLoginStatus: "normal"}, nil
 	}, Output: func(identity.PublicUser, int64) (production.ComposeOutputDetail, error) {
 		return production.ComposeOutputDetail{Output: outputmodel.CompositeOutput{ID: 42, TeamID: 7, CategoryID: 1, OperatorID: &owner, PublishStatus: "pending_publish", Platforms: []string{"baidu"}, ObjectKey: "video", FileSizeBytes: 3, SHA256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Video: outputmodel.ComposeOutputVideo{Status: "ready"}}}, nil
-	}, File: func(context.Context, identity.PublicUser, int64, int64) (filemodel.File, error) {
-		return filemodel.File{ID: 5, Type: "image", ObjectKey: "cover", SizeBytes: 3, SHA256: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}, nil
+	}, File: func(_ context.Context, _ identity.PublicUser, id int64, _ int64) (filemodel.File, error) {
+		width, height := 1280, 720
+		if id == 6 {
+			width, height = 1080, 1440
+		}
+		metadata, _ := json.Marshal(filemodel.ImageMetadata{Width: width, Height: height, Format: "png"})
+		return filemodel.File{ID: id, MetadataJSON: metadata, Type: "image", ObjectKey: "cover", SizeBytes: 3, SHA256: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}, nil
 	}}
-	return s, actor, CreateInput{RequestKey: "request-1", Platform: "baidu", CategoryID: 1, MediaAccountID: 12, CompositeOutputID: 42, Content: model.Content{Description: "真实作品描述", CoverFileID: 5, Declaration: "无需声明", Confirmed: true}}
+	return s, actor, CreateInput{RequestKey: "request-1", Platform: "baidu", CategoryID: 1, MediaAccountID: 12, CompositeOutputID: 42, Content: model.Content{Description: "真实作品描述", CoverFileID: 5, PortraitCoverFileID: 6, Declaration: "无需声明", Confirmed: true}}
 }
 
 type memoryTasks struct {

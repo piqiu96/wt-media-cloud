@@ -29,7 +29,7 @@ import { feedback } from '../../../shared/ui/feedback/index.js';
 const task = id => ({
   id, revision: '1', status: 'pending', can_cancel: true, request_key: `request-${id}`,
   category_id: '1', media_account_id: '9', composite_output_id: '10', platform: 'baidu',
-  content: { description: `标题-${id}`, cover_file_id: '11', declaration: '无需声明', confirmed: true },
+  content: { description: `标题-${id}`, cover_file_id: '11', portrait_cover_file_id:'12', declaration: '无需声明', confirmed: true },
   resources: {},
 });
 const history = [{ id: 'attempt-A', attempt_no: 1, input_snapshot: { content: { description: '仅属于任务A的历史快照' } } }];
@@ -198,10 +198,10 @@ it('reselecting the same image preserves confirmation', async () => {
   state.form.value.content.cover_file_id = '11';
   state.form.value.content.confirmed = true;
   state.picker.value = 'image';
-  state.picked({ id: '11' });
+  state.picked({ id: '11',width:1280,height:720 });
   expect(state.form.value.content.confirmed).toBe(true);
   state.picker.value = 'image';
-  state.picked({ id: '12' });
+  state.picked({ id: '12',width:1280,height:720 });
   expect(state.form.value.content.confirmed).toBe(false);
 });
 
@@ -342,7 +342,7 @@ it('copies reusable text into a new unconfirmed form with no old resources or ex
  expect(services.publication.copy).toHaveBeenCalledWith('A','1');
  expect(state.view.value).toBe('form');expect(state.editing.value).toBe(null);
  expect(state.form.value.request_key).not.toBe('request-A');
- expect(state.form.value.content).toEqual({description:'可复用的人工文案',topics:'#话题',declaration:'无需声明',cover_file_id:'',confirmed:false});
+ expect(state.form.value.content).toEqual({description:'可复用的人工文案',topics:'#话题',declaration:'无需声明',cover_file_id:'',portrait_cover_file_id:'',confirmed:false});
  expect(state.form.value.media_account_id).toBe('');expect(state.form.value.composite_output_id).toBe('');
  expect(state.account.value).toBe(null);expect(state.output.value).toBe(null);expect(state.cover.value).toBe(null);
  expect(state.pendingRequest.value).toBe(null);expect(state.attempts.value).toEqual([]);
@@ -437,4 +437,20 @@ it('refreshes reviewing results and pauses while the human supplementation dialo
  expect(state.detail.value.status).toBe('published');
  expect(state.detail.value.work_id).toBe('10');
  expect(state.needsExecutionRefresh.value).toBe(false);
+});
+
+it('keeps the horizontal artwork when only the portrait configuration changes',async()=>{
+ await state.openCreate();state.form.value.content.cover_file_id='11';
+ state.cover.value={id:'11',origin:'template'};state.form.value.content.portrait_cover_file_id='12';
+ state.form.value.content.confirmed=true;
+ state.updatePortraitConfig({...state.portraitCoverConfig.value,method:'template',title:'新竖版标题'});
+ expect(state.form.value.content.cover_file_id).toBe('11');
+ expect(state.form.value.content.portrait_cover_file_id).toBe('');
+ expect(state.form.value.content.confirmed).toBe(false);
+});
+it('refuses a landscape image for the portrait slot without replacing either cover',async()=>{
+ await state.openCreate();state.form.value.content.cover_file_id='11';state.form.value.content.portrait_cover_file_id='12';
+ state.chooseCoverImage('portrait');state.picked({id:'13',width:1280,height:720});
+ expect(state.form.value.content.cover_file_id).toBe('11');expect(state.form.value.content.portrait_cover_file_id).toBe('12');
+ expect(state.formError.value).toContain('3:4');
 });

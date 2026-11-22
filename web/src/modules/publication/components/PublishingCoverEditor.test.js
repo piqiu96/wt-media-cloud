@@ -13,6 +13,7 @@ import Editor from "./PublishingCoverEditor.vue";
 let state, props, emit;
 const template = {
   id: "8",
+  canvas_width:1280,canvas_height:720,
   enabled: true,
   published_revision: 2,
   published_config: { backgroundMode: "business" },
@@ -22,6 +23,7 @@ beforeEach(async () => {
   services.getCoverTemplate.mockResolvedValue(template);
   services.listCoverTemplate.mockResolvedValue({ items: [template] });
   props = reactive({
+    aspect:[16,9],
     config: {
       method: "template",
       template_id: "8",

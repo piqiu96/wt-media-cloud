@@ -149,7 +149,7 @@ func (s *Service) Summary(a identity.PublicUser, f Filter) (map[string]int64, er
 }
 
 func contentValid(c model.Content) bool {
-	return strings.TrimSpace(c.Description) != "" && utf8.RuneCountInString(c.Description) <= 1000 && c.CoverFileID > 0 && c.Declaration == "无需声明" && utf8.RuneCountInString(c.Topics) <= 200 && c.Confirmed
+	return strings.TrimSpace(c.Description) != "" && utf8.RuneCountInString(c.Description) <= 1000 && c.CoverFileID > 0 && c.PortraitCoverFileID > 0 && c.Declaration == "无需声明" && utf8.RuneCountInString(c.Topics) <= 200 && c.Confirmed
 }
 func (s *Service) Create(ctx context.Context, a identity.PublicUser, in CreateInput) (model.Task, error) {
 	if a.ID <= 0 || a.Status != identity.UserStatusEnabled {
@@ -215,11 +215,18 @@ func (s *Service) Create(ctx context.Context, a identity.PublicUser, in CreateIn
 	if cover.Type != "image" || cover.SizeBytes <= 0 || len(cover.SHA256) != 64 || previewCover(cover) {
 		return model.Task{}, ErrInvalid
 	}
+	if err := verifyCoverSpec(cover, 16, 9); err != nil {
+		return model.Task{}, err
+	}
+	portrait, portraitSnapshot, err := s.preparePortraitCover(ctx, a, in.Content, in.CategoryID, in.CompositeOutputID, false)
+	if err != nil {
+		return model.Task{}, err
+	}
 	coverSnapshot, err := verifyCoverRender(cover, in.Content, in.CompositeOutputID)
 	if err != nil {
 		return model.Task{}, err
 	}
-	snapshot, _ := json.Marshal(map[string]any{"cover_render": coverSnapshot, "account_name": account.PlatformName, "account_owner": account.UserName, "browser_profile_id": account.BrowserProfileID, "output_name": o.Name, "video_sha256": o.SHA256, "video_size": o.FileSizeBytes, "cover_sha256": cover.SHA256, "cover_name": cover.Name, "cover_resource_path": "/api/v1/file-resources/" + cover.ResourceToken})
+	snapshot, _ := json.Marshal(map[string]any{"portrait_cover_render": portraitSnapshot, "portrait_cover_sha256": portrait.SHA256, "portrait_cover_name": portrait.Name, "portrait_cover_resource_path": "/api/v1/file-resources/" + portrait.ResourceToken, "cover_render": coverSnapshot, "account_name": account.PlatformName, "account_owner": account.UserName, "browser_profile_id": account.BrowserProfileID, "output_name": o.Name, "video_sha256": o.SHA256, "video_size": o.FileSizeBytes, "cover_sha256": cover.SHA256, "cover_name": cover.Name, "cover_resource_path": "/api/v1/file-resources/" + cover.ResourceToken})
 	now := time.Now().UTC()
 	v := model.Task{TeamID: int64(*account.TeamID), OperatorID: int64(account.UserID), Platform: in.Platform, CategoryID: in.CategoryID, MediaAccountID: in.MediaAccountID, CompositeOutputID: in.CompositeOutputID, PlatformAccountUID: account.PlatformAccountID, CoverFileID: cover.ID, ResourceSnapshot: snapshot, Content: in.Content, Status: model.StatusPending, NotBefore: in.NotBefore, Revision: 1, CreatedBy: int64(a.ID), RequestKey: in.RequestKey, RequestHash: digest, CreatedAt: now, UpdatedAt: now}
 	return s.Repo.Create(v)
@@ -247,6 +254,13 @@ func (s *Service) Edit(ctx context.Context, a identity.PublicUser, id uint64, in
 	if cover.Type != "image" || cover.SizeBytes <= 0 || len(cover.SHA256) != 64 || previewCover(cover) {
 		return model.Task{}, ErrInvalid
 	}
+	if err := verifyCoverSpec(cover, 16, 9); err != nil {
+		return model.Task{}, err
+	}
+	portrait, portraitSnapshot, err := s.preparePortraitCover(ctx, a, in.Content, v.CategoryID, v.CompositeOutputID, in.Content.PortraitCoverFileID == v.Content.PortraitCoverFileID)
+	if err != nil {
+		return model.Task{}, err
+	}
 	coverSnapshot, err := verifyCoverRender(cover, in.Content, v.CompositeOutputID)
 	if err != nil {
 		return model.Task{}, err
@@ -255,6 +269,10 @@ func (s *Service) Edit(ctx context.Context, a identity.PublicUser, id uint64, in
 	if err := json.Unmarshal(v.ResourceSnapshot, &snapshot); err != nil {
 		return model.Task{}, err
 	}
+	snapshot["portrait_cover_render"] = portraitSnapshot
+	snapshot["portrait_cover_sha256"] = portrait.SHA256
+	snapshot["portrait_cover_name"] = portrait.Name
+	snapshot["portrait_cover_resource_path"] = "/api/v1/file-resources/" + portrait.ResourceToken
 	snapshot["cover_render"] = coverSnapshot
 	snapshot["cover_sha256"] = cover.SHA256
 	snapshot["cover_name"] = cover.Name

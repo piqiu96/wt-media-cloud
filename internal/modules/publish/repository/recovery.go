@@ -24,7 +24,7 @@ func safeDisposition(a model.Attempt) model.Status {
 		return ""
 	}
 	ev := r.Evidence
-	if !ev.SceneClosed || ev.PlatformUID != a.Input.PlatformUID || ev.BitProfileID != a.Input.BitProfileID || ev.VideoSHA256 != a.Input.VideoSHA256 || ev.CoverSHA256 != a.Input.CoverSHA256 {
+	if !ev.SceneClosed || ev.PlatformUID != a.Input.PlatformUID || ev.BitProfileID != a.Input.BitProfileID || ev.VideoSHA256 != a.Input.VideoSHA256 || ev.CoverSHA256 != a.Input.CoverSHA256 || ev.PortraitCoverSHA256 != a.Input.PortraitCoverSHA256 {
 		return ""
 	}
 	if r.Status == model.StatusFailed && ev.NotSubmitted && a.SubmitStartedAt == nil {

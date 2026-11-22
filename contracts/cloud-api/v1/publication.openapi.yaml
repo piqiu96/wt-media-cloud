@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: WT Media Single Publication Preparation
-  version: 2026.11.21.4
+  version: 2026.11.22.1
   description: Task platform_submission_id/target_url contain original receipts; platform_work_id/work_url/work_id only identify verified public work (ADR-0035). Creating never authorizes execution or submits a platform post. Execution requires separate revision-bound start authorization. Baidu task preparation is available. IDs and revisions are decimal strings; timestamps RFC3339. Uses errcode/message/data/logid.
 paths:
   /api/v1/publication/generate:
@@ -305,9 +305,11 @@ components:
     Content:
       type: object
       additionalProperties: false
-      required: [description, cover_file_id, declaration, confirmed]
+      required: [description, cover_file_id, portrait_cover_file_id, declaration, confirmed]
       properties:
         description: {type: string, minLength: 1, maxLength: 1000}
+        portrait_cover_render: {$ref: '#/components/schemas/CoverRender'}
+        portrait_cover_file_id: {$ref: '#/components/schemas/ID'}
         cover_render: {$ref: '#/components/schemas/CoverRender'}
         cover_file_id: {$ref: '#/components/schemas/ID'}
         topics: {type: string, maxLength: 200}

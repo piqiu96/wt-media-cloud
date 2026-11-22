@@ -1,12 +1,13 @@
 openapi: 3.1.0
 info:
   title: WT Media Cloud-Agent Publication Execution
-  version: 2026.11.22.1
+  version: 2026.11.22.2
   description: >-
     Additive single-task execution. Agent bearer identifies the account owner; no device identity or
     generic lease. Claim requires a current Desktop session. Reports are report-safe only for the same
     owner and current attempt; starting new work, including submitting, rechecks the Desktop session.
     Task/attempt ids and revisions are decimal strings. Responses use errcode/message/data/logid.
+    New execution freezes portrait_cover_sha256/portrait_cover_size in addition to the horizontal cover, and requires matching portrait_cover_sha256 in progress and result evidence. Missing portrait input is refused; no automatic conversion.
     Download grants appear only in responses, never in frozen snapshots, evidence or logs.
 paths:
   /api/v1/cloud-agent/publication-task/claim:
@@ -164,6 +165,7 @@ components:
         platform_uid: {type: string, maxLength: 255}
         bit_profile_id: {type: string, maxLength: 255}
         video_sha256: {type: string, pattern: '^[a-f0-9]{64}$'}
+        portrait_cover_sha256: {type: string, pattern: '^[a-f0-9]{64}$'}
         cover_sha256: {type: string, pattern: '^[a-f0-9]{64}$'}
       allOf:
         - if: {not: {required: [stage]}}
@@ -174,6 +176,7 @@ components:
                 - {required: [bit_profile_id]}
                 - {required: [video_sha256]}
                 - {required: [cover_sha256]}
+                - {required: [portrait_cover_sha256]}
     Completion:
       type: object
       required: [attempt_id, report_seq, result_hash, result]
@@ -200,6 +203,7 @@ components:
             platform_uid: {type: string, maxLength: 255}
             bit_profile_id: {type: string, maxLength: 255}
             video_sha256: {type: string, pattern: '^[a-f0-9]{64}$'}
+            portrait_cover_sha256: {type: string, pattern: '^[a-f0-9]{64}$'}
             cover_sha256: {type: string, pattern: '^[a-f0-9]{64}$'}
             receipt_id: {type: string, maxLength: 255}
             not_submitted: {type: boolean}
@@ -211,7 +215,7 @@ components:
         task: {type: object, description: 'Formal task with decimal-string IDs; ownership and fixed content.'}
         attempt: {type: object, description: 'Attempt with frozen input, owner, Cloud/BitBrowser Profile IDs and file sizes/digests; no grants or secrets.'}
         replayed: {type: boolean}
-        files: {type: object, description: 'video and cover short-lived single-object grants, each {url,size,sha256}; never persist. Omitted on replay of finished/lost work.'}
+        files: {type: object, description: 'video, cover (16:9), and portrait_cover (3:4) short-lived single-object grants, each {url,size,sha256}; never persist. Omitted on replay of finished/lost work.'}
     Envelope:
       type: object
       required: [errcode, message, data, logid]

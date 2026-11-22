@@ -73,7 +73,7 @@ func (s Store) Create(v model.Task) (model.Task, error) {
 		if s.LockFiles == nil {
 			return errors.New("file reference locking unavailable")
 		}
-		if err := s.LockFiles(tx, []int64{v.CoverFileID}); err != nil {
+		if err := s.LockFiles(tx, []int64{v.CoverFileID, v.Content.PortraitCoverFileID}); err != nil {
 			return err
 		}
 		if err := tx.Create(&v).Error; err != nil {
@@ -103,15 +103,24 @@ func (s Store) Edit(v model.Task, revision uint64) (model.Task, error) {
 		if s.LockFiles == nil {
 			return errors.New("file reference locking unavailable")
 		}
-		if err := s.LockFiles(tx, []int64{v.CoverFileID}); err != nil {
-			return err
-		}
 		var old model.Task
 		if err := tx.First(&old, v.ID).Error; err != nil {
 			return missing(err)
 		}
 		if old.Revision != revision || old.Status != model.StatusPending || old.CurrentAttemptID != nil || old.AuthorizedAt != nil {
 			return &ConflictError{TaskID: old.ID, Revision: old.Revision}
+		}
+		// Existing references already prevent deletion. Lock only newly selected
+		// files so independent edits do not serialize on an unchanged cover.
+		ids := []int64{}
+		if v.CoverFileID != old.CoverFileID {
+			ids = append(ids, v.CoverFileID)
+		}
+		if v.Content.PortraitCoverFileID != old.Content.PortraitCoverFileID {
+			ids = append(ids, v.Content.PortraitCoverFileID)
+		}
+		if err := s.LockFiles(tx, ids); err != nil {
+			return err
 		}
 		if err := updateTask(tx, old, map[string]any{"content_json": mustJSON(v.Content), "resource_snapshot_json": string(v.ResourceSnapshot), "cover_file_id": v.CoverFileID, "not_before": v.NotBefore, "updated_at": time.Now().UTC()}); err != nil {
 			return err
@@ -196,11 +205,11 @@ func mustJSON(v any) string { b, _ := json.Marshal(v); return string(b) }
 // FileReferenced is read while the caller holds the operations file row lock.
 func FileReferenced(tx *gorm.DB, fileID int64) (bool, error) {
 	var count int64
-	err := tx.Model(&model.Task{}).Where("cover_file_id=?", fileID).Count(&count).Error
+	err := tx.Model(&model.Task{}).Where("cover_file_id=? OR JSON_UNQUOTE(JSON_EXTRACT(content_json,'$.portrait_cover_file_id'))=?", fileID, strconv.FormatInt(fileID, 10)).Count(&count).Error
 	if err != nil || count > 0 {
 		return count > 0, err
 	}
-	err = tx.Model(&model.Attempt{}).Where("JSON_UNQUOTE(JSON_EXTRACT(input_snapshot_json,'$.content.cover_file_id'))=?", strconv.FormatInt(fileID, 10)).Count(&count).Error
+	err = tx.Model(&model.Attempt{}).Where("JSON_UNQUOTE(JSON_EXTRACT(input_snapshot_json,'$.content.cover_file_id'))=? OR JSON_UNQUOTE(JSON_EXTRACT(input_snapshot_json,'$.content.portrait_cover_file_id'))=?", strconv.FormatInt(fileID, 10), strconv.FormatInt(fileID, 10)).Count(&count).Error
 	return count > 0, err
 }
 
@@ -214,10 +223,10 @@ func ListFileReference(db *gorm.DB, a identity.PublicUser, id int64) ([]FileRefe
 	out := []FileReference{}
 	var taskIDs, attemptIDs []uint64
 	allowed := (Store{DB: db}).query(Filter{Actor: a}).Select("id")
-	if e := db.Model(&model.Task{}).Where("id IN (?)", allowed).Where("cover_file_id=?", id).Pluck("id", &taskIDs).Error; e != nil {
+	if e := db.Model(&model.Task{}).Where("id IN (?)", allowed).Where("cover_file_id=? OR JSON_UNQUOTE(JSON_EXTRACT(content_json,'$.portrait_cover_file_id'))=?", id, strconv.FormatInt(id, 10)).Pluck("id", &taskIDs).Error; e != nil {
 		return nil, e
 	}
-	if e := db.Model(&model.Attempt{}).Where("publication_id IN (?)", allowed).Where("JSON_UNQUOTE(JSON_EXTRACT(input_snapshot_json,'$.content.cover_file_id'))=?", strconv.FormatInt(id, 10)).Pluck("id", &attemptIDs).Error; e != nil {
+	if e := db.Model(&model.Attempt{}).Where("publication_id IN (?)", allowed).Where("JSON_UNQUOTE(JSON_EXTRACT(input_snapshot_json,'$.content.cover_file_id'))=? OR JSON_UNQUOTE(JSON_EXTRACT(input_snapshot_json,'$.content.portrait_cover_file_id'))=?", strconv.FormatInt(id, 10), strconv.FormatInt(id, 10)).Pluck("id", &attemptIDs).Error; e != nil {
 		return nil, e
 	}
 	for _, id := range taskIDs {

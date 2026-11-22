@@ -6,15 +6,17 @@ import (
 )
 
 type ExecutionInput struct {
-	ProfileID     uint64  `json:"profile_id,string"`
-	BitProfileID  string  `json:"bit_profile_id"`
-	BitMainUserID string  `json:"bit_main_user_id"`
-	PlatformUID   string  `json:"platform_uid"`
-	Content       Content `json:"content"`
-	VideoSHA256   string  `json:"video_sha256"`
-	VideoSize     int64   `json:"video_size"`
-	CoverSHA256   string  `json:"cover_sha256"`
-	CoverSize     int64   `json:"cover_size"`
+	PortraitCoverSHA256 string  `json:"portrait_cover_sha256"`
+	PortraitCoverSize   int64   `json:"portrait_cover_size"`
+	ProfileID           uint64  `json:"profile_id,string"`
+	BitProfileID        string  `json:"bit_profile_id"`
+	BitMainUserID       string  `json:"bit_main_user_id"`
+	PlatformUID         string  `json:"platform_uid"`
+	Content             Content `json:"content"`
+	VideoSHA256         string  `json:"video_sha256"`
+	VideoSize           int64   `json:"video_size"`
+	CoverSHA256         string  `json:"cover_sha256"`
+	CoverSize           int64   `json:"cover_size"`
 }
 type HumanContinuation struct {
 	AttemptID        uint64 `json:"attempt_id,string"`

@@ -27,12 +27,12 @@ func runningTermination(t *testing.T) (repo.ExecutionStore, model.Claim) {
 }
 func terminationReport(c model.Claim, seq uint64, stage model.AttemptStage) model.ExecutionReport {
 	in := c.Attempt.Input
-	return model.ExecutionReport{AttemptID: c.Attempt.ID, Seq: seq, Stage: stage, PlatformUID: in.PlatformUID, BitProfileID: in.BitProfileID, VideoSHA256: in.VideoSHA256, CoverSHA256: in.CoverSHA256}
+	return model.ExecutionReport{AttemptID: c.Attempt.ID, Seq: seq, Stage: stage, PlatformUID: in.PlatformUID, BitProfileID: in.BitProfileID, VideoSHA256: in.VideoSHA256, CoverSHA256: in.CoverSHA256, PortraitCoverSHA256: in.PortraitCoverSHA256}
 }
 func terminationCompletion(t *testing.T, c model.Claim, seq uint64, status model.Status, closed bool) model.Completion {
 	t.Helper()
 	in := c.Attempt.Input
-	r := model.ExecutionResult{Status: status, ErrorCode: "EXECUTION_STOPPED", Evidence: model.ResultEvidence{PlatformUID: in.PlatformUID, BitProfileID: in.BitProfileID, VideoSHA256: in.VideoSHA256, CoverSHA256: in.CoverSHA256, NotSubmitted: true, SceneClosed: closed}}
+	r := model.ExecutionResult{Status: status, ErrorCode: "EXECUTION_STOPPED", Evidence: model.ResultEvidence{PlatformUID: in.PlatformUID, BitProfileID: in.BitProfileID, VideoSHA256: in.VideoSHA256, CoverSHA256: in.CoverSHA256, PortraitCoverSHA256: in.PortraitCoverSHA256, NotSubmitted: true, SceneClosed: closed}}
 	raw, err := json.Marshal(r)
 	if err != nil {
 		t.Fatal(err)

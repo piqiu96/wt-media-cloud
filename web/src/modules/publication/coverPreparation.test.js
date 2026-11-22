@@ -1,5 +1,6 @@
 import { expect, it } from "vitest";
 import {
+  coverMatchesRatio,
   coverReference,
   coverRenderInput,
   coverResultMatches,
@@ -79,4 +80,12 @@ it("only adopts a complete artifact for the same frozen input and request", () =
     background_image_asset_id: "0",
     render_input_hash: "abc",
   });
+});
+
+it("requires actual matching dimensions and refuses an oversized cover",()=>{
+ expect(coverMatchesRatio({width:1280,height:720},16,9)).toBe(true);
+ expect(coverMatchesRatio({width:1080,height:1440},3,4)).toBe(true);
+ expect(coverMatchesRatio({width:1280,height:720},3,4)).toBe(false);
+ expect(coverMatchesRatio({metadata:{width:1280,height:720},size_bytes:5242881},16,9)).toBe(false);
+ expect(coverMatchesRatio({},16,9)).toBe(false);
 });

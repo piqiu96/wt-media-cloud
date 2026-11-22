@@ -44,7 +44,7 @@ describe("publication preparation eligibility", () => {
       composite_output_id: "128",
       content: {
         description: "实测文案",
-        cover_file_id: "5",
+        cover_file_id: "5",portrait_cover_file_id:"6",
         declaration: "无需声明",
         confirmed: false,
       },

@@ -44,8 +44,9 @@ type FileGrant struct {
 	Size   int64  `json:"size"`
 }
 type FileGrants struct {
-	Video FileGrant `json:"video"`
-	Cover FileGrant `json:"cover"`
+	PortraitCover FileGrant `json:"portrait_cover"`
+	Video         FileGrant `json:"video"`
+	Cover         FileGrant `json:"cover"`
 }
 type GrantedClaim struct {
 	model.Claim
@@ -75,10 +76,11 @@ func WiredExecution() *ExecutionService {
 }
 func readExecutionInput(tx *gorm.DB, v model.Task) (model.ExecutionInput, error) {
 	var snap struct {
-		Profile   string `json:"browser_profile_id"`
-		VideoSHA  string `json:"video_sha256"`
-		VideoSize int64  `json:"video_size"`
-		CoverSHA  string `json:"cover_sha256"`
+		Profile          string `json:"browser_profile_id"`
+		VideoSHA         string `json:"video_sha256"`
+		VideoSize        int64  `json:"video_size"`
+		CoverSHA         string `json:"cover_sha256"`
+		PortraitCoverSHA string `json:"portrait_cover_sha256"`
 	}
 	var out model.ExecutionInput
 	if json.Unmarshal(v.ResourceSnapshot, &snap) != nil || v.Platform != "baidu" || !contentValid(v.Content) {
@@ -139,7 +141,14 @@ func readExecutionInput(tx *gorm.DB, v model.Task) (model.ExecutionInput, error)
 	if !found || !supported || o.TeamID != v.TeamID || int64(o.CategoryID) != v.CategoryID || o.PublishStatus == productionmodel.OutputPublishArchived || o.SHA256 != snap.VideoSHA || o.FileSizeBytes != snap.VideoSize || f.Type != "image" || f.SHA256 != snap.CoverSHA || f.SizeBytes <= 0 || len(o.SHA256) != 64 || len(f.SHA256) != 64 || o.FileSizeBytes <= 0 {
 		return out, repository.ErrInputChanged
 	}
-	return model.ExecutionInput{ProfileID: id, BitProfileID: p.BitProfileID, BitMainUserID: p.BitMainUserID, PlatformUID: v.PlatformAccountUID, Content: v.Content, VideoSHA256: o.SHA256, VideoSize: o.FileSizeBytes, CoverSHA256: f.SHA256, CoverSize: f.SizeBytes}, nil
+	portrait, e := files.ReadSavedReference(tx, v.Content.PortraitCoverFileID)
+	if e != nil {
+		return out, e
+	}
+	if portrait.SHA256 != snap.PortraitCoverSHA || len(portrait.SHA256) != 64 || verifyCoverSpec(portrait, 3, 4) != nil || verifyCoverSpec(f, 16, 9) != nil {
+		return out, repository.ErrInputChanged
+	}
+	return model.ExecutionInput{PortraitCoverSHA256: portrait.SHA256, PortraitCoverSize: portrait.SizeBytes, ProfileID: id, BitProfileID: p.BitProfileID, BitMainUserID: p.BitMainUserID, PlatformUID: v.PlatformAccountUID, Content: v.Content, VideoSHA256: o.SHA256, VideoSize: o.FileSizeBytes, CoverSHA256: f.SHA256, CoverSize: f.SizeBytes}, nil
 }
 func grantExecutionFiles(ctx context.Context, c model.Claim) (FileGrants, error) {
 	var out FileGrants
@@ -163,7 +172,18 @@ func grantExecutionFiles(ctx context.Context, c model.Claim) (FileGrants, error)
 	if e != nil {
 		return out, e
 	}
-	return FileGrants{Video: FileGrant{URL: video, SHA256: i.VideoSHA256, Size: i.VideoSize}, Cover: FileGrant{URL: cover.URL, SHA256: i.CoverSHA256, Size: i.CoverSize}}, nil
+	portrait, e := fsvc.ReadSavedReference(ctx, i.Content.PortraitCoverFileID)
+	if e != nil {
+		return out, e
+	}
+	if portrait.SHA256 != i.PortraitCoverSHA256 || portrait.SizeBytes != i.PortraitCoverSize {
+		return out, ErrConflict
+	}
+	portraitResource, e := fsvc.Resource(ctx, portrait.ResourceToken, true)
+	if e != nil {
+		return out, e
+	}
+	return FileGrants{PortraitCover: FileGrant{URL: portraitResource.URL, SHA256: i.PortraitCoverSHA256, Size: i.PortraitCoverSize}, Video: FileGrant{URL: video, SHA256: i.VideoSHA256, Size: i.VideoSize}, Cover: FileGrant{URL: cover.URL, SHA256: i.CoverSHA256, Size: i.CoverSize}}, nil
 }
 func (s *ExecutionService) readable(a identity.PublicUser, id uint64) (model.Task, error) {
 	v, e := s.Repo.Get(id)

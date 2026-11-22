@@ -14,13 +14,14 @@ import (
 )
 
 type ExecutionReport struct {
-	AttemptID    uint64       `json:"attempt_id,string"`
-	Seq          uint64       `json:"report_seq"`
-	Stage        AttemptStage `json:"stage,omitempty"`
-	PlatformUID  string       `json:"platform_uid,omitempty"`
-	BitProfileID string       `json:"bit_profile_id,omitempty"`
-	VideoSHA256  string       `json:"video_sha256,omitempty"`
-	CoverSHA256  string       `json:"cover_sha256,omitempty"`
+	PortraitCoverSHA256 string       `json:"portrait_cover_sha256,omitempty"`
+	AttemptID           uint64       `json:"attempt_id,string"`
+	Seq                 uint64       `json:"report_seq"`
+	Stage               AttemptStage `json:"stage,omitempty"`
+	PlatformUID         string       `json:"platform_uid,omitempty"`
+	BitProfileID        string       `json:"bit_profile_id,omitempty"`
+	VideoSHA256         string       `json:"video_sha256,omitempty"`
+	CoverSHA256         string       `json:"cover_sha256,omitempty"`
 }
 type Completion struct {
 	AttemptID  uint64          `json:"attempt_id,string"`
@@ -29,13 +30,14 @@ type Completion struct {
 	Result     json.RawMessage `json:"result"`
 }
 type ResultEvidence struct {
-	PlatformUID  string `json:"platform_uid,omitempty"`
-	BitProfileID string `json:"bit_profile_id,omitempty"`
-	VideoSHA256  string `json:"video_sha256,omitempty"`
-	CoverSHA256  string `json:"cover_sha256,omitempty"`
-	ReceiptID    string `json:"receipt_id,omitempty"`
-	NotSubmitted bool   `json:"not_submitted,omitempty"`
-	SceneClosed  bool   `json:"scene_closed,omitempty"`
+	PortraitCoverSHA256 string `json:"portrait_cover_sha256,omitempty"`
+	PlatformUID         string `json:"platform_uid,omitempty"`
+	BitProfileID        string `json:"bit_profile_id,omitempty"`
+	VideoSHA256         string `json:"video_sha256,omitempty"`
+	CoverSHA256         string `json:"cover_sha256,omitempty"`
+	ReceiptID           string `json:"receipt_id,omitempty"`
+	NotSubmitted        bool   `json:"not_submitted,omitempty"`
+	SceneClosed         bool   `json:"scene_closed,omitempty"`
 }
 type ExecutionResult struct {
 	Status         Status         `json:"status"`

@@ -23,7 +23,7 @@ func waitingScene(t *testing.T) (repo.ExecutionStore, model.Claim, model.Task) {
 	if err != nil || c == nil {
 		t.Fatal(err)
 	}
-	r := model.ExecutionReport{AttemptID: c.Attempt.ID, Seq: 1, Stage: model.AttemptStageReady, PlatformUID: c.Attempt.Input.PlatformUID, BitProfileID: c.Attempt.Input.BitProfileID, VideoSHA256: c.Attempt.Input.VideoSHA256, CoverSHA256: c.Attempt.Input.CoverSHA256}
+	r := model.ExecutionReport{AttemptID: c.Attempt.ID, Seq: 1, Stage: model.AttemptStageReady, PlatformUID: c.Attempt.Input.PlatformUID, BitProfileID: c.Attempt.Input.BitProfileID, VideoSHA256: c.Attempt.Input.VideoSHA256, CoverSHA256: c.Attempt.Input.CoverSHA256, PortraitCoverSHA256: c.Attempt.Input.PortraitCoverSHA256}
 	if _, err = s.Report(c.Task, 9, r, true, now); err != nil {
 		t.Fatal(err)
 	}
@@ -66,7 +66,7 @@ func TestLiveHumanResumeKeepsOriginalSceneAndNeverGrantsSubmit(t *testing.T) {
 	if again.Revision != current.Revision {
 		t.Fatal("replay changed task")
 	}
-	r := model.ExecutionReport{AttemptID: c.Attempt.ID, Seq: 3, Stage: model.AttemptStageSubmitting, PlatformUID: c.Attempt.Input.PlatformUID, BitProfileID: c.Attempt.Input.BitProfileID, VideoSHA256: c.Attempt.Input.VideoSHA256, CoverSHA256: c.Attempt.Input.CoverSHA256}
+	r := model.ExecutionReport{AttemptID: c.Attempt.ID, Seq: 3, Stage: model.AttemptStageSubmitting, PlatformUID: c.Attempt.Input.PlatformUID, BitProfileID: c.Attempt.Input.BitProfileID, VideoSHA256: c.Attempt.Input.VideoSHA256, CoverSHA256: c.Attempt.Input.CoverSHA256, PortraitCoverSHA256: c.Attempt.Input.PortraitCoverSHA256}
 	permission, err := s.Report(current, 9, r, true, now)
 	if err != nil || !permission.AllowSubmit {
 		t.Fatalf("fresh submit recheck %+v %v", permission, err)

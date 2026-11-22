@@ -1,4 +1,5 @@
 <script setup>
+import { coverMatchesRatio } from "../coverPreparation.js";
 import { OutputVideoStatus } from "../../compose/outputStatus.js";
 import { computed, ref, watch } from "vue";
 import ResourceRowActions from "../../../shared/ui/resource/ResourceRowActions.vue";
@@ -14,6 +15,7 @@ const props = defineProps({
   visible: Boolean,
   kind: String,
   usage: {type:String, default:"cover"},
+  aspect: Array,
   category: String,
   account: Object,
 });
@@ -81,7 +83,7 @@ function reason(row) {
       ? outputUnavailable(row, props.category, props.account)
       : row.deleted_at
         ? "文件正在删除"
-        : "";
+        : props.usage === "cover" && props.aspect && !coverMatchesRatio(row,...props.aspect) ? `需要${props.aspect.join(":")}且不超过5MB的图片` : "";
 }
 function select(row) {
   if (busy.value || reason(row)) return;

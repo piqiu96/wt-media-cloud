@@ -149,7 +149,7 @@ func TestLiveExecutionReportsNeverCacheSubmitPermissionOrRewriteResult(t *testin
 	if e != nil || claim == nil {
 		t.Fatalf("%+v %v", claim, e)
 	}
-	report := model.ExecutionReport{AttemptID: claim.Attempt.ID, Seq: 1, Stage: "ready", PlatformUID: "uid-a", BitProfileID: "bit-37", VideoSHA256: claim.Attempt.Input.VideoSHA256, CoverSHA256: claim.Attempt.Input.CoverSHA256}
+	report := model.ExecutionReport{AttemptID: claim.Attempt.ID, Seq: 1, Stage: "ready", PlatformUID: "uid-a", BitProfileID: "bit-37", VideoSHA256: claim.Attempt.Input.VideoSHA256, CoverSHA256: claim.Attempt.Input.CoverSHA256, PortraitCoverSHA256: claim.Attempt.Input.PortraitCoverSHA256}
 	if _, e = s.Report(claim.Task, 9, report, true, now); e != nil {
 		t.Fatal(e)
 	}
@@ -207,7 +207,7 @@ func TestLiveExecutionStaleSessionAndStopCannotStartSubmission(t *testing.T) {
 	if e != nil || claim == nil {
 		t.Fatal(e)
 	}
-	ready := model.ExecutionReport{AttemptID: claim.Attempt.ID, Seq: 1, Stage: "ready", PlatformUID: "uid-a", BitProfileID: "bit-37", VideoSHA256: claim.Attempt.Input.VideoSHA256, CoverSHA256: claim.Attempt.Input.CoverSHA256}
+	ready := model.ExecutionReport{AttemptID: claim.Attempt.ID, Seq: 1, Stage: "ready", PlatformUID: "uid-a", BitProfileID: "bit-37", VideoSHA256: claim.Attempt.Input.VideoSHA256, CoverSHA256: claim.Attempt.Input.CoverSHA256, PortraitCoverSHA256: claim.Attempt.Input.PortraitCoverSHA256}
 	if _, e = s.Report(claim.Task, 9, ready, false, now); !errors.Is(e, repo.ErrConflict) {
 		t.Fatal(e)
 	}
@@ -240,7 +240,7 @@ func TestLiveLateSafeUnsubmittedResultRequiresMatchingFrozenEvidence(t *testing.
 	if e = s.InterruptStale(now.Add(91 * time.Second)); e != nil {
 		t.Fatal(e)
 	}
-	result := model.ExecutionResult{Status: "failed", ErrorCode: "UNSUBMITTED_TEST", Evidence: model.ResultEvidence{PlatformUID: "wrong", BitProfileID: c.Attempt.Input.BitProfileID, VideoSHA256: c.Attempt.Input.VideoSHA256, CoverSHA256: c.Attempt.Input.CoverSHA256, NotSubmitted: true, SceneClosed: true}}
+	result := model.ExecutionResult{Status: "failed", ErrorCode: "UNSUBMITTED_TEST", Evidence: model.ResultEvidence{PlatformUID: "wrong", BitProfileID: c.Attempt.Input.BitProfileID, VideoSHA256: c.Attempt.Input.VideoSHA256, CoverSHA256: c.Attempt.Input.CoverSHA256, PortraitCoverSHA256: c.Attempt.Input.PortraitCoverSHA256, NotSubmitted: true, SceneClosed: true}}
 	raw, _ := json.Marshal(result)
 	hash, _ := model.CompletionHash(1, raw)
 	completion := model.Completion{AttemptID: c.Attempt.ID, Seq: 1, ResultHash: hash, Result: raw}
