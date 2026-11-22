@@ -26,10 +26,12 @@ export function outputUnavailable(output, category, account) {
     return output.video?.reason || "视频文件不可用";
   return "";
 }
+export function publicationTextLength(description,topics) {return Array.from(description || "").length + (topics ? 1+Array.from(topics).length : 0);}
 export function contentProblem(form) {
   if (!form.category_id || !form.media_account_id || !form.composite_output_id)
     return "请选择发布类目、账号和成片";
   if (!form.content.description.trim()) return "请填写发布标题";
+  if (publicationTextLength(form.content.description,form.content.topics)>50) return "百度发布标题与话题合计不能超过50字（含分隔空格），请缩短后再确认";
   if (!form.content.cover_file_id) return "请选择发布封面";
   if (!form.content.portrait_cover_file_id) return "请选择或生成3:4竖版封面";
   if (!form.content.declaration) return "请按内容事实选择创作声明";

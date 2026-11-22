@@ -71,3 +71,11 @@ it('does not offer a server-occupied output even while its production status is 
  expect(outputUnavailable({...output,occupied:true},4,{team_id:1})).toBe('该成片已被当前平台的任务占用');
  expect(outputUnavailable({...output,occupied:false},4,{team_id:1})).toBe('');
 });
+
+it("checks Baidu's combined text budget without truncating the draft",()=>{
+ const form={category_id:'4',media_account_id:'9',composite_output_id:'135',content:{description:'字'.repeat(40),topics:'#'+'话'.repeat(10),cover_file_id:'31',portrait_cover_file_id:'32',declaration:'无需声明',confirmed:true}};
+ expect(contentProblem(form)).toContain('50字');
+ expect(form.content.description).toBe('字'.repeat(40));
+ form.content.topics='#'+'话'.repeat(8);
+ expect(contentProblem(form)).toBe('');
+});

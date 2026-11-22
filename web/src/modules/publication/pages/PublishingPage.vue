@@ -37,6 +37,7 @@ import { createFilesClient } from "../../../shared/api/files.js";
 import {
   definitivePublicationRejection,
   contentProblem,
+  publicationTextLength,
   outputUnavailable,
 } from "../eligibility.js";
 import { PublicationStatus, publicationStatuses } from "../status.js";
@@ -1202,7 +1203,7 @@ onMounted(async () => {
               :maxlength="200"
               :disabled="frozen"
               @change="invalidate"
-          /></label>
+          /><small>标题与话题合计 {{ publicationTextLength(form.content.description, form.content.topics) }}/50 字（含分隔空格）</small></label>
           <label
             ><ResourceRequiredLabel>创作声明</ResourceRequiredLabel><t-select
               v-model="form.content.declaration"

@@ -75,3 +75,52 @@ func TestGenerationRequiresAllSelectedValidFieldsAndNoExtraOutput(t *testing.T) 
 		}
 	}
 }
+
+func TestGenerationRejectsCombinedBaiduTextBeforeAdoption(t *testing.T) {
+	s, a, _ := fixture()
+	s.GenerateJSON = func(context.Context, string, string) (string, error) {
+		return `{"description":"` + strings.Repeat("字", 40) + `","topics":"#` + strings.Repeat("话", 10) + `"}`, nil
+	}
+	run, err := s.PreparePublicationGeneration(a, generationInput())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = run(context.Background()); err == nil {
+		t.Fatal("combined text exceeding 50 characters accepted")
+	}
+}
+
+func TestGenerationCanShortenOverlongHumanDraft(t *testing.T) {
+	s, a, _ := fixture()
+	in := generationInput()
+	in.Content["description"] = strings.Repeat("长", 100)
+	s.GenerateJSON = func(context.Context, string, string) (string, error) {
+		return `{"description":"精简标题","topics":"#实战"}`, nil
+	}
+	run, err := s.PreparePublicationGeneration(a, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len([]rune(in.Content["description"])) != 100 {
+		t.Fatal("original human text changed")
+	}
+}
+
+func TestCreateRefusesCombinedTextOverLimitWithoutTruncation(t *testing.T) {
+	s, a, in := fixture()
+	in.Content.Description = strings.Repeat("字", 40)
+	in.Content.Topics = "#" + strings.Repeat("话", 10)
+	if _, err := s.Create(context.Background(), a, in); err == nil {
+		t.Fatal("overlong platform text accepted")
+	}
+	if len(s.Repo.(*memoryTasks).items) != 0 {
+		t.Fatal("invalid text occupied output")
+	}
+	in.Content.Topics = "#" + strings.Repeat("话", 8)
+	if _, err := s.Create(context.Background(), a, in); err != nil {
+		t.Fatal(err)
+	}
+}

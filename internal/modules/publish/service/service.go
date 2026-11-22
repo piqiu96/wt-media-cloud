@@ -149,7 +149,7 @@ func (s *Service) Summary(a identity.PublicUser, f Filter) (map[string]int64, er
 }
 
 func contentValid(c model.Content) bool {
-	return strings.TrimSpace(c.Description) != "" && utf8.RuneCountInString(c.Description) <= 1000 && c.CoverFileID > 0 && c.PortraitCoverFileID > 0 && c.Declaration == "无需声明" && utf8.RuneCountInString(c.Topics) <= 200 && c.Confirmed
+	return strings.TrimSpace(c.Description) != "" && publicationTextLength(c.Description, c.Topics) <= 50 && c.CoverFileID > 0 && c.PortraitCoverFileID > 0 && c.Declaration == "无需声明" && utf8.RuneCountInString(c.Topics) <= 200 && c.Confirmed
 }
 func (s *Service) Create(ctx context.Context, a identity.PublicUser, in CreateInput) (model.Task, error) {
 	if a.ID <= 0 || a.Status != identity.UserStatusEnabled {
