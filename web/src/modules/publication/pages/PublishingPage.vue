@@ -255,7 +255,6 @@ async function changeCategory(category) {
       return;
   }
   draftResourceIssue.value = {};
-  draftNotice.value = "";
   form.value = emptyForm();
   form.value.category_id = category;
   account.value = null;
@@ -284,7 +283,7 @@ function initializeCreate() {
   baseline.value = JSON.stringify({ form: form.value, schedule: "", cover_config:coverConfig.value,portrait_cover_config:portraitCoverConfig.value });
   view.value = "form";
 }
-const draftPersistent = ref(false), draftReady = ref(false), draftNotice = ref("");
+const draftPersistent = ref(false), draftReady = ref(false);
 const draftResourceIssue = ref({}), draftConflict = ref(false);
 let draftClient = null;
 function draftPayload() {
@@ -320,7 +319,6 @@ async function openCreate(sourceOutput = null, copyInput = null, copyUserId = nu
     initializeCreate();
     draftResourceIssue.value = {};
     draftConflict.value = false;
-    draftNotice.value = "";
     if (choice === "continue") await restoreDraft(previous.payload);
     else if (copyInput) {
       form.value.platform = copyInput.platform;
@@ -328,7 +326,7 @@ async function openCreate(sourceOutput = null, copyInput = null, copyUserId = nu
       form.value.content.description = copyInput.content.description;
       form.value.content.topics = copyInput.content.topics;
       form.value.content.declaration = copyInput.content.declaration;
-      draftNotice.value = "已复制文案、话题和声明；请重新选择账号、成片和封面，并核对确认内容。";
+      feedback.toast.info("已复制文案、话题和声明；请重新选择账号、成片和封面，并核对确认内容。");
     } else if (sourceOutput?.id) {
       source.value = true;
       setOutput(sourceOutput);
@@ -379,7 +377,7 @@ async function restoreDraft(payload) {
     }
   }
   await restorePortraitCover(payload);
-  draftNotice.value = "已恢复填写，资源可用性已重新检查；请重新核对内容。";
+  feedback.toast.info("已恢复填写，请重新核对内容；不可用资源已在对应位置标明。");
 }
 async function restorePortraitCover(payload) {
   portraitCover.value = null;
@@ -637,7 +635,6 @@ async function edit(row) {
     ]);
     draftReady.value = false;
     draftResourceIssue.value = {};
-    draftNotice.value = "";
     draftConflict.value = false;
     editing.value = v;
     account.value = a;
@@ -784,14 +781,14 @@ function picked(row) {
     delete draftResourceIssue.value.output;
     setOutput(row);
   } else if(coverTarget.value==="portrait") {
-    if(!coverMatchesRatio(row,3,4)){formError.value="请选择3:4且不超过5MB的竖版封面";return;}
+    if(!coverMatchesRatio(row,3,4)){feedback.toast.error("请选择3:4且不超过5MB的竖版封面");return;}
     portraitCover.value=row;
     portraitCoverConfig.value={...portraitCoverConfig.value,method:"image"};
     form.value.content.portrait_cover_file_id=String(row.id);
     delete form.value.content.portrait_cover_render;
     delete draftResourceIssue.value.portrait_cover;
   } else {
-    if(!coverMatchesRatio(row,16,9)){formError.value="请选择16:9且不超过5MB的横版封面";return;}
+    if(!coverMatchesRatio(row,16,9)){feedback.toast.error("请选择16:9且不超过5MB的横版封面");return;}
     delete draftResourceIssue.value.cover;
     delete form.value.content.cover_render;
     coverConfig.value = {...coverConfig.value,method:"image"};
@@ -1114,15 +1111,13 @@ onMounted(async () => {
       @back="back"
     >
       <FeedbackAlert v-if="formError" theme="error" :message="formError" />
-      <FeedbackAlert v-if="!editing" theme="info" :message="draftPersistent ? '保存草稿后重启可继续；不占用成片，也不会启动发布。' : '填写仅暂存于当前应用；刷新、关闭或退出登录后清空。'" />
       <t-button v-if="draftConflict" theme="default" variant="outline" :disabled="busy" @click="reloadDraft">读取最新草稿</t-button>
-      <FeedbackAlert v-if="draftNotice" theme="info" :message="draftNotice" />
-      <FeedbackAlert v-if="Object.values(draftResourceIssue).some(Boolean)" theme="warning" :message="Object.values(draftResourceIssue).filter(Boolean).join('；')" />
       <div class="quick-publish">
         <section class="resource-editor-section quick-block">
           <h3>
             <span>01</span>{{ editing ? "发布资源（已锁定）" : "选择发布平台与账号" }}
           </h3>
+          <FeedbackAlert v-if="draftResourceIssue.account || draftResourceIssue.output" theme="error" :message="[draftResourceIssue.account, draftResourceIssue.output].filter(Boolean).join('；')" />
           <div class="quick-resource-grid">
             <label
               ><ResourceRequiredLabel>发布平台</ResourceRequiredLabel><t-select
@@ -1189,11 +1184,13 @@ onMounted(async () => {
           <div class="quick-cover-field">
             <label class="quick-field-heading"><ResourceRequiredLabel>发布封面</ResourceRequiredLabel><ResourceFieldHelp label="发布封面" content="使用现成图片或选择模板添加文字。默认使用成片真实封面；百度需要16:9横版和3:4竖版封面，单张不超过5MB；分别选择图片或匹配模板生成。" /></label>
             <h4>横版封面 · 16:9</h4>
+            <FeedbackAlert v-if="draftResourceIssue.cover" theme="error" :message="draftResourceIssue.cover" />
             <div class="quick-cover-workspace">
               <div class="publication-cover-preview"><button v-if="cover?.resource_path" type="button" class="publication-image-button" aria-label="预览发布封面" @click="previewImage(cover.resource_path, cover.name)"><img :src="files.resourceURL(cover)" alt="当前发布封面" /><span>预览封面</span></button><div v-else class="publication-cover-empty">请选择图片或生成封面</div></div>
               <PublishingCoverEditor :config="coverConfig" :output="output" :category="form.category_id" :disabled="frozen" @update:config="updateCoverConfig" @rendered="useRenderedCover" @choose-image="chooseCoverImage('horizontal')" @use-output="useOutputCover" />
             </div>
             <h4>竖版封面 · 3:4</h4>
+            <FeedbackAlert v-if="draftResourceIssue.portrait_cover" theme="error" :message="draftResourceIssue.portrait_cover" />
             <div class="quick-cover-workspace">
               <div class="publication-cover-preview"><button v-if="portraitCover?.resource_path" type="button" class="publication-image-button" aria-label="预览竖版封面" @click="previewImage(portraitCover.resource_path, portraitCover.name)"><img :src="files.resourceURL(portraitCover)" alt="当前竖版封面" /><span>预览封面</span></button><div v-else class="publication-cover-empty">请选择图片或生成竖版封面</div></div>
               <PublishingCoverEditor :config="portraitCoverConfig" :aspect="[3,4]" :output="output" :category="form.category_id" :disabled="frozen" @update:config="updatePortraitConfig" @rendered="usePortraitArtwork" @choose-image="chooseCoverImage('portrait')" @use-output="usePortraitOutput" />
@@ -1230,7 +1227,7 @@ onMounted(async () => {
         </section>
       </div>
       <template #footer
-        ><t-button v-if="!editing" theme="default" variant="outline" :disabled="busy" @click="saveDraft">保存草稿</t-button
+        ><span v-if="!editing" class="publication-draft-help">{{ draftPersistent ? '保存草稿后可重启续编，不占用成片或启动发布。' : '仅暂存当前填写；刷新、关闭或退出登录后清空。' }}</span><t-button v-if="!editing" theme="default" variant="outline" :disabled="busy" @click="saveDraft">保存草稿</t-button
         ><t-button :loading="busy" @click="submit">{{
           pendingRequest ? "查询创建结果" : editing ? "保存" : "创建任务"
         }}</t-button></template
@@ -1316,6 +1313,8 @@ onMounted(async () => {
   </div>
 </template>
 <style scoped>
+.publication-draft-help { margin-right: auto; color: var(--wt-text-secondary); font-size: 12px; line-height: 20px; overflow-wrap: anywhere; }
+@media (max-width: 680px) { .publication-draft-help { flex-basis: 100%; } }
 .publication-content-cell {
   display: flex;
   align-items: center;

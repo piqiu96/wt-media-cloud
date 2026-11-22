@@ -12,7 +12,7 @@ defineProps({ tone: { type: String, default: 'neutral' }, title: { type: String,
 </template>
 
 <style scoped>
-.resource-notice { display: flex; align-items: center; gap: 8px; margin: 12px 0; color: var(--wt-text-tertiary); font-size: 12px; line-height: 1.7; overflow-wrap: anywhere; }
+.resource-notice { display: flex; align-items: flex-start; gap: 8px; margin: 12px 0; color: var(--wt-text-secondary); font-size: 12px; line-height: 20px; overflow-wrap: anywhere; }
 .resource-notice:first-child { margin-top: 0; }
 .resource-notice:last-child { margin-bottom: 0; }
 .resource-notice.is-warning, .resource-notice.is-info, .resource-notice.is-success, .resource-notice.has-details { padding: 8px 16px; min-height: 48px; box-sizing: border-box; border: 1px solid var(--wt-border); border-radius: 6px; background: var(--wt-color-bg-subtle); color: var(--wt-text-primary); font-size: 13px; }
@@ -23,7 +23,7 @@ defineProps({ tone: { type: String, default: 'neutral' }, title: { type: String,
 .resource-notice > .resource-notice__actions { flex: 0 1 auto; display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
 @media (max-width: 680px) { .resource-notice:has(.resource-notice__actions) { flex-wrap: wrap; } .resource-notice > .resource-notice__actions { flex-basis: 100%; margin-left: 24px; } }
 .resource-notice > div { flex: 1; min-width: 0; }
-.resource-notice__icon { flex: 0 0 16px; margin-top: 3px; color: var(--wt-text-tertiary); }
+.resource-notice__icon { flex: 0 0 16px; margin-top: 2px; color: var(--wt-text-tertiary); }
 .resource-notice.is-warning .resource-notice__icon { color: var(--wt-warning); }
 .resource-notice details { margin-top: 4px; }
 .resource-notice summary { display: flex; align-items: center; gap: 6px; cursor: pointer; width: fit-content; color: var(--wt-primary); list-style: none; border-radius: 4px; }

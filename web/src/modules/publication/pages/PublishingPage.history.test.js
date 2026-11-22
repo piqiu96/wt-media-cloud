@@ -21,7 +21,7 @@ vi.mock('../../../shared/api/publication.js', () => ({ createPublicationClient: 
 vi.mock('../../../shared/api/compose.js', () => ({ createComposeClient: () => services.compose }));
 vi.mock('../../../shared/api/mediaAccounts.js', () => ({ createMediaAccountClient: () => services.accounts }));
 vi.mock('../../../shared/api/files.js', () => ({ createFilesClient: () => ({}) }));
-vi.mock('../../../shared/ui/feedback/index.js', () => ({ feedback: { toast: { success: vi.fn() }, confirmWarning: vi.fn(async () => true) } }));
+vi.mock('../../../shared/ui/feedback/index.js', () => ({ feedback: { toast: { error: vi.fn(), info: vi.fn(), success: vi.fn() }, confirmWarning: vi.fn(async () => true) } }));
 vi.mock('vue-router', () => ({ useRoute: () => ({ query: {} }), useRouter: () => ({ push: vi.fn() }), onBeforeRouteLeave: vi.fn() }));
 import PublishingPage from './PublishingPage.vue';
 import { feedback } from '../../../shared/ui/feedback/index.js';
@@ -452,5 +452,6 @@ it('refuses a landscape image for the portrait slot without replacing either cov
  await state.openCreate();state.form.value.content.cover_file_id='11';state.form.value.content.portrait_cover_file_id='12';
  state.chooseCoverImage('portrait');state.picked({id:'13',width:1280,height:720});
  expect(state.form.value.content.cover_file_id).toBe('11');expect(state.form.value.content.portrait_cover_file_id).toBe('12');
- expect(state.formError.value).toContain('3:4');
+ expect(feedback.toast.error).toHaveBeenCalledWith('请选择3:4且不超过5MB的竖版封面');
+ expect(state.formError.value).toBe('');
 });

@@ -11,13 +11,14 @@ import { loginStatusText } from '../../../shared/utils/mediaAccountLabels.js';
 import ResourceOverlay from '../../../shared/ui/resource/ResourceOverlay.vue';
 import ResourceSection from '../../../shared/ui/resource/ResourceSection.vue';
 import ResourceDescriptions from '../../../shared/ui/resource/ResourceDescriptions.vue';
+import { feedback } from '../../../shared/ui/feedback/index.js';
 import FeedbackAlert from '../../../shared/ui/feedback/FeedbackAlert.vue';
 
 const props = defineProps({ visible: Boolean, accountId: String });
 const emit = defineEmits(['update:visible']);
 const accounts = createMediaAccountClient(), profiles = createProfileBindingClient(), session = createSessionClient();
 const account = ref(null), profile = ref(null), user = ref(null);
-const loading = ref(false), opening = ref(false), error = ref(''), notice = ref('');
+const loading = ref(false), opening = ref(false), error = ref('');
 let sequence = 0;
 const openHint = computed(() => {
   if (!account.value) return '请先读取账号信息';
@@ -33,7 +34,7 @@ const openHint = computed(() => {
 async function load() {
   const n = ++sequence;
   account.value = null; profile.value = null; user.value = null;
-  loading.value = true; error.value = ''; notice.value = '';
+  loading.value = true; error.value = '';
   try {
     const [current, me] = await Promise.all([accounts.get(props.accountId), session.me()]);
     if (n !== sequence || !props.visible) return false;
@@ -57,14 +58,14 @@ async function openWindow() {
     if (!(await load())) return;
     if (openHint.value) { error.value = openHint.value; return; }
     await createLocalAgentService({ invoke }).profileOpen(String(profile.value.bit_profile_id));
-    notice.value = `已打开浏览器窗口：${profile.value.bit_name || '绑定窗口'}`;
+    feedback.toast.success(`已打开浏览器窗口：${profile.value.bit_name || '绑定窗口'}`);
   } catch (e) { error.value = executionErrorMessage(e); }
   finally { opening.value = false; }
 }
 function close() { if (!opening.value) emit('update:visible', false); }
 watch(() => [props.visible, props.accountId], ([visible]) => {
   if (visible) load();
-  else { sequence++; loading.value = false; account.value = null; profile.value = null; error.value = ''; notice.value = ''; }
+  else { sequence++; loading.value = false; account.value = null; profile.value = null; error.value = ''; }
 }, { immediate: true });
 onBeforeUnmount(() => { sequence++; });
 </script>
@@ -73,7 +74,6 @@ onBeforeUnmount(() => { sequence++; });
   <ResourceOverlay :visible="visible" title="账号信息" :width="640" :busy="opening" form-actions @update:visible="value => { if (!value) close(); }">
     <p v-if="loading" role="status">正在读取账号信息…</p>
     <FeedbackAlert v-if="error" theme="error" :message="error"><template #operation><t-button variant="text" :disabled="opening || loading" @click="load">重新读取</t-button></template></FeedbackAlert>
-    <FeedbackAlert v-if="notice" theme="success" :message="notice" />
     <template v-if="account">
       <ResourceSection title="账号概况">
         <ResourceDescriptions>
