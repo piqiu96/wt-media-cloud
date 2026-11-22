@@ -22,6 +22,7 @@ import ResourceDetailPage from "../../../shared/ui/resource/ResourceDetailPage.v
 import ResourceRowActions from "../../../shared/ui/resource/ResourceRowActions.vue";
 import { opColumnWidth } from "../../../shared/ui/resource/opColumnWidth.js";
 import BusinessStatus from "../../../shared/ui/BusinessStatus.vue";
+import FormError from "../../../shared/ui/feedback/FormError.vue";
 import FeedbackAlert from "../../../shared/ui/feedback/FeedbackAlert.vue";
 import { feedback } from "../../../shared/ui/feedback/index.js";
 import { createPublicationClient } from "../../../shared/api/publication.js";
@@ -36,7 +37,7 @@ import { accountUnavailable } from "../eligibility.js";
 import { createFilesClient } from "../../../shared/api/files.js";
 import {
   definitivePublicationRejection,
-  contentProblem,
+  contentIssue,
   publicationTextLength,
   outputUnavailable,
 } from "../eligibility.js";
@@ -240,6 +241,7 @@ function query() {
 }
 function invalidate() {
   formError.value = "";
+  validationField.value = "";
   if (form.value) form.value.content.confirmed = false;
 }
 async function changeCategory(category) {
@@ -279,10 +281,12 @@ function initializeCreate() {
   schedule.value = "";
   form.value = emptyForm();
   formError.value = "";
+  validationField.value = "";
   pendingRequest.value = null;
   baseline.value = JSON.stringify({ form: form.value, schedule: "", cover_config:coverConfig.value,portrait_cover_config:portraitCoverConfig.value });
   view.value = "form";
 }
+const validationField = ref("");
 const draftPersistent = ref(false), draftReady = ref(false);
 const draftResourceIssue = ref({}), draftConflict = ref(false);
 let draftClient = null;
@@ -438,6 +442,7 @@ async function saveDraft() {
   if (busy.value || !draftReady.value || editing.value) return false;
   busy.value = true;
   formError.value = "";
+  validationField.value = "";
   try {
     await draftClient.save(draftPayload());
     baseline.value = JSON.stringify({ form: form.value, schedule: schedule.value, cover_config:coverConfig.value,portrait_cover_config:portraitCoverConfig.value });
@@ -451,6 +456,7 @@ async function reloadDraft() {
   if (!(await feedback.confirmWarning({ title: "读取最新草稿？", message: "最新草稿会替换当前填写，当前未保存修改将丢失。", confirmText: "读取最新草稿", cancelText: "保留当前填写" }))) return;
   busy.value = true;
   formError.value = "";
+  validationField.value = "";
   try {
     const current = await draftClient.get({ reload: true });
     draftResourceIssue.value = {};
@@ -663,6 +669,7 @@ async function edit(row) {
       cover_config:coverConfig.value,portrait_cover_config:portraitCoverConfig.value,
     });
     formError.value = "";
+  validationField.value = "";
     pendingRequest.value = null;
     view.value = "form";
   } catch (e) {
@@ -802,9 +809,12 @@ function picked(row) {
 async function submit() {
   if (busy.value) return;
   formError.value = "";
-  const problem = !pendingRequest.value && ((!editing.value && Object.values(draftResourceIssue.value).find(Boolean)) || contentProblem(form.value));
-  if (problem) {
-    formError.value = problem;
+  validationField.value = "";
+  const resourceProblem = !editing.value && Object.values(draftResourceIssue.value).find(Boolean);
+  const issue = !pendingRequest.value && contentIssue(form.value);
+  if (!pendingRequest.value && (resourceProblem || issue)) {
+    // Resource restoration already shows the exact reason next to that resource.
+    if (!resourceProblem) { formError.value = issue.message; validationField.value = issue.field; }
     return;
   }
   busy.value = true;
@@ -1110,7 +1120,7 @@ onMounted(async () => {
       :back-label="source ? '返回成片管理' : '返回发布任务列表'"
       @back="back"
     >
-      <FeedbackAlert v-if="formError" theme="error" :message="formError" />
+      <FeedbackAlert v-if="formError && !validationField" theme="error" :message="formError" />
       <t-button v-if="draftConflict" theme="default" variant="outline" :disabled="busy" @click="reloadDraft">读取最新草稿</t-button>
       <div class="quick-publish">
         <section class="resource-editor-section quick-block">
@@ -1118,6 +1128,7 @@ onMounted(async () => {
             <span>01</span>{{ editing ? "发布资源（已锁定）" : "选择发布平台与账号" }}
           </h3>
           <FeedbackAlert v-if="draftResourceIssue.account || draftResourceIssue.output" theme="error" :message="[draftResourceIssue.account, draftResourceIssue.output].filter(Boolean).join('；')" />
+          <FormError id="publication-resource-error" v-if="validationField === 'resource'" :message="formError" />
           <div class="quick-resource-grid">
             <label
               ><ResourceRequiredLabel>发布平台</ResourceRequiredLabel><t-select
@@ -1175,21 +1186,25 @@ onMounted(async () => {
             ><ResourceRequiredLabel>发布标题</ResourceRequiredLabel><t-textarea
               v-model="form.content.description"
               aria-label="发布标题"
+              :aria-describedby="validationField === 'text' && formError ? 'publication-text-error' : undefined"
               placeholder="默认带入素材标题，可修改"
               :maxlength="1000"
               :autosize="{ minRows: 3, maxRows: 5 }"
               :disabled="frozen"
               @change="invalidate"
           /></label>
+          <FormError id="publication-text-error" v-if="validationField === 'text'" :message="formError" />
           <div class="quick-cover-field">
             <label class="quick-field-heading"><ResourceRequiredLabel>发布封面</ResourceRequiredLabel><ResourceFieldHelp label="发布封面" content="使用现成图片或选择模板添加文字。默认使用成片真实封面；百度需要16:9横版和3:4竖版封面，单张不超过5MB；分别选择图片或匹配模板生成。" /></label>
             <h4>横版封面 · 16:9</h4>
+            <FormError id="publication-cover-error" v-if="validationField === 'cover'" :message="formError" />
             <FeedbackAlert v-if="draftResourceIssue.cover" theme="error" :message="draftResourceIssue.cover" />
             <div class="quick-cover-workspace">
               <div class="publication-cover-preview"><button v-if="cover?.resource_path" type="button" class="publication-image-button" aria-label="预览发布封面" @click="previewImage(cover.resource_path, cover.name)"><img :src="files.resourceURL(cover)" alt="当前发布封面" /><span>预览封面</span></button><div v-else class="publication-cover-empty">请选择图片或生成封面</div></div>
               <PublishingCoverEditor :config="coverConfig" :output="output" :category="form.category_id" :disabled="frozen" @update:config="updateCoverConfig" @rendered="useRenderedCover" @choose-image="chooseCoverImage('horizontal')" @use-output="useOutputCover" />
             </div>
             <h4>竖版封面 · 3:4</h4>
+            <FormError id="publication-portrait-error" v-if="validationField === 'portrait'" :message="formError" />
             <FeedbackAlert v-if="draftResourceIssue.portrait_cover" theme="error" :message="draftResourceIssue.portrait_cover" />
             <div class="quick-cover-workspace">
               <div class="publication-cover-preview"><button v-if="portraitCover?.resource_path" type="button" class="publication-image-button" aria-label="预览竖版封面" @click="previewImage(portraitCover.resource_path, portraitCover.name)"><img :src="files.resourceURL(portraitCover)" alt="当前竖版封面" /><span>预览封面</span></button><div v-else class="publication-cover-empty">请选择图片或生成竖版封面</div></div>
@@ -1199,7 +1214,7 @@ onMounted(async () => {
           <label
             >话题<t-input
               v-model="form.content.topics"
-              aria-label="话题"
+              aria-label="话题" :aria-describedby="validationField === 'text' && formError ? 'publication-text-error' : undefined"
               :maxlength="200"
               :disabled="frozen"
               @change="invalidate"
@@ -1208,11 +1223,13 @@ onMounted(async () => {
             ><ResourceRequiredLabel>创作声明</ResourceRequiredLabel><t-select
               v-model="form.content.declaration"
               aria-label="创作声明"
+              :aria-describedby="validationField === 'declaration' && formError ? 'publication-declaration-error' : undefined"
               :options="[{ label: '无需声明', value: '无需声明' }]"
               placeholder="按内容事实选择"
               :disabled="frozen"
               @change="invalidate"
           /></label>
+          <FormError id="publication-declaration-error" v-if="validationField === 'declaration'" :message="formError" />
           </div>
         </section>
         <section v-if="output || form.composite_output_id" class="resource-editor-section quick-block">
@@ -1221,9 +1238,10 @@ onMounted(async () => {
             <label>发布方式<t-input value="自动发布" disabled /></label>
             <label><span class="quick-field-heading">最早执行时间<ResourceFieldHelp label="最早执行时间" content="留空表示确认执行后尽快发布；指定时间为最早开始执行时间。创建任务后仍需单独确认执行。" /></span><ResourceDateTime v-model:value="schedule" aria-label="最早执行时间" :disabled="frozen" /></label>
           </div>
-          <t-checkbox v-model="form.content.confirmed" :disabled="frozen"
+          <t-checkbox v-model="form.content.confirmed" :disabled="frozen" :aria-describedby="validationField === 'confirmation' && formError ? 'publication-confirmation-error' : undefined" @change="formError = ''"
             >已核对当前文案、封面和声明，确认内容可用</t-checkbox
           >
+          <FormError id="publication-confirmation-error" v-if="validationField === 'confirmation'" :message="formError" />
         </section>
       </div>
       <template #footer

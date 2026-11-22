@@ -79,3 +79,14 @@ it("checks Baidu's combined text budget without truncating the draft",()=>{
  form.content.topics='#'+'话'.repeat(8);
  expect(contentProblem(form)).toBe('');
 });
+
+// Field targets are presentation metadata; preserve the original validation order.
+it('targets title and topic validation at their fields', async () => {
+ const { contentIssue } = await import('./eligibility.js');
+ const form = { category_id:'1', media_account_id:'2', composite_output_id:'3', content:{description:'',topics:''} };
+ expect(contentIssue(form)).toEqual({field:'text',message:'请填写发布标题'});
+ form.content.description='字'.repeat(51);
+ expect(contentIssue(form).field).toBe('text');
+ form.content.description='有效标题';
+ expect(contentIssue(form).field).toBe('cover');
+});
