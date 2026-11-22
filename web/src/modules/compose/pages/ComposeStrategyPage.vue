@@ -659,7 +659,7 @@ const runTableScroll = computed(() => ({ x: `${runColumns.reduce((sum, column) =
 
 <template>
   <t-loading :loading="loading" :show-overlay="true">
-    <div class="wt-resource-page resource-visual-approved production-page strategy-page">
+    <div class="wt-resource-page resource-visual-approved resource-list-page production-page strategy-page">
       <FeedbackAlert v-if="error" theme="error" :message="error" closable style="margin-bottom:16px" @close="error=''" />
       <ResourcePageHeader title="合成策略" description="设置制作方法、选材条件和执行时间。">
         <template #actions>
@@ -668,7 +668,7 @@ const runTableScroll = computed(() => ({ x: `${runColumns.reduce((sum, column) =
       </ResourcePageHeader>
 
       <!-- 筛选区与表格同卡（与内容池一致）：filter-bar 自带分隔线，下方接表格与分页。 -->
-      <ResourceCard class="strategy-card">
+      <ResourceCard class="resource-list-panel strategy-card">
         <ResourceFilterBar>
           <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">综合搜索</span><t-input v-model="filters.search" clearable placeholder="策略名称 / ID" @enter="query" /></label>
           <label class="wt-filter-field"><span class="wt-filter-field__label">类目</span><BusinessSelect kind="category" filter v-model="filters.category_id" clearable>
@@ -688,7 +688,7 @@ const runTableScroll = computed(() => ({ x: `${runColumns.reduce((sum, column) =
             <t-button class="wt-secondary-button" variant="outline" @click="resetFilters">重置</t-button>
             </div>
 </ResourceFilterBar>
-        <div class="table-scroll-wrap">
+        <div class="table-scroll-wrap resource-data-table">
           <t-table class="wt-resource-table" :data="pagedRows" :columns="columns" row-key="id" hover size="small" :scroll="tableScroll" empty="暂无合成策略">
             <template #id="{ row }"><span class="strategy-id">{{ row.id }}</span></template>
             <template #name="{ row }">
@@ -830,7 +830,7 @@ const runTableScroll = computed(() => ({ x: `${runColumns.reduce((sum, column) =
               </ResourceFilterBar>
               <p v-if="runHistoryError" class="strategy-run-message">{{ runHistoryError }} <t-link theme="primary" @click="loadRunHistory(detailRow.id)">重试</t-link></p>
               <t-loading v-else :loading="runHistoryLoading" :show-overlay="true">
-                <div class="table-scroll-wrap">
+                <div class="table-scroll-wrap resource-data-table resource-embedded-table">
                   <t-table class="wt-resource-table" :data="runHistory" :columns="runColumns" row-key="run_key" hover size="small" :scroll="runTableScroll" empty="暂无运行记录">
                     <template #batch_id="{ row }">{{ row.batch_id || '—' }}</template>
                     <template #created_at="{ row }">{{ formatDateTime(row.created_at) }}</template>

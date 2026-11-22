@@ -294,11 +294,11 @@ function hasFailed(task) {
 
 <template>
   <t-loading :loading="loading" :show-overlay="true">
-    <div class="wt-resource-page resource-visual-approved task-page">
+    <div class="wt-resource-page resource-visual-approved resource-list-page task-page">
       <FeedbackAlert v-if="error" theme="error" :message="error" closable style="margin-bottom:16px" @close="error=''" />
       <ResourcePageHeader title="挖掘任务" description="查看发现结果和执行记录，处理失败任务。" />
 
-      <ResourceCard class="task-card">
+      <ResourceCard class="resource-list-panel task-card">
         <ResourceFilterBar>
           <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">综合搜索</span><t-input v-model="filters.search" clearable placeholder="搜索任务 ID / 任务名称 / 来源策略" @enter="load" /></label>
           <label v-if="isAdmin" class="wt-filter-field"><span class="wt-filter-field__label">运营团队</span><BusinessSelect kind="team" filter v-model="teamFilter" clearable @change="changeTeamFilter"><t-option v-for="team in teams" :key="team.id" :value="team.id" :label="team.name" /></BusinessSelect></label>
@@ -311,7 +311,7 @@ function hasFailed(task) {
           </t-select></label>
           <div class="wt-filter-actions"><t-button theme="primary" @click="load">查询</t-button><t-button class="wt-secondary-button" variant="outline" @click="resetFilters">重置</t-button></div>
         </ResourceFilterBar>
-        <div class="table-scroll-wrap">
+        <div class="table-scroll-wrap resource-data-table">
           <t-table class="wt-resource-table" :data="pagedRows" :columns="columns" row-key="id" hover :scroll="tableScroll" empty="暂无挖掘任务">
             <template #name="{ row }">
               <span class="task-name" :title="taskName(row)">{{ taskName(row) }}</span>
@@ -367,7 +367,7 @@ function hasFailed(task) {
             </t-tab-panel>
 
             <t-tab-panel value="items" :label="contentTabLabel" :destroy-on-hide="true">
-              <t-table class="wt-resource-table" :data="pagedContents" :columns="resultColumns" row-key="platform_content_id" hover :scroll="resultScroll" empty="暂无内容">
+              <t-table class="wt-resource-table resource-data-table resource-embedded-table is-summary" :data="pagedContents" :columns="resultColumns" row-key="platform_content_id" hover :scroll="resultScroll" empty="暂无内容">
                 <template #content="{ row }">
                   <div class="task-content-cell">
                     <img v-if="row.cover_url && !failedCovers.has(row.cover_url)" @error="failedCovers.add(row.cover_url)" class="result-cover" :src="row.cover_url" alt="" loading="lazy" referrerpolicy="no-referrer" />

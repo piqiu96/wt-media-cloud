@@ -322,10 +322,10 @@ onMounted(() => {
 
 <template>
   <t-loading :loading="loading" :show-overlay="true">
-    <div class="wt-resource-page resource-visual-approved production-page my-materials-page">
+    <div class="wt-resource-page resource-visual-approved resource-list-page production-page my-materials-page">
       <FeedbackAlert v-if="error" theme="error" :message="error" closable style="margin-bottom:16px" @close="error=''" />
       <ResourcePageHeader title="我的素材" description="管理已加入的素材，查看使用情况并下载。" />
-      <ResourceCard class="material-table-card">
+      <ResourceCard class="resource-list-panel material-table-card">
         <ResourceFilterBar>
           <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">综合搜索</span><t-input v-model="search" clearable placeholder="名称 / 作者 / ID" @enter="load({ applyFilters: true })" /></label>
           <label class="wt-filter-field"><span class="wt-filter-field__label">类目</span><BusinessSelect kind="category" filter v-model="categoryFilters" multiple clearable><t-option v-for="category in categories" :key="category.id" :value="category.id" :label="category.name" /></BusinessSelect></label>
@@ -338,7 +338,7 @@ onMounted(() => {
         </ResourceFilterBar>
         <ResourceSelectionToolbar :count="selectedRowKeys.length" unit="条素材" @clear="selectedRowKeys=[]"><t-button variant="outline" :loading="batchLoading" :disabled="Boolean(downloadReason)" :title="downloadReason" @click="batchDownload">下载（{{ selectedRowKeys.length }}）</t-button></ResourceSelectionToolbar>
         <p v-if="downloadReason" class="wt-download-reason">{{ downloadReason }}</p>
-        <div class="table-scroll-wrap">
+        <div class="table-scroll-wrap resource-data-table">
           <t-table class="wt-resource-table" :data="pagedRows" :columns="columns" row-key="usage_id" hover size="small" :scroll="tableScroll" :sort="{ sortBy, descending: sortOrder === 'desc' }" @sort-change="changeSort" v-model:selected-row-keys="selectedRowKeys" empty="暂无符合条件的素材">
             <template #id="{ row }">{{ row.id }}</template>
             <!-- 封面、标题与「类目 · 作者」合成一格（走查七轮起副行是这两样；素材库那一页

@@ -477,14 +477,14 @@ onMounted(() => {
 
 <template>
   <t-loading :loading="loading" :show-overlay="true">
-    <div class="wt-resource-page resource-visual-approved production-page compose-tasks-page">
+    <div class="wt-resource-page resource-visual-approved resource-list-page production-page compose-tasks-page">
       <FeedbackAlert v-if="error" theme="error" :message="error" closable style="margin-bottom:16px" @close="error=''" />
       <ResourcePageHeader title="合成任务" description="查看任务批次、生产进度和执行结果">
         <template #actions>
           <t-button theme="primary" @click="createVisible = true">新建合成任务</t-button>
         </template>
       </ResourcePageHeader>
-      <ResourceCard class="compose-tasks-card">
+      <ResourceCard class="resource-list-panel compose-tasks-card">
         <t-tabs v-model="activeView" class="compose-workspace-tabs"><t-tab-panel value="batches" label="任务批次" /><t-tab-panel value="tasks" label="任务列表" /></t-tabs>
         <ResourceFilterBar>
           <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">综合搜索</span><t-input v-model="filters.search" clearable placeholder="搜索名称或 ID" @enter="query" /></label>
@@ -503,7 +503,7 @@ onMounted(() => {
         <div class="wt-filter-actions"><t-button theme="primary" @click="query">查询</t-button><t-button class="wt-secondary-button" variant="outline" @click="reset">重置</t-button></div>
 </ResourceFilterBar>
         <ComposeTaskSelectionActions v-if="activeView === 'tasks'" :tasks="selectedTaskRows" :can-retry="canRetry" @clear="selectedTaskKeys = []" @busy="bulkBusy = $event" @changed="load({quiet:true})" />
-        <div class="table-scroll-wrap">
+        <div class="table-scroll-wrap resource-data-table">
           <t-table class="wt-resource-table" :data="pagedRows" :columns="columns" row-key="id" v-model:selected-row-keys="selectedTaskKeys" reserve-selected-row-on-paginate hover size="small" :scroll="tableScroll" empty="还没有合成任务">
             <template #id="{ row }"><span class="compose-task-id">{{ row.id }}</span></template>
             <template #name="{ row }"><span class="compose-task-name" :title="activeView === 'batches' ? row.name : taskName(row)">{{ activeView === 'batches' ? row.name : taskName(row) }}</span><span v-if="activeView === 'tasks'" class="compose-task-subline">{{ row.setting_name || '—' }} · {{ triggerLabel(row.trigger_type) }}</span></template>
@@ -564,7 +564,7 @@ onMounted(() => {
         @go-page="goMaterialPage(detail?.material_id)"
       />
 
-      <ResourceOverlay :visible="strategyDrawer.visible" title="策略详情" kind="drawer" :width="880"  @update:visible="strategyDrawer.visible = $event">
+      <ResourceOverlay :visible="strategyDrawer.visible" title="策略详情" kind="drawer" :width="960"  @update:visible="strategyDrawer.visible = $event">
         <t-loading :loading="strategyDrawer.loading" :show-overlay="true">
           <ComposeStrategySummary
             v-if="strategyDrawer.row"
@@ -581,7 +581,7 @@ onMounted(() => {
         </template>
       </ResourceOverlay>
 
-      <ResourceOverlay :visible="outputDrawer.visible" title="成片详情" kind="drawer" :width="880"  @update:visible="outputDrawer.visible = $event">
+      <ResourceOverlay :visible="outputDrawer.visible" title="成片详情" kind="drawer" :width="960"  @update:visible="outputDrawer.visible = $event">
         <t-loading :loading="outputDrawer.loading" :show-overlay="true">
           <ComposeOutputDetail
             v-model:tab="outputDrawer.tab"

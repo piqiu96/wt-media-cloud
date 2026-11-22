@@ -55,7 +55,7 @@ describe('compose tasks page', () => {
     expect(source).not.toContain(':clearable="!isSenior"')
     expect(source).toContain('client.listComposeOperators({ team_id: isAdmin.value ? Number(filters.value.team_id) : undefined })')
     expect(source).toContain("row.operator_name || '未记录'")
-    expect(source).toContain('<span class="compose-detail__label">负责人</span>')
+    expect(source).toContain('<t-descriptions-item label="负责人">')
   })
 
   // 执行阶段是过程信息，只在详情里；列表放决策信息，进度百分比一律不进列表。
@@ -97,7 +97,7 @@ describe('compose tasks page', () => {
   it('keeps completion time in task details', () => {
     expect(source).not.toContain("{ colKey: 'finished_at'")
     expect(source).toContain('<template #finished_at="{ row }">{{ formatDateTime(row.finished_at) }}</template>')
-    expect(source).toContain('<span class="compose-detail__label">完成时间</span><span>{{ formatDateTime(detail.finished_at) }}</span>')
+    expect(source).toContain('<t-descriptions-item label="完成时间"><span>{{ formatDateTime(detail.finished_at) }}</span>')
     expect(source).not.toContain('结束时间')
   })
 
@@ -246,7 +246,7 @@ describe('compose tasks page', () => {
   it('drops the hero card and keeps business actions out of the header', () => {
     expect(source).not.toContain('compose-detail__hero')
     expect(source).toContain('title="任务详情"')
-    expect(source).toContain('kind="drawer" :width="880"')
+    expect(source).toContain('kind="drawer" :width="960"')
     expect(source).toContain('<ResourceOverlay')
     expect(source).not.toContain('>关闭<')
   })

@@ -128,7 +128,7 @@ describe('content pool page', () => {
 
   it('keeps the operation column pinned while allowing the source columns to scroll', () => {
     expect(source).toContain("fixed: 'right'")
-    expect(source).toContain('class="table-scroll-wrap"')
+    expect(source).toContain('class="table-scroll-wrap resource-data-table"')
   })
 
   it('derives horizontal scrolling from the compact list columns', () => {
@@ -204,7 +204,7 @@ describe('content pool page', () => {
   it('uses the shared selection toolbar between filters and the table', () => {
     const filtersEnd = source.indexOf('</ResourceFilterBar>')
     const toolbar = source.indexOf('<ResourceSelectionToolbar')
-    const table = source.indexOf('<div class="table-scroll-wrap">')
+    const table = source.indexOf('<div class="table-scroll-wrap resource-data-table">')
     expect(toolbar).toBeGreaterThan(filtersEnd)
     expect(table).toBeGreaterThan(toolbar)
     expect(source).toContain(':count="selectedRowKeys.length"')

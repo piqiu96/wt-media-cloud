@@ -1,4 +1,5 @@
 <script setup>
+import ResourceDescriptions from '../../../shared/ui/resource/ResourceDescriptions.vue'
 import ResourceStatusBadge from '../../../shared/ui/resource/ResourceStatusBadge.vue'
 import FeedbackAlert from '../../../shared/ui/feedback/FeedbackAlert.vue'
 import { formatDateTime } from '../../../shared/utils/datetime.js'
@@ -63,19 +64,19 @@ function snapshotValue(row, field) {
               <t-tab-panel value="overview" label="任务信息">
                 <div class="compose-detail__section">
                   <h4>任务信息</h4>
-                  <div class="compose-detail__grid">
-                    <div class="compose-detail__wide"><span class="compose-detail__label">任务名称</span><span>{{ taskName(detail) }}</span></div>
-                    <div><span class="compose-detail__label">任务 ID</span><span>{{ detail.id }}</span></div>
-                    <div><span class="compose-detail__label">触发方式</span><span>{{ triggerLabel(detail.trigger_type) }}</span></div>
-                    <div><span class="compose-detail__label">任务批次</span><t-link v-if="detail.batch_id" theme="primary" @click="emit('batch', detail.batch_id)">批次 {{ detail.batch_id }}</t-link><span v-else>未记录</span></div>
-                    <div><span class="compose-detail__label">负责人</span><span>{{ detail.operator_name || '未记录' }}</span></div>
-                    <div><span class="compose-detail__label">创建时间</span><span>{{ formatDateTime(detail.created_at) }}</span></div>
-                    <div><span class="compose-detail__label">完成时间</span><span>{{ formatDateTime(detail.finished_at) }}</span></div>
-                    <div><span class="compose-detail__label">状态</span><ResourceStatusBadge :tone="statusTones[detail.status] || 'neutral'" :label="statusText(detail)" /></div>
+                  <ResourceDescriptions class="compose-detail__fields">
+                    <t-descriptions-item label="任务名称" full><span>{{ taskName(detail) }}</span></t-descriptions-item>
+                    <t-descriptions-item label="任务 ID"><span>{{ detail.id }}</span></t-descriptions-item>
+                    <t-descriptions-item label="触发方式"><span>{{ triggerLabel(detail.trigger_type) }}</span></t-descriptions-item>
+                    <t-descriptions-item label="任务批次"><t-link v-if="detail.batch_id" theme="primary" @click="emit('batch', detail.batch_id)">批次 {{ detail.batch_id }}</t-link><span v-else>未记录</span></t-descriptions-item>
+                    <t-descriptions-item label="负责人"><span>{{ detail.operator_name || '未记录' }}</span></t-descriptions-item>
+                    <t-descriptions-item label="创建时间"><span>{{ formatDateTime(detail.created_at) }}</span></t-descriptions-item>
+                    <t-descriptions-item label="完成时间"><span>{{ formatDateTime(detail.finished_at) }}</span></t-descriptions-item>
+                    <t-descriptions-item label="状态"><ResourceStatusBadge :tone="statusTones[detail.status] || 'neutral'" :label="statusText(detail)" /></t-descriptions-item>
                     <!-- 失败原因就写在任务信息里：找「为什么失败」的人先看的就是这一段，不必
                          再翻到执行记录去对错误码。列表页不加列（详情才需要这个上下文）。 -->
-                    <div v-if="detail.status === 'failed'"><span class="compose-detail__label">失败原因</span><span class="compose-detail__failure-reason">{{ safeComposeError(detail.error_code) }}</span></div>
-                  </div>
+                    <t-descriptions-item v-if="detail.status === 'failed'" label="失败原因" full><span class="compose-detail__failure-reason">{{ safeComposeError(detail.error_code) }}</span></t-descriptions-item>
+                  </ResourceDescriptions>
                   <!-- 重试按钮为什么不在，就写在这里：这一格给的是「不是所有失败都能重试」的
                        那个理由（错误类型 / 账号权限），两列网格里放不下，也不属于任务信息。 -->
                   <p v-if="retryHint(detail, canRetry)" class="compose-detail__hint">{{ retryHint(detail, canRetry) }}</p>
@@ -83,47 +84,47 @@ function snapshotValue(row, field) {
                 <div class="compose-detail__section">
                   <h4>合成配置</h4>
 
-                  <div class="compose-detail__grid compose-detail__snapshot-fields">
-                    <div><span class="compose-detail__label">模板</span><span>{{ templates.find(row => row.code === detail.template_code && row.version === detail.template_version)?.name || detail.template_code }}</span></div>
-                    <div><span class="compose-detail__label">成片设置</span><span>{{ detail.setting_name || '未记录' }} · 第 {{ detail.copy_index || 1 }} 份</span></div>
-                    <div><span class="compose-detail__label">适用平台</span><span>{{ platformText(detail.platforms) }}</span></div>
-                    <div><span class="compose-detail__label">模板版本</span><span>v{{ detail.template_version }}</span></div>
-                    <div v-for="field in snapshotFields(detail)" :key="field.key"><span class="compose-detail__label">{{ field.label }}</span><span>{{ snapshotValue(detail, field) }}</span></div>
-                  </div>
+                  <ResourceDescriptions class="compose-detail__fields">
+                    <t-descriptions-item label="模板"><span>{{ templates.find(row => row.code === detail.template_code && row.version === detail.template_version)?.name || detail.template_code }}</span></t-descriptions-item>
+                    <t-descriptions-item label="成片设置"><span>{{ detail.setting_name || '未记录' }} · 第 {{ detail.copy_index || 1 }} 份</span></t-descriptions-item>
+                    <t-descriptions-item label="适用平台"><span>{{ platformText(detail.platforms) }}</span></t-descriptions-item>
+                    <t-descriptions-item label="模板版本"><span>v{{ detail.template_version }}</span></t-descriptions-item>
+                    <t-descriptions-item v-for="field in snapshotFields(detail)" :key="field.key" :label="field.label"><span>{{ snapshotValue(detail, field) }}</span></t-descriptions-item>
+                  </ResourceDescriptions>
                   <p v-if="!snapshotFields(detail).length" class="compose-detail__hint">当前没有可安全展示的模板参数定义。</p>
                 </div>
                 <div v-if="detail.execution_timeline?.segments?.length" class="compose-detail__section">
                   <h4>实际合成时间线</h4>
                   <p class="compose-detail__hint">成片 {{ seconds(detail.execution_timeline.duration) }} · 广告从 {{ seconds(detail.execution_timeline.ad_start) }} 开始出现</p>
-                  <div class="compose-detail__grid">
-                    <div v-for="segment in detail.execution_timeline.segments" :key="segment.name"><span class="compose-detail__label">{{ segmentLabels[segment.name] || segment.name }}</span><span>{{ seconds(segment.start) }} ～ {{ seconds(segment.end) }}</span></div>
-                  </div>
+                  <ResourceDescriptions class="compose-detail__fields">
+                    <t-descriptions-item v-for="segment in detail.execution_timeline.segments" :key="segment.name" :label="segmentLabels[segment.name] || segment.name"><span>{{ seconds(segment.start) }} ～ {{ seconds(segment.end) }}</span></t-descriptions-item>
+                  </ResourceDescriptions>
                   <details class="compose-detail__hint"><summary>复现信息</summary><p>随机种子：{{ detail.random_seed }}</p><p v-for="resource in detail.resource_snapshots || []" :key="resource.name">{{ resource.name }} · {{ seconds(resource.duration) }} · {{ resource.sha256 }}</p></details>
                 </div>
                 <div class="compose-detail__section">
                   <h4>关联信息</h4>
-                  <div class="compose-detail__grid">
-                    <div><span class="compose-detail__label">关联素材</span><t-link theme="primary" @click="emit('material', detail.material_id)">素材 {{ detail.material_id }}</t-link></div>
-                    <div><span class="compose-detail__label">合成策略</span><t-link theme="primary" @click="emit('strategy', detail.compose_strategy_id)">{{ strategyName(detail) }}</t-link></div>
-                  </div>
+                  <ResourceDescriptions class="compose-detail__fields">
+                    <t-descriptions-item label="关联素材"><t-link theme="primary" @click="emit('material', detail.material_id)">素材 {{ detail.material_id }}</t-link></t-descriptions-item>
+                    <t-descriptions-item label="合成策略"><t-link theme="primary" @click="emit('strategy', detail.compose_strategy_id)">{{ strategyName(detail) }}</t-link></t-descriptions-item>
+                  </ResourceDescriptions>
                 </div>
                 <div class="compose-detail__section">
                   <h4>执行信息</h4>
-                  <div class="compose-detail__grid">
-                    <div><span class="compose-detail__label">当前阶段</span><span>{{ stageText(detail) }}</span></div>
-                    <div><span class="compose-detail__label">执行次数</span><span>{{ detail.attempt_count }}</span></div>
-                    <div><span class="compose-detail__label">开始时间</span><span>{{ formatDateTime(detail.started_at) }}</span></div>
-                    <div><span class="compose-detail__label">更新时间</span><span>{{ formatDateTime(detail.updated_at) }}</span></div>
-                  </div>
+                  <ResourceDescriptions class="compose-detail__fields">
+                    <t-descriptions-item label="当前阶段"><span>{{ stageText(detail) }}</span></t-descriptions-item>
+                    <t-descriptions-item label="执行次数"><span>{{ detail.attempt_count }}</span></t-descriptions-item>
+                    <t-descriptions-item label="开始时间"><span>{{ formatDateTime(detail.started_at) }}</span></t-descriptions-item>
+                    <t-descriptions-item label="更新时间"><span>{{ formatDateTime(detail.updated_at) }}</span></t-descriptions-item>
+                  </ResourceDescriptions>
                 </div>
                 <div class="compose-detail__section">
                   <h4>生成结果</h4>
                   <!-- 成片只在「生成结果」里出现一次，生成时间自己占一格：这两样是并排的两条
                        事实，拼成一句话反而让人在一串文字里找时间。 -->
-                  <div v-if="outputID(detail)" class="compose-detail__grid">
-                    <div><span class="compose-detail__label">生成成片</span><t-link theme="primary" @click="emit('output', outputID(detail))">成片 {{ outputID(detail) }}</t-link></div>
-                    <div><span class="compose-detail__label">生成时间</span><span>{{ outputSummary ? formatDateTime(outputSummary.created_at) : '—' }}</span></div>
-                  </div>
+                  <ResourceDescriptions class="compose-detail__fields" v-if="outputID(detail)">
+                    <t-descriptions-item label="生成成片"><t-link theme="primary" @click="emit('output', outputID(detail))">成片 {{ outputID(detail) }}</t-link></t-descriptions-item>
+                    <t-descriptions-item label="生成时间"><span>{{ outputSummary ? formatDateTime(outputSummary.created_at) : '—' }}</span></t-descriptions-item>
+                  </ResourceDescriptions>
                   <template v-else-if="detail.status === 'failed'">
                     <p class="compose-detail__empty">未生成成片</p>
 
@@ -187,17 +188,11 @@ function snapshotValue(row, field) {
 .compose-detail { min-height: 320px; }
 .compose-detail__tabs { margin-top: 4px; }
 .compose-detail__section { margin-top: 24px; min-width:0; }
-.compose-detail__section h4 { padding-left:10px; border-left:3px solid var(--wt-primary); margin: 0 0 16px; color: var(--wt-text-primary); font-size: 15px; font-weight: 600; }
-.compose-detail__grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 24px; font-size: 14px; line-height: 1.5; }
-.compose-detail__grid > div { display: grid; grid-template-columns:112px minmax(0,1fr); gap:16px; min-width:0; color:var(--wt-text-primary);overflow-wrap:anywhere;align-items:start; }
-.compose-detail__label {color:var(--wt-text-tertiary);font-size:14px;}
-.compose-detail__wide{grid-column:1/-1;}
-.compose-detail__snapshot-fields { margin-top: 16px; }
+.compose-detail__section h4 { display:flex; align-items:center; gap:8px; margin: 0 0 16px; color: var(--wt-text-primary); font-size: 16px; font-weight: 500; line-height:24px; }
 /* 失败态用 --wt-danger：它定义在入口加载的 design-token.css 里，
    且与紧邻「当前状态」的失败徽标（statusTones.failed=danger）同色。 */
 .compose-detail__failure-reason { color: var(--wt-danger); font-weight: 500; }
 .compose-detail__hint { margin: 0; color: var(--wt-text-secondary); font-size: 12px; line-height: 1.5; }
-.compose-detail__grid + .compose-detail__hint, .compose-detail__empty + .compose-detail__hint, .compose-detail__section > .compose-detail__hint + .compose-detail__grid { margin-top: 12px; }
 .compose-detail__empty { margin: 0; color: var(--wt-text-secondary); font-size: 14px; }
 .compose-detail__attempt { padding: 0 0 20px;border:0;border-bottom:1px solid var(--wt-border); }
 .compose-detail__attempt + .compose-detail__attempt { margin-top: 12px; }
@@ -216,5 +211,6 @@ function snapshotValue(row, field) {
 .compose-detail__review :deep(.t-textarea) { width: 100%; }
 .compose-detail__review-evidence { margin: 8px 0 0; color: var(--wt-text-primary); font-size: 13px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .compose-detail__footer { display: flex; justify-content: flex-end; align-items: center; gap: 8px; }
-@media (max-width: 760px) { .compose-detail__grid { grid-template-columns: 1fr; } }
+.compose-detail__section h4::before { content:""; width:3px; height:14px; flex:none; border-radius:1px; background:var(--wt-primary); }
+.compose-detail__fields + .compose-detail__hint, .compose-detail__empty + .compose-detail__hint, .compose-detail__hint + .compose-detail__fields { margin-top:12px; }
 </style>

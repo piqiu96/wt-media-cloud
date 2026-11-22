@@ -63,7 +63,7 @@
 }
 .resource-list-page .resource-list-panel.resource-card .resource-filter-bar {
   padding: 24px var(--resource-list-inset) 20px;
-  gap: 16px 24px;
+  gap: 20px 24px;
   margin: 0;
   border-bottom: 0;
 }
@@ -111,15 +111,15 @@
   border-top: 0;
 }
 /* 表格背景与行分隔贯通外层白卡；只有最外层管理面板保留圆角和描边。 */
-.resource-list-page .resource-data-table:not(:where(.resource-embedded-table)) {
+:is(.wt-resource-page, .resource-list-page).resource-list-page .resource-data-table:not(:where(.resource-embedded-table)) {
   border: 0;
   border-radius: 0;
   box-shadow: none;
 }
-.resource-list-page .resource-data-table:not(:where(.resource-embedded-table)) .t-table__content {
+:is(.wt-resource-page, .resource-list-page).resource-list-page .resource-data-table:not(:where(.resource-embedded-table)) .t-table__content {
   border-radius: 0;
 }
-.resource-list-page .resource-data-table:not(:where(.resource-embedded-table)) .t-table__header th {
+:is(.wt-resource-page, .resource-list-page).resource-list-page .resource-data-table:not(:where(.resource-embedded-table)) .t-table__header th {
   height: 44px;
   padding: 10px 16px;
   border-radius: 0;
@@ -132,7 +132,7 @@
   line-height: 22px;
   text-align: left;
 }
-.resource-list-page .resource-data-table:not(:where(.resource-embedded-table)) .t-table__body td {
+:is(.wt-resource-page, .resource-list-page).resource-list-page .resource-data-table:not(:where(.resource-embedded-table)) .t-table__body td {
   height: 64px;
   padding: 10px 16px;
   box-sizing: border-box;
@@ -141,34 +141,34 @@
   font-weight: 400;
   line-height: 22px;
 }
-.resource-list-page .resource-data-table:not(:where(.resource-embedded-table)) tr > :first-child {
+:is(.wt-resource-page, .resource-list-page).resource-list-page .resource-data-table:not(:where(.resource-embedded-table)) tr > :first-child {
   padding-left: var(--resource-list-inset);
   font-variant-numeric: tabular-nums;
 }
-.resource-list-page .resource-data-table:not(:where(.resource-embedded-table)) tr > :last-child {
+:is(.wt-resource-page, .resource-list-page).resource-list-page .resource-data-table:not(:where(.resource-embedded-table)) tr > :last-child {
   padding-right: var(--resource-list-inset);
   text-align: left;
 }
-.resource-list-page .resource-data-table:not(:where(.resource-embedded-table)) .cell-secondary,
+:is(.wt-resource-page, .resource-list-page).resource-list-page .resource-data-table:not(:where(.resource-embedded-table)) .cell-secondary,
 .resource-list-page .title-cell small {
   margin-top: 2px;
   line-height: 18px;
 }
-.resource-list-page .resource-data-table:not(:where(.resource-embedded-table)) .t-tag {
+:is(.wt-resource-page, .resource-list-page).resource-list-page .resource-data-table:not(:where(.resource-embedded-table)) .t-tag {
   height: 22px;
   line-height: 20px;
   font-size: 12px;
   font-weight: 400;
 }
-.resource-list-page .resource-data-table:not(:where(.resource-embedded-table)) .resource-row-actions {
+:is(.wt-resource-page, .resource-list-page).resource-list-page .resource-data-table:not(:where(.resource-embedded-table)) .resource-row-actions {
   justify-content: flex-start;
   gap: 8px;
 }
-.resource-list-page .resource-data-table:not(:where(.resource-embedded-table)) .resource-row-actions .t-button {
+:is(.wt-resource-page, .resource-list-page).resource-list-page .resource-data-table:not(:where(.resource-embedded-table)) .resource-row-actions .t-button {
   font-size: 13px;
   font-weight: 400;
 }
-.resource-list-page .resource-data-table:not(:where(.resource-embedded-table)) .t-table__pagination {
+:is(.wt-resource-page, .resource-list-page).resource-list-page .resource-data-table:not(:where(.resource-embedded-table)) .t-table__pagination {
   margin: 0;
   padding: 0;
   border-top: 1px solid var(--wt-border);
@@ -206,3 +206,20 @@
 }
 
 @media(max-width:720px){.resource-list-page .resource-page-header{align-items:flex-start;}}
+
+/* Separate pagination and list tabs share the same outer panel perimeter. */
+.resource-list-page .resource-list-panel > .pagination-bar {
+  margin: 0; padding: 16px var(--resource-list-inset);
+  border-top: 1px solid var(--wt-border); box-sizing: border-box;
+}
+.resource-list-page .resource-list-panel > .t-tabs {
+  margin: 0; padding: 0 var(--resource-list-inset);
+}
+.resource-list-page .resource-list-panel > .resource-selection-toolbar {
+  margin-inline: var(--resource-list-inset);
+}
+
+/* Date ranges must retain two readable dates when a dense filter row wraps. */
+.resource-list-page .resource-list-panel.resource-card .resource-filter-bar > .wt-filter-field:has(.resource-date-range) {
+  flex: 0 1 300px; max-width: 100%;
+}

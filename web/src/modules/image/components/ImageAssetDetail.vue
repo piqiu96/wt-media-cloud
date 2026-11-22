@@ -2,6 +2,7 @@
 import { computed } from "vue";
 import FeedbackAlert from "../../../shared/ui/feedback/FeedbackAlert.vue";
 import Overlay from "../../../shared/ui/resource/ResourceOverlay.vue";
+import ResourceSection from "../../../shared/ui/resource/ResourceSection.vue";
 import ResourceDescriptions from "../../../shared/ui/resource/ResourceDescriptions.vue";
 import ResourceEmptyState from "../../../shared/ui/resource/ResourceEmptyState.vue";
 import { formatDateTime } from "../../../shared/utils/datetime.js";
@@ -26,7 +27,7 @@ const fileSize = computed(() => {
     :visible="!!image"
     kind="drawer"
     title="图片详情"
-    :width="720"
+    :width="800"
     @update:visible="$emit('close')"
   >
     <FeedbackAlert v-if="error" theme="error" :message="error"
@@ -38,8 +39,7 @@ const fileSize = computed(() => {
       <div class="image-detail-preview">
         <img :src="image.src" :alt="image.name" />
       </div>
-      <section>
-        <h3>基本信息</h3>
+      <ResourceSection title="基本信息">
         <ResourceDescriptions>
           <t-descriptions-item label="ID">{{ image.id }}</t-descriptions-item>
           <t-descriptions-item label="名称">{{
@@ -55,9 +55,8 @@ const fileSize = computed(() => {
             image.enabled ? "启用" : "停用"
           }}</t-descriptions-item>
         </ResourceDescriptions>
-      </section>
-      <section>
-        <h3>文件信息</h3>
+      </ResourceSection>
+      <ResourceSection title="文件信息">
         <ResourceDescriptions>
           <t-descriptions-item label="尺寸">{{
             image.width && image.height
@@ -80,11 +79,8 @@ const fileSize = computed(() => {
             image.updatedAt ? formatDateTime(image.updatedAt) : "—"
           }}</t-descriptions-item>
         </ResourceDescriptions>
-      </section>
-      <section>
-        <h3>
-          引用记录 <span>{{ references.length }}</span>
-        </h3>
+      </ResourceSection>
+      <ResourceSection title="引用记录"><template #title-extra><span class="reference-count">{{ references.length }}</span></template>
         <t-loading v-if="loading" />
         <ul v-else-if="references.length" class="image-reference-list">
           <li v-for="r in references" :key="r.kind + r.id">
@@ -103,7 +99,7 @@ const fileSize = computed(() => {
           </li>
         </ul>
         <ResourceEmptyState v-else-if="!error" title="暂无可查看的引用" />
-      </section>
+      </ResourceSection>
     </div>
     <template #footer
       ><t-button theme="default" variant="outline" @click="$emit('close')"
@@ -133,18 +129,8 @@ const fileSize = computed(() => {
   height: 100%;
   object-fit: contain;
 }
-h3 {
-  margin: 0 0 12px;
-  font-size: 16px;
-  font-weight: 500;
-  color: var(--wt-text-primary);
-}
-h3 span {
-  margin-left: 8px;
-  font-size: 13px;
-  font-weight: 400;
-  color: var(--wt-text-tertiary);
-}
+.reference-count { font-size:13px; font-weight:400; color:var(--wt-text-tertiary); }
+
 .image-reference-list {
   padding: 0;
   margin: 0;

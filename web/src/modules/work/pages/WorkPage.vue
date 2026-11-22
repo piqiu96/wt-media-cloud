@@ -306,7 +306,7 @@ onMounted(() => {
           >重试加载类目</t-button
         ></FeedbackAlert
       >
-      <ResourceCard>
+      <ResourceCard class="resource-list-panel">
         <ResourceFilterBar>
           <label class="wt-filter-field wt-filter-field--wide"
             ><span class="wt-filter-field__label">作品</span
@@ -369,7 +369,7 @@ onMounted(() => {
             /></label>
           </div>
         </ResourceFilterBar>
-        <t-table
+        <t-table class="resource-data-table"
           row-key="id"
           :data="rows"
           :columns="columns"

@@ -272,7 +272,7 @@ onMounted(() => {
 });
 </script>
 <template>
-  <div class="image-library-page">
+  <div class="image-library-page wt-resource-page resource-visual-approved resource-list-page">
     <ResourcePageHeader title="图片库"
       ><template #actions
         ><t-button @click="openForm()">上传图片</t-button></template
@@ -283,7 +283,7 @@ onMounted(() => {
         >重试加载类目</t-button
       ></FeedbackAlert
     >
-    <ResourceCard>
+    <ResourceCard class="resource-list-panel">
       <ResourceFilterBar>
         <label class="wt-filter-field wt-filter-field--wide"
           ><span class="wt-filter-field__label">图片名称</span
@@ -496,6 +496,7 @@ onMounted(() => {
         {{ results.filter((r) => !r.success).length }} 张
       </div>
       <t-table
+        class="resource-data-table resource-embedded-table"
         row-key="id"
         :data="results"
         :columns="[
