@@ -243,7 +243,8 @@ it('rechecks cancellation against the original list revision before showing a de
  await state.openTermination(task('A'),'cancel');
  expect(state.terminationVisible.value).toBe(false);
  expect(services.publication.cancel).not.toHaveBeenCalled();
- expect(state.error.value).toContain('状态已变化');
+ expect(feedback.toast.error).toHaveBeenCalledWith(expect.stringContaining('状态已变化'));
+ expect(state.error.value).toBe('');
 });
 it('submits cancellation once and refreshes after a lost reply', async () => {
  await state.openTermination(task('A'),'cancel');
@@ -544,4 +545,17 @@ it('senior own start and retry remain available with explicit confirmation',asyn
  await state.startExecution(task('7'));expect(services.publication.start).toHaveBeenCalledWith('7',{expected_revision:'1'});
  services.publication.get.mockResolvedValue({...task('7'),status:'failed'});
  await state.retryExecution({...task('7'),status:'failed'});expect(services.publication.retry).toHaveBeenCalledWith('7',{expected_revision:'1'});
+});
+
+it('reports blocked abandonment once as a toast without turning it into a page error',async()=>{
+ services.session.me.mockResolvedValue({id:'1',role:'admin'});
+ const member={...task('7'),status:'failed',current_attempt_id:'21',platform_account_uid:'uid9'};
+ services.publication.get.mockResolvedValue(member);
+ services.publication.attempt.mockResolvedValue([]);
+ await state.openTermination(member,'abandon');
+ expect(feedback.toast.error).toHaveBeenCalledWith('原尝试缺少安全结束且未投稿的记录，请由任务所属运营先核实');
+ expect(feedback.toast.error).toHaveBeenCalledTimes(1);
+ expect(state.error.value).toBe('');
+ expect(state.terminationVisible.value).toBe(false);
+ expect(services.publication.abandon).not.toHaveBeenCalled();
 });

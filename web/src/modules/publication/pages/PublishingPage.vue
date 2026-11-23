@@ -546,7 +546,7 @@ async function openTermination(row, action) {
     if (task.revision !== row.revision || !(action === 'cancel' ? cancellable(task) : action === 'abandon' && abandonable(task))) throw new Error('任务内容或状态已变化，请核对更新后的列表再操作');
     terminationTask.value = JSON.parse(JSON.stringify(task));
     terminationAction.value = action; terminationError.value = ''; terminationSubmitted.value = false; terminationVisible.value = true;
-  } catch (e) { await load(); error.value = e.message; }
+  } catch (e) { await load(); feedback.toast.error(e.message); }
   finally { busy.value = false; }
 }
 async function saveTermination(input) {
