@@ -3,5 +3,7 @@
 .resource-feedback-dialog .t-dialog__header, .resource-feedback-dialog .t-dialog__footer { flex-shrink: 0; }
 .resource-feedback-dialog .t-dialog__body { min-height: 0; overflow: auto; overflow-wrap: anywhere; white-space: pre-wrap; line-height: 24px; }
 .resource-feedback-dialog .t-dialog__footer { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+/* Give WebKit an explicit shrink-to-fit width before measuring message children. */
+.t-message__list { width: max-content; max-width: calc(100vw - 64px); }
 .t-message { max-width: min(480px, calc(100vw - 32px)); box-sizing: border-box; }
 .t-message__content { min-width: 0; overflow-wrap: anywhere; }
