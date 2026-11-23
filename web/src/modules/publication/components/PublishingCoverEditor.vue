@@ -21,6 +21,9 @@ const emit = defineEmits([
 ]);
 const client = createImageClient();
 const templates = ref([]),
+  templateSearch = ref(""),
+  templatePage = ref(0),
+  hasMoreTemplates = ref(false),
   selectedTemplate = ref(null),
   loading = ref(false),
   rendering = ref(false),
@@ -52,25 +55,52 @@ const options = computed(() => {
 function update(patch) {
   emit("update:config", { ...props.config, ...patch });
 }
-async function loadTemplate(search = "") {
+async function loadTemplate(search = "", append = false) {
+  if (append && (loading.value || !hasMoreTemplates.value)) return;
   const sequence = ++lookupSequence;
+  if (!append) {
+    templateSearch.value = search;
+    templatePage.value = 0;
+    templates.value = [];
+    hasMoreTemplates.value = false;
+  }
   loading.value = true;
   error.value = "";
   try {
-    const page = await client.listCoverTemplate({
-      enabled: true,
-      category_id: props.category,
-      search,
-      page: 1,
-      page_size: 100,
-    });
-    if (sequence === lookupSequence) templates.value = (page.items || []).filter(t => coverMatchesRatio({width:t.canvas_width,height:t.canvas_height},...props.aspect));
+    // The API's width/height filters require exact dimensions. Keep accepting
+    // every resolution of the requested ratio and page past other ratios.
+    do {
+      const nextPage = templatePage.value + 1;
+      const page = await client.listCoverTemplate({
+        enabled: true,
+        category_id: props.category,
+        search: templateSearch.value,
+        page: nextPage,
+        page_size: 100,
+      });
+      if (sequence !== lookupSequence) return;
+      const items = page.items || [];
+      const matching = items.filter((t) =>
+        coverMatchesRatio(
+          { width: t.canvas_width, height: t.canvas_height },
+          ...props.aspect,
+        ),
+      );
+      templates.value = [...templates.value, ...matching];
+      templatePage.value = nextPage;
+      hasMoreTemplates.value =
+        items.length > 0 && nextPage * 100 < Number(page.total);
+      if (matching.length) break;
+    } while (hasMoreTemplates.value);
   } catch (e) {
     if (sequence === lookupSequence)
       error.value = e.message || "模板读取失败，请重试";
   } finally {
     if (sequence === lookupSequence) loading.value = false;
   }
+}
+function loadMoreTemplates() {
+  return loadTemplate(templateSearch.value, true);
 }
 async function readSelected(id) {
   const sequence = ++selectedSequence;
@@ -205,11 +235,18 @@ watch(
   { immediate: true },
 );
 watch(
-  () => [props.config.method, props.category],
+  [
+    () => props.config.method,
+    () => props.category,
+    () => props.aspect[0],
+    () => props.aspect[1],
+  ],
   () => {
+    lookupSequence++;
+    loading.value = false;
     if (props.config.method === "template") loadTemplate();
   },
-  { immediate: true },
+  { immediate: true, flush: "sync" },
 );
 onBeforeUnmount(() => {
   selectionSequence++;
@@ -278,11 +315,20 @@ onBeforeUnmount(() => {
           :loading="loading"
           :disabled="disabled || rendering"
           placeholder="搜索并选择封面模板"
-          @search="loadTemplate"
+          @search="loadTemplate($event)"
           @change="selectTemplate"
       /></label>
+      <div v-if="hasMoreTemplates">
+        <t-button
+          variant="text"
+          :loading="loading"
+          :disabled="disabled || rendering || loading"
+          @click="loadMoreTemplates"
+          >加载更多模板</t-button
+        >
+      </div>
       <div v-if="error && !templates.length">
-        <t-button variant="text" :disabled="loading" @click="loadTemplate()"
+        <t-button variant="text" :disabled="disabled || loading" @click="loadTemplate(templateSearch)"
           >重新读取模板</t-button
         >
       </div>
