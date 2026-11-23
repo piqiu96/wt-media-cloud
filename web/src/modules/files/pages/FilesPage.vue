@@ -103,18 +103,18 @@ onMounted(load)
 </script>
 
 <template>
-  <div class="wt-resource-page resource-visual-approved files-page">
-    <ResourcePageHeader title="文件管理" description="上传图片和视频，获取可复用的文件链接">
+  <div class="wt-resource-page resource-list-page resource-visual-approved files-page">
+    <ResourcePageHeader title="文件管理">
       <template #actions><t-button theme="primary" @click="openUpload">上传文件</t-button></template>
     </ResourcePageHeader>
     <FeedbackAlert v-if="error" theme="error" :message="error" closable @close="error = ''" />
-    <ResourceCard>
+    <ResourceCard class="resource-list-panel">
       <ResourceFilterBar>
         <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">文件搜索</span><t-input v-model="filters.search" clearable placeholder="搜索文件名或 ID" @enter="query" /></label>
         <label class="wt-filter-field"><span class="wt-filter-field__label">文件类型</span><t-select v-model="filters.type" :options="[{label:'图片',value:'image'},{label:'视频',value:'video'}]" clearable placeholder="全部" /></label>
         <div class="wt-filter-actions"><t-button theme="primary" @click="query">查询</t-button><t-button variant="outline" @click="reset">重置</t-button></div>
       </ResourceFilterBar>
-      <div class="table-scroll-wrap"><t-table class="wt-resource-table" :data="items" :columns="columns" row-key="id" :loading="loading" :scroll="tableScroll" size="small" hover empty="还没有上传文件">
+      <div class="table-scroll-wrap resource-data-table"><t-table class="wt-resource-table" :data="items" :columns="columns" row-key="id" :loading="loading" :scroll="tableScroll" size="small" hover empty="还没有上传文件">
         <template #type="{row}"><t-tag variant="light">{{ row.type === 'video' ? '视频' : '图片' }}</t-tag></template>
         <template #size_bytes="{row}">{{ sizeLabel(row.size_bytes) }}</template>
         <template #owner_name="{row}">{{ row.owner_name || `用户 ${row.owner_id}` }}</template>

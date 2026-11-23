@@ -27,6 +27,7 @@ import ResourceDescriptions from "../../../shared/ui/resource/ResourceDescriptio
 import ResourceChoiceCards from "../../../shared/ui/resource/ResourceChoiceCards.vue"
 import ResourceSelectionToolbar from "../../../shared/ui/resource/ResourceSelectionToolbar.vue"
 import ResourceCard from "../../../shared/ui/resource/ResourceCard.vue"
+import ResourceFilterBar from "../../../shared/ui/resource/ResourceFilterBar.vue"
 import ResourcePageHeader from "../../../shared/ui/resource/ResourcePageHeader.vue"
 import ResourceStatGrid from "../../../shared/ui/resource/ResourceStatGrid.vue"
 import ResourceStatusBadge from "../../../shared/ui/resource/ResourceStatusBadge.vue"
@@ -194,7 +195,6 @@ const isSenior = computed(() => currentUser.value?.role === "senior_operator")
 const isOperator = computed(() => currentUser.value?.role === "operator")
 const isDesktopClient = computed(() => isDesktop())
 const selfId = computed(() => String(currentUser.value?.id ?? ""))
-const ownTeamName = computed(() => currentUser.value?.team_name || "本人团队")
 const viewingMember = computed(() => isSenior.value && Boolean(memberFilter.value) && memberFilter.value !== selfId.value)
 const isOwnDesktop = computed(() => isDesktopClient.value && (isOperator.value || (isSenior.value && !viewingMember.value)))
 const canMaintainNote = computed(() => isOperator.value || isSenior.value || isAdmin.value)
@@ -329,14 +329,6 @@ const columns = computed(() => {
 })
 
 const tableScroll = computed(() => ({ x: `${columns.value.reduce((sum, column) => sum + (column.width || 0), 0)}px` }))
-
-const pageDescription = computed(() => {
-  if (isOwnDesktop.value) return "同步比特窗口、管理代理方式与关联账号"
-  if (isAdmin.value) return "按团队与运营查看所有窗口"
-  if (isSenior.value && viewingMember.value) return `${ownTeamName.value} · 查看 ${ownerLabel(Number(memberFilter.value))} 的窗口`
-  if (isSenior.value) return `${ownTeamName.value} · 默认查看自己`
-  return "查看本人窗口；本机操作请在桌面端进行"
-})
 
 const candidateRows = computed(() => {
   const search = candidateSearch.value.trim().toLowerCase()
@@ -2133,8 +2125,8 @@ function returnToSyncResult() {
 
 <template>
   <t-loading :loading="loading" :show-overlay="true" size="large">
-    <div class="wt-resource-page resource-visual-approved">
-      <ResourcePageHeader title="浏览器窗口" :description="pageDescription">
+    <div class="wt-resource-page resource-list-page resource-visual-approved">
+      <ResourcePageHeader title="浏览器窗口">
         <template v-if="isOwnDesktop" #actions>
           <t-button v-if="syncReturnAvailable" variant="outline" @click="returnToSyncResult">返回同步结果</t-button>
           <t-tooltip content="只读取比特窗口的已打开或已关闭状态，不同步窗口资料。">
@@ -2163,8 +2155,8 @@ function returnToSyncResult() {
 
       <ResourceStatGrid :items="statItems" interactive :active-key="statusFilter" @select="toggleStatFilter" />
 
-      <ResourceCard class="window-resource-card">
-        <div class="filter-bar">
+      <ResourceCard class="resource-list-panel window-resource-card">
+        <ResourceFilterBar>
           <label class="wt-filter-field wt-filter-field--wide">
             <span class="wt-filter-field__label">搜索</span>
             <t-input v-model="filterDraft.search" clearable placeholder="名称 / ID / 比特窗口ID / 备注" @enter="submitSearch" />
@@ -2187,8 +2179,8 @@ function returnToSyncResult() {
           <div class="wt-filter-actions">
             <t-button theme="primary" @click="submitSearch">查询</t-button>
             <t-button class="wt-secondary-button" variant="outline" @click="resetFilters">重置</t-button>
-            <ResourceFilterToggle v-model="advancedFilters" :count="advancedFilterCount" controls="profile-advanced-filters" />
           </div>
+          <ResourceFilterToggle v-model="advancedFilters" :count="advancedFilterCount" controls="profile-advanced-filters" />
           <div v-show="advancedFilters" id="profile-advanced-filters" class="wt-advanced-filters">
           <label v-if="isSenior" class="wt-filter-field">
             <span class="wt-filter-field__label">授权运营</span>
@@ -2219,7 +2211,7 @@ function returnToSyncResult() {
             </t-select>
           </label>
           </div>
-        </div>
+        </ResourceFilterBar>
 
         <ResourceSelectionToolbar v-if="isOwnDesktop" :count="selectedRowKeys.length" unit="个窗口" :hint="batchHint" @clear="selectedRowKeys = []">
           <t-button theme="default" variant="outline" @click="openBatchProxy">批量设置代理</t-button>
@@ -2227,7 +2219,7 @@ function returnToSyncResult() {
           <t-button theme="default" variant="outline" :disabled="!batchCloseReady" @click="startBatchWindowFromSelection('close')">批量关闭</t-button>
         </ResourceSelectionToolbar>
 
-        <div class="table-scroll-wrap">
+        <div class="table-scroll-wrap resource-data-table">
           <t-table
             class="wt-resource-table"
             :data="pagedProfiles"

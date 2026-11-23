@@ -324,7 +324,7 @@ onMounted(() => {
   <t-loading :loading="loading" :show-overlay="true">
     <div class="wt-resource-page resource-visual-approved resource-list-page production-page my-materials-page">
       <FeedbackAlert v-if="error" theme="error" :message="error" closable style="margin-bottom:16px" @close="error=''" />
-      <ResourcePageHeader title="我的素材" description="管理已加入的素材，查看使用情况并下载。" />
+      <ResourcePageHeader title="我的素材" />
       <ResourceCard class="resource-list-panel material-table-card">
         <ResourceFilterBar>
           <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">综合搜索</span><t-input v-model="search" clearable placeholder="名称 / 作者 / ID" @enter="load({ applyFilters: true })" /></label>
@@ -336,8 +336,7 @@ onMounted(() => {
 <label class="wt-filter-field"><span class="wt-filter-field__label">视频状态</span><t-select v-model="statusFilter" clearable placeholder="全部"><t-option v-for="status in VIDEO_STATUSES" :key="status" :value="status" :label="videoStatusLabel(status)" /></t-select></label>
 <div class="wt-filter-actions"><t-button theme="primary" @click="load({ applyFilters: true })">查询</t-button><t-button class="wt-secondary-button" variant="outline" @click="reset">重置</t-button></div>
         </ResourceFilterBar>
-        <ResourceSelectionToolbar :count="selectedRowKeys.length" unit="条素材" @clear="selectedRowKeys=[]"><t-button variant="outline" :loading="batchLoading" :disabled="Boolean(downloadReason)" :title="downloadReason" @click="batchDownload">下载（{{ selectedRowKeys.length }}）</t-button></ResourceSelectionToolbar>
-        <p v-if="downloadReason" class="wt-download-reason">{{ downloadReason }}</p>
+        <ResourceSelectionToolbar :count="selectedRowKeys.length" unit="条素材" @clear="selectedRowKeys=[]"><t-tooltip :content="downloadReason" :disabled="!downloadReason"><span><t-button variant="outline" :loading="batchLoading" :disabled="Boolean(downloadReason)" @click="batchDownload">下载（{{ selectedRowKeys.length }}）</t-button></span></t-tooltip></ResourceSelectionToolbar>
         <div class="table-scroll-wrap resource-data-table">
           <t-table class="wt-resource-table" :data="pagedRows" :columns="columns" row-key="usage_id" hover size="small" :scroll="tableScroll" :sort="{ sortBy, descending: sortOrder === 'desc' }" @sort-change="changeSort" v-model:selected-row-keys="selectedRowKeys" empty="暂无符合条件的素材">
             <template #id="{ row }">{{ row.id }}</template>
@@ -378,8 +377,8 @@ onMounted(() => {
                   <t-button size="small" theme="primary" variant="text" class="is-primary" @click="restore(row)">恢复使用</t-button>
                 </template>
                 <template v-else>
-                  <t-button v-if="needsRedownload(row.download_status, localPresence(row))" size="small" theme="primary" variant="text" class="is-primary" :disabled="Boolean(downloadReason)" :title="downloadReason" @click="download(row)">重新下载</t-button>
-                  <t-button v-else-if="row.download_status !== 'downloading' && row.download_status !== 'downloaded'" size="small" theme="primary" variant="text" class="is-primary" :disabled="Boolean(downloadReason)" :title="downloadReason" @click="download(row)">{{ downloadActionLabel(row.download_status) }}</t-button>
+                  <t-tooltip v-if="needsRedownload(row.download_status, localPresence(row))" :content="downloadReason" :disabled="!downloadReason"><span><t-button size="small" theme="primary" variant="text" class="is-primary" :disabled="Boolean(downloadReason)" @click="download(row)">重新下载</t-button></span></t-tooltip>
+                  <t-tooltip v-else-if="row.download_status !== 'downloading' && row.download_status !== 'downloaded'" :content="downloadReason" :disabled="!downloadReason"><span><t-button size="small" theme="primary" variant="text" class="is-primary" :disabled="Boolean(downloadReason)" @click="download(row)">{{ downloadActionLabel(row.download_status) }}</t-button></span></t-tooltip>
                   <t-button size="small" class="is-danger" variant="text" @click="giveUp(row)">放弃</t-button>
                 </template>
               </ResourceRowActions>
@@ -407,7 +406,6 @@ onMounted(() => {
 </template>
 
 <style scoped>
-.wt-download-reason { margin: 12px 16px; font-size: 13px; color: var(--wt-text-secondary); }
 .material-table-card { margin-top: 16px; }
 /* 标题两种分支（外链 a / 普通 span）共用省略号；颜色只写在 span 分支上，
    免得覆盖 .wt-primary-link 的主题色——与内容池页同一条教训。 */

@@ -53,7 +53,7 @@ describe('browser window resource page', () => {
   it('places window status before running state and labels deletion at both entry and confirmation', () => {
     const columns = source.slice(source.indexOf('const columns = computed('), source.indexOf('const tableScroll = computed('))
     expect(columns.indexOf('colKey: "window_state"')).toBeLessThan(columns.indexOf('colKey: "running"'))
-    const filters = source.slice(source.indexOf('<div class="filter-bar">'), source.indexOf('class="wt-resource-table"'))
+    const filters = source.slice(source.indexOf('<ResourceFilterBar>'), source.indexOf('class="wt-resource-table"'))
     expect(filters.indexOf('>窗口状态</span>')).toBeLessThan(filters.indexOf('>运行状态</span>'))
     expect(source).toContain('>删除</t-button>')
     expect(source).not.toContain('>删除记录</t-button>')

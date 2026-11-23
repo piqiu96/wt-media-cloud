@@ -32,6 +32,7 @@ import { CATEGORY_TYPE_LABELS } from "../../../shared/utils/categories.js"
 import OperationProgressDialog from "../../../shared/ui/feedback/OperationProgressDialog.vue"
 import OperationResultSummary from "../../../shared/ui/feedback/OperationResultSummary.vue"
 import ResourceCard from "../../../shared/ui/resource/ResourceCard.vue"
+import ResourceFilterBar from "../../../shared/ui/resource/ResourceFilterBar.vue"
 import ResourcePageHeader from "../../../shared/ui/resource/ResourcePageHeader.vue"
 import ResourceStatGrid from "../../../shared/ui/resource/ResourceStatGrid.vue"
 import ResourceStatusBadge from "../../../shared/ui/resource/ResourceStatusBadge.vue"
@@ -950,7 +951,7 @@ const columns = computed(() => [
 
 <template>
   <t-loading :loading="loading" :show-overlay="true" size="large">
-  <div class="wt-resource-page resource-visual-approved account-page">
+  <div class="wt-resource-page resource-list-page resource-visual-approved account-page">
     <ResourcePageHeader title="社媒账号">
       <template #actions>
         <t-button v-if="!isAdmin" theme="primary" @click="openCreate">新增账号</t-button>
@@ -960,19 +961,13 @@ const columns = computed(() => [
     </ResourcePageHeader>
 
     <FeedbackAlert v-if="error" :message="error" theme="error" style="margin-bottom:16px" closable @close="error=''" />
-    <FeedbackAlert
-      v-if="!isDesktop"
-        message="Cloud Web 只展示 Cloud 已保存的账号与窗口绑定信息；打开/关闭窗口、绑定/换绑和检查/同步账号信息请在 Desktop 端完成。"
-      theme="info"
-      style="margin-bottom:16px"
-    />
 
     <ResourceStatGrid :items="resourceAccountStats" :active-key="({normal: 'normal', attention: 'abnormal', unbound: 'unbound'})[searchView] || 'total'" interactive @select="applyStatFilter" />
     <div v-if="recentImport" class="import-resume"><span>最近一次接入还有 {{ recentImport.counts.pending+recentImport.counts.failed+recentImport.counts.uncertain+recentImport.counts.running }} 项需要处理</span><t-button variant="text" @click="openImports(recentImport.id)">继续处理</t-button></div>
 
-    <ResourceCard class="account-resource-card">
+    <ResourceCard class="resource-list-panel account-resource-card">
     <div v-if="searchView" style="margin-bottom:12px"><t-tag closable @close="searchView='';loadAccounts({resetPage:true})">{{ {normal:"正常账号",attention:"待处理账号",unbound:"未绑定窗口"}[searchView] }}</t-tag></div>
-    <div class="filter-bar">
+    <ResourceFilterBar>
         <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">搜索</span><t-input v-model="searchText" placeholder="账号 / UID / 备注 / 窗口名" clearable @enter="loadAccounts({ resetPage: true })" /></label>
         <label class="wt-filter-field"><span class="wt-filter-field__label">平台</span><t-select v-model="searchPlatform" placeholder="全部" clearable>
             <t-option v-for="option in ACCOUNT_PLATFORM_OPTIONS.filter(o => ['bilibili','baidu'].includes(o.value))" :key="option.value" :value="option.value" :label="option.label" />
@@ -988,8 +983,8 @@ const columns = computed(() => [
         <div class="wt-filter-actions">
           <t-button theme="primary" @click="loadAccounts({ resetPage: true })">查询</t-button>
           <t-button class="wt-secondary-button" variant="outline" @click="resetFilters">重置</t-button>
-          <ResourceFilterToggle v-model="showAdvancedFilters" :count="advancedFilterCount" controls="account-advanced-filters" />
         </div>
+        <ResourceFilterToggle v-model="showAdvancedFilters" :count="advancedFilterCount" controls="account-advanced-filters" />
         <div v-show="showAdvancedFilters" id="account-advanced-filters" class="wt-advanced-filters">
         <label v-if="isAdmin" class="wt-filter-field"><span class="wt-filter-field__label">运营团队</span><BusinessSelect kind="team" filter v-model="searchTeam" clearable><t-option v-for="team in accountTeams" :key="team.id" :value="String(team.id)" :label="team.name" /></BusinessSelect></label>
         <label v-if="canFilterByOwner" class="wt-filter-field"><span class="wt-filter-field__label">使用人</span><BusinessSelect kind="member" filter v-model="searchOwner">
@@ -1005,7 +1000,7 @@ const columns = computed(() => [
             <t-option v-for="t in availableTags" :key="t" :value="t" :label="t" />
         </t-select></label>
         </div>
-    </div>
+    </ResourceFilterBar>
 
     <ResourceSelectionToolbar v-if="isDesktop && !isAdmin" :count="selectedAccountIds.length" unit="个账号" @clear="selectedAccountIds = []">
       <t-button theme="default" variant="outline" :loading="batchChecking" :disabled="Boolean(currentCheckingId)" @click="runBatchCheck()">批量检查</t-button>
@@ -1014,7 +1009,7 @@ const columns = computed(() => [
       :items="batchResults.map(item => ({key: item.account.id, label: accountLabel(item.account), status: item.status, reason: item.message}))"
       @retry="runBatchCheck({retryFailedOnly:true})" @done="batchCheckVisible = false" />
 
-    <div class="table-scroll-wrap">
+    <div class="table-scroll-wrap resource-data-table">
     <t-table class="wt-resource-table"
       :data="pagedAccounts"
       :columns="columns"

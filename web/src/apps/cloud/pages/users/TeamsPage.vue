@@ -151,19 +151,19 @@ async function deleteTeam(team) {
 
 <template>
   <t-loading :loading="loading" :show-overlay="true" size="small">
-    <div class="wt-resource-page">
-    <ResourcePageHeader title="运营团队" description="管理运营人员的团队归属">
+    <div class="wt-resource-page resource-visual-approved resource-list-page">
+    <ResourcePageHeader title="运营团队">
       <template #actions>
         <t-button v-if="canManage" theme="primary" @click="openCreate">新增团队</t-button>
       </template>
     </ResourcePageHeader>
     <FeedbackAlert v-if="error" :message="error" theme="error" style="margin-bottom:16px" closable @close="error=''" />
-    <ResourceCard class="system-resource-card">
+    <ResourceCard class="resource-list-panel system-resource-card">
       <ResourceFilterBar>
         <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">综合搜索</span><t-input v-model="keyword" placeholder="团队 ID / 名称" clearable @enter="search" /></label>
         <div class="wt-filter-actions"><t-button theme="primary" @click="search">查询</t-button><t-button class="wt-secondary-button" variant="outline" @click="resetFilters">重置</t-button></div>
       </ResourceFilterBar>
-      <div class="table-scroll-wrap"><t-table class="wt-resource-table" :data="pagedTeams" :columns="columns" row-key="id" size="small" hover :scroll="tableScroll">
+      <div class="table-scroll-wrap resource-data-table"><t-table class="wt-resource-table" :data="pagedTeams" :columns="columns" row-key="id" size="small" hover :scroll="tableScroll">
         <template #operations="{ row }">
           <ResourceRowActions>
             <t-button size="small" variant="text" :disabled="pendingActions.has(row.id)" @click="openRename(row)">重命名</t-button>
