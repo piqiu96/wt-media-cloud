@@ -1,7 +1,8 @@
 import { IdentificationStatus, PlatformLoginStatus } from "../accounts/status.js";
 import { OutputPublishStatus, OutputVideoStatus } from "../compose/outputStatus.js";
 
-export function accountUnavailable(account, category) {
+export function accountUnavailable(account, category, userId) {
+  if (userId && String(account.user_id) !== String(userId)) return "只能选择本人账号创建发布任务";
   if (account.platform !== "baidu") return "当前阶段仅支持百度";
   if (!account.enabled) return "账号已停用";
   if (

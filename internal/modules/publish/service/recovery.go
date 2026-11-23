@@ -35,6 +35,10 @@ func (s *RecoveryService) Resolve(actor identity.PublicUser, id uint64, in model
 	if e != nil {
 		return v, e
 	}
+	if !ownsPublication(actor, v) && (v.Status != model.StatusReviewing || in.Conclusion != model.StatusPublished) {
+		return model.Task{}, ErrNotFound
+	}
+
 	if !in.Valid() {
 		return model.Task{}, ErrInvalid
 	}
@@ -50,6 +54,9 @@ func (s *RecoveryService) Retry(actor identity.PublicUser, id, revision uint64) 
 	v, e := s.readable(actor, id)
 	if e != nil {
 		return v, e
+	}
+	if !ownsPublication(actor, v) {
+		return model.Task{}, ErrNotFound
 	}
 	if v.Platform != "baidu" {
 		return model.Task{}, ErrClosed
@@ -71,6 +78,10 @@ func (s *RecoveryService) Cancel(actor identity.PublicUser, id uint64, in model.
 	if err != nil {
 		return v, err
 	}
+	if v.CurrentAttemptID != nil && !ownsPublication(actor, v) {
+		return model.Task{}, ErrNotFound
+	}
+
 	if !in.Valid() {
 		return model.Task{}, ErrInvalid
 	}

@@ -2,7 +2,7 @@ openapi: 3.1.0
 info:
   title: WT Media Single Publication Preparation
   version: 2026.11.22.1
-  description: Task platform_submission_id/target_url contain original receipts; platform_work_id/work_url/work_id only identify verified public work (ADR-0035). Creating never authorizes execution or submits a platform post. Execution requires separate revision-bound start authorization. Baidu task preparation is available. IDs and revisions are decimal strings; timestamps RFC3339. Uses errcode/message/data/logid.
+  description: Administrators manage Cloud records only. Senior operators execute and copy only their own tasks and create with their own accounts. Managers may cancel unclaimed tasks; stopping a claimed scene or verifying an uncertain scene belongs to the task operator. Managers supplement reviewing results or abandon failed tasks only against the exact original recorded safe disposition, checked by the existing transaction. Task platform_submission_id/target_url contain original receipts; platform_work_id/work_url/work_id only identify verified public work (ADR-0035). Creating never authorizes execution or submits a platform post. Execution requires separate revision-bound start authorization. Baidu task preparation is available. IDs and revisions are decimal strings; timestamps RFC3339. Uses errcode/message/data/logid.
 paths:
   /api/v1/publication/generate:
     post:

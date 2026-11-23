@@ -200,6 +200,9 @@ func (s *ExecutionService) Start(a identity.PublicUser, id, revision uint64) (mo
 	if e != nil {
 		return v, e
 	}
+	if !ownsPublication(a, v) {
+		return model.Task{}, ErrNotFound
+	}
 	if v.Platform != "baidu" {
 		return model.Task{}, ErrClosed
 	}

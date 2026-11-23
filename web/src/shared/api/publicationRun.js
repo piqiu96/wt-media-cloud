@@ -1,11 +1,11 @@
 import { invoke } from "@tauri-apps/api/core";
-const nativeDesktop = () =>
+export const nativePublicationDesktop = () =>
   typeof window !== "undefined" && !!window.__TAURI_INTERNALS__;
 export async function handlePublicationHuman({
   task,
   userId,
   resume = false,
-  tauri = nativeDesktop(),
+  tauri = nativePublicationDesktop(),
   invokeImpl = invoke,
 }) {
   if (!tauri) throw new Error("请在原任务所属电脑的安装版中处理人工验证");

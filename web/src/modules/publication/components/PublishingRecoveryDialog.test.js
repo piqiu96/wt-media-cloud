@@ -9,7 +9,7 @@ async function mount(
     revision: "2",
     status: "uncertain",
     platform_account_uid: "6572476037",
-  },
+  }, extra = {},
 ) {
   let state;
   const emit = vi.fn();
@@ -17,7 +17,7 @@ async function mount(
     createSSRApp({
       setup() {
         state = Dialog.setup(
-          { visible: true, task, busy: false, error: "" },
+          { visible: true, task, busy: false, error: "", ...extra },
           { emit, expose: () => {} },
         );
         return () => null;
@@ -77,4 +77,17 @@ it("supplements reviewing with the original receipt, distinct work ID and explic
       published_at: "2026-11-20T10:12:53.000Z",
     }),
   );
+});
+
+it('management supplementation needs recorded closure and cannot verify an uncertain member scene',async()=>{
+ const task={id:'1',current_attempt_id:'7',revision:'3',status:'reviewing',platform_account_uid:'6572476037'};
+ const {state:s,emit}=await mount(task,{management:true,savedEvidence:null});
+ s.conclusion.value='published';s.reason.value='补录公开结果';s.basis.value='根据原回执核实作品已公开并核对视频一致';
+ s.submissionId.value='18';s.workId.value='70';s.workUrl.value='https://example.com/work/70';s.publishedTime.value='2026-11-20T18:12:53';s.workMatched.value=true;s.publiclyAccessible.value=true;s.sceneClosed.value=true;
+ s.submit();expect(emit).not.toHaveBeenCalled();
+ const good=await mount(task,{management:true,savedEvidence:{scene_closed:true}});
+ for(const key of ['conclusion','reason','basis','submissionId','workId','workUrl','publishedTime','workMatched','publiclyAccessible'])good.state[key].value=s[key].value;
+ good.state.submit();expect(good.emit).toHaveBeenCalledWith('submit',expect.objectContaining({evidence:expect.objectContaining({scene_closed:true})}));
+ const uncertain=await mount({...task,status:'uncertain'},{management:true,savedEvidence:{scene_closed:true}});
+ uncertain.state.submit();expect(uncertain.emit).not.toHaveBeenCalled();
 });

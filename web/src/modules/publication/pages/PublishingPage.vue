@@ -31,9 +31,10 @@ import { createMediaAccountClient } from "../../../shared/api/mediaAccounts.js";
 import { createSessionClient } from "../../../shared/api/session.js";
 import { canRunLocalAgent } from "../../../utils.js";
 import { createImageClient } from "../../../shared/api/image.js";
-import { handlePublicationHuman } from "../../../shared/api/publicationRun.js";
+import { nativePublicationDesktop, handlePublicationHuman } from "../../../shared/api/publicationRun.js";
 import { createPublicationDraftClient } from "../../../shared/api/publicationDraft.js";
 import { choosePublicationDraft, capturePublicationDraft } from "../draftRecovery.js";
+import { recordedPublicationEvidence } from "../recordedEvidence.js";
 import { accountUnavailable } from "../eligibility.js";
 import { createFilesClient } from "../../../shared/api/files.js";
 import {
@@ -74,6 +75,15 @@ async function publicationUser() {
   if (!canRunLocalAgent(user)) throw new Error("管理员仅可查看和管理云端记录，不承担发布执行");
   return user;
 }
+const ownsTask = task => canPublish.value && String(task?.operator_id) === String(currentUser.value?.id);
+const ownerReason = task => ownsTask(task) ? "" : "仅任务所属运营可操作，不能使用成员的浏览器现场";
+const humanReason = task => ownerReason(task) || (nativePublicationDesktop() ? "" : "请在原任务所属电脑的安装版中处理人工验证");
+const verificationReason = task => task.status === PublicationStatus.Uncertain ? ownerReason(task) : "";
+const cancelReason = task => task.current_attempt_id ? ownerReason(task) : "";
+function requireOwner(task) { if (!ownsTask(task)) throw new Error(ownerReason(task)); }
+async function refreshActor() { currentUser.value = await createSessionClient().me(); return currentUser.value; }
+const recoveryManagement = ref(false), recoveryEvidence = ref(null);
+const terminationManagement = ref(false), terminationEvidence = ref(null);
 const attempts = ref([]);
 const accountSummaryVisible = ref(false), accountSummaryId = ref("");
 function viewAccount(id) {
@@ -374,7 +384,7 @@ async function restoreDraft(payload) {
   const [a, o, c, artwork] = results.map(result => result.status === "fulfilled" ? result.value : null);
   account.value = a;
   output.value = o?.output || null;
-  if (form.value.media_account_id) draftResourceIssue.value.account = !a ? "原账号不可用，请恢复原账号或重新选择" : accountUnavailable(a, form.value.category_id);
+  if (form.value.media_account_id) draftResourceIssue.value.account = !a ? "原账号不可用，请恢复原账号或重新选择" : accountUnavailable(a, form.value.category_id, currentUser.value?.id);
   if (form.value.composite_output_id) draftResourceIssue.value.output = !output.value ? "原成片不可用，填写内容已保留" : outputUnavailable(output.value, form.value.category_id, a);
   if (form.value.content.cover_file_id) {
     cover.value = { id: form.value.content.cover_file_id, image_asset_id: String(payload.image_asset_id || ""), origin: String(payload.cover_origin || ""), output_id: String(payload.cover_output_id || ""), name: "原封面暂不可用" };
@@ -512,6 +522,7 @@ async function copyTask(row) {
   try {
     userId = String((await publicationUser()).id);
     if (disposed) return;
+    requireOwner(await client.get(row.id));
     input = await client.copy(row.id, row.revision);
   }
   catch (e) { if (!disposed) { await load(); error.value = e.message; } }
@@ -523,7 +534,15 @@ async function openTermination(row, action) {
   if (busy.value) return;
   busy.value = true; error.value = '';
   try {
+    await refreshActor();
     const task = await client.get(row.id);
+    if (action === 'cancel' && cancelReason(task)) throw new Error(cancelReason(task));
+    terminationManagement.value = !ownsTask(task);
+    terminationEvidence.value = null;
+    if (action === 'abandon' && terminationManagement.value) {
+      terminationEvidence.value = recordedPublicationEvidence(task, await client.attempt(task.id));
+      if (!terminationEvidence.value?.no_publishable_work) throw new Error('原尝试缺少安全结束且未投稿的记录，请由任务所属运营先核实');
+    }
     if (task.revision !== row.revision || !(action === 'cancel' ? cancellable(task) : action === 'abandon' && abandonable(task))) throw new Error('任务内容或状态已变化，请核对更新后的列表再操作');
     terminationTask.value = JSON.parse(JSON.stringify(task));
     terminationAction.value = action; terminationError.value = ''; terminationSubmitted.value = false; terminationVisible.value = true;
@@ -551,6 +570,7 @@ async function startExecution(row) {
   try {
     await publicationUser();
     const task = await client.get(row.id);
+    requireOwner(task);
     if (!editable(task) || task.revision !== row.revision) throw new Error("任务内容或状态已变化，请核对更新后的列表再操作");
     if (!(await feedback.confirmWarning({title:"确认执行发布",message:`将使用账号「${task.resources.account_name}」自动发布此任务。请确认文案、封面和声明；执行后不能再编辑。`,confirmText:"确认执行"}))) return;
     await client.start(task.id, {expected_revision: task.revision});
@@ -569,6 +589,8 @@ async function openHumanScene(row) {
   try {
     const [task,user]=await Promise.all([client.get(row.id),publicationUser()]);
     if (disposed) return;
+    requireOwner(task);
+    if (humanReason(task)) throw new Error(humanReason(task));
     if (task.status!==PublicationStatus.AwaitingHuman || !task.current_attempt_id) throw new Error('任务状态已变化，请刷新后核对');
     await handlePublicationHuman({task,userId:String(user.id)});
     if (disposed) return;
@@ -583,6 +605,7 @@ async function continueHumanScene() {
     const user=await publicationUser();
     if (disposed) return;
     if (String(user.id)!==humanUserId.value) throw new Error('登录身份已变化，请关闭后重新打开原任务');
+    requireOwner(humanTask.value);
     await handlePublicationHuman({task:humanTask.value,userId:humanUserId.value,resume:true});
     if (disposed) return;
     humanVisible.value=false;
@@ -597,7 +620,15 @@ async function openVerification(row) {
   busy.value = true;
   error.value = "";
   try {
+    await refreshActor();
     const task = await client.get(row.id);
+    if (verificationReason(task)) throw new Error(verificationReason(task));
+    recoveryManagement.value = !ownsTask(task);
+    recoveryEvidence.value = null;
+    if (recoveryManagement.value) {
+      recoveryEvidence.value = recordedPublicationEvidence(task, await client.attempt(task.id));
+      if (!recoveryEvidence.value?.scene_closed) throw new Error("原尝试缺少安全结束记录，请由任务所属运营先核实");
+    }
     if (![PublicationStatus.Uncertain,PublicationStatus.Reviewing].includes(task.status)) throw new Error("任务状态已变化，请核对列表后操作");
     recoveryTask.value = JSON.parse(JSON.stringify(task));
     recoveryError.value = "";
@@ -629,6 +660,7 @@ async function retryExecution(row) {
   try {
     await publicationUser();
     const task = await client.get(row.id);
+    requireOwner(task);
     if (!retryable(task) || task.revision !== row.revision) throw new Error("任务内容或状态已变化，请核对更新后的列表再操作");
     if (!(await feedback.confirmWarning({title:"重试任务",message:"确认原尝试无可发布稿件、执行现场已结束。将复查原账号、成片、封面与内容，沿用本任务重新执行；历史尝试与占用保留。",confirmText:"确认重试"}))) return;
     await client.retry(task.id, {expected_revision: task.revision});
@@ -787,6 +819,7 @@ function chooseCoverImage(target) {
 function picked(row) {
   const previousInput = reviewedInput();
   if (picker.value === "account") {
+    if (String(row.user_id) !== String(currentUser.value?.id)) { feedback.toast.error("只能选择本人账号创建发布任务"); return; }
     delete draftResourceIssue.value.account;
     account.value = row;
     form.value.media_account_id = String(row.id);
@@ -822,6 +855,9 @@ async function submit() {
   if (busy.value) return;
   formError.value = "";
   validationField.value = "";
+  if (!editing.value && account.value && String(account.value.user_id) !== String(currentUser.value?.id)) {
+    draftResourceIssue.value.account = "只能选择本人账号创建发布任务";
+  }
   const resourceProblem = !editing.value && Object.values(draftResourceIssue.value).find(Boolean);
   const issue = !pendingRequest.value && contentIssue(form.value);
   if (!pendingRequest.value && (resourceProblem || issue)) {
@@ -1098,15 +1134,15 @@ onMounted(async () => {
             }}</template>
             <template #op="{ row }">
               <ResourceRowActions>
-                <t-button v-if="canPublish && editable(row)" class="is-primary" variant="text" size="small" :disabled="busy" @click="startExecution(row)">执行</t-button>
-                <t-button v-if="canPublish && row.status===PublicationStatus.AwaitingHuman" class="is-primary" variant="text" size="small" :disabled="busy" @click="openHumanScene(row)">去处理</t-button>
-                <t-button v-if="[PublicationStatus.Uncertain,PublicationStatus.Reviewing].includes(row.status)" class="is-primary" variant="text" size="small" :disabled="busy" @click="openVerification(row)">{{row.status===PublicationStatus.Reviewing?'补录结果':'核实结果'}}</t-button>
-                <t-button v-if="canPublish && retryable(row)" class="is-primary" variant="text" size="small" :disabled="busy" @click="retryExecution(row)">重试</t-button>
+                <t-button v-if="canPublish && editable(row)" class="is-primary" variant="text" size="small" :disabled="busy || !!ownerReason(row)" :title="ownerReason(row)" @click="startExecution(row)">执行</t-button>
+                <t-button v-if="canPublish && row.status===PublicationStatus.AwaitingHuman" class="is-primary" variant="text" size="small" :disabled="busy || !!humanReason(row)" :title="humanReason(row)" @click="openHumanScene(row)">去处理</t-button>
+                <t-button v-if="[PublicationStatus.Uncertain,PublicationStatus.Reviewing].includes(row.status)" class="is-primary" variant="text" size="small" :disabled="busy || !!verificationReason(row)" :title="verificationReason(row)" @click="openVerification(row)">{{row.status===PublicationStatus.Reviewing?'补录结果':'核实结果'}}</t-button>
+                <t-button v-if="canPublish && retryable(row)" class="is-primary" variant="text" size="small" :disabled="busy || !!ownerReason(row)" :title="ownerReason(row)" @click="retryExecution(row)">重试</t-button>
                 <t-button v-if="editable(row)" variant="text" size="small" :disabled="busy" @click="edit(row)">编辑</t-button>
-                <t-button v-if="cancellable(row)" theme="danger" variant="text" size="small" :disabled="busy" @click="openTermination(row, 'cancel')">终止</t-button>
+                <t-button v-if="cancellable(row)" theme="danger" variant="text" size="small" :disabled="busy || !!cancelReason(row)" :title="cancelReason(row)" @click="openTermination(row, 'cancel')">终止</t-button>
                 <t-button v-if="abandonable(row)" theme="danger" variant="text" size="small" :disabled="busy" @click="openTermination(row, 'abandon')">放弃</t-button>
                 <t-button v-if="row.work_id" variant="text" size="small" @click="router.push({path:'/work',query:{work_id:row.work_id}})">查看作品</t-button>
-                <t-button v-if="canPublish && copyable(row)" variant="text" size="small" :disabled="busy" @click="copyTask(row)">复制</t-button>
+                <t-button v-if="canPublish && copyable(row)" variant="text" size="small" :disabled="busy || !!ownerReason(row)" :title="ownerReason(row)" @click="copyTask(row)">复制</t-button>
                 <t-button variant="text" size="small" :disabled="busy" @click="detailReturn = 'list'; openDetail(row)">详情</t-button>
               </ResourceRowActions>
             </template>
@@ -1283,6 +1319,7 @@ onMounted(async () => {
           <t-descriptions-item label="发布平台">{{ platformLabel(detail.platform) }}</t-descriptions-item>
           <t-descriptions-item label="内容类目">{{ categoryName(detail.category_id) }}</t-descriptions-item>
           <t-descriptions-item label="发布账号"><t-button v-if="detail.media_account_id" theme="primary" variant="text" size="small" @click="viewAccount(detail.media_account_id)">{{ detail.resources.account_name || "查看账号" }}</t-button><span v-else>—</span></t-descriptions-item>
+          <t-descriptions-item label="账号所属用户">{{ detail.resources.account_owner || detail.operator_id }}</t-descriptions-item>
           <t-descriptions-item label="真实 UID">{{ detail.platform_account_uid }}</t-descriptions-item>
           <t-descriptions-item v-if="detail.last_checked_at" label="最近核验">{{formatDateTime(detail.last_checked_at)}}</t-descriptions-item>
           <t-descriptions-item v-if="detail.last_check_message && detail.status !== PublicationStatus.Published" label="核验说明" full>{{detail.last_check_message}}</t-descriptions-item>
@@ -1323,7 +1360,7 @@ onMounted(async () => {
       <template #footer><t-button v-if="videoError" theme="default" variant="outline" @click="previewOutput">重试预览</t-button></template>
     </ResourceOverlay>
     <MediaPreview form-actions v-model:visible="preview" :images="previewImages" title="发布封面预览" />
-    <PublishingTerminationDialog v-model:visible="terminationVisible" :task="terminationTask" :action="terminationAction" :busy="busy" :error="terminationError" :submitted="terminationSubmitted" @submit="saveTermination" />
+    <PublishingTerminationDialog v-model:visible="terminationVisible" :task="terminationTask" :action="terminationAction" :busy="busy" :error="terminationError" :submitted="terminationSubmitted" :management="terminationManagement" :saved-evidence="terminationEvidence" @submit="saveTermination" />
     <ResourceOverlay :visible="humanVisible" title="处理人工验证" :width="560" :busy="busy" form-actions @update:visible="humanVisible=$event">
       <FeedbackAlert v-if="humanError" theme="error" :message="humanError" />
       <p>请在已打开的原账号页面完成登录或安全验证，然后继续原发布尝试。</p>
@@ -1331,10 +1368,11 @@ onMounted(async () => {
       <p>请保留原页面，完成验证后不要自行点击平台的发布按钮。继续后会再次核对账号，并按原任务执行。</p>
       <template #footer><t-button theme="default" variant="outline" :disabled="busy" @click="humanVisible=false">暂不处理</t-button><t-button :loading="busy" @click="continueHumanScene">已经处理，继续原尝试</t-button></template>
     </ResourceOverlay>
-    <PublishingRecoveryDialog v-model:visible="recoveryVisible" :task="recoveryTask" :busy="busy" :error="recoveryError" @submit="saveVerification" />
+    <PublishingRecoveryDialog v-model:visible="recoveryVisible" :task="recoveryTask" :busy="busy" :error="recoveryError" :management="recoveryManagement" :saved-evidence="recoveryEvidence" @submit="saveVerification" />
     <PublishingResourcePicker
       :visible="!!picker"
       :kind="picker"
+      :user-id="currentUser?.id"
       :aspect="picker==='image' ? (coverTarget==='portrait' ? [3,4] : [16,9]) : undefined"
       :category="form?.category_id"
       :account="account"

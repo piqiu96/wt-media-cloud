@@ -13,6 +13,9 @@ func (s *RecoveryService) Copy(actor identity.PublicUser, id, revision uint64) (
 	if err != nil {
 		return model.PublicationCopy{}, err
 	}
+	if !ownsPublication(actor, v) {
+		return model.PublicationCopy{}, ErrNotFound
+	}
 	if revision == 0 {
 		return model.PublicationCopy{}, ErrInvalid
 	}

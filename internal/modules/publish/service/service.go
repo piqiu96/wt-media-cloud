@@ -99,6 +99,9 @@ func CanRead(a identity.PublicUser, v model.Task) bool {
 func canExecutePublication(a identity.PublicUser) bool {
 	return a.ID > 0 && a.Status == identity.UserStatusEnabled && (a.Role == identity.RoleOperator || a.Role == identity.RoleSeniorOperator)
 }
+func ownsPublication(a identity.PublicUser, v model.Task) bool {
+	return canExecutePublication(a) && int64(a.ID) == v.OperatorID
+}
 func (s *Service) Get(a identity.PublicUser, id uint64) (model.Task, error) {
 	v, e := s.Repo.Get(id)
 	if e == nil && !CanRead(a, v) {
@@ -181,6 +184,9 @@ func (s *Service) Create(ctx context.Context, a identity.PublicUser, in CreateIn
 	account, err := s.Account(a, fmt.Sprint(in.MediaAccountID))
 	if err != nil {
 		return model.Task{}, err
+	}
+	if account.UserID != a.ID {
+		return model.Task{}, ErrNotFound
 	}
 	if string(account.Platform) != in.Platform || !account.Enabled || account.IdentificationStatus != accounts.IdentificationIdentified || account.PlatformLoginStatus != accounts.PlatformLoginNormal || account.PlatformAccountID == "" || account.BrowserProfileID == "" || account.TeamID == nil {
 		return model.Task{}, ErrInvalid

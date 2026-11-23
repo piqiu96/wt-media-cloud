@@ -3,7 +3,7 @@ import { ref, watch } from 'vue';
 import ResourceOverlay from '../../../shared/ui/resource/ResourceOverlay.vue';
 import ResourceRequiredLabel from '../../../shared/ui/resource/ResourceRequiredLabel.vue';
 import FeedbackAlert from '../../../shared/ui/feedback/FeedbackAlert.vue';
-const props = defineProps({ visible: Boolean, task: Object, action: String, busy: Boolean, error: String, submitted: Boolean });
+const props = defineProps({ visible: Boolean, task: Object, action: String, busy: Boolean, error: String, submitted: Boolean, management: Boolean, savedEvidence: Object });
 const emit = defineEmits(['update:visible', 'submit']);
 const reason = ref(''), basis = ref(''), sceneClosed = ref(false), noPublishableWork = ref(false), validation = ref('');
 watch(() => props.visible, visible => {
@@ -16,12 +16,14 @@ function submit() {
   const input = { expected_revision: props.task.revision };
   if (props.action === 'cancel') input.reason = reason.value.trim();
   if (props.action === 'abandon') {
-    if (!reason.value.trim() || basis.value.trim().length < 10 || !sceneClosed.value || !noPublishableWork.value) {
+    const confirmedSceneClosed = props.management ? props.savedEvidence?.scene_closed === true : sceneClosed.value;
+    const confirmedNoWork = props.management ? props.savedEvidence?.no_publishable_work === true : noPublishableWork.value;
+    if (!reason.value.trim() || basis.value.trim().length < 10 || !confirmedSceneClosed || !confirmedNoWork) {
       validation.value = '请填写原因和实际核实依据（至少 10 字），并确认原现场结束、没有可发布稿件。';
       return;
     }
     input.attempt_id = props.task.current_attempt_id;
-    input.evidence = { platform_uid: props.task.platform_account_uid, reason: reason.value.trim(), basis: basis.value.trim(), scene_closed: sceneClosed.value, no_publishable_work: noPublishableWork.value };
+    input.evidence = { platform_uid: props.task.platform_account_uid, reason: reason.value.trim(), basis: basis.value.trim(), scene_closed: confirmedSceneClosed, no_publishable_work: confirmedNoWork };
   }
   emit('submit', input);
 }
@@ -35,8 +37,9 @@ function submit() {
         <p>请先核实原尝试 {{ task?.current_attempt_id }}。放弃后旧任务永久结束并释放成片占用，不能恢复执行；已有投稿或仍不确定时不能放弃。</p>
         <label><ResourceRequiredLabel>放弃原因</ResourceRequiredLabel><t-input v-model="reason" aria-label="放弃原因" :maxlength="200" :disabled="busy || submitted" /></label>
         <label><ResourceRequiredLabel>核实依据</ResourceRequiredLabel><t-textarea v-model="basis" aria-label="放弃核实依据" :maxlength="2000" :autosize="{ minRows: 4, maxRows: 8 }" :disabled="busy || submitted" /></label>
-        <t-checkbox v-model="sceneClosed" :disabled="busy || submitted">已核实原执行进程与浏览器现场安全结束</t-checkbox>
-        <t-checkbox v-model="noPublishableWork" :disabled="busy || submitted">已核实原账号没有可继续发布的稿件或公开作品</t-checkbox>
+        <FeedbackAlert v-if="management" theme="info" :message="savedEvidence?.basis || '原尝试缺少安全结束且未投稿的记录'" />
+        <t-checkbox v-if="!management" v-model="sceneClosed" :disabled="busy || submitted">已核实原执行进程与浏览器现场安全结束</t-checkbox>
+        <t-checkbox v-if="!management" v-model="noPublishableWork" :disabled="busy || submitted">已核实原账号没有可继续发布的稿件或公开作品</t-checkbox>
       </template>
       <template v-else><p>{{ task?.status === 'running' ? '将先请求停止，确认原执行现场已安全关闭且尚未投稿后才会取消；无法确认时需核实结果。' : '未领取任务确认后取消。' }}终止后保留成片占用，原任务不恢复；这不会撤回平台投稿。</p><label><ResourceRequiredLabel>终止原因</ResourceRequiredLabel><t-input v-model="reason" aria-label="终止原因" :maxlength="200" :disabled="busy || submitted" /></label></template>
     </div>

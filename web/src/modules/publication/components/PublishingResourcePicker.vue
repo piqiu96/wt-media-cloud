@@ -18,6 +18,7 @@ const props = defineProps({
   aspect: Array,
   category: String,
   account: Object,
+  userId: String,
 });
 const emit = defineEmits(["update:visible", "selected", "view-account"]);
 const accounts = createMediaAccountClient(),
@@ -57,7 +58,7 @@ async function load() {
     const params = { page: page.value, page_size: 10, search: search.value };
     let data;
     if (props.kind === "account")
-      data = await accounts.listPage({ ...params, platform: "baidu" });
+      data = await accounts.listPage({ ...params, platform: "baidu", user_id: props.userId });
     else if (props.kind === "output")
       data = await publication.outputs({ ...params, platform: "baidu" });
     else data = await images.listImageAsset({ ...params, usage: props.usage, enabled: true, category_id: props.category });
@@ -78,7 +79,7 @@ async function load() {
 }
 function reason(row) {
   return props.kind === "account"
-    ? accountUnavailable(row, props.category)
+    ? accountUnavailable(row, props.category, props.userId)
     : props.kind === "output"
       ? outputUnavailable(row, props.category, props.account)
       : row.deleted_at

@@ -13,9 +13,9 @@ await fs.mkdir(evidence, { recursive: true });
 const browser = await chromium.launch({ headless: true, channel: 'chrome' });
 const checks = [];
 const output = { id: '130', category_id: '1', team_id: '1', name: '走查成片', material_title: '走查成片', platforms: ['baidu'], video: { status: 'ready' }, publish_status: 'unpublished' };
-const tasks = ['pending', 'failed', 'awaiting_human', 'uncertain', 'reviewing', 'published'].map((status, i) => ({
-  id: String(i + 1), revision: '1', status, platform: 'baidu', category_id: '1', media_account_id: '9', composite_output_id: '130',
-  current_attempt_id: i ? '7' : null, authorized_at: i ? '2026-11-23T01:00:00Z' : null, can_cancel: i === 0, created_at: '2026-11-23T01:00:00Z',
+const tasks = ['pending', 'failed', 'awaiting_human', 'uncertain', 'reviewing', 'published', 'pending', 'failed', 'awaiting_human', 'uncertain', 'running'].map((status, i) => ({
+  id: String(i + 1), operator_id: i < 6 ? '1' : '9', revision: '1', status, platform: 'baidu', category_id: '1', media_account_id: '9', composite_output_id: '130',
+  current_attempt_id: status === 'pending' ? null : '7', authorized_at: status === 'pending' ? null : '2026-11-23T01:00:00Z', can_cancel: ['pending','running'].includes(status), created_at: '2026-11-23T01:00:00Z',
   content: { description: `走查任务${i + 1}`, cover_file_id: '12', portrait_cover_file_id: '13', topics: '', declaration: '无需声明', confirmed: true },
   resources: { account_name: '走查账号', output_name: '走查成片' },
 }));
@@ -95,6 +95,19 @@ try {
             checks.push(`${app}: admin Cloud management retained, publication entries/deep link/Agent/draft blocked`);
           } else {
             for (const name of ['快速发布', '执行', '重试', '去处理', '复制']) assert(await page.getByRole('button', { name, exact: true }).count() > 0, `${app}: ${role} ${name}`);
+            for (const [id, names] of [['7',['执行']], ['8',['重试','复制']], ['9',['去处理']], ['10',['核实结果']], ['11',['终止']]]) {
+              const row=page.getByRole('row').filter({hasText:`走查任务${id}`});
+              for (const name of names) {
+                const button=row.getByRole('button',{name,exact:true});
+                assert.equal(await button.isEnabled(),false,`${app}: ${role} member ${id} ${name}`);
+                assert.match(await button.getAttribute('title'), /任务所属运营/);
+              }
+            }
+            assert.equal(await page.getByRole('row').filter({hasText:'走查任务1'}).filter({hasNotText:'走查任务10'}).filter({hasNotText:'走查任务11'}).getByRole('button',{name:'执行',exact:true}).isEnabled(),true);
+            const ownHuman=page.getByRole('row').filter({hasText:'走查任务3'}).getByRole('button',{name:'去处理',exact:true});
+            assert.equal(await ownHuman.isEnabled(),app==='desktop');
+            checks.push(`${app}: ${role} own execution retained; member execution/retry/copy/scene/uncertain verification/running stop disabled with reasons`);
+            await page.screenshot({path:path.join(evidence,`${app}-${role}-ownership.png`),fullPage:true});
             await page.getByRole('button', { name: '快速发布', exact: true }).click();
             await page.getByRole('heading', { name: '快速发布', exact: true }).waitFor();
             if (app === 'desktop') assert(nativeCalls.includes('local_publication_draft_get'));

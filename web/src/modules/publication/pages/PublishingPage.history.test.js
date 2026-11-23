@@ -7,12 +7,12 @@ const services = vi.hoisted(() => ({
   draft: { get: vi.fn(), save: vi.fn(), clear: vi.fn(), remember: vi.fn(), persistent: false },
   chooseDraft: vi.fn(),
   images: { getImageAsset: vi.fn() },
-  publication: { copy: vi.fn(), findByRequest: vi.fn(), get: vi.fn(), attempt: vi.fn(), list: vi.fn(), edit: vi.fn(), create: vi.fn(), cancel: vi.fn(), abandon: vi.fn() },
+  publication: { copy: vi.fn(), findByRequest: vi.fn(), get: vi.fn(), attempt: vi.fn(), list: vi.fn(), edit: vi.fn(), create: vi.fn(), start: vi.fn(), retry: vi.fn(), cancel: vi.fn(), abandon: vi.fn() },
   compose: { getComposeOutput: vi.fn() },
   accounts: { get: vi.fn() },
   human: vi.fn(),
 }));
-vi.mock('../../../shared/api/publicationRun.js',()=>({handlePublicationHuman:services.human}));
+vi.mock('../../../shared/api/publicationRun.js',()=>({handlePublicationHuman:services.human,nativePublicationDesktop:()=>true}));
 vi.mock('../../../shared/api/image.js', () => ({ createImageClient: () => services.images }));
 vi.mock('../../../shared/api/session.js', () => ({ createSessionClient: () => services.session }));
 vi.mock('../../../shared/api/publicationDraft.js', () => ({ createPublicationDraftClient: () => services.draft }));
@@ -27,7 +27,7 @@ import PublishingPage from './PublishingPage.vue';
 import { feedback } from '../../../shared/ui/feedback/index.js';
 
 const task = id => ({
-  id, revision: '1', status: 'pending', can_cancel: true, request_key: `request-${id}`,
+  id, operator_id: '9', revision: '1', status: 'pending', can_cancel: true, request_key: `request-${id}`,
   category_id: '1', media_account_id: '9', composite_output_id: '10', platform: 'baidu',
   content: { description: `标题-${id}`, cover_file_id: '11', portrait_cover_file_id:'12', declaration: '无需声明', confirmed: true },
   resources: {},
@@ -45,7 +45,7 @@ beforeEach(async () => {
   services.publication.list.mockResolvedValue({ items: [], total: 0, summary: {} });
   services.publication.edit.mockImplementation(async (id, input) => ({ ...task(id), content: input.content, revision: '2' }));
   services.publication.create.mockImplementation(async input => ({ ...input, id: 'C', revision: '1', status: 'pending' }));
-  services.accounts.get.mockResolvedValue({ id: '9', role: 'operator' });
+  services.accounts.get.mockResolvedValue({ id: '9', user_id: '9', role: 'operator' });
   services.compose.getComposeOutput.mockResolvedValue({ output: { id: '10' } });
   // Mount the real page's setup without its visual shell. Navigation and save
   // handlers run unchanged; only external APIs and feedback are substituted.
@@ -213,7 +213,7 @@ it('reselects an unavailable original account after it becomes available without
   state.account.value = null;
   state.draftResourceIssue.value.account = '原账号不可用';
   state.picker.value = 'account';
-  state.picked({ id: '9', platform: 'baidu' });
+  state.picked({ id: '9', user_id: '9', platform: 'baidu' });
   expect(state.account.value.id).toBe('9');
   expect(state.draftResourceIssue.value.account).toBeFalsy();
   expect(state.form.value.content.confirmed).toBe(true);
@@ -485,4 +485,63 @@ it('rejects administrator execution and original-scene continuation but keeps Cl
   await state.openDetail(task('A'));
   expect(state.view.value).toBe('detail');
   expect(state.detail.value.id).toBe('A');
+});
+
+
+it('keeps member execution and original-scene actions out of the senior workflow', async () => {
+ services.session.me.mockResolvedValue({id:'8',role:'senior_operator'});
+ const member=task('7');services.publication.get.mockResolvedValue(member);
+ await state.startExecution(member);
+ await state.retryExecution({...member,status:'failed'});
+ await state.copyTask({...member,status:'published'});
+ await state.openHumanScene({...member,status:'awaiting_human',current_attempt_id:'21'});
+ expect(services.publication.start).not.toHaveBeenCalled();
+ expect(services.publication.retry).not.toHaveBeenCalled();
+ expect(services.publication.copy).not.toHaveBeenCalled();
+ expect(services.human).not.toHaveBeenCalled();
+ expect(feedback.confirmWarning).not.toHaveBeenCalled();
+ expect(services.draft.get).not.toHaveBeenCalled();
+ await state.openDetail(member);expect(state.detail.value.id).toBe('7');
+});
+it('keeps member scene verification and running stop out of Cloud management',async()=>{
+ services.session.me.mockResolvedValue({id:'8',role:'senior_operator'});
+ const member={...task('7'),status:'uncertain',current_attempt_id:'21'};
+ services.publication.get.mockResolvedValue(member);
+ await state.openVerification(member);expect(state.recoveryVisible.value).toBe(false);
+ services.publication.get.mockResolvedValue({...member,status:'running',can_cancel:true});
+ await state.openTermination({...member,status:'running'},'cancel');
+ expect(state.terminationVisible.value).toBe(false);
+ services.publication.get.mockResolvedValue(task('7'));
+ await state.openTermination(task('7'),'cancel');expect(state.terminationVisible.value).toBe(true);
+});
+it('preserves draft text but blocks a member account restored into the senior own preparation',async()=>{
+ services.session.me.mockResolvedValue({id:'8',role:'senior_operator'});
+ services.draft.get.mockResolvedValue({payload:{form:task('D')},revision:'2'});
+ services.chooseDraft.mockResolvedValue('continue');
+ services.accounts.get.mockResolvedValue({id:'9',user_id:'9',platform:'baidu'});
+ await state.openCreate();
+ expect(state.form.value.content.description).toBe('标题-D');
+ expect(state.draftResourceIssue.value.account).toContain('本人');
+ await state.submit();expect(services.publication.create).not.toHaveBeenCalled();
+});
+
+it('management decisions reuse the exact saved attempt and refuse missing member proof',async()=>{
+ services.session.me.mockResolvedValue({id:'8',role:'senior_operator'});
+ const member={...task('7'),status:'reviewing',current_attempt_id:'21',platform_account_uid:'uid9'};
+ services.publication.get.mockResolvedValue(member);
+ await state.openVerification(member);expect(state.recoveryVisible.value).toBe(false);
+ const recorded={id:'21',publication_id:'7',executor_user_id:'9',status:'completed',result_hash:'hash',submit_started_at:'2026-11-23T01:00:00Z',input_snapshot:{platform_uid:'uid9'},evidence:{status:'reviewing',platform_work_id:'100',evidence:{scene_closed:true,platform_uid:'uid9',receipt_id:'100'}}};
+ services.publication.attempt.mockResolvedValue([recorded]);
+ await state.openVerification(member);
+ expect(state.recoveryVisible.value).toBe(true);expect(state.recoveryManagement.value).toBe(true);expect(state.recoveryEvidence.value.scene_closed).toBe(true);
+ const failed={...member,status:'failed'};services.publication.get.mockResolvedValue(failed);
+ await state.openTermination(failed,'abandon');expect(state.terminationVisible.value).toBe(false);
+ services.publication.attempt.mockResolvedValue([{...recorded,submit_started_at:null,evidence:{status:'failed',evidence:{scene_closed:true,platform_uid:'uid9',not_submitted:true}}}]);
+ await state.openTermination(failed,'abandon');expect(state.terminationVisible.value).toBe(true);expect(state.terminationEvidence.value.no_publishable_work).toBe(true);
+});
+it('senior own start and retry remain available with explicit confirmation',async()=>{
+ services.session.me.mockResolvedValue({id:'9',role:'senior_operator'});
+ await state.startExecution(task('7'));expect(services.publication.start).toHaveBeenCalledWith('7',{expected_revision:'1'});
+ services.publication.get.mockResolvedValue({...task('7'),status:'failed'});
+ await state.retryExecution({...task('7'),status:'failed'});expect(services.publication.retry).toHaveBeenCalledWith('7',{expected_revision:'1'});
 });

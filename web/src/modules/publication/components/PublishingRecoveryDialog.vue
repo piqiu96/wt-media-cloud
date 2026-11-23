@@ -11,6 +11,8 @@ const props = defineProps({
   task: Object,
   busy: Boolean,
   error: String,
+  management: Boolean,
+  savedEvidence: Object,
 });
 const emit = defineEmits(["update:visible", "submit"]);
 const conclusion = ref(""),
@@ -67,6 +69,11 @@ watch(
 function submit() {
   validation.value = "";
   if (props.busy) return;
+  if (props.management && (!supplement.value || !props.savedEvidence?.scene_closed)) {
+    validation.value = "原尝试缺少安全结束记录，请由任务所属运营先核实。";
+    return;
+  }
+  const confirmedSceneClosed = props.management ? props.savedEvidence.scene_closed : sceneClosed.value;
   if (
     !conclusion.value ||
     !props.task?.current_attempt_id ||
@@ -76,7 +83,7 @@ function submit() {
     validation.value = "请选择核实结论，填写原因及实际核实依据（至少 10 字）。";
     return;
   }
-  if (conclusion.value !== PublicationStatus.Uncertain && !sceneClosed.value) {
+  if (conclusion.value !== PublicationStatus.Uncertain && !confirmedSceneClosed) {
     validation.value = "请先核实原执行进程与浏览器已安全结束。";
     return;
   }
@@ -119,7 +126,7 @@ function submit() {
       platform_uid: props.task.platform_account_uid,
       reason: reason.value.trim(),
       basis: basis.value.trim(),
-      scene_closed: sceneClosed.value,
+      scene_closed: confirmedSceneClosed,
       no_publishable_work:
         conclusion.value === PublicationStatus.Failed &&
         noPublishableWork.value,
@@ -234,8 +241,9 @@ function submit() {
           :disabled="busy"
           placeholder="记录如何核对原账号、指定稿件、视频及公开时间"
       /></label>
+      <FeedbackAlert v-if="management" theme="info" :message="savedEvidence?.basis || '原尝试已记录现场安全结束'" />
       <t-checkbox
-        v-if="conclusion && conclusion !== PublicationStatus.Uncertain"
+        v-if="!management && conclusion && conclusion !== PublicationStatus.Uncertain"
         v-model="sceneClosed"
         :disabled="busy"
         >已核实原执行进程与浏览器已安全结束</t-checkbox
