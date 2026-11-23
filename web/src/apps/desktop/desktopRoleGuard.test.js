@@ -76,7 +76,7 @@ describe('desktop role guard', () => {
   // 菜单与路由守卫用的是同一个判据。
   it('gives the desktop environment to operators and seniors, not to admins', () => {
     expect(layout).toContain('const desktopEnvAllowed = computed(() => canUseDesktopEnv(currentUser.value))')
-    expect(layout).toContain('desktopEnvAllowed.value ? desktopItems : []')
+    expect(layout).toContain('v-if="isDesktop() && desktopEnvAllowed"')
     expect(desktopMain).toContain('if (!canUseDesktopEnv(user))')
   })
 
@@ -100,7 +100,7 @@ describe('desktop role guard', () => {
 
   it('does not read or render local agent and BitBrowser binding for admins', () => {
     expect(personalInfo).toContain("if (!canRunLocalAgent(currentUser)) return")
-    expect(personalInfo).toContain('v-if="localAgentAllowed" class="device-card"')
+    expect(personalInfo).toContain('<ResourceCard v-if="localAgentAllowed">')
   })
 
   it('waits for the local agent before the window page performs its entry scan', () => {

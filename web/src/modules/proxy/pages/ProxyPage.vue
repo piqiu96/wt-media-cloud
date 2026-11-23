@@ -21,6 +21,7 @@ import ResourceDescriptions from "../../../shared/ui/resource/ResourceDescriptio
 import ResourceChoiceCards from "../../../shared/ui/resource/ResourceChoiceCards.vue"
 import ResourceSelectionToolbar from "../../../shared/ui/resource/ResourceSelectionToolbar.vue"
 import ResourceCard from "../../../shared/ui/resource/ResourceCard.vue"
+import ResourceFilterBar from "../../../shared/ui/resource/ResourceFilterBar.vue"
 import ResourcePageHeader from "../../../shared/ui/resource/ResourcePageHeader.vue"
 import ResourceStatusBadge from "../../../shared/ui/resource/ResourceStatusBadge.vue"
 import ResourceEmptyState from "../../../shared/ui/resource/ResourceEmptyState.vue"
@@ -960,8 +961,8 @@ function closeImport() {
 
 <template>
   <t-loading :loading="loading" :show-overlay="true" size="large">
-    <div class="wt-resource-page resource-visual-approved">
-      <ResourcePageHeader title="代理管理" description="团队代理资源、连接检测与窗口额度">
+    <div class="wt-resource-page resource-list-page resource-visual-approved">
+      <ResourcePageHeader title="代理管理">
         <template #actions>
           <t-button theme="primary" @click="openCreate">新增代理</t-button>
           <t-button class="wt-secondary-button" variant="outline" @click="openImport">批量导入</t-button>
@@ -971,8 +972,8 @@ function closeImport() {
 
       <FeedbackAlert v-if="error" :message="error" theme="error" style="margin-bottom:16px" closable @close="error=''" />
 
-      <ResourceCard class="proxy-resource-card">
-        <div class="filter-bar">
+      <ResourceCard class="resource-list-panel proxy-resource-card">
+        <ResourceFilterBar>
           <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">搜索</span><t-input v-model="filterText" clearable placeholder="名称 / ID / 地址 / 备注" @enter="submitSearch" /></label>
           <label class="wt-filter-field"><span class="wt-filter-field__label">检测结果</span>
             <t-select v-model="filterCheck" clearable placeholder="全部" @change="applyClientFilters">
@@ -990,8 +991,8 @@ function closeImport() {
           <div class="wt-filter-actions">
             <t-button theme="primary" @click="submitSearch">查询</t-button>
             <t-button class="wt-secondary-button" variant="outline" @click="resetFilters">重置</t-button>
-            <ResourceFilterToggle v-model="advancedFilters" :count="advancedFilterCount" controls="proxy-advanced-filters" />
           </div>
+          <ResourceFilterToggle v-model="advancedFilters" :count="advancedFilterCount" controls="proxy-advanced-filters" />
           <div v-show="advancedFilters" id="proxy-advanced-filters" class="wt-advanced-filters">
           <label v-if="isAdmin" class="wt-filter-field">
             <span class="wt-filter-field__label">运营团队</span>
@@ -1005,13 +1006,13 @@ function closeImport() {
           </label>
           <label class="wt-filter-field"><span class="wt-filter-field__label">地区</span><t-input v-model="filterRegion" clearable placeholder="地区" @enter="submitSearch" /></label>
           </div>
-        </div>
+        </ResourceFilterBar>
 
         <ResourceSelectionToolbar :count="selectedRowKeys.length" unit="条代理" @clear="selectedRowKeys = []">
           <t-button theme="default" variant="outline" @click="startBatchCheck">批量检测（{{ selectedRowKeys.length }}）</t-button>
         </ResourceSelectionToolbar>
 
-        <div class="table-scroll-wrap">
+        <div class="table-scroll-wrap resource-data-table">
           <t-table
             class="wt-resource-table"
             :data="pagedProxies"

@@ -20,8 +20,8 @@ func Compatibility(ctx context.Context, c *hertzapp.RequestContext) {
 	api.Success(c, compatibility{
 		API:                          "cloud-agent",
 		MajorVersion:                 "v1",
-		ContractRevision:             "2026.11.20.2",
-		MinimumAgentContractRevision: "2026.10.23.1",
+		ContractRevision:             "2026.11.22.2",
+		MinimumAgentContractRevision: "2026.11.22.2",
 		CompatibleAgentMajorVersions: []string{"v1"},
 		Status:                       "compatible",
 	})

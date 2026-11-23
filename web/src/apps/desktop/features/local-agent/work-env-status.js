@@ -79,8 +79,8 @@ export function aggregateWorkEnv({ snapshot, cloudUser, binding, tokenFacts }) {
 
   // 阻断项按「云端绑定 → 账号不一致 → 本机」的优先级排，面板照此逐条展示。
   const blockers = []
-  if (!bitBound) blockers.push('尚未绑定比特浏览器账号，请到「个人信息」页完成绑定')
-  else if (accountDiffers) blockers.push('比特浏览器登录账号与绑定账号不一致，请到「个人信息」页确认换绑')
+  if (!bitBound) blockers.push('尚未绑定比特浏览器账号，请到「我的账号」页完成绑定')
+  else if (accountDiffers) blockers.push('比特浏览器登录账号与绑定账号不一致，请到「我的账号」页确认换绑')
   if (!page.ready) blockers.push(page.trustReason)
 
   return { page, bitBound, bitAccountDiffers: accountDiffers, workable, blockers }

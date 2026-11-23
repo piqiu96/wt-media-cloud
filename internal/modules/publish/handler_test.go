@@ -6,6 +6,7 @@ import (
 	app "github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/app/server"
 	"github.com/cloudwego/hertz/pkg/common/ut"
+	images "github.com/wt-media/wt-media-cloud/internal/modules/image/service"
 	"github.com/wt-media/wt-media-cloud/internal/modules/publish/service"
 	"gopkg.in/yaml.v3"
 	"os"
@@ -43,7 +44,7 @@ func TestPublicationRoutesAndContractRequireSession(t *testing.T) {
 			}
 		}
 	}
-	if count != 9 {
+	if count != 14 {
 		t.Fatalf("route/contract count=%d", count)
 	}
 	for _, action := range []string{"execute", "authorize"} {
@@ -110,7 +111,7 @@ func TestPublicationAgentRoutesRequireBearer(t *testing.T) {
 	if e = yaml.Unmarshal(raw, &doc); e != nil {
 		t.Fatal(e)
 	}
-	if len(doc.Paths) != 4 {
+	if len(doc.Paths) != 8 {
 		t.Fatalf("agent route count=%d", len(doc.Paths))
 	}
 	for path, methods := range doc.Paths {
@@ -159,5 +160,18 @@ func TestPublicationRetiredExecutionRoutesAreAbsent(t *testing.T) {
 	}
 	if got := ut.PerformRequest(h.Engine, "GET", "/api/v1/publication/1/attempts", nil).Result().StatusCode(); got != 404 {
 		t.Fatalf("retired attempts route=%d", got)
+	}
+}
+
+func TestImageCoverRefusalIsDefinitiveAndDoesNotFreezeCreation(t *testing.T) {
+	for _, test := range []struct {
+		err    error
+		status int
+	}{{images.ErrInvalid, 400}, {images.ErrNotFound, 404}} {
+		c := app.NewContext(0)
+		fail(c, test.err)
+		if c.Response.StatusCode() != test.status {
+			t.Fatalf("image refusal classified as uncertain: %d %s", c.Response.StatusCode(), c.Response.Body())
+		}
 	}
 }

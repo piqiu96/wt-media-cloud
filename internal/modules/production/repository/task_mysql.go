@@ -47,7 +47,7 @@ type ComposeTaskFilter struct {
 	CreatedBefore           time.Time
 }
 
-type ComposeTaskStore struct{}
+type ComposeTaskStore struct{ LockFiles func(*gorm.DB, []int64) error }
 
 func (ComposeTaskStore) CreateAudited(item model.ComposeTask, action string) (model.ComposeTask, error) {
 	return createComposeTaskAudited(database.DB(), item, action, time.Now())

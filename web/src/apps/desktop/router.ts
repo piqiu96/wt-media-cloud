@@ -13,7 +13,7 @@ export const desktopRoutes = [
     component: () => import("../../layout/AppLayout.vue"),
     children: [
       { path: "", name: "Dashboard", component: () => import("../../modules/dashboard/pages/DashboardPage.vue") },
-      { path: "personal-info", name: "PersonalInfo", component: () => import("../../modules/auth/pages/PersonalInfoPage.vue"), meta: { title: '个人信息' } },
+      { path: "personal-info", name: "PersonalInfo", component: () => import("../../modules/auth/pages/PersonalInfoPage.vue"), meta: { title: '我的账号' } },
       { path: "discovery", redirect: "/content-pool" },
       { path: "content-pool", name: "ContentPool", component: () => import("../../modules/contentpool/pages/ContentPoolPage.vue") },
       { path: "discovery-strategies", name: "DiscoveryStrategies", component: () => import("../../modules/contentpool/pages/DiscoveryStrategiesPage.vue") },
@@ -23,9 +23,12 @@ export const desktopRoutes = [
       { path: "compose-strategy", name: "ComposeStrategy", component: () => import("../../modules/compose/pages/ComposeStrategyPage.vue") },
       { path: "compose", name: "Compose", component: () => import("../../modules/compose/pages/ComposeTasksPage.vue") },
       { path: "finished-media", name: "FinishedMedia", component: () => import("../../modules/compose/pages/MyOutputsPage.vue") },
+      { path: "work", name: "Work", component: () => import("../../modules/work/pages/WorkPage.vue") },
       { path: "publish", name: "Publish", component: () => import("../../modules/publication/pages/PublishingPage.vue") },
       { path: "interact", name: "Interact", component: () => import("../../shared/ui/ComingSoon.vue") },
       { path: "comment-templates", name: "CommentTemplates", component: () => import("../../shared/ui/ComingSoon.vue") },
+      { path: "cover-template", name: "CoverTemplate", component: () => import("../../modules/image/pages/CoverTemplatePage.vue") },
+      { path: "image-library", name: "ImageLibrary", component: () => import("../../modules/image/pages/ImageLibraryPage.vue") },
       { path: "files", name: "Files", component: () => import("../../modules/files/pages/FilesPage.vue") },
       { path: "stats", name: "Stats", component: () => import("../../shared/ui/ComingSoon.vue") },
       // 社媒账号三角色可见（本地操作按账号归属在页面内判定）；浏览器窗口与代理对
@@ -39,8 +42,8 @@ export const desktopRoutes = [
       { path: "operation-teams", name: "OperationTeams", component: () => import("../cloud/pages/users/TeamsPage.vue") },
       { path: "categories", name: "Categories", component: () => import("../cloud/pages/users/CategoriesPage.vue") },
       // Desktop 独有页面
-      { path: "logs", name: "LocalLogs", component: () => import("./features/local-logs/LocalLogsPage.vue") },
-      { path: "settings", name: "LocalSettings", component: () => import("./features/local-settings/LocalSettingsPage.vue") },
+      { path: "logs", name: "LocalLogs", redirect: { path: "/settings", query: { tab: "log" } } },
+      { path: "settings", name: "LocalSettings", meta: { title: "桌面设置" }, component: () => import("./features/local-settings/LocalSettingsPage.vue") },
     ],
   },
 ]

@@ -46,46 +46,16 @@ describe('the 本机设置 route', () => {
   it('is reachable from the sidebar, at the path the router serves', () => {
     const layout = read('./layout/AppLayout.vue')
 
-    expect(layout).toMatch(/path: '\/settings'/)
-    // The sidebar's path is absolute and the router's is relative under the
-    // layout route; the two spellings have to name one address, so the absolute
-    // form is the router's with a leading slash.
-    expect(layout).toContain(`path: '/${settings.path}'`)
+    expect(layout).toContain('class="desktop-utility"')
+    expect(layout).toContain(`@click="router.push('/settings')"`)
+    expect(layout).toContain('桌面设置')
+    expect(layout).not.toContain('const desktopItems')
+  })
+  it('keeps old logs links directed at the settings log tab', () => {
+    const logs = children.find(route => route.name === 'LocalLogs')
+    expect(logs.redirect).toEqual({path:'/settings',query:{tab:'log'}})
   })
 
-  it('is listed under 桌面环境, after the page that was already there', () => {
-    const layout = read('./layout/AppLayout.vue')
-    // 切到下一段声明为止：整份文件里还有别的 `path: '/…'`（内容挖掘那一组），
-    // 不切的话断言的是整份菜单，而不是「桌面环境」这一组。
-    const desktopItems = layout.slice(
-      layout.indexOf('const desktopItems'),
-      layout.indexOf('const localOnlyPaths')
-    )
-
-    expect(desktopItems.indexOf("path: '/logs'")).toBeGreaterThan(-1)
-    expect(desktopItems.indexOf("path: '/settings'")).toBeGreaterThan(
-      desktopItems.indexOf("path: '/logs'")
-    )
-    // 切片的端点还在：端点一旦改名，上面的 slice 会退化成整份文件，下面这句就红。
-    expect(desktopItems).not.toContain('内容挖掘')
-  })
-
-  /**
-   * Every component the desktop router names resolves to a file on disk.
-   *
-   * A dynamic `import()` of a path that does not exist is a build error in the
-   * packaged app and a runtime one in dev, and both messages name a module id
-   * rather than the page. Walking the declared table covers all of them, not just
-   * this change's row.
-   *
-   * **What is read out of the loader is Vite's own id, not the source path.**
-   * The runner rewrites `import("./x.vue")` into
-   * `__vite_ssr_dynamic_import__("/src/apps/…/x.vue")` — already resolved
-   * against the project root — so the id here is the one Vite produced, and the
-   * assertion is that a file is at that place. Both spellings are accepted
-   * because which one appears is the bundler's business, not this test's; the id
-   * is the part that means something either way.
-   */
   it('names a component file that exists, for every desktop route', () => {
     const loaders = children
       .map((route) => route.components?.default ?? route.component)
@@ -94,7 +64,7 @@ describe('the 本机设置 route', () => {
     // Exact rather than a floor: a floor catches only a table that has been emptied,
     // not one that lost a route, and the walk below would then cover one page fewer
     // without saying so.
-    expect(loaders.length, 'desktop routes carrying a loader (including 文件管理)').toBe(23)
+    expect(loaders.length, 'desktop routes carrying a loader (including 图片库、封面模板和作品管理)').toBe(25)
 
     const projectRoot = new URL('../', import.meta.url)
     let checked = 0

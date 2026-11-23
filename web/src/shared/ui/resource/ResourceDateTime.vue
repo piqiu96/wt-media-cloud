@@ -2,10 +2,11 @@
 import { computed } from 'vue';
 import { DatePicker } from 'tdesign-vue-next';
 defineOptions({ inheritAttrs: false });
-const props = defineProps({ value: { type: String, default: '' } });
+const props = defineProps({ value: { type: String, default: '' }, seconds: Boolean });
 const emit = defineEmits(['update:value', 'change']);
 // Keep the existing local ISO minute value at the component boundary.
-const pickerValue = computed(() => (props.value || '').replace('T', ' ').slice(0, 16));
+const pickerFormat = computed(() => props.seconds ? 'YYYY-MM-DD HH:mm:ss' : 'YYYY-MM-DD HH:mm');
+const pickerValue = computed(() => (props.value || '').replace('T', ' ').slice(0, props.seconds ? 19 : 16));
 function change(value) {
   const next = value ? value.replace(' ', 'T') : '';
   emit('update:value', next);
@@ -13,7 +14,7 @@ function change(value) {
 }
 </script>
 <template>
-  <DatePicker class="resource-date-time" :value="pickerValue" enable-time-picker allow-input value-type="YYYY-MM-DD HH:mm" format="YYYY-MM-DD HH:mm" :time-picker-props="{ format: 'HH:mm' }" :popup-props="{ attach: 'body', zIndex: 5500, overlayClassName: 'resource-date-time-popup' }" placeholder="请选择日期和时间" clearable v-bind="$attrs" @change="change" />
+  <DatePicker class="resource-date-time" :value="pickerValue" enable-time-picker allow-input :value-type="pickerFormat" :format="pickerFormat" :time-picker-props="{ format: seconds ? 'HH:mm:ss' : 'HH:mm' }" :popup-props="{ attach: 'body', zIndex: 5500, overlayClassName: 'resource-date-time-popup' }" placeholder="请选择日期和时间" clearable v-bind="$attrs" @change="change" />
 </template>
 <style scoped>
 .resource-date-time { width: 100%; min-width: 0; }

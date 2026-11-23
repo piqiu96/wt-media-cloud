@@ -240,14 +240,14 @@ function categoryScopeText(categoryIds, role) {
 
 <template>
   <t-loading :loading="loading" :show-overlay="true" size="small">
-    <div class="wt-resource-page">
-    <ResourcePageHeader title="用户管理" description="管理用户权限、运营团队与类目范围">
+    <div class="wt-resource-page resource-visual-approved resource-list-page">
+    <ResourcePageHeader title="用户管理">
       <template #actions>
         <t-button theme="primary" @click="openCreateUser">新增用户</t-button>
       </template>
     </ResourcePageHeader>
     <FeedbackAlert v-if="error" :message="error" theme="error" style="margin-bottom:16px" closable @close="error=''" />
-    <ResourceCard class="system-resource-card">
+    <ResourceCard class="resource-list-panel system-resource-card">
       <ResourceFilterBar>
         <label class="wt-filter-field"><span class="wt-filter-field__label">UID</span><t-input v-model="filters.uid" placeholder="UID" clearable /></label>
         <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">用户名</span><t-input v-model="filters.username" placeholder="用户名" clearable /></label>
@@ -269,7 +269,7 @@ function categoryScopeText(categoryIds, role) {
         <div class="wt-filter-actions"><t-button theme="primary" @click="applyFilters">查询</t-button><t-button class="wt-secondary-button" variant="outline" @click="clearFilters">重置</t-button></div>
       </ResourceFilterBar>
 
-      <div class="table-scroll-wrap"><t-table class="wt-resource-table" :data="pagedUsers" :columns="columns" size="small" hover row-key="id" :scroll="tableScroll">
+      <div class="table-scroll-wrap resource-data-table"><t-table class="wt-resource-table" :data="pagedUsers" :columns="columns" size="small" hover row-key="id" :scroll="tableScroll">
         <template #role="{ row }"><t-tag size="small">{{ roleLabels[row.role] || row.role }}</t-tag></template>
         <template #team_name="{ row }">{{ row.role === 'admin' ? '全局' : (row.team_name || '未分配团队') }}</template>
         <template #category_ids="{ row }">{{ categoryScopeText(row.category_ids, row.role) }}</template>

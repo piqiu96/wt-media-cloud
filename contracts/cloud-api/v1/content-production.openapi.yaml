@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: WT Media Cloud Content Production API
-  version: 2026.11.07.1
+  version: 2026.11.21.1
   description: Cloud content production API. Every response uses the Cloud errcode/message/data/logid envelope.
 paths:
   /api/v1/compose-templates:
@@ -1558,6 +1558,7 @@ components:
       - platforms
       - video
       - actions
+      - thumbnail
       properties:
         id:
           type: integer
@@ -1608,7 +1609,7 @@ components:
           type:
           - object
           - 'null'
-          description: Verified final output probe facts only. Unknown fields are omitted.
+          description: Verified final output probe facts and the generated thumbnail file reference. Unknown fields are omitted.
           properties:
             duration_ms:
               type: integer
@@ -1619,6 +1620,9 @@ components:
             height:
               type: integer
               minimum: 1
+            thumbnail_file_id:
+              type: string
+              pattern: '^[1-9][0-9]*$'
         publish_status:
           type: string
           enum:
@@ -1666,6 +1670,15 @@ components:
             - bilibili
             - baidu
             - xiaohongshu
+        thumbnail:
+          type: [object, 'null']
+          description: Verified first-frame PNG from this exact final output. Null for an output without a generated thumbnail; never replaced by source art. Read failure remains an error.
+          required: [file_id, resource_path, width, height]
+          properties:
+            file_id: {type: string, pattern: '^[1-9][0-9]*$'}
+            resource_path: {type: string}
+            width: {type: integer, minimum: 1}
+            height: {type: integer, minimum: 1}
         video:
           $ref: '#/components/schemas/ComposeOutputVideo'
         actions:

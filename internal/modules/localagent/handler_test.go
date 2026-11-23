@@ -66,6 +66,7 @@ func issueProbe(t *testing.T) issueResult {
 		Data struct {
 			Token     string `json:"token"`
 			ExpiresAt int64  `json:"expires_at"`
+			UserID    string `json:"user_id"`
 		} `json:"data"`
 		Error struct {
 			Code string `json:"code"`
@@ -73,6 +74,9 @@ func issueProbe(t *testing.T) issueResult {
 	}
 	if err := json.Unmarshal(result.Result().Body(), &body); err != nil {
 		t.Fatalf("decode response %s: %v", result.Result().Body(), err)
+	}
+	if body.Data.Token != "" && body.Data.UserID != "9" {
+		t.Fatalf("issued user_id must be authenticated decimal string, got %q", body.Data.UserID)
 	}
 	return issueResult{
 		status: result.Result().StatusCode(), code: body.Error.Code,

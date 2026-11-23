@@ -1,0 +1,380 @@
+openapi: 3.1.0
+info:
+  title: WT Media Cover Template API
+  version: 2026.11.21.1
+  description: Image-domain template drafts, publication, usage and actual artwork.
+    Entity IDs and optimistic revisions are decimal strings; published_revision is
+    an integer version counter. Session scope matches image assets.
+paths:
+  /api/v1/cover/{id}:
+    get:
+      operationId: getCover
+      description: Read an authorized actual non-preview template artwork, file, render_input_hash and frozen snapshot. Does not regenerate or require the original template to remain enabled. Unavailable files are errors.
+      parameters:
+      - {in: path, name: id, required: true, schema: {$ref: '#/components/schemas/EntityID'}}
+      responses:
+        '200': {description: Artwork with preview false and frozen source/template snapshot.}
+        '404': {description: File missing or outside caller scope.}
+        '400': {description: Not a valid formal template artwork.}
+  /api/v1/cover-template:
+    get:
+      operationId: listCoverTemplate
+      description: Search by name, content_status (draft/published), enabled, width/height,
+        category_id, scope (general) and platform. Draft and published filters overlap
+        when both exist. Paginated items,total,page,page_size.
+      responses:
+        '200':
+          description: Scoped template list.
+    post:
+      operationId: createCoverTemplate
+      description: request_key, team_id (admin only), name, canvas_width/height, category_ids
+        and platform_codes create an independent disabled draft. Same key and same
+        payload replays, conflicting payload returns 409. Base information is fixed;
+        use copy to change it.
+      responses:
+        '200':
+          description: Saved draft.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateCoverTemplate'
+  /api/v1/cover-template/{id}:
+    get:
+      operationId: getCoverTemplate
+      responses:
+        '200':
+          description: Draft and current published configuration, revisions and actual thumbnail.
+    delete:
+      operationId: deleteCoverTemplate
+      description: expected_revision query; only never-published unreferenced drafts
+        may be deleted.
+      responses:
+        '200':
+          description: Removed.
+        '409':
+          description: Revision conflict or published/referenced template.
+      parameters:
+      - in: query
+        name: expected_revision
+        required: true
+        schema:
+          $ref: '#/components/schemas/EntityID'
+    parameters:
+    - in: path
+      name: id
+      required: true
+      schema:
+        $ref: '#/components/schemas/EntityID'
+  /api/v1/cover-template/{id}/draft:
+    put:
+      operationId: saveCoverTemplateDraft
+      description: expected_revision and document. Allows unfinished content, keeps
+        fixed canvas size, published configuration and thumbnail. Saving identical
+        published content clears a redundant draft.
+      responses:
+        '200':
+          description: Updated template.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SaveCoverTemplateDraft'
+    parameters:
+    - in: path
+      name: id
+      required: true
+      schema:
+        $ref: '#/components/schemas/EntityID'
+  /api/v1/cover-template/{id}/validate:
+    post:
+      operationId: validateCoverTemplate
+      description: expected_revision, optional document, title and background_image_asset_id.
+        Structural input errors return JSON before streaming. Streams start,progress,item_result
+        or item_error,done. Actual preview uses the same engine and fonts as publication.
+        Preview files cannot be used as formal covers.
+      responses:
+        '200':
+          description: text/event-stream with a single terminal item event.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ValidateCoverTemplate'
+    parameters:
+    - in: path
+      name: id
+      required: true
+      schema:
+        $ref: '#/components/schemas/EntityID'
+  /api/v1/cover-template/{id}/publish:
+    post:
+      operationId: publishCoverTemplate
+      description: expected_revision; validates saved draft with standard short and
+        long titles and real sample image for business-background templates, renders
+        thumbnail, then atomically replaces published configuration. First publication
+        remains disabled; updates preserve usage. Failure preserves both old published
+        content and draft.
+      responses:
+        '200':
+          description: Published template.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TemplateRevision'
+    parameters:
+    - in: path
+      name: id
+      required: true
+      schema:
+        $ref: '#/components/schemas/EntityID'
+  /api/v1/cover-template/{id}/usage:
+    put:
+      operationId: setCoverTemplateUsage
+      description: expected_revision and enabled. Never-published drafts cannot be
+        enabled.
+      responses:
+        '200':
+          description: Updated usage.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetCoverTemplateUsage'
+    parameters:
+    - in: path
+      name: id
+      required: true
+      schema:
+        $ref: '#/components/schemas/EntityID'
+  /api/v1/cover-template/{id}/copy:
+    post:
+      operationId: copyCoverTemplate
+      description: Same creation fields and request_key; copy current draft or published
+        document to a new independent disabled draft. Scales geometry and font sizes
+        proportionately, preserves image crop behavior. No glyph stretching. New draft
+        must pass actual output validation.
+      responses:
+        '200':
+          description: New independent draft.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateCoverTemplate'
+    parameters:
+    - in: path
+      name: id
+      required: true
+      schema:
+        $ref: '#/components/schemas/EntityID'
+  /api/v1/cover/render:
+    post:
+      operationId: renderCover
+      description: template_id, expected_published_revision, title, background_image_asset_id or background_output_id,
+        row_key and input_revision. Only an enabled published template and enabled
+        permitted background may produce a formal result. Returns fixed actual file,
+        input hash, full template/input snapshot and renderer version through start/progress/item_result|item_error/done
+        events. Business background requires exactly one source; output is resolved via the production service and must have an actual thumbnail. Fixed/solid backgrounds reject extra business sources. Snapshot includes background_file_id and background_output_id as decimal strings (zero when absent). Result is artwork and issues. No task or content confirmation is created.
+      responses:
+        '200':
+          description: text/event-stream; each item has exactly one terminal event.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RenderCover'
+  /api/v1/image-font/{family}/{weight}:
+    get:
+      operationId: getImageFont
+      description: Fixed bundled font bytes for editor layout. family is sans-serif,serif,monospace,system-ui;
+        weight is 400 or 700. Same bytes as actual raster renderer. No local or remote
+        path input.
+      responses:
+        '200':
+          description: font/otf bytes
+          immutable renderer version in ETag.: null
+    parameters:
+    - in: path
+      name: family
+      required: true
+      schema:
+        type: string
+    - in: path
+      name: weight
+      required: true
+      schema:
+        type: string
+components:
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: session
+  schemas:
+    CreateCoverTemplate:
+      type: object
+      required:
+      - request_key
+      - name
+      - canvas_width
+      - canvas_height
+      - category_ids
+      - platform_codes
+      properties:
+        request_key:
+          type: string
+          minLength: 8
+          maxLength: 64
+        name:
+          type: string
+          minLength: 1
+          maxLength: 128
+        team_id:
+          $ref: '#/components/schemas/EntityID'
+        canvas_width:
+          type: integer
+        canvas_height:
+          type: integer
+        category_ids:
+          type: array
+          items:
+            $ref: '#/components/schemas/EntityID'
+        platform_codes:
+          type: array
+          uniqueItems: true
+          items:
+            type: string
+            enum:
+            - baidu
+            - bilibili
+            - xiaohongshu
+      additionalProperties: false
+    EntityID:
+      type: string
+      pattern: ^[1-9][0-9]*$
+    ImageDocument:
+      type: object
+      description: 'Image editor document: fixed canvas, safe area, background asset
+        identity/crop, and ordered typed text/decoration layers. Exactly one visible
+        dynamic title is required for actual output.'
+      required:
+      - width
+      - height
+      - layers
+      properties:
+        width:
+          type: integer
+          minimum: 128
+          maximum: 4096
+        height:
+          type: integer
+          minimum: 128
+          maximum: 4096
+        backgroundMode:
+          type: string
+          enum:
+          - solid
+          - fixed
+          - business
+        imageAssetId:
+          $ref: '#/components/schemas/EntityID'
+        layers:
+          type: array
+          maxItems: 64
+          items:
+            type: object
+    TemplateRevision:
+      type: object
+      required:
+      - expected_revision
+      properties:
+        expected_revision:
+          $ref: '#/components/schemas/EntityID'
+        background_image_asset_id:
+          type: string
+          pattern: ^[0-9]+$
+      additionalProperties: false
+    SaveCoverTemplateDraft:
+      type: object
+      required:
+      - expected_revision
+      - document
+      properties:
+        expected_revision:
+          $ref: '#/components/schemas/EntityID'
+        document:
+          $ref: '#/components/schemas/ImageDocument'
+      additionalProperties: false
+    ValidateCoverTemplate:
+      type: object
+      required:
+      - expected_revision
+      - title
+      properties:
+        expected_revision:
+          $ref: '#/components/schemas/EntityID'
+        document:
+          $ref: '#/components/schemas/ImageDocument'
+        title:
+          type: string
+          minLength: 1
+          maxLength: 2000
+        background_image_asset_id:
+          type: string
+          pattern: ^[0-9]+$
+      additionalProperties: false
+    SetCoverTemplateUsage:
+      type: object
+      required:
+      - expected_revision
+      - enabled
+      properties:
+        expected_revision:
+          $ref: '#/components/schemas/EntityID'
+        enabled:
+          type: boolean
+      additionalProperties: false
+    RenderCover:
+      type: object
+      required:
+      - template_id
+      - expected_published_revision
+      - title
+      - row_key
+      - input_revision
+      properties:
+        template_id:
+          $ref: '#/components/schemas/EntityID'
+        expected_published_revision:
+          type: integer
+          minimum: 1
+        title:
+          type: string
+          minLength: 1
+          maxLength: 2000
+        background_output_id:
+          type: string
+          pattern: ^[1-9][0-9]*$
+        background_image_asset_id:
+          type: string
+          pattern: ^[0-9]+$
+        row_key:
+          type: string
+          minLength: 1
+          maxLength: 100
+        input_revision:
+          type: string
+          minLength: 1
+          maxLength: 100
+      additionalProperties: false
+security:
+- sessionCookie: []

@@ -44,7 +44,7 @@ describe("publication preparation eligibility", () => {
       composite_output_id: "128",
       content: {
         description: "实测文案",
-        cover_file_id: "5",
+        cover_file_id: "5",portrait_cover_file_id:"6",
         declaration: "无需声明",
         confirmed: false,
       },
@@ -70,4 +70,23 @@ it('does not offer a server-occupied output even while its production status is 
  const output={category_id:4,team_id:1,platforms:['baidu'],video:{status:'ready'},publish_status:'pending_publish'};
  expect(outputUnavailable({...output,occupied:true},4,{team_id:1})).toBe('该成片已被当前平台的任务占用');
  expect(outputUnavailable({...output,occupied:false},4,{team_id:1})).toBe('');
+});
+
+it("checks Baidu's combined text budget without truncating the draft",()=>{
+ const form={category_id:'4',media_account_id:'9',composite_output_id:'135',content:{description:'字'.repeat(40),topics:'#'+'话'.repeat(10),cover_file_id:'31',portrait_cover_file_id:'32',declaration:'无需声明',confirmed:true}};
+ expect(contentProblem(form)).toContain('50字');
+ expect(form.content.description).toBe('字'.repeat(40));
+ form.content.topics='#'+'话'.repeat(8);
+ expect(contentProblem(form)).toBe('');
+});
+
+// Field targets are presentation metadata; preserve the original validation order.
+it('targets title and topic validation at their fields', async () => {
+ const { contentIssue } = await import('./eligibility.js');
+ const form = { category_id:'1', media_account_id:'2', composite_output_id:'3', content:{description:'',topics:''} };
+ expect(contentIssue(form)).toEqual({field:'text',message:'请填写发布标题'});
+ form.content.description='字'.repeat(51);
+ expect(contentIssue(form).field).toBe('text');
+ form.content.description='有效标题';
+ expect(contentIssue(form).field).toBe('cover');
 });

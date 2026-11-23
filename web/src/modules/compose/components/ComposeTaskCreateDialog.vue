@@ -137,7 +137,7 @@ async function submit() {
         </ResourceForm></ResourceSection>
         <ResourceSection title="选用素材" variant="form">
           <div class="task-create__heading"><span class="task-create__hint">已选 {{ selected.length }} 条素材</span><t-button v-if="!isSource" variant="outline" class="wt-secondary-button" :disabled="!selectedStrategy" @click="materialVisible=true">选择素材</t-button></div>
-          <t-table v-if="selected.length" class="wt-resource-table" :data="selected" :columns="[{colKey:'id',title:'素材 ID',width:80},{colKey:'title',title:'素材名称',width:400,ellipsis:true},...(!isSource ? [{colKey:'op',title:'操作',width:80}] : [])]" row-key="id" size="small" :scroll="{x:'560px'}"><template #op="{row}"><ResourceRowActions><t-button variant="text" @click="removeSelected(row.id)">移除</t-button></ResourceRowActions></template></t-table>
+          <t-table v-if="selected.length" class="wt-resource-table resource-data-table resource-embedded-table is-summary" :data="selected" :columns="[{colKey:'id',title:'素材 ID',width:80},{colKey:'title',title:'素材名称',width:400,ellipsis:true},...(!isSource ? [{colKey:'op',title:'操作',width:80}] : [])]" row-key="id" size="small" :scroll="{x:'560px'}"><template #op="{row}"><ResourceRowActions><t-button variant="text" @click="removeSelected(row.id)">移除</t-button></ResourceRowActions></template></t-table>
           <p v-else class="task-create__hint">请选择素材</p>
         </ResourceSection>
         <p v-if="isSource" class="task-create__hint">沿用原素材、原模板版本与原成片设置，生成一份新成片。仅可调整模板开放的参数。确认创建时，原素材将加入负责人的“我的素材”，并准备制作所需视频。</p>

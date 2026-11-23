@@ -1,0 +1,6 @@
+schema_version: 1
+revision: "2026.11.21.2"
+errors:
+  work_invalid: {errcode: 20001, http_status: 400, retryable: false, message: Invalid work filters.}
+  work_not_found: {errcode: 20002, http_status: 404, retryable: false, message: Work missing or outside actor scope.}
+  work_unavailable: {errcode: 20003, http_status: 503, retryable: true, message: Work read unavailable.}

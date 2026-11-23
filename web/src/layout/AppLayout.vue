@@ -14,7 +14,11 @@ import WorkEnvPill from '../apps/desktop/features/local-agent/WorkEnvPill.vue'
 const route = useRoute()
 const router = useRouter()
 const downloadCentre = useDownloadCentre()
-const collapsed = ref(false)
+const narrowViewport = window.matchMedia('(max-width: 760px)')
+const collapsed = ref(narrowViewport.matches)
+function syncNavigationSize(event) { collapsed.value = event.matches }
+narrowViewport.addEventListener('change', syncNavigationSize)
+watch(() => route.path, () => { if (narrowViewport.matches) collapsed.value = true })
 const SIDEBAR_EXPANDED_GROUPS_KEY = 'wt-media:sidebar-expanded-groups'
 const expandedGroups = ref(readExpandedGroups())
 const sessionClient = createSessionClient()
@@ -38,6 +42,9 @@ const menuItems = [
     { value: 'publishing', title: '发布管理', icon: 'send', children: [
       { title: '发布任务', path: '/publish', icon: 'send' },
     ] },
+    { value: 'work-management', title: '作品管理', icon: 'video', children: [
+      { title: '作品列表', path: '/work', icon: 'video' },
+    ]},
     { title: '互动管理', path: '/interact', icon: 'chat' },
   ] },
   { value: 'operation-resources', title: '运营资源', icon: 'folder', children: [
@@ -46,19 +53,14 @@ const menuItems = [
     { title: '社媒账号', path: '/accounts', icon: 'user' },
   ] },
   { value: 'operation-tools', title: '运营工具', icon: 'tools', children: [
+    { title: '封面模板', path: '/cover-template', icon: 'image' },
+    { title: '图片库', path: '/image-library', icon: 'image' },
     { title: '文件管理', path: '/files', icon: 'folder' },
   ] },
   { value: 'system', title: '系统管理', icon: 'setting', children: [
     { title: '用户管理', path: '/users', icon: 'user-setting' },
     { title: '运营团队', path: '/operation-teams', icon: 'view-organization' },
     { title: '类目管理', path: '/categories', icon: 'categorypad' },
-  ] },
-]
-
-const desktopItems = [
-  { value: 'local-environment', title: '桌面环境', icon: 'server', children: [
-    { title: '本地日志', path: '/logs', icon: 'file' },
-    { title: '本机设置', path: '/settings', icon: 'setting' },
   ] },
 ]
 
@@ -83,7 +85,10 @@ onMounted(async () => {
   await refreshUser()
   window.addEventListener('wt-media:profile-updated', refreshUser)
 })
-onUnmounted(() => window.removeEventListener('wt-media:profile-updated', refreshUser))
+onUnmounted(() => {
+ window.removeEventListener('wt-media:profile-updated', refreshUser)
+ narrowViewport.removeEventListener('change', syncNavigationSize)
+})
 
 const allItems = computed(() => {
   const hiddenPaths = new Set()
@@ -95,9 +100,7 @@ const allItems = computed(() => {
   for (const path of SYSTEM_MANAGEMENT_PATHS) {
     if (!canViewSystemPath(currentUser.value?.role, path)) hiddenPaths.add(path)
   }
-  const sourceItems = isDesktop()
-    ? [...menuItems, ...(desktopEnvAllowed.value ? desktopItems : [])]
-    : menuItems
+  const sourceItems = menuItems
   return sourceItems
     .map((item) => {
       if (!item.children) return hiddenPaths.has(item.path) ? null : item
@@ -168,6 +171,7 @@ async function logout() {
           <span v-if="appVersion" class="sidebar-version">v{{ appVersion }}</span>
         </div>
       </div>
+      <div class="business-navigation">
       <t-menu
         :value="route.path"
         :collapsed="collapsed"
@@ -199,6 +203,12 @@ async function logout() {
           </t-menu-item>
         </template>
       </t-menu>
+      </div>
+      <div v-if="isDesktop() && desktopEnvAllowed" class="desktop-utility">
+        <button type="button" class="desktop-settings-link" :class="{ 'is-active': route.path === '/settings' }" :aria-current="route.path === '/settings' ? 'page' : undefined" :title="collapsed ? '桌面设置' : undefined" aria-label="桌面设置" @click="router.push('/settings')">
+          <t-icon name="setting" /><span v-if="!collapsed">桌面设置</span>
+        </button>
+      </div>
     </t-aside>
 
     <t-layout class="app-main">
@@ -225,11 +235,11 @@ async function logout() {
           <t-dropdown trigger="click">
             <button type="button" class="profile-trigger" aria-label="打开个人菜单">
               <SystemAvatar :avatar-id="currentUser?.avatar_id || 'sky'" :size="30" />
-              <span class="profile-name">{{ currentUser?.nickname || currentUser?.username || '个人信息' }}</span>
+              <span class="profile-name">{{ currentUser?.nickname || currentUser?.username || '我的账号' }}</span>
               <t-icon name="chevron-down" />
             </button>
             <t-dropdown-menu>
-              <t-dropdown-item @click="router.push('/personal-info')">个人信息</t-dropdown-item>
+              <t-dropdown-item @click="router.push('/personal-info')">我的账号</t-dropdown-item>
               <t-dropdown-item @click="logout">退出</t-dropdown-item>
             </t-dropdown-menu>
           </t-dropdown>
@@ -249,7 +259,9 @@ async function logout() {
 .app-shell { height: 100%; }
 .app-aside {
   height: 100%;
-  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   flex-shrink: 0;
   background: #FAFAF8;
   border-right: 1px solid rgba(0, 0, 0, 0.04);
@@ -259,7 +271,14 @@ async function logout() {
 /* Only content-area scrolls. Hidden overflow lets focusing a table action
    scroll this shell sideways and move the footer across the sidebar. */
 .app-main { height: 100%; min-width: 0; overflow: clip; }
+.business-navigation { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; }
+.desktop-utility { flex: none; padding: 12px 16px; border-top: 1px solid var(--wt-border); }
+.desktop-settings-link { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 36px; border: 0; border-radius: 6px; padding: 8px; background: transparent; color: var(--wt-text-secondary); font: inherit; cursor: pointer; white-space: nowrap; }
+.desktop-settings-link:hover { background: var(--wt-bg-hover); }
+.desktop-settings-link.is-active { background: var(--wt-primary-light, #e8f0ff); color: var(--wt-primary); }
+.desktop-settings-link:focus-visible { outline: 2px solid var(--wt-primary); outline-offset: 2px; }
 .sidebar-header {
+  flex-shrink: 0;
   height: 76px;
   padding: 0 20px;
   display: flex;
@@ -358,4 +377,11 @@ async function logout() {
   padding: 24px; background: var(--td-bg-color-page);
 }
 .content-area > * { min-width: 0; max-width: 100%; }
+@media (max-width: 760px) {
+ .app-aside { position:fixed; inset:0 auto 0 0; z-index:20; }
+ .app-main { margin-left:64px; }
+ .content-area { padding:20px 16px; }
+ .topbar { padding:0 8px; }
+ .topbar :deep(.t-breadcrumb), .profile-name { display:none; }
+}
 </style>

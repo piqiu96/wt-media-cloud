@@ -8,6 +8,8 @@
  *   Throws an ApiError with errcode, message, logid, and optional details.
  */
 
+import { readGenerationStream } from './generationStream.js'
+
 export class ApiError extends Error {
   constructor({ errcode = 99999, message = '未知错误', logid = '', type = '', code = '', details = null, retryable = false, recovery_action = '' }) {
     super(message)
@@ -116,7 +118,7 @@ export function cloudResourceURL(path, base = '/api/v1') {
 }
 
 export function createApiClient({ base = '/api/v1', fetchImpl = globalThis.fetch } = {}) {
-  async function request(path, { method = 'GET', body, params } = {}) {
+  async function request(path, { method = 'GET', body, params, stream, signal, onEvent, binary } = {}) {
     const apiBase = defaultApiBase(base)
     let url = `${apiBase}${path}`
     if (params) {
@@ -134,6 +136,8 @@ export function createApiClient({ base = '/api/v1', fetchImpl = globalThis.fetch
       headers: { 'Content-Type': 'application/json' },
     }
     if (sessionToken) options.headers['X-Session-Token'] = sessionToken
+    if (signal) options.signal = signal
+    if (stream) options.headers.Accept = 'text/event-stream'
     if (body !== undefined) {
       if (typeof FormData !== 'undefined' && body instanceof FormData) {
         options.body = body
@@ -171,6 +175,8 @@ export function createApiClient({ base = '/api/v1', fetchImpl = globalThis.fetch
       win.location.href = `/login?redirect=${returnUrl}${reason}`
     }
 
+    if (response.ok && stream && response.headers.get('content-type')?.includes('text/event-stream')) return readGenerationStream(response, onEvent)
+    if (response.ok && binary) return response.arrayBuffer()
     const result = await parseResponse(response)
 
     // HTTP error without structured body
@@ -183,6 +189,8 @@ export function createApiClient({ base = '/api/v1', fetchImpl = globalThis.fetch
 
   return {
     get(path, params) { return request(path, { params }) },
+    getBinary(path) { return request(path, { binary: true }) },
+    stream(path, body, { signal, onEvent } = {}) { return request(path, { method: 'POST', body, stream: true, signal, onEvent }) },
     post(path, body) { return request(path, { method: 'POST', body }) },
     put(path, body) { return request(path, { method: 'PUT', body }) },
     patch(path, body) { return request(path, { method: 'PATCH', body }) },

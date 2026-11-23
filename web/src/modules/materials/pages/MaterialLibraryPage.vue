@@ -294,10 +294,10 @@ onMounted(async () => {
 
 <template>
   <t-loading :loading="loading" :show-overlay="true">
-    <div class="wt-resource-page resource-visual-approved production-page material-library-page">
+    <div class="wt-resource-page resource-visual-approved resource-list-page production-page material-library-page">
       <FeedbackAlert v-if="error" theme="error" :message="error" closable style="margin-bottom:16px" @close="error=''" />
       <ResourcePageHeader title="素材库" description="筛选团队素材，加入我的素材后用于制作。" />
-      <ResourceCard class="material-table-card">
+      <ResourceCard class="resource-list-panel material-table-card">
         <ResourceFilterBar>
           <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">综合搜索</span><t-input v-model="search" clearable placeholder="标题 / 作者 / 素材 ID / 平台作品 ID" @enter="load({ applyFilters: true })" /></label>
           <label class="wt-filter-field"><span class="wt-filter-field__label">类目</span><BusinessSelect kind="category" filter v-model="categoryFilters" multiple clearable><t-option v-for="category in categoryOptions" :key="category.id" :value="category.id" :label="category.name" /></BusinessSelect></label>
@@ -318,7 +318,7 @@ onMounted(async () => {
             <li v-for="row in [...joinResult.failed, ...joinResult.skipped]" :key="row.id">{{ row.title || `素材 ${row.id}` }}：{{ row.reason }}</li>
           </ul>
         </div>
-        <div class="table-scroll-wrap">
+        <div class="table-scroll-wrap resource-data-table">
           <t-table class="wt-resource-table" :data="pagedRows" :columns="columns" row-key="id" v-model:selected-row-keys="selectedRowKeys" hover size="small" :scroll="tableScroll" :sort="{ sortBy, descending: sortOrder === 'desc' }" @sort-change="changeSort" empty="暂无素材">
             <template #id="{ row }">{{ row.id }}</template>
             <template #platform="{ row }">{{ platformLabel(row.platform) }}</template>

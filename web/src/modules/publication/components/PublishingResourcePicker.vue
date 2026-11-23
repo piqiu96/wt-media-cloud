@@ -1,4 +1,5 @@
 <script setup>
+import { coverMatchesRatio } from "../coverPreparation.js";
 import { OutputVideoStatus } from "../../compose/outputStatus.js";
 import { computed, ref, watch } from "vue";
 import ResourceRowActions from "../../../shared/ui/resource/ResourceRowActions.vue";
@@ -7,18 +8,22 @@ import ResourceFilterBar from "../../../shared/ui/resource/ResourceFilterBar.vue
 import FeedbackAlert from "../../../shared/ui/feedback/FeedbackAlert.vue";
 import { createMediaAccountClient } from "../../../shared/api/mediaAccounts.js";
 import { createPublicationClient } from "../../../shared/api/publication.js";
+import { createImageClient } from "../../../shared/api/image.js";
 import { createFilesClient } from "../../../shared/api/files.js";
 import { accountUnavailable, outputUnavailable } from "../eligibility.js";
 const props = defineProps({
   visible: Boolean,
   kind: String,
+  usage: {type:String, default:"cover"},
+  aspect: Array,
   category: String,
   account: Object,
+  userId: String,
 });
 const emit = defineEmits(["update:visible", "selected", "view-account"]);
 const accounts = createMediaAccountClient(),
   publication = createPublicationClient(),
-  files = createFilesClient();
+  files = createFilesClient(), images = createImageClient();
 const rows = ref([]),
   total = ref(0),
   page = ref(1),
@@ -53,10 +58,10 @@ async function load() {
     const params = { page: page.value, page_size: 10, search: search.value };
     let data;
     if (props.kind === "account")
-      data = await accounts.listPage({ ...params, platform: "baidu" });
+      data = await accounts.listPage({ ...params, platform: "baidu", user_id: props.userId });
     else if (props.kind === "output")
       data = await publication.outputs({ ...params, platform: "baidu" });
-    else data = await files.list({ ...params, type: "image" });
+    else data = await images.listImageAsset({ ...params, usage: props.usage, enabled: true, category_id: props.category });
     if (n !== sequence) return;
     if (props.kind === "output" && (data.items || []).some(row => typeof row.occupied !== "boolean"))
       throw new Error("暂时无法确认成片占用，请重新查询");
@@ -74,16 +79,16 @@ async function load() {
 }
 function reason(row) {
   return props.kind === "account"
-    ? accountUnavailable(row, props.category)
+    ? accountUnavailable(row, props.category, props.userId)
     : props.kind === "output"
       ? outputUnavailable(row, props.category, props.account)
       : row.deleted_at
         ? "文件正在删除"
-        : "";
+        : props.usage === "cover" && props.aspect && !coverMatchesRatio(row,...props.aspect) ? `需要${props.aspect.join(":")}且不超过5MB的图片` : "";
 }
 function select(row) {
   if (busy.value || reason(row)) return;
-  emit("selected", row);
+  emit("selected", props.kind === "image" ? { ...row, image_asset_id: row.id, id: row.file_id } : row);
   emit("update:visible", false);
 }
 watch(

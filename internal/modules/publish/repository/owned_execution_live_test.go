@@ -18,6 +18,9 @@ import (
 func ownedStore(t *testing.T) (repo.ExecutionStore, func(int) model.Task) {
 	db := isolated(t)
 	queries := []string{
+		`ALTER TABLE operations_files ADD metadata_json JSON`,
+		`UPDATE operations_files SET metadata_json='{"width":1280,"height":720,"format":"png"}' WHERE id=1`,
+		`UPDATE operations_files SET metadata_json='{"width":1080,"height":1440,"format":"png"}' WHERE id=2`,
 		`CREATE TABLE users(id BIGINT UNSIGNED PRIMARY KEY,role VARCHAR(32),status VARCHAR(16),team_id BIGINT,bit_main_user_id VARCHAR(255))`,
 		`INSERT INTO users VALUES(9,'operator','enabled',7,'main-9')`,
 		`CREATE TABLE categories(id BIGINT PRIMARY KEY,enabled BOOL)`, `INSERT INTO categories VALUES(1,1)`,
@@ -74,9 +77,10 @@ func ownedStore(t *testing.T) (repo.ExecutionStore, func(int) model.Task) {
 	s := service.NewExecutionStore(db)
 	makeTask := func(n int) model.Task {
 		v := task(fmt.Sprint("owned-", n), int64(42+n), 1)
+		v.Content.PortraitCoverFileID = 2
 		v.MediaAccountID = uint64(12 + n)
 		v.PlatformAccountUID = fmt.Sprint("uid-", n)
-		v.ResourceSnapshot, _ = json.Marshal(map[string]any{"browser_profile_id": fmt.Sprint(37 + n), "video_sha256": strings.Repeat("a", 64), "video_size": 16, "cover_sha256": fmt.Sprintf("%064d", 1)})
+		v.ResourceSnapshot, _ = json.Marshal(map[string]any{"browser_profile_id": fmt.Sprint(37 + n), "video_sha256": strings.Repeat("a", 64), "video_size": 16, "cover_sha256": fmt.Sprintf("%064d", 1), "portrait_cover_sha256": fmt.Sprintf("%064d", 2)})
 		v, e := s.Create(v)
 		if e != nil {
 			t.Fatal(e)

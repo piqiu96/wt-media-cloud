@@ -1,4 +1,5 @@
 <script setup>
+import './feedback.css'
 defineProps({
   visible: { type: Boolean, default: false },
   title: { type: String, required: true },
@@ -12,6 +13,8 @@ const emit = defineEmits(['update:visible', 'confirm'])
 <template>
   <t-dialog
     :visible="visible"
+    dialog-class-name="resource-feedback-dialog"
+    width="min(calc(100vw - 32px), 480px)"
     theme="warning"
     :header="title"
     :close-on-overlay-click="false"
@@ -29,5 +32,5 @@ const emit = defineEmits(['update:visible', 'confirm'])
 </template>
 
 <style scoped>
-.feedback-dialog-message{margin:0;line-height:1.6}
+.feedback-dialog-message{margin:0;line-height:24px;overflow-wrap:anywhere;white-space:pre-wrap}
 </style>

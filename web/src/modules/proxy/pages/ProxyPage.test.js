@@ -26,8 +26,8 @@ describe('proxy resource page', () => {
   })
 
   it('uses the browser-window resource table structure', () => {
-    expect(source).toContain('class="filter-bar"')
-    expect(source).toContain('class="table-scroll-wrap"')
+    expect(source).toContain('<ResourceFilterBar>')
+    expect(source).toContain('class="table-scroll-wrap resource-data-table"')
     expect(source).toContain(':scroll="tableScroll"')
     expect(source).toContain('class="pagination-bar"')
     expect(source).toContain('<t-pagination')

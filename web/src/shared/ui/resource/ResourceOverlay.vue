@@ -143,6 +143,7 @@ function close() {
 .resource-overlay__close { display:inline-flex; align-items:center; justify-content:center; width:24px; height:24px; padding:0; border:0; border-radius:4px; background:transparent; color:var(--wt-text-secondary); cursor:pointer; }
 .resource-overlay__close:focus-visible { outline:2px solid var(--wt-primary); outline-offset:2px; }
 .resource-overlay__body { min-width: 0; color: var(--wt-text-secondary); font-family: var(--wt-font-family); font-size: 14px; line-height: 24px; }
+.resource-overlay__body > :deep(.feedback-alert:not(:last-child)) { margin-bottom: 16px; }
 .resource-overlay__footer { display: flex; justify-content: flex-end; align-items: center; flex-wrap: wrap; gap: 8px; }
 .resource-overlay__body :deep(.t-descriptions__label) { color: var(--wt-text-tertiary); }
 .resource-overlay__body :deep(.t-descriptions__content) { overflow-wrap: anywhere; }

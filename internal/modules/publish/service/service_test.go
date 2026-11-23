@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	filemodel "github.com/wt-media/wt-media-cloud/internal/modules/files/model"
 	identity "github.com/wt-media/wt-media-cloud/internal/modules/identity/service"
@@ -20,10 +21,15 @@ func fixture() (*Service, identity.PublicUser, CreateInput) {
 		return accounts.Account{ID: "12", UserID: 9, TeamID: &team, CategoryIDs: []identity.CategoryID{1}, Enabled: true, Platform: "baidu", PlatformAccountID: "real-uid", BrowserProfileID: "profile", IdentificationStatus: "identified", PlatformLoginStatus: "normal"}, nil
 	}, Output: func(identity.PublicUser, int64) (production.ComposeOutputDetail, error) {
 		return production.ComposeOutputDetail{Output: outputmodel.CompositeOutput{ID: 42, TeamID: 7, CategoryID: 1, OperatorID: &owner, PublishStatus: "pending_publish", Platforms: []string{"baidu"}, ObjectKey: "video", FileSizeBytes: 3, SHA256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Video: outputmodel.ComposeOutputVideo{Status: "ready"}}}, nil
-	}, File: func(context.Context, identity.PublicUser, int64) (filemodel.File, error) {
-		return filemodel.File{ID: 5, Type: "image", ObjectKey: "cover", SizeBytes: 3, SHA256: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}, nil
+	}, File: func(_ context.Context, _ identity.PublicUser, id int64, _ int64) (filemodel.File, error) {
+		width, height := 1280, 720
+		if id == 6 {
+			width, height = 1080, 1440
+		}
+		metadata, _ := json.Marshal(filemodel.ImageMetadata{Width: width, Height: height, Format: "png"})
+		return filemodel.File{ID: id, MetadataJSON: metadata, Type: "image", ObjectKey: "cover", SizeBytes: 3, SHA256: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}, nil
 	}}
-	return s, actor, CreateInput{RequestKey: "request-1", Platform: "baidu", CategoryID: 1, MediaAccountID: 12, CompositeOutputID: 42, Content: model.Content{Description: "真实作品描述", CoverFileID: 5, Declaration: "无需声明", Confirmed: true}}
+	return s, actor, CreateInput{RequestKey: "request-1", Platform: "baidu", CategoryID: 1, MediaAccountID: 12, CompositeOutputID: 42, Content: model.Content{Description: "真实作品描述", CoverFileID: 5, PortraitCoverFileID: 6, Declaration: "无需声明", Confirmed: true}}
 }
 
 type memoryTasks struct {
@@ -114,7 +120,7 @@ func TestCreateRejectsUnavailableResourcesAndPlatform(t *testing.T) {
 			case "outside-category":
 				in.CategoryID = 2
 			case "file-unavailable":
-				s.File = func(context.Context, identity.PublicUser, int64) (filemodel.File, error) {
+				s.File = func(context.Context, identity.PublicUser, int64, int64) (filemodel.File, error) {
 					return filemodel.File{}, errors.New("missing object")
 				}
 			case "output-unavailable":
@@ -169,5 +175,50 @@ func TestBaiduPreparationNeedsNoFeatureSwitch(t *testing.T) {
 	}
 	if task.Status != "pending" || task.AuthorizedAt != nil || task.CurrentAttemptID != nil {
 		t.Fatalf("create authorized execution: %+v", task)
+	}
+}
+
+func TestCreateAndEditRejectRendererPreview(t *testing.T) {
+	s, a, in := fixture()
+	original := s.File
+	preview := func(ctx context.Context, a identity.PublicUser, id, categoryID int64) (filemodel.File, error) {
+		f, e := original(ctx, a, id, categoryID)
+		f.MetadataJSON = []byte(`{"preview":true}`)
+		return f, e
+	}
+	s.File = preview
+	if _, err := s.Create(context.Background(), a, in); err == nil {
+		t.Fatal("preview became formal task")
+	}
+	s.File = original
+	task, err := s.Create(context.Background(), a, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.File = preview
+	in.Content.CoverFileID++
+	if _, err = s.Edit(context.Background(), a, task.ID, EditInput{ExpectedRevision: task.Revision, Content: in.Content}); err == nil {
+		t.Fatal("preview replaced formal cover")
+	}
+}
+
+func TestFindCreationByRequestKeepsCreatorAndResourceScope(t *testing.T) {
+	s, actor, input := fixture()
+	task, err := s.Create(context.Background(), actor, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.FindByRequest(actor, input.RequestKey)
+	if err != nil || got.ID != task.ID {
+		t.Fatalf("lookup: %+v %v", got, err)
+	}
+	other := actor
+	other.ID = 10
+	if _, err := s.FindByRequest(other, input.RequestKey); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("other creator: %v", err)
+	}
+	actor.CategoryIDs = nil
+	if _, err := s.FindByRequest(actor, input.RequestKey); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("revoked category: %v", err)
 	}
 }

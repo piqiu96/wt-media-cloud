@@ -1,4 +1,4 @@
-.production-page .resource-card { margin-top:24px; box-shadow:none; }
+.production-page .resource-card { box-shadow:none; }
 .production-page .table-scroll-wrap { min-width:0; }
 .production-page .t-tabs { margin-bottom:20px; }
 .production-page .t-pagination { width:100%; }

@@ -566,7 +566,7 @@ function openImageViewer(url) {
 
 <template>
   <t-loading :loading="loading" :show-overlay="true">
-    <div class="wt-resource-page resource-visual-approved content-pool-page">
+    <div class="wt-resource-page resource-visual-approved resource-list-page content-pool-page">
       <FeedbackAlert v-if="error" theme="error" :message="error" closable style="margin-bottom:16px" @close="error=''" />
       <ResourcePageHeader :title="isLibrary ? '素材库' : '内容池'" :description="isLibrary ? '查看已从内容池沉淀的素材及其来源关系' : '统一管理人工发现与自动挖掘进入系统的外部内容'">
         <template #actions>
@@ -588,7 +588,7 @@ function openImageViewer(url) {
           >审核模式</t-button>
         </template>
       </ResourcePageHeader>
-      <ResourceCard class="content-pool-card" :class="{ 'is-reviewing': reviewMode }">
+      <ResourceCard class="resource-list-panel content-pool-card" :class="{ 'is-reviewing': reviewMode }">
         <ResourceFilterBar>
             <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">综合搜索</span><t-input v-model="search" clearable placeholder="标题、内容 ID、作者" /></label>
             <label class="wt-filter-field"><span class="wt-filter-field__label">类目</span><BusinessSelect kind="category" filter v-model="categoryFilter" multiple clearable><t-option v-for="category in enabledCategoryOptions" :key="category.id" :value="category.id" :label="category.name" /></BusinessSelect></label>
@@ -605,7 +605,7 @@ function openImageViewer(url) {
           <t-button variant="outline" :loading="batchLoading" @click="batchSetStatus('ignored', '批量人工忽略')">批量忽略</t-button>
           <t-button variant="outline" :loading="batchLoading" @click="batchSetStatus('pending', '')">批量恢复</t-button>
         </ResourceSelectionToolbar>
-        <div class="table-scroll-wrap">
+        <div class="table-scroll-wrap resource-data-table">
           <t-table class="wt-resource-table" :data="pagedRows" :columns="columns" row-key="id" hover size="small" :scroll="tableScroll" :sort="{ sortBy, descending: sortOrder === 'desc' }" @sort-change="changeSort" v-model:selected-row-keys="selectedRowKeys" empty="暂无内容">
             <template #title="{ row }">
               <div class="title-cell">
@@ -720,7 +720,7 @@ function openImageViewer(url) {
           <ResourceEmptyState v-if="manualSearched && !manualResults.length" title="未发现内容" description="请调整输入后重新发现。" />
           <div v-if="manualResults.length" class="discover-results">
             <div class="discover-section__title">结果预览<small>仅所选内容会加入内容池</small></div>
-            <t-table v-model:selected-row-keys="selectedResultKeys" :data="manualResults" :columns="resultColumns" row-key="platform_content_id" hover size="small" :scroll="{ y: '300px' }" empty="暂无结果">
+            <t-table class="resource-data-table resource-embedded-table is-summary" v-model:selected-row-keys="selectedResultKeys" :data="manualResults" :columns="resultColumns" row-key="platform_content_id" hover size="small" :scroll="{ y: '300px' }" empty="暂无结果">
               <template #title="{ row }">
                 <div class="title-cell">
                   <button v-if="coverAvailable(row.cover_url)" type="button" class="title-media is-clickable" @click.stop="openImageViewer(row.cover_url)"><img :src="row.cover_url" alt="" loading="lazy" referrerpolicy="no-referrer" @error="markCoverFailed(row.cover_url)" /></button>

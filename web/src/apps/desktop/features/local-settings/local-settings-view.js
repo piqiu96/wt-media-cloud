@@ -1,4 +1,4 @@
-// What the 本机设置 page derives from the answers it was given.
+// What the 桌面设置 page derives from the answers it was given.
 //
 // Pure, and separate from the `.vue` file for the same reason
 // `local-agent-status.js` is: this is the part with rules in it, and a rule that
@@ -131,8 +131,9 @@ export function describeDiagnostic(report) {
     `其中 ${report.entries.length} 个文件，另有 ${report.omitted.length} 个未收录`,
     `本机执行服务：${report.agentState === "answered" ? "已应答" : "不可达"}`,
   ];
+  for (const item of report.omitted) lines.push(`未收录 ${item.name}：${item.reason}`);
   return {
-    theme: "success",
+    theme: report.omitted.length || report.agentState !== "answered" ? "warning" : "success",
     text: `诊断包已生成：${report.path}`,
     detail: lines.join("\n"),
     // Named so the page can show it apart from the rest: an export that could not

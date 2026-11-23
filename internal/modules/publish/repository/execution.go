@@ -16,7 +16,8 @@ var ErrInputChanged = fmt.Errorf("%w: execution input changed", ErrConflict)
 
 type ExecutionStore struct {
 	Store
-	ReadInput func(*gorm.DB, model.Task) (model.ExecutionInput, error)
+	ReadInput  func(*gorm.DB, model.Task) (model.ExecutionInput, error)
+	RecordWork func(*gorm.DB, model.Task, model.Attempt, model.ResultResolution, time.Time) (uint64, error)
 }
 
 func (s ExecutionStore) readInput(tx *gorm.DB, v model.Task) (model.ExecutionInput, error) {

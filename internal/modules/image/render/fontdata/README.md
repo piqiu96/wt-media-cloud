@@ -1,0 +1,1 @@
+Noto CJK fonts, upstream revision `f8d157532fbfaeda587e826d4cd5b21a49186f7c`. Source: https://github.com/notofonts/noto-cjk . Distributed under the included SIL Open Font License. Font bytes are embedded by Cloud so deployment and preview use the same glyphs. Checksums: SHA256SUMS.

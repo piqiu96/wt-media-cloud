@@ -26,6 +26,9 @@ describe('local settings command names', () => {
   it('spells every command the way the Rust side registers it', () => {
     expect(LOCAL_SETTINGS_COMMANDS).toEqual({
       getSettings: 'local_settings_get',
+      pickSaveDirectory: 'local_pick_save_directory',
+      removeSearchDirectory: 'local_remove_search_directory',
+      openSaveDirectory: 'local_open_save_directory',
       setSettings: 'local_settings_set',
       pushSaveDirectory: 'local_push_save_directory',
       storageUsage: 'local_storage_usage',
@@ -100,6 +103,7 @@ describe('local settings service invoke arguments', () => {
     const invoke = vi.fn(async (command, args = {}) => ({
       save_dir: args.saveDir ?? null,
       file: '/tmp/s.toml',
+      known_save_dirs: [],
     }))
     const service = createLocalSettingsService({ invoke })
 
@@ -337,6 +341,7 @@ describe('local settings normalization', () => {
   it('keeps an unchosen save directory as null rather than an empty string', () => {
     expect(normalizeSettingsView({ save_dir: null, file: '/tmp/s.toml' })).toEqual({
       saveDir: null,
+      knownSaveDirs: [],
       file: '/tmp/s.toml',
     })
     expect(normalizeSettingsView({ save_dir: '/x', file: '/tmp/s.toml' }).saveDir).toBe('/x')
@@ -517,7 +522,7 @@ describe('local settings mock bridge', () => {
       name: 'desktop.log',
     })
 
-    expect(Object.keys(settings).sort()).toEqual(['file', 'save_dir'])
+    expect(Object.keys(settings).sort()).toEqual(['file', 'known_save_dirs', 'save_dir'])
     expect(Object.keys(tail)).toContain('lines_shown')
     expect(Object.keys(tail)).toContain('min_level')
     expect(tail).not.toHaveProperty('linesShown')

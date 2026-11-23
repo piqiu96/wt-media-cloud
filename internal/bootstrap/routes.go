@@ -17,15 +17,22 @@ import (
 	"github.com/wt-media/wt-media-cloud/internal/modules/filetransfer"
 	"github.com/wt-media/wt-media-cloud/internal/modules/identity"
 	identityservice "github.com/wt-media/wt-media-cloud/internal/modules/identity/service"
+	"github.com/wt-media/wt-media-cloud/internal/modules/image"
+	imagemodel "github.com/wt-media/wt-media-cloud/internal/modules/image/model"
+	imageservice "github.com/wt-media/wt-media-cloud/internal/modules/image/service"
 	"github.com/wt-media/wt-media-cloud/internal/modules/localagent"
 	"github.com/wt-media/wt-media-cloud/internal/modules/mediaaccount"
 	"github.com/wt-media/wt-media-cloud/internal/modules/production"
+	productionservice "github.com/wt-media/wt-media-cloud/internal/modules/production/service"
 	"github.com/wt-media/wt-media-cloud/internal/modules/profilebinding"
 	profileservice "github.com/wt-media/wt-media-cloud/internal/modules/profilebinding/service"
 	"github.com/wt-media/wt-media-cloud/internal/modules/proxy"
 	"github.com/wt-media/wt-media-cloud/internal/modules/publish"
 	publishservice "github.com/wt-media/wt-media-cloud/internal/modules/publish/service"
+	"github.com/wt-media/wt-media-cloud/internal/modules/work"
+	workservice "github.com/wt-media/wt-media-cloud/internal/modules/work/service"
 	api "github.com/wt-media/wt-media-cloud/internal/shared/api"
+	"gorm.io/gorm"
 )
 
 func registerRoutes(engine *server.Hertz) error {
@@ -58,9 +65,11 @@ func registerModuleRoutes(engine *server.Hertz) {
 	contentpool.RegisterRoutes(engine)
 	production.RegisterRoutes(engine)
 	filetransfer.RegisterRoutes(engine)
-	fileservice.SetReferenceCheck(publishservice.CheckFileReferences)
+	ConfigureFileReferences()
 	files.RegisterRoutes(engine)
+	image.RegisterRoutes(engine)
 	publish.RegisterRoutes(engine)
+	work.RegisterRoutes(engine)
 }
 
 func bootstrapIdentity(username, password string) error {
@@ -84,5 +93,61 @@ func registerHealthRoutes(h *server.Hertz) {
 	h.GET("/healthz", func(_ context.Context, c *hertzapp.RequestContext) { c.String(consts.StatusOK, "ok") })
 	h.GET("/api/v1/health", func(_ context.Context, c *hertzapp.RequestContext) {
 		api.Success(c, map[string]string{"status": "ok"})
+	})
+}
+
+// ConfigureFileReferences injects the same provider checks into HTTP and Worker processes.
+func ConfigureFileReferences() {
+	fileservice.SetReferenceCheck(func(tx *gorm.DB, id int64) error {
+		if e := imageservice.CheckFileReferences(tx, id); e != nil {
+			return e
+		}
+		if e := productionservice.CheckOutputFileReferences(tx, id); e != nil {
+			return e
+		}
+		if e := publishservice.CheckFileReferences(tx, id); e != nil {
+			return e
+		}
+		return workservice.CheckFileReferences(tx, id)
+	})
+	imageservice.SetReferenceProvider(func(tx *gorm.DB, id int64) error {
+		if e := imageservice.CheckArtworkFileReferences(tx, id); e != nil {
+			return e
+		}
+		if e := imageservice.CheckTemplateFileReferences(tx, id); e != nil {
+			return e
+		}
+		if e := productionservice.CheckOutputFileReferences(tx, id); e != nil {
+			return e
+		}
+		if e := publishservice.CheckFileReferences(tx, id); e != nil {
+			return e
+		}
+		return workservice.CheckFileReferences(tx, id)
+	}, func(a identityservice.PublicUser, id int64) ([]imagemodel.Reference, error) {
+		rows, e := publishservice.ListFileReference(a, id)
+		if e != nil {
+			return nil, e
+		}
+		out, e := imageservice.ListTemplateFileReference(a, id)
+		if e != nil {
+			return nil, e
+		}
+		artwork, e := imageservice.ListArtworkFileReference(a, id)
+		if e != nil {
+			return nil, e
+		}
+		out = append(out, artwork...)
+		for _, row := range rows {
+			out = append(out, imagemodel.Reference{Kind: row.Kind, ID: row.ID})
+		}
+		outputIDs, e := productionservice.ListOutputFileReference(a, id)
+		if e != nil {
+			return nil, e
+		}
+		for _, outputID := range outputIDs {
+			out = append(out, imagemodel.Reference{Kind: "composite_output", ID: outputID})
+		}
+		return out, nil
 	})
 }

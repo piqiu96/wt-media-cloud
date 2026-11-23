@@ -89,7 +89,7 @@ function parameterValue(key, value) {
       </ResourceDescriptions>
     </ResourceSection>
     <ResourceSection title="选材条件">
-      <div class="table-scroll-wrap">
+      <div class="table-scroll-wrap resource-data-table resource-embedded-table">
         <t-table class="wt-resource-table" :data="orderedRules()" :columns="ruleColumns" row-key="priority" size="small" :scroll="{ x: '660px' }" empty="暂无选材条件">
           <template #action="{ row }">{{ row.action === 'filter' ? '排除' : '选入' }}</template>
           <template #logic="{ row }">{{ row.logic === 'all' ? '全部满足' : '任一满足' }}</template>

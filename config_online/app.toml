@@ -10,3 +10,8 @@ session_cookie_secure = true
 
 [bitbrowser]
 observation_fresh_for = '2m'
+
+[publication_generation]
+model = 'deepseek-flash'
+base_url = 'https://api.deepseek.com'
+timeout = '170s'

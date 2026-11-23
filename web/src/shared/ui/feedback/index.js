@@ -1,3 +1,4 @@
+import './feedback.css'
 import { DialogPlugin, MessagePlugin } from 'tdesign-vue-next'
 
 const options = { placement: 'top-right', duration: 4000, closeBtn: true }

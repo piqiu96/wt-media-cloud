@@ -57,6 +57,7 @@ try {
    }
    else if (p === '/api/v1/compose-outputs/130') data = { output };
    else if (p.endsWith('/compose-outputs')) data = { items: [output], total: 1 };
+   else if (p === '/api/v1/image-asset') data = { items: [{ ...cover, file_id: cover.id, width: 1280, height: 720, size_bytes: 1000, enabled: true, use_as_cover: true }], total: 1 };
    else if (p.endsWith('/files')) data = { items: [cover], total: 1 };
    else data = { items: [], total: 0 };
    await route.fulfill({ json: { errcode: 0, message: 'ok', data } });
@@ -140,7 +141,7 @@ try {
   await outputPicker.getByRole('button', { name: '关闭选择成片', exact: true }).click(); await outputPicker.waitFor({ state: 'hidden' });
   await page.getByRole('button', { name: '返回', exact: true }).click();
   const discardCreation = page.locator('.resource-feedback-dialog'); await discardCreation.waitFor();
-  await discardCreation.getByRole('button', { name: '离开', exact: true }).click(); await discardCreation.waitFor({ state: 'hidden' });
+  await discardCreation.getByRole('button', { name: '保存并返回', exact: true }).click(); await discardCreation.waitFor({ state: 'hidden' });
   await page.getByRole('heading', { name: '发布任务', exact: true }).waitFor();
   await page.getByRole('button', { name: '高级筛选', exact: false }).click();
   await page.locator('#publication-advanced').waitFor();
@@ -176,7 +177,7 @@ try {
   await page.getByRole('heading', { name: '编辑发布内容', exact: true }).waitFor();
   const description = page.locator('[aria-label="发布标题"] textarea');
   await description.fill('返回资源选择弹窗后应保留这段输入');
-  const confirmationLabel = page.locator('.quick-block .t-checkbox');
+  const confirmationLabel = page.locator('.quick-block .t-checkbox').filter({ hasText: '已核对当前文案、封面和声明，确认内容可用' });
   const confirmationInput = confirmationLabel.locator('input[type="checkbox"]');
   check(`${width}: confirmation keeps checkbox and label in a row`, await confirmationLabel.evaluate(node => getComputedStyle(node).flexDirection === 'row'));
   if (await confirmationInput.isChecked()) await confirmationLabel.locator('.t-checkbox__label').click();
@@ -200,7 +201,7 @@ try {
   check(`${width}: shared date picker`, await page.locator('.resource-date-time').count() === 1 && await page.locator('input[type="datetime-local"]').count() === 0);
   const backStyle = await style(page.locator('.resource-detail-page__back'), ['backgroundColor']);
   check(`${width}: solid secondary action`, backStyle.backgroundColor !== 'rgba(0, 0, 0, 0)' && backStyle.backgroundColor !== 'rgb(255, 255, 255)');
-  await page.getByRole('button', { name: '更换图片', exact: true }).click();
+  await page.getByRole('button', { name: '选择图片', exact: true }).first().click();
   const picker = page.getByRole('dialog', { name: '选择发布封面', exact: true }); await picker.waitFor();
   const rowAction = await style(picker.getByRole('button', { name: '选择', exact: true }), ['height', 'backgroundColor']);
   check(`${width}: embedded row action`, rowAction.height === '32px' && rowAction.backgroundColor === 'rgba(0, 0, 0, 0)');

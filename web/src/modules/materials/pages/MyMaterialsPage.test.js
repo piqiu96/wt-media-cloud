@@ -140,10 +140,10 @@ describe('my materials page', () => {
     expect(source).toContain('已放弃')
   })
 
-  // 这一页不是收藏夹，副标题不该说「收藏」。合成的入口在合成任务页，这一页不承诺
-  // 「进入后续生产」，只说这里实际能做的事。
-  it('describes the page by what it actually offers, not a favourites list', () => {
-    expect(source).toContain('管理已加入的素材，查看使用情况并下载。')
+  it('keeps the page title without repeating purpose or download restrictions', () => {
+    expect(source).toContain('<ResourcePageHeader title="我的素材" />')
+    expect(source).not.toContain('wt-download-reason')
+    expect(source).toContain('<t-tooltip :content="downloadReason" :disabled="!downloadReason">')
     expect(source).not.toContain('你收藏的素材')
     expect(source).not.toContain('进入后续生产')
   })
@@ -215,7 +215,7 @@ describe('my materials page', () => {
     expect(source).toContain('MaterialCover')
     expect(source).toMatch(/<t-link[^>]*@click="openDetail\(row\)"/)
     expect(source).toContain('<t-link theme="primary" class="material-title"')
-    expect(source).toContain('theme="primary" variant="text" class="is-primary" :disabled="Boolean(downloadReason)" :title="downloadReason" @click="download(row)">{{ downloadActionLabel(row.download_status) }}</t-button>')
+    expect(source).toContain('theme="primary" variant="text" class="is-primary" :disabled="Boolean(downloadReason)" @click="download(row)">{{ downloadActionLabel(row.download_status) }}</t-button>')
     expect(source).not.toContain('downloadHint')
     expect(source).not.toContain('下载到本机</t-button>')
     expect(source).not.toContain('· {{ row.author_name')

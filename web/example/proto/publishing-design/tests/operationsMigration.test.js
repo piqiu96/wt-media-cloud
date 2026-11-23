@@ -11,6 +11,10 @@ describe('统一工作台路由', () => {
     expect(legacyOperationURL(new URL('http://localhost/example/?view=publishing#templates'))).toBe(operationURL('templates'));
     expect(legacyOperationURL(new URL('http://localhost/example/proto/content-operations/#tasks'))).toBe(operationURL('production-tasks'));
     expect(navigationGroups.flatMap(g=>g.pages).map(p=>p.id)).toHaveLength(10);
+    expect(operationURL('personal')).toBe('/example/operations/account/profile');
+    expect(readOperationRoute(new URL('http://localhost/example/operations/desktop/settings')).page).toBe('settings');
+    expect(navigationGroups.flatMap(g=>g.pages).some(p=>['personal','settings'].includes(p.id))).toBe(false);
+    expect(legacyOperationURL(new URL('http://localhost/example/proto/personal-settings/?page=personal&edit=profile'))).toBe('/example/operations/account/profile?edit=profile');
     expect(readOperationRoute(new URL("http://localhost/example/operations/settings/publishing")).page).toBe("materials");
     expect(navigationGroups.flatMap(g=>g.pages).some(p=>/overview|works|interact|replication/.test(p.id))).toBe(false);
   });

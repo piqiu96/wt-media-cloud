@@ -1,7 +1,8 @@
 import { IdentificationStatus, PlatformLoginStatus } from "../accounts/status.js";
 import { OutputPublishStatus, OutputVideoStatus } from "../compose/outputStatus.js";
 
-export function accountUnavailable(account, category) {
+export function accountUnavailable(account, category, userId) {
+  if (userId && String(account.user_id) !== String(userId)) return "只能选择本人账号创建发布任务";
   if (account.platform !== "baidu") return "当前阶段仅支持百度";
   if (!account.enabled) return "账号已停用";
   if (
@@ -26,15 +27,20 @@ export function outputUnavailable(output, category, account) {
     return output.video?.reason || "视频文件不可用";
   return "";
 }
-export function contentProblem(form) {
+export function publicationTextLength(description,topics) {return Array.from(description || "").length + (topics ? 1+Array.from(topics).length : 0);}
+export function contentIssue(form) {
   if (!form.category_id || !form.media_account_id || !form.composite_output_id)
-    return "请选择发布类目、账号和成片";
-  if (!form.content.description.trim()) return "请填写发布标题";
-  if (!form.content.cover_file_id) return "请选择发布封面";
-  if (!form.content.declaration) return "请按内容事实选择创作声明";
-  if (!form.content.confirmed) return "请核对并确认当前文案、封面和声明";
-  return "";
+    return { field: "resource", message: "请选择发布类目、账号和成片" };
+  if (!form.content.description.trim()) return { field: "text", message: "请填写发布标题" };
+  if (publicationTextLength(form.content.description,form.content.topics)>50) return { field: "text", message: "百度发布标题与话题合计不能超过50字（含分隔空格），请缩短后再确认" };
+  if (!form.content.cover_file_id) return { field: "cover", message: "请选择发布封面" };
+  if (!form.content.portrait_cover_file_id) return { field: "portrait", message: "请选择或生成3:4竖版封面" };
+  if (!form.content.declaration) return { field: "declaration", message: "请按内容事实选择创作声明" };
+  if (!form.content.confirmed) return { field: "confirmation", message: "请核对并确认当前文案、封面和声明" };
+  return null;
 }
+
+export function contentProblem(form) { return contentIssue(form)?.message || ""; }
 
 // Only an explicit business rejection proves that the save did not happen.
 export function definitivePublicationRejection(error) {

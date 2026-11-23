@@ -270,7 +270,9 @@ func attemptFixture(t *testing.T) (ComposeExecutorDeps, *lifecycleFake, *storeFa
 	}
 	t.Cleanup(func() { _ = runDir.Release() })
 	deps := ComposeExecutorDeps{
-		Tasks: lifecycle, Materials: materials, Registry: registry, Store: store,
+		RemoveThumbnail: func(context.Context, model.ComposeTask, int64) error { return nil },
+		CreateThumbnail: func(context.Context, model.ComposeTask, int64, string, string) (int64, error) { return 123, nil },
+		Tasks:           lifecycle, Materials: materials, Registry: registry, Store: store,
 		Runner: runner, GrantTTL: time.Minute, Client: memClient(store),
 	}
 	task := model.ComposeTask{
@@ -315,7 +317,7 @@ func TestAttemptRunsAndCommitsVerifiedOutput(t *testing.T) {
 	if out.SHA256 != hex.EncodeToString(sum[:]) || out.FileSizeBytes != int64(len("composed-output-bytes")) {
 		t.Fatalf("storage facts drifted: %+v", out)
 	}
-	if string(out.Media) != `{"duration_ms":900,"height":1920,"width":1080}` {
+	if string(out.Media) != `{"duration_ms":900,"height":1920,"thumbnail_file_id":"123","width":1080}` {
 		t.Fatalf("media=%s", out.Media)
 	}
 	if _, ok := store.objects["media-ku/finalVideo/55.mp4"]; !ok {
@@ -394,7 +396,9 @@ func TestGuideAttemptProducesVerifiedOutputFromFrozenAddress(t *testing.T) {
 	defer runDir.Release()
 	address := "https://media.example.com/guide.mp4"
 	deps := ComposeExecutorDeps{
-		Tasks: lifecycle, Materials: materialsFake{byID: map[int64]model.Material{42: {ID: 42, TeamID: 7, VideoStatus: model.VideoReady, SourceObjectKey: fakeSourceKey}}},
+		RemoveThumbnail: func(context.Context, model.ComposeTask, int64) error { return nil },
+		CreateThumbnail: func(context.Context, model.ComposeTask, int64, string, string) (int64, error) { return 123, nil },
+		Tasks:           lifecycle, Materials: materialsFake{byID: map[int64]model.Material{42: {ID: 42, TeamID: 7, VideoStatus: model.VideoReady, SourceObjectKey: fakeSourceKey}}},
 		Registry: registry, Store: store, Runner: &compose.Runner{FFmpegPath: ffmpeg, FFprobePath: ffprobe, Registry: registry}, GrantTTL: time.Minute, Client: memClient(store),
 		FetchGuide: func(_ context.Context, got, path string) error {
 			if got != address {

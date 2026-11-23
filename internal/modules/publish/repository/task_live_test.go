@@ -25,7 +25,7 @@ import (
 // This creates an isolated, disposable schema, never test task rows in the live queue.
 func isolated(t *testing.T) *gorm.DB {
 	db := isolatedDB(t, true)
-	for _, name := range []string{"20261118_103_operations_file_delete_state.sql", "20261119_106_operations_file_deleted_at.sql", "20261119_107_publication_attempt_revision.sql", "20261120_108_publication_task_profile_reference.sql", "20261120_109_publication_attempt_admission.sql"} {
+	for _, name := range []string{"20261118_103_operations_file_delete_state.sql", "20261119_106_operations_file_deleted_at.sql", "20261119_107_publication_attempt_revision.sql", "20261120_108_publication_task_profile_reference.sql", "20261120_109_publication_attempt_admission.sql", "20261121_112_public_work.sql", "20261121_113_publication_human.sql", "20261121_114_publication_observation.sql", "20261122_115_publication_check_policy.sql"} {
 		applyFileMigration(t, db, name)
 	}
 	return db
@@ -140,7 +140,7 @@ func isolatedDB(t *testing.T, fixtures bool) *gorm.DB {
 }
 func task(key string, output int64, file int64) model.Task {
 	now := time.Now().UTC()
-	return model.Task{TeamID: 7, OperatorID: 9, CategoryID: 1, MediaAccountID: 12, CompositeOutputID: output, Platform: "baidu", PlatformAccountUID: "exact-UID", CoverFileID: file, ResourceSnapshot: []byte(`{"cover_name":"cover"}`), Content: model.Content{Description: "数据库并发测试，不会执行投稿", CoverFileID: file, Declaration: "无需声明", Confirmed: true}, Status: "pending", Revision: 1, CreatedBy: 9, RequestKey: key, RequestHash: fmt.Sprintf("%064d", 1), CreatedAt: now, UpdatedAt: now}
+	return model.Task{TeamID: 7, OperatorID: 9, CategoryID: 1, MediaAccountID: 12, CompositeOutputID: output, Platform: "baidu", PlatformAccountUID: "exact-UID", CoverFileID: file, ResourceSnapshot: []byte(`{"cover_name":"cover"}`), Content: model.Content{Description: "数据库并发测试，不会执行投稿", CoverFileID: file, PortraitCoverFileID: file, Declaration: "无需声明", Confirmed: true}, Status: "pending", Revision: 1, CreatedBy: 9, RequestKey: key, RequestHash: fmt.Sprintf("%064d", 1), CreatedAt: now, UpdatedAt: now}
 }
 func store(db *gorm.DB) repo.Store { return repo.Store{DB: db, LockFiles: files.LockAvailable} }
 func fileStore(db *gorm.DB) filesrepo.Store {
@@ -444,4 +444,21 @@ func TestLiveFileDeletionMigrationPreservesPendingDeletion(t *testing.T) {
 		t.Fatal(err)
 	}
 
+}
+
+func TestLivePortraitCoverIsProtectedAndListed(t *testing.T) {
+	db := isolated(t)
+	v := task("portrait-reference", 42, 1)
+	v.Content.PortraitCoverFileID = 2
+	v, err := store(db).Create(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = fileStore(db).BeginDelete(2); !errors.Is(err, files.ErrInUse) {
+		t.Fatalf("portrait deletion: %v", err)
+	}
+	refs, err := repo.ListFileReference(db, identity.PublicUser{ID: 9, Role: identity.RoleAdmin, Status: identity.UserStatusEnabled}, 2)
+	if err != nil || len(refs) != 1 || refs[0].ID != fmt.Sprint(v.ID) {
+		t.Fatalf("portrait reference: %+v %v", refs, err)
+	}
 }

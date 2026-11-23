@@ -44,7 +44,7 @@ export default defineComponent({
 .resource-descriptions :deep(.t-descriptions__content) { padding: 8px 16px 8px 0; color: var(--wt-text-primary); font-size: 14px; line-height: 24px; vertical-align: top; overflow-wrap: anywhere; white-space: pre-wrap; }
 .resource-descriptions :deep(.t-descriptions__content .t-button) { margin-left: 8px; }
 @media (max-width: 600px) { .resource-descriptions :deep(.t-descriptions__body > tbody > tr) { grid-template-columns: 96px minmax(0, 1fr); column-gap: 12px; } }
-.resource-descriptions[data-compact="true"] :deep(.t-descriptions__body > tbody > tr) { grid-template-columns: minmax(0, 1fr); column-gap: 0; }
-.resource-descriptions[data-compact="true"] :deep(.t-descriptions__label) { padding: 8px 0 0; }
-.resource-descriptions[data-compact="true"] :deep(.t-descriptions__content) { padding: 4px 0 12px; }
+.resource-descriptions[data-compact="true"] :deep(.t-descriptions__body > tbody > tr) { grid-template-columns: 96px minmax(0, 1fr); column-gap: 12px; }
+.resource-descriptions[data-compact="true"] :deep(.t-descriptions__label) { padding: 8px 0; }
+.resource-descriptions[data-compact="true"] :deep(.t-descriptions__content) { padding: 8px 0; }
 </style>

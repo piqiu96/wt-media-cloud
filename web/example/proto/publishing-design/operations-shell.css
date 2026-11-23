@@ -46,3 +46,6 @@
   .publish-shell { --operations-sidebar-width: 0px; --operations-header-height: 56px; }
   .publish-shell .publish-main .breadcrumbs, .publish-shell .production-page .production-context { padding-inline: 56px 16px; }
 }
+
+.publish-shell .publish-main .breadcrumbs, .publish-shell .production-page .production-context { padding-right: 220px; }
+@media(max-width:680px){.publish-shell .publish-main .breadcrumbs,.publish-shell .production-page .production-context{padding-right:160px}}

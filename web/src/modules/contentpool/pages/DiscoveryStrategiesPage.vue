@@ -518,7 +518,7 @@ function latestStats(row) {
 
 <template>
   <t-loading :loading="loading" :show-overlay="true">
-    <div class="wt-resource-page resource-visual-approved strategy-page">
+    <div class="wt-resource-page resource-visual-approved resource-list-page strategy-page">
       <FeedbackAlert v-if="error" theme="error" :message="error" closable style="margin-bottom:16px" @close="error=''" />
       <ResourcePageHeader title="挖掘策略" description="设置挖掘对象、执行时间和转素材规则。">
         <template #actions>
@@ -528,7 +528,7 @@ function latestStats(row) {
 
       <ResourceStatGrid :items="stats" />
 
-      <ResourceCard class="strategy-card">
+      <ResourceCard class="resource-list-panel strategy-card">
         <ResourceFilterBar>
           <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">综合搜索</span><t-input v-model="filters.search" clearable placeholder="搜索策略 ID / 策略名称" @enter="load" /></label>
           <label v-if="isAdmin" class="wt-filter-field"><span class="wt-filter-field__label">运营团队</span><BusinessSelect kind="team" filter v-model="teamFilter" clearable @change="changeTeamFilter"><t-option v-for="team in teams" :key="team.id" :value="team.id" :label="team.name" /></BusinessSelect></label>
@@ -542,7 +542,7 @@ function latestStats(row) {
           </t-select></label>
           <div class="wt-filter-actions"><t-button theme="primary" @click="load">查询</t-button><t-button class="wt-secondary-button" variant="outline" @click="resetFilters">重置</t-button></div>
         </ResourceFilterBar>
-        <div class="table-scroll-wrap">
+        <div class="table-scroll-wrap resource-data-table">
           <t-table class="wt-resource-table" :data="pagedRows" :columns="columns" row-key="id" hover :scroll="tableScroll" empty="暂无挖掘策略">
             <template #name="{ row }"><span class="mining-ellipsis" :title="row.name">{{ row.name }}</span></template>
             <template #team="{ row }">{{ teamName(row.team_id) }}</template>

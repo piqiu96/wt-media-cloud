@@ -1,6 +1,6 @@
 <script setup>
-import { onMounted, onUnmounted, ref, watch } from 'vue'
-import { CloudUploadIcon, VideoIcon } from 'tdesign-icons-vue-next'
+import { onMounted, onUnmounted, ref, watch, computed } from 'vue'
+import { CloudUploadIcon, VideoIcon, CopyIcon } from 'tdesign-icons-vue-next'
 import { opColumnWidth } from '../../../shared/ui/resource/opColumnWidth.js'
 import { createFilesClient } from '../../../shared/api/files.js'
 import { formatDateTime } from '../../../shared/utils/datetime.js'
@@ -16,7 +16,9 @@ import ResourceRowActions from '../../../shared/ui/resource/ResourceRowActions.v
 const client = createFilesClient()
 const items = ref([]), loading = ref(false), error = ref('')
 const filters = ref({ search: '', type: '' })
-const page = ref(1), pageSize = ref(20), total = ref(0), uploadMaxBytes = ref(0)
+const appliedFilters = ref({ ...filters.value })
+const hasAppliedFilters = computed(() => !!(appliedFilters.value.search || appliedFilters.value.type))
+const page = ref(1), pageSize = ref(10), total = ref(0), uploadMaxBytes = ref(0)
 const uploadVisible = ref(false), uploadName = ref(''), uploadFile = ref(null), previewURL = ref('')
 const busy = ref(false), formError = ref('')
 const renameVisible = ref(false), editing = ref(null), renameName = ref('')
@@ -29,7 +31,7 @@ const columns = [
   { colKey: 'owner_name', title: '上传人', width: 120 },
   { colKey: 'team_name', title: '运营团队', width: 130 },
   { colKey: 'created_at', title: '上传时间', width: 160 },
-  { colKey: 'op', title: '操作', width: opColumnWidth(['预览', '下载', '复制链接', '改名', '删除'], { variant: 'text' }), fixed: 'right' },
+  { colKey: 'op', title: '操作', width: opColumnWidth(['预览', '下载', '编辑', '删除'], { variant: 'text' }), fixed: 'right' },
 ]
 const tableScroll = { x: `${columns.reduce((sum, column) => sum + column.width, 0)}px` }
 const acceptedFiles = '.png,.jpg,.jpeg,.webp,.gif,.mp4,.m4v,.mov,.webm,.mkv'
@@ -39,13 +41,14 @@ async function load() {
   const current = ++sequence
   loading.value = true; error.value = ''
   try {
-    const data = await client.list({ ...filters.value, page: page.value, page_size: pageSize.value })
+    const data = await client.list({ ...appliedFilters.value, page: page.value, page_size: pageSize.value })
     if (current !== sequence) return
     items.value = data.items || []; total.value = data.total || 0; uploadMaxBytes.value = data.upload_max_bytes || 0
   } catch (e) { if (current === sequence) error.value = e.message }
   finally { if (current === sequence) loading.value = false }
 }
-function query() { page.value = 1; load() }
+function query() { appliedFilters.value = { ...filters.value }; page.value = 1; load() }
+function changePageSize() { page.value = 1; load() }
 function reset() { filters.value = { search: '', type: '' }; query() }
 function clearSelection() {
   if (previewURL.value) URL.revokeObjectURL(previewURL.value)
@@ -75,7 +78,7 @@ async function upload() {
   busy.value = true; formError.value = ''
   try {
     await client.upload(uploadName.value.trim(), uploadFile.value)
-    uploadVisible.value = false; feedback.toast.success('文件上传成功'); page.value = 1; await load()
+    uploadVisible.value = false; feedback.toast.success('文件已创建'); page.value = 1; await load()
   } catch (e) { formError.value = e.message }
   finally { busy.value = false }
 }
@@ -84,7 +87,7 @@ async function rename() {
   if (busy.value) return
   if (!renameName.value.trim()) { formError.value = '请填写文件名'; return }
   busy.value = true; formError.value = ''
-  try { await client.rename(editing.value.id, renameName.value.trim()); renameVisible.value = false; feedback.toast.success('文件已改名'); await load() }
+  try { await client.rename(editing.value.id, renameName.value.trim()); renameVisible.value = false; feedback.toast.success('文件已保存'); await load() }
   catch (e) { formError.value = e.message }
   finally { busy.value = false }
 }
@@ -103,18 +106,22 @@ onMounted(load)
 </script>
 
 <template>
-  <div class="wt-resource-page resource-visual-approved files-page">
-    <ResourcePageHeader title="文件管理" description="上传图片和视频，获取可复用的文件链接">
-      <template #actions><t-button theme="primary" @click="openUpload">上传文件</t-button></template>
+  <div class="wt-resource-page resource-list-page resource-visual-approved files-page">
+    <ResourcePageHeader title="文件管理">
+      <template #actions><t-button theme="primary" @click="openUpload">新建文件</t-button></template>
     </ResourcePageHeader>
-    <FeedbackAlert v-if="error" theme="error" :message="error" closable @close="error = ''" />
-    <ResourceCard>
+    <ResourceCard class="resource-list-panel">
+      <FeedbackAlert v-if="error" theme="error" :message="error"><template #operation><t-button variant="text" :disabled="loading" @click="load">重试</t-button></template></FeedbackAlert>
       <ResourceFilterBar>
         <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">文件搜索</span><t-input v-model="filters.search" clearable placeholder="搜索文件名或 ID" @enter="query" /></label>
         <label class="wt-filter-field"><span class="wt-filter-field__label">文件类型</span><t-select v-model="filters.type" :options="[{label:'图片',value:'image'},{label:'视频',value:'video'}]" clearable placeholder="全部" /></label>
         <div class="wt-filter-actions"><t-button theme="primary" @click="query">查询</t-button><t-button variant="outline" @click="reset">重置</t-button></div>
       </ResourceFilterBar>
-      <div class="table-scroll-wrap"><t-table class="wt-resource-table" :data="items" :columns="columns" row-key="id" :loading="loading" :scroll="tableScroll" size="small" hover empty="还没有上传文件">
+      <div class="table-scroll-wrap resource-data-table"><t-table class="wt-resource-table" :data="items" :columns="columns" row-key="id" :loading="loading" :scroll="tableScroll" size="small" hover>
+        <template #empty><t-empty :description="error ? '暂无法加载文件' : hasAppliedFilters ? '未找到符合条件的文件' : '暂无文件'">
+          <template #action><t-button v-if="!error" variant="outline" @click="hasAppliedFilters ? reset() : openUpload()">{{ hasAppliedFilters ? '重置' : '新建文件' }}</t-button></template>
+        </t-empty></template>
+        <template #filename="{row}"><span class="file-name-cell"><span class="file-name-cell__text" :title="row.filename">{{ row.filename }}</span><t-button v-if="!row.deleted_at" size="small" variant="text" class="file-copy" title="复制文件链接" :aria-label="`复制文件链接：${row.filename}`" @click="copy(row)"><CopyIcon /></t-button></span></template>
         <template #type="{row}"><t-tag variant="light">{{ row.type === 'video' ? '视频' : '图片' }}</t-tag></template>
         <template #size_bytes="{row}">{{ sizeLabel(row.size_bytes) }}</template>
         <template #owner_name="{row}">{{ row.owner_name || `用户 ${row.owner_id}` }}</template>
@@ -123,14 +130,13 @@ onMounted(load)
         <template #op="{row}"><ResourceRowActions>
           <t-button v-if="!row.deleted_at" tag="a" size="small" variant="text" :href="client.resourceURL(row)" target="_blank" rel="noopener noreferrer">预览</t-button>
           <t-button v-if="!row.deleted_at" tag="a" size="small" variant="text" :href="`${client.resourceURL(row)}?download=1`" target="_blank" rel="noopener noreferrer">下载</t-button>
-          <t-button v-if="!row.deleted_at" size="small" variant="text" @click="copy(row)">复制链接</t-button>
-          <t-button v-if="!row.deleted_at" size="small" variant="text" @click="openRename(row)">改名</t-button>
+          <t-button v-if="!row.deleted_at" size="small" variant="text" @click="openRename(row)">编辑</t-button>
           <t-button size="small" variant="text" class="is-danger" @click="remove(row)">{{row.deleted_at?'重试删除':'删除'}}</t-button>
         </ResourceRowActions></template>
       </t-table></div>
-      <div class="pagination-bar"><t-pagination v-model:current="page" v-model:page-size="pageSize" :total="total" :show-jumper="false" :page-size-options="[10,20,50]" @current-change="load" @page-size-change="query" /></div>
+      <div class="pagination-bar"><t-pagination v-model:current="page" v-model:page-size="pageSize" :total="total" :show-jumper="false" :page-size-options="[10,20,50]" @current-change="load" @page-size-change="changePageSize" /></div>
     </ResourceCard>
-    <ResourceOverlay v-model:visible="uploadVisible" title="上传文件" :busy="busy">
+    <ResourceOverlay v-model:visible="uploadVisible" title="新建文件" :busy="busy">
       <FeedbackAlert v-if="formError" theme="error" :message="formError" />
       <ResourceForm>
         <t-form-item label="选择文件" required>
@@ -156,9 +162,9 @@ onMounted(load)
         <t-form-item label="文件名" required><t-input v-model="uploadName" :maxlength="80" :disabled="busy" placeholder="请填写文件名，可修改预填名称" /></t-form-item>
       </ResourceForm>
       <p v-if="busy" class="file-help" role="status">正在上传并校验文件，请稍候…</p>
-      <template #footer><t-button variant="outline" :disabled="busy" @click="uploadVisible = false">取消</t-button><t-button theme="primary" :loading="busy" :disabled="!uploadFile || !uploadName.trim()" @click="upload">上传</t-button></template>
+      <template #footer><t-button variant="outline" :disabled="busy" @click="uploadVisible = false">取消</t-button><t-button theme="primary" :loading="busy" :disabled="!uploadFile || !uploadName.trim()" @click="upload">保存</t-button></template>
     </ResourceOverlay>
-    <ResourceOverlay v-model:visible="renameVisible" title="修改文件名" :busy="busy">
+    <ResourceOverlay v-model:visible="renameVisible" title="编辑文件" :busy="busy">
       <FeedbackAlert v-if="formError" theme="error" :message="formError" />
       <ResourceForm><t-form-item label="文件名" required><t-input v-model="renameName" :maxlength="80" :disabled="busy" placeholder="请填写文件名" /></t-form-item></ResourceForm>
       <template #footer><t-button variant="outline" :disabled="busy" @click="renameVisible = false">取消</t-button><t-button theme="primary" :loading="busy" @click="rename">保存</t-button></template>
@@ -168,6 +174,11 @@ onMounted(load)
 </template>
 
 <style scoped>
+.file-name-cell{display:flex;align-items:center;gap:6px;min-width:0}
+.file-name-cell__text{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.file-copy{flex:none;min-width:32px;height:32px;padding:0;color:var(--wt-text-tertiary)}
+.file-copy:focus-visible{outline:2px solid var(--wt-primary);outline-offset:2px}
+
 .file-choice{display:flex;flex-direction:column;gap:12px;min-width:0;width:100%}
 .file-help{color:var(--wt-text-tertiary);font-size:13px;line-height:1.6}
 .file-picker{width:100%}

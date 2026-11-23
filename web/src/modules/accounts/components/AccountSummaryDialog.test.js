@@ -2,11 +2,12 @@ import { createSSRApp, reactive } from 'vue';
 import { renderToString } from 'vue/server-renderer';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 
-const api = vi.hoisted(() => ({ get: vi.fn(), listProfiles: vi.fn(), me: vi.fn(), invoke: vi.fn() }));
+const api = vi.hoisted(() => ({ get: vi.fn(), listProfiles: vi.fn(), me: vi.fn(), invoke: vi.fn(), success: vi.fn() }));
 vi.mock('../../../shared/api/mediaAccounts.js', () => ({ createMediaAccountClient: () => ({ get: api.get }) }));
 vi.mock('../../../shared/api/profileBindings.js', () => ({ createProfileBindingClient: () => ({ listProfiles: api.listProfiles }) }));
 vi.mock('../../../shared/api/session.js', () => ({ createSessionClient: () => ({ me: api.me }) }));
 vi.mock('@tauri-apps/api/core', () => ({ invoke: api.invoke }));
+vi.mock('../../../shared/ui/feedback/index.js', () => ({ feedback: { toast: { success: api.success } } }));
 import AccountSummaryDialog from './AccountSummaryDialog.vue';
 
 const account = { id: '9', user_id: '1', platform_name: '运营账号', browser_profile_id: '8' };
@@ -34,7 +35,7 @@ it('reads only the bound profile and opens it only after an explicit action', as
   expect(api.invoke).not.toHaveBeenCalled();
   await state.openWindow();
   expect(api.invoke).toHaveBeenCalledWith('local_agent_profile_open', { args: { bit_profile_id: 'bit-8' } });
-  expect(state.notice.value).toBe('已打开浏览器窗口：运营窗口');
+  expect(api.success).toHaveBeenCalledWith('已打开浏览器窗口：运营窗口');
 });
 
 it('rechecks the current binding before opening instead of using the displayed snapshot', async () => {
@@ -100,5 +101,5 @@ it('prevents overlapping opens and reports a native failure without claiming suc
   await opening;
   expect(state.opening.value).toBe(false);
   expect(state.error.value).toContain('浏览器连接失败');
-  expect(state.notice.value).toBe('');
+  expect(api.success).not.toHaveBeenCalled();
 });

@@ -1,7 +1,7 @@
 <script setup>
 import FeedbackAlert from '../../../shared/ui/feedback/FeedbackAlert.vue'
 import { feedback } from '../../../shared/ui/feedback/index.js'
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { createSessionClient } from '../../../shared/api/session.js'
 import { createBitAccountClient } from '../../../shared/api/bitAccount.js'
@@ -13,6 +13,39 @@ import { canRunLocalAgent } from '../../../utils.js'
 import { avatarOptions } from '../../../shared/ui/systemAvatars.js'
 import SystemAvatar from '../../../shared/ui/SystemAvatar.vue'
 
+import { onBeforeRouteLeave } from 'vue-router'
+import ResourceCard from '../../../shared/ui/resource/ResourceCard.vue'
+import ResourceSection from '../../../shared/ui/resource/ResourceSection.vue'
+import ResourcePageHeader from '../../../shared/ui/resource/ResourcePageHeader.vue'
+import ResourceOverlay from '../../../shared/ui/resource/ResourceOverlay.vue'
+
+const editing = ref(false)
+const avatarVisible = ref(false)
+const profileError = ref('')
+const bindingError = ref('')
+const dirty = computed(() => editing.value && (nickname.value !== (user.value?.nickname || user.value?.username || '') || avatarId.value !== (user.value?.avatar_id || 'sky')))
+function startEdit() {
+  nickname.value = user.value.nickname || user.value.username
+  avatarId.value = user.value.avatar_id || 'sky'
+  profileError.value = ''
+  editing.value = true
+}
+function cancelEdit() {
+  editing.value = false
+  avatarVisible.value = false
+  profileError.value = ''
+}
+onBeforeRouteLeave(async (to) => {
+  if (to.path === '/login') return true
+  if (saving.value || bindingBusy.value) return false
+  if (!dirty.value) return true
+  return feedback.confirmWarning({title:'放弃未保存的修改？',message:'离开后，本次昵称和头像修改将不保存。',confirmText:'放弃修改'})
+})
+function beforeUnload(event) {
+  if (dirty.value || saving.value) { event.preventDefault(); event.returnValue = '' }
+}
+onMounted(() => window.addEventListener('beforeunload', beforeUnload))
+onUnmounted(() => window.removeEventListener('beforeunload', beforeUnload))
 const session = createSessionClient()
 const bitAccounts = createBitAccountClient()
 // 团队/类目范围只做展示，取与素材库页同一个 categories 端点把类目 ID 映射成名称；
@@ -73,12 +106,16 @@ async function load() {
   try {
     const [currentUser, categoryRows] = await Promise.all([session.me(), usersClient.listCategories({ enabled: true }).catch(() => [])])
     user.value = currentUser
-    nickname.value = currentUser.nickname || currentUser.username
-    avatarId.value = currentUser.avatar_id || 'sky'
+    if (!editing.value) {
+      nickname.value = currentUser.nickname || currentUser.username
+      avatarId.value = currentUser.avatar_id || 'sky'
+    }
     categories.value = Array.isArray(categoryRows) ? categoryRows : []
     // 本机 Agent 与比特账号绑定给运营与高级运营；管理员不读取这类本机信息。
     if (!canRunLocalAgent(currentUser)) return
-    binding.value = await bitAccounts.get()
+    bindingError.value = ''
+    try { binding.value = await bitAccounts.get() }
+    catch (e) { bindingError.value = e?.message || '无法读取绑定状态' }
     if (inDesktop) {
       const [agentResult, deviceResult] = await Promise.allSettled([
         invoke('local_agent_status'),
@@ -87,22 +124,25 @@ async function load() {
       localAgent.value = agentResult.status === 'fulfilled' ? agentResult.value : null
       deviceId.value = deviceResult.status === 'fulfilled' ? deviceResult.value : ''
     }
-  } catch (e) { error.value = e?.message || '无法加载个人信息' }
+  } catch (e) { error.value = e?.message || '无法加载账号信息' }
   finally { loading.value = false }
 }
 onMounted(load)
 
 async function saveProfile() {
   if (saving.value) return
+  if (!nickname.value.trim()) { profileError.value = '请输入昵称'; return }
   saving.value = true
-  error.value = ''
+  profileError.value = ''
   try {
-    const updated = await session.updateProfile(nickname.value, avatarId.value)
+    const updated = await session.updateProfile(nickname.value.trim(), avatarId.value)
     user.value = updated
-    nickname.value = updated.nickname
+    nickname.value = updated.nickname || updated.username
+    avatarId.value = updated.avatar_id || 'sky'
+    editing.value = false
     window.dispatchEvent(new Event('wt-media:profile-updated'))
-    feedback.toast.success('个人信息已保存')
-  } catch (e) { feedback.toast.error(e?.message || '保存失败') }
+    feedback.toast.success('账号资料已保存')
+  } catch (e) { profileError.value = e?.message || '保存失败，请重试' }
   finally { saving.value = false }
 }
 
@@ -139,73 +179,92 @@ async function bindAccount({ rebind = false } = {}) {
 
 <template>
   <main class="personal-page">
-    <header class="page-heading"><div><p class="eyebrow">ACCOUNT &amp; BITBROWSER</p><h1>个人信息</h1><p>管理你的展示资料与比特浏览器账号绑定。</p></div></header>
+    <ResourcePageHeader title="我的账号" />
+    <FeedbackAlert v-if="error" theme="error" :message="error"><template #operation><t-button variant="text" @click="load">重试</t-button></template></FeedbackAlert>
     <t-loading :loading="loading" size="large">
-      <div class="personal-grid">
-        <section class="profile-card">
-          <h2>基本信息</h2>
-          <div class="identity-summary"><SystemAvatar :avatar-id="avatarId" :size="64" /><div><strong>{{ user?.nickname || user?.username }}</strong><span>用户 UID {{ user?.id || '—' }}</span></div></div>
-          <div class="static-details"><span>用户名</span><strong>{{ user?.username || '—' }}</strong><span>角色</span><strong>{{ user?.role === 'operator' ? '普通运营' : user?.role === 'admin' ? '管理员' : '高级运营' }}</strong><span>所属团队</span><strong>{{ user?.team_name || '—' }}</strong><span>类目范围</span><strong>{{ categoryScopeLabel }}</strong></div>
-          <label class="form-label" for="profile-nickname">昵称</label>
-          <t-input id="profile-nickname" v-model="nickname" maxlength="64" placeholder="请输入昵称" />
-          <p class="field-help">默认与用户名一致，可随时修改。</p>
-          <p class="form-label">选择系统头像</p>
-          <div class="avatar-options" role="group" aria-label="系统头像">
-            <button v-for="option in avatarOptions" :key="option.id" type="button" class="avatar-choice" :class="{ selected: avatarId === option.id }" :aria-pressed="avatarId === option.id" @click="avatarId = option.id">
-              <SystemAvatar :avatar-id="option.id" :size="42" /><span>{{ option.label }}</span>
-            </button>
-          </div>
-          <t-button theme="primary" :loading="saving" @click="saveProfile">保存</t-button>
-        </section>
-
-        <section v-if="localAgentAllowed" class="device-card">
-          <div class="section-title"><div><h2>比特浏览器</h2><p>每个账号绑定一个比特浏览器主账号，只有该账号下的窗口能执行任务。</p></div><span class="status-pill" :class="binding?.bound ? 'is-bound' : 'is-unbound'">{{ binding?.bound ? '已绑定' : '未绑定' }}</span></div>
-          <div class="device-hero"><span class="device-icon"><t-icon name="user-circle" /></span><div><strong>{{ bindingTitle }}</strong><span>{{ bindingSummary }}</span></div></div>
-          <dl class="device-details">
-            <div><dt>绑定比特账号</dt><dd>{{ binding?.main_user_id_masked || '—' }}</dd></div>
-            <div><dt>绑定时间</dt><dd>{{ binding?.bound_at ? new Date(binding.bound_at).toLocaleString() : '—' }}</dd></div>
-            <div><dt>最近验证</dt><dd>{{ binding?.last_verified_at ? new Date(binding.last_verified_at).toLocaleString() : '—' }}</dd></div>
-            <div v-if="inDesktop && bitAccountDiffers"><dt>当前比特账号</dt><dd>{{ currentAccountText }}</dd></div>
-          </dl>
-          <FeedbackAlert v-if="bitAccountDiffers" theme="warning" class="device-alert" message="当前比特浏览器登录账号与系统绑定账号不一致，任务会被拦下。如确需更换，请点击「换绑为当前账号」。" />
-          <p v-if="!binding?.bound" class="device-note">首次绑定由本机 Agent 直接读取比特浏览器当前登录的主账号，不需要手工输入；其他账号下的窗口不会出现在可用列表中。</p>
-          <div class="device-actions">
-            <t-button v-if="!binding?.bound && inDesktop" theme="primary" :loading="bindingBusy" @click="bindAccount()">绑定比特浏览器账号</t-button>
-            <t-button v-if="binding?.bound && inDesktop && bitAccountDiffers" variant="outline" :loading="bindingBusy" @click="confirmRebind = true">换绑为当前账号</t-button>
-          </div>
-          <p v-if="!inDesktop" class="device-note">Cloud 网页可查看绑定状态；绑定与换绑需在 Desktop 应用中操作。</p>
-          <section v-if="inDesktop" class="machine-section">
-            <h3>本机</h3>
+      <div v-if="user" class="account-sections">
+        <ResourceCard>
+          <ResourceSection title="账号资料">
+            <div class="identity-summary">
+              <SystemAvatar :avatar-id="editing ? avatarId : user.avatar_id || 'sky'" :size="48" />
+              <div class="identity-name"><strong>{{ user.nickname || user.username }}</strong><span>用户 UID {{ user.id }}</span></div>
+              <t-button v-if="!editing" variant="text" theme="primary" class="edit-action" @click="startEdit">编辑</t-button>
+            </div>
+            <div v-if="editing" class="profile-editor">
+              <t-form label-align="top" @submit.prevent="saveProfile">
+                <t-form-item label="昵称" name="nickname"><t-input v-model="nickname" aria-label="昵称" maxlength="64" :disabled="saving" placeholder="请输入昵称" /></t-form-item>
+              </t-form>
+              <t-button variant="outline" :disabled="saving" @click="avatarVisible = true">更换头像</t-button>
+              <FeedbackAlert v-if="profileError" theme="error" :message="profileError" />
+              <div class="profile-actions"><t-button theme="primary" :loading="saving" :disabled="!dirty" @click="saveProfile">保存</t-button><t-button variant="outline" :disabled="saving" @click="cancelEdit">取消</t-button></div>
+            </div>
+            <dl class="profile-details">
+              <div><dt>用户名</dt><dd>{{ user.username }}</dd></div>
+              <div><dt>角色</dt><dd>{{ user.role === 'operator' ? '普通运营' : user.role === 'admin' ? '管理员' : '高级运营' }}</dd></div>
+              <div><dt>所属团队</dt><dd>{{ user.team_name || '—' }}</dd></div>
+              <div><dt>类目范围</dt><dd>{{ categoryScopeLabel }}</dd></div>
+            </dl>
+          </ResourceSection>
+        </ResourceCard>
+        <ResourceCard v-if="localAgentAllowed">
+          <ResourceSection title="比特浏览器">
+            <template #title-extra><t-tag class="binding-tag" :theme="binding?.bound ? 'success' : 'default'" variant="light">{{ bindingError ? '读取失败' : binding?.bound ? '已绑定' : '未绑定' }}</t-tag></template>
+            <FeedbackAlert v-if="bindingError" theme="error" :message="bindingError"><template #operation><t-button variant="text" @click="load">重试</t-button></template></FeedbackAlert>
+            <template v-else>
+              <div class="device-hero"><span class="device-icon"><t-icon name="user-circle" /></span><div><strong>{{ bindingTitle }}</strong><span>{{ bindingSummary }}</span></div></div>
+              <dl class="device-details">
+                <div><dt>绑定比特账号</dt><dd>{{ binding?.main_user_id_masked || '—' }}</dd></div>
+                <div><dt>绑定时间</dt><dd>{{ binding?.bound_at ? new Date(binding.bound_at).toLocaleString() : '—' }}</dd></div>
+                <div><dt>最近验证</dt><dd>{{ binding?.last_verified_at ? new Date(binding.last_verified_at).toLocaleString() : '—' }}</dd></div>
+                <div v-if="inDesktop && bitAccountDiffers"><dt>当前比特账号</dt><dd>{{ currentAccountText }}</dd></div>
+              </dl>
+              <FeedbackAlert v-if="bitAccountDiffers" theme="warning" message="当前比特浏览器登录账号与绑定账号不一致，请核对后换绑或切回原账号。" />
+              <div v-if="inDesktop" class="device-actions">
+                <t-button v-if="!binding?.bound" theme="primary" :loading="bindingBusy" :disabled="editing" @click="bindAccount()">绑定比特浏览器账号</t-button>
+                <t-button v-if="binding?.bound && bitAccountDiffers" variant="outline" :loading="bindingBusy" :disabled="editing" @click="confirmRebind = true">换绑为当前账号</t-button>
+              </div>
+              <p v-else class="section-note">绑定和换绑请在桌面应用中操作。</p>
+            </template>
+          </ResourceSection>
+          <ResourceSection v-if="inDesktop" title="本机" variant="form" class="machine-section">
             <dl class="device-details">
               <div><dt>设备 ID</dt><dd>{{ deviceId || '无法读取' }}</dd></div>
               <div><dt>系统</dt><dd>{{ systemLabel }}</dd></div>
               <div><dt>Agent 状态</dt><dd>{{ agentStatusText }}</dd></div>
               <div><dt>Agent 版本</dt><dd>{{ localAgent?.agent_version || '未读取到' }}</dd></div>
             </dl>
-          </section>
-        </section>
+          </ResourceSection>
+        </ResourceCard>
       </div>
-      <FeedbackAlert v-if="error" class="feedback" :message="error" theme="error" />
     </t-loading>
-
-    <t-dialog v-if="localAgentAllowed" v-model:visible="confirmRebind" header="换绑为当前比特浏览器账号" :footer="false" :close-on-overlay-click="false">
-      <p class="dialog-note">把当前比特浏览器登录的账号（{{ localAccountMasked || '未读取到' }}）设为绑定账号后：</p>
-      <ul class="dialog-list">
-        <li>这台电脑的比特浏览器窗口按新账号归属，只有新账号下的窗口能执行任务；</li>
-        <li>原账号下的窗口记录不会删除，切回原账号即可恢复；</li>
-        <li>正在执行的任务不受影响。</li>
-      </ul>
-      <p class="dialog-note">请确认比特浏览器已登录你要使用的账号。</p>
-      <div class="dialog-actions"><t-button variant="outline" @click="confirmRebind = false">取消</t-button><t-button theme="primary" :loading="bindingBusy" @click="bindAccount({ rebind: true })">确认换绑</t-button></div>
-    </t-dialog>
+    <ResourceOverlay v-model:visible="avatarVisible" title="选择头像" :busy="saving">
+      <div class="avatar-options" role="group" aria-label="系统头像">
+        <button v-for="option in avatarOptions" :key="option.id" type="button" class="avatar-choice" :class="{ selected: avatarId === option.id }" :aria-pressed="avatarId === option.id" @click="avatarId = option.id">
+          <SystemAvatar :avatar-id="option.id" :size="42" /><span>{{ option.label }}</span>
+        </button>
+      </div>
+      <template #footer><t-button theme="primary" @click="avatarVisible = false">完成</t-button></template>
+    </ResourceOverlay>
+    <ResourceOverlay v-model:visible="confirmRebind" title="换绑为当前比特浏览器账号" :busy="bindingBusy">
+      <p>确认将当前比特账号 {{ localAccountMasked || '未读取到' }} 设为绑定账号？</p>
+      <ul class="dialog-list"><li>只有新账号下的窗口能执行任务。</li><li>原账号窗口记录保留，切回原账号即可恢复。</li><li>正在执行的任务不受影响。</li></ul>
+      <template #footer><t-button variant="outline" :disabled="bindingBusy" @click="confirmRebind = false">取消</t-button><t-button theme="primary" :loading="bindingBusy" @click="bindAccount({ rebind: true })">确认换绑</t-button></template>
+    </ResourceOverlay>
   </main>
 </template>
 
 <style scoped>
-.personal-page { max-width: 1140px; margin: 0 auto; color: #193250; }.page-heading { margin-bottom: 25px; }.eyebrow { margin: 0 0 7px; color: #3b86e9; font-size: 11px; font-weight: 700; letter-spacing: .16em; }.page-heading h1 { margin: 0 0 6px; font-size: 28px; }.page-heading p { margin: 0; color: #7b8ba2; }
-.personal-grid { display: grid; grid-template-columns: minmax(330px, 1fr) minmax(340px, 1.1fr); gap: 20px; }.profile-card,.device-card { padding: 28px; border: 1px solid #e7edf5; border-radius: 14px; background: #fff; box-shadow: 0 8px 24px #1733570a; }.profile-card h2,.device-card h2 { margin: 0; font-size: 20px; }.identity-summary { display: flex; align-items: center; gap: 14px; margin: 24px 0; }.identity-summary div { display: flex; flex-direction: column; gap: 5px; }.identity-summary strong { font-size: 19px; }.identity-summary span { color: #8294ab; font-size: 13px; }.static-details { display: grid; grid-template-columns: 75px 1fr; gap: 10px; padding: 16px 0; border-top: 1px solid #eef2f6; border-bottom: 1px solid #eef2f6; }.static-details span { color: #8a9aaf; }.static-details strong { font-weight: 500; }.form-label { display: block; margin: 22px 0 9px; font-weight: 600; }.field-help { margin: 6px 0 0; color: #94a3b8; font-size: 12px; }.avatar-options { display: flex; flex-wrap: wrap; gap: 9px; margin-bottom: 20px; }.avatar-choice { display: flex; flex-direction: column; align-items: center; gap: 5px; min-width: 66px; padding: 8px 5px; border: 2px solid transparent; border-radius: 10px; background: #f7f9fc; cursor: pointer; color: #637995; font-size: 12px; }.avatar-choice.selected { border-color: #2984fa; background: #eef6ff; color: #1465d2; }
-.section-title { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }.section-title p { margin: 7px 0 0; color: #8d9db0; font-size: 13px; }.status-pill { padding: 5px 10px; border-radius: 20px; font-size: 12px; }.is-bound { color: #167e5c; background: #e7f7f0; }.is-unbound { color: #8f6f1c; background: #fff5da; }.device-hero { display: flex; gap: 14px; align-items: center; margin: 24px 0; padding: 18px; border-radius: 10px; background: #f3f8ff; }.device-icon { display: grid; place-items: center; width: 48px; height: 48px; border-radius: 10px; background: #deedff; color: #2075e8; font-size: 24px; }.device-hero div { display: flex; flex-direction: column; gap: 5px; }.device-hero span:not(.device-icon) { color: #7890ae; font-size: 13px; }.device-details { margin: 0; }.device-details div { display: flex; justify-content: space-between; gap: 14px; padding: 12px 0; border-bottom: 1px solid #eef2f6; }.device-details dt { color: #8a9bb0; }.device-details dd { margin: 0; text-align: right; overflow-wrap: anywhere; }.device-alert { margin-top: 19px; }.device-note { margin: 18px 0 0; color: #8294a9; font-size: 13px; line-height: 1.6; }.device-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 20px; }.feedback { margin-top: 18px; }.unbind-warning { padding: 15px; border-radius: 9px; color: #81421a; background: #fff3e8; line-height: 1.7; }.unbind-warning p { margin: 7px 0 0; }.dialog-note { margin: 0; color: #7b8ba2; line-height: 1.7; }.dialog-list { margin: 10px 0; padding-left: 20px; color: #5b6d85; line-height: 1.9; }.dialog-list li + li { margin-top: 2px; }.acknowledge { display: flex; align-items: flex-start; gap: 8px; margin: 19px 0; cursor: pointer; line-height: 1.5; }.acknowledge input { margin-top: 4px; }.dialog-actions { display: flex; justify-content: flex-end; gap: 9px; }
-.machine-section { margin-top: 26px; padding-top: 20px; border-top: 1px solid #eef2f6; }.machine-section h3 { margin: 0 0 4px; color: #193250; font-size: 15px; font-weight: 600; }
-@media (max-width: 830px) { .personal-grid { grid-template-columns: 1fr; } }
-@media (max-width: 480px) { .profile-card,.device-card { padding: 20px; } }
+.personal-page { min-width: 0; color: var(--wt-text-secondary); }
+.account-sections { display: grid; gap: 16px; }
+.identity-summary { display:flex; align-items:center; gap:16px; margin-bottom:24px; }
+.identity-name { display:grid; gap:4px; }.identity-name strong { font-size:16px; font-weight:500; color:var(--wt-text-primary); }.identity-name span,.section-note { color:var(--wt-text-tertiary); font-size:13px; line-height:22px; }
+.edit-action,.binding-tag { margin-left:auto; flex-shrink:0; white-space:nowrap; }
+.profile-details { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); column-gap:24px; row-gap:16px; margin:0; }
+.profile-details > div,.device-details > div { display:grid; grid-template-columns:112px minmax(0,1fr); gap:16px; align-items:start; }
+dt { color:var(--wt-text-tertiary); }dd { margin:0; color:var(--wt-text-secondary); overflow-wrap:anywhere; line-height:24px; }
+.profile-editor { display:grid; gap:16px; max-width:480px; margin-bottom:24px; }.profile-editor > .t-button { justify-self:start; }.profile-actions,.device-actions { display:flex; gap:8px; flex-wrap:wrap; }.device-actions:empty { display:none; }
+.section-note { margin:0 0 16px; }.device-hero { display:flex; align-items:center; gap:16px; padding:20px 24px; background:var(--wt-primary-light,#eaf2ff); border-radius:6px; margin-bottom:16px; }.device-icon { display:grid; place-items:center; flex:none; width:48px; height:48px; border-radius:6px; background:#dceaff; color:var(--wt-primary); font-size:24px; }.device-hero > div { display:grid; gap:6px; }.device-hero strong { font-weight:500; color:var(--wt-text-primary); }.device-hero span { color:var(--wt-text-tertiary); }
+.device-details { margin:0; }.device-details > div { padding:8px 0; }.device-actions { margin-top:16px; }.machine-section { margin-top:24px !important; padding-top:24px; border-top:1px solid var(--wt-border); }
+.avatar-options { display:flex; flex-wrap:wrap; gap:12px; }.avatar-choice { display:grid; justify-items:center; gap:8px; padding:12px; background:var(--wt-bg-page); border:1px solid transparent; border-radius:6px; color:var(--wt-text-secondary); cursor:pointer; }.avatar-choice.selected { border-color:var(--wt-primary); background:var(--wt-primary-light,#eaf2ff); color:var(--wt-primary); }.avatar-choice:focus-visible { outline:2px solid var(--wt-primary); }.dialog-list { padding-left:20px; }
+@media (max-width:900px) { .profile-details { grid-template-columns:1fr; } }
 </style>

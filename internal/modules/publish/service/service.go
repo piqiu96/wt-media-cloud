@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/wt-media/wt-media-cloud/internal/infra/client/deepseek"
 	"github.com/wt-media/wt-media-cloud/internal/infra/database"
 	filemodel "github.com/wt-media/wt-media-cloud/internal/modules/files/model"
 	files "github.com/wt-media/wt-media-cloud/internal/modules/files/service"
@@ -41,16 +42,19 @@ type Repository interface {
 	Edit(model.Task, uint64) (model.Task, error)
 }
 type Service struct {
-	OutputPage func(context.Context, identity.PublicUser, production.ListComposeOutputsInput) (OutputPage, error)
-	SavedFile  func(context.Context, int64) (filemodel.File, error)
-	Repo       Repository
-	Account    func(identity.PublicUser, string) (accounts.Account, error)
-	Output     func(identity.PublicUser, int64) (production.ComposeOutputDetail, error)
-	File       func(context.Context, identity.PublicUser, int64) (filemodel.File, error)
+	GenerateJSON func(context.Context, string, string) (string, error)
+	OutputPage   func(context.Context, identity.PublicUser, production.ListComposeOutputsInput) (OutputPage, error)
+	SavedFile    func(context.Context, int64) (filemodel.File, error)
+	Repo         Repository
+	Account      func(identity.PublicUser, string) (accounts.Account, error)
+	Output       func(identity.PublicUser, int64) (production.ComposeOutputDetail, error)
+	File         func(context.Context, identity.PublicUser, int64, int64) (filemodel.File, error)
 }
 
 func Wired() *Service {
-	return &Service{OutputPage: func(ctx context.Context, a identity.PublicUser, in production.ListComposeOutputsInput) (OutputPage, error) {
+	return &Service{GenerateJSON: func(ctx context.Context, system, user string) (string, error) {
+		return deepseek.Get().CompleteJSON(ctx, system, user)
+	}, OutputPage: func(ctx context.Context, a identity.PublicUser, in production.ListComposeOutputsInput) (OutputPage, error) {
 		page, err := production.ListComposeOutputPage(ctx, a, in)
 		return OutputPage{Items: page.Items, Total: page.Total, Page: page.Page, PageSize: page.PageSize}, err
 	}, SavedFile: func(ctx context.Context, id int64) (filemodel.File, error) {
@@ -59,17 +63,8 @@ func Wired() *Service {
 			return filemodel.File{}, e
 		}
 		return s.ReadSavedReference(ctx, id)
-	}, Repo: repository.Store{DB: database.DB(), LockFiles: files.LockAvailable}, Account: accounts.GetAccount, Output: production.GetComposeOutput, File: func(ctx context.Context, a identity.PublicUser, id int64) (filemodel.File, error) {
-		s, e := files.Wired()
-		if e != nil {
-			return filemodel.File{}, e
-		}
-		f, e := s.Read(a, id)
-		if e != nil {
-			return f, e
-		}
-		return s.ResolveToken(ctx, f.ResourceToken)
-	}}
+	}, Repo: repository.Store{DB: database.DB(), LockFiles: files.LockAvailable}, Account: accounts.GetAccount, Output: production.GetComposeOutput, File: readCoverFile,
+	}
 }
 func CheckFileReferences(tx *gorm.DB, id int64) error {
 	used, err := repository.FileReferenced(tx, id)
@@ -101,6 +96,12 @@ func CanRead(a identity.PublicUser, v model.Task) bool {
 	t := identity.TeamID(v.TeamID)
 	return a.ID > 0 && a.CanAccess(identity.UserID(v.OperatorID), &t, identity.CategoryID(v.CategoryID))
 }
+func canExecutePublication(a identity.PublicUser) bool {
+	return a.ID > 0 && a.Status == identity.UserStatusEnabled && (a.Role == identity.RoleOperator || a.Role == identity.RoleSeniorOperator)
+}
+func ownsPublication(a identity.PublicUser, v model.Task) bool {
+	return canExecutePublication(a) && int64(a.ID) == v.OperatorID
+}
 func (s *Service) Get(a identity.PublicUser, id uint64) (model.Task, error) {
 	v, e := s.Repo.Get(id)
 	if e == nil && !CanRead(a, v) {
@@ -108,6 +109,20 @@ func (s *Service) Get(a identity.PublicUser, id uint64) (model.Task, error) {
 	}
 	return v, e
 }
+func (s *Service) FindByRequest(a identity.PublicUser, key string) (model.Task, error) {
+	if a.ID <= 0 || a.Status != identity.UserStatusEnabled {
+		return model.Task{}, ErrNotFound
+	}
+	if len(key) < 1 || len(key) > 64 || strings.TrimSpace(key) != key {
+		return model.Task{}, ErrInvalid
+	}
+	task, err := s.Repo.ByRequest(int64(a.ID), key)
+	if err == nil && !CanRead(a, task) {
+		return model.Task{}, ErrNotFound
+	}
+	return task, err
+}
+
 func validateFilter(a identity.PublicUser, f Filter) error {
 	if a.Role == identity.RoleSeniorOperator && a.TeamID == nil {
 		return ErrNotFound
@@ -140,10 +155,10 @@ func (s *Service) Summary(a identity.PublicUser, f Filter) (map[string]int64, er
 }
 
 func contentValid(c model.Content) bool {
-	return strings.TrimSpace(c.Description) != "" && utf8.RuneCountInString(c.Description) <= 1000 && c.CoverFileID > 0 && c.Declaration == "无需声明" && utf8.RuneCountInString(c.Topics) <= 200 && c.Confirmed
+	return strings.TrimSpace(c.Description) != "" && publicationTextLength(c.Description, c.Topics) <= 50 && c.CoverFileID > 0 && c.PortraitCoverFileID > 0 && c.Declaration == "无需声明" && utf8.RuneCountInString(c.Topics) <= 200 && c.Confirmed
 }
 func (s *Service) Create(ctx context.Context, a identity.PublicUser, in CreateInput) (model.Task, error) {
-	if a.ID <= 0 || a.Status != identity.UserStatusEnabled {
+	if !canExecutePublication(a) {
 		return model.Task{}, ErrNotFound
 	}
 	if len(in.RequestKey) < 1 || len(in.RequestKey) > 64 || strings.TrimSpace(in.RequestKey) != in.RequestKey || in.CategoryID <= 0 || in.MediaAccountID == 0 || in.CompositeOutputID <= 0 || !contentValid(in.Content) {
@@ -169,6 +184,9 @@ func (s *Service) Create(ctx context.Context, a identity.PublicUser, in CreateIn
 	account, err := s.Account(a, fmt.Sprint(in.MediaAccountID))
 	if err != nil {
 		return model.Task{}, err
+	}
+	if account.UserID != a.ID {
+		return model.Task{}, ErrNotFound
 	}
 	if string(account.Platform) != in.Platform || !account.Enabled || account.IdentificationStatus != accounts.IdentificationIdentified || account.PlatformLoginStatus != accounts.PlatformLoginNormal || account.PlatformAccountID == "" || account.BrowserProfileID == "" || account.TeamID == nil {
 		return model.Task{}, ErrInvalid
@@ -199,14 +217,25 @@ func (s *Service) Create(ctx context.Context, a identity.PublicUser, in CreateIn
 	if int64(o.CategoryID) != in.CategoryID || o.TeamID != int64(*account.TeamID) || o.PublishStatus == productionmodel.OutputPublishArchived || o.Video.Status != string(productionmodel.VideoReady) || o.FileSizeBytes <= 0 || len(o.SHA256) != 64 {
 		return model.Task{}, ErrInvalid
 	}
-	cover, err := s.File(ctx, a, in.Content.CoverFileID)
+	cover, err := s.File(ctx, a, in.Content.CoverFileID, in.CategoryID)
 	if err != nil {
 		return model.Task{}, err
 	}
-	if cover.Type != "image" || cover.SizeBytes <= 0 || len(cover.SHA256) != 64 {
+	if cover.Type != "image" || cover.SizeBytes <= 0 || len(cover.SHA256) != 64 || previewCover(cover) {
 		return model.Task{}, ErrInvalid
 	}
-	snapshot, _ := json.Marshal(map[string]any{"account_name": account.PlatformName, "account_owner": account.UserName, "browser_profile_id": account.BrowserProfileID, "output_name": o.Name, "video_sha256": o.SHA256, "video_size": o.FileSizeBytes, "cover_sha256": cover.SHA256, "cover_name": cover.Name, "cover_resource_path": "/api/v1/file-resources/" + cover.ResourceToken})
+	if err := verifyCoverSpec(cover, 16, 9); err != nil {
+		return model.Task{}, err
+	}
+	portrait, portraitSnapshot, err := s.preparePortraitCover(ctx, a, in.Content, in.CategoryID, in.CompositeOutputID, false)
+	if err != nil {
+		return model.Task{}, err
+	}
+	coverSnapshot, err := verifyCoverRender(cover, in.Content, in.CompositeOutputID)
+	if err != nil {
+		return model.Task{}, err
+	}
+	snapshot, _ := json.Marshal(map[string]any{"portrait_cover_render": portraitSnapshot, "portrait_cover_sha256": portrait.SHA256, "portrait_cover_name": portrait.Name, "portrait_cover_resource_path": "/api/v1/file-resources/" + portrait.ResourceToken, "cover_render": coverSnapshot, "account_name": account.PlatformName, "account_owner": account.UserName, "browser_profile_id": account.BrowserProfileID, "output_name": o.Name, "video_sha256": o.SHA256, "video_size": o.FileSizeBytes, "cover_sha256": cover.SHA256, "cover_name": cover.Name, "cover_resource_path": "/api/v1/file-resources/" + cover.ResourceToken})
 	now := time.Now().UTC()
 	v := model.Task{TeamID: int64(*account.TeamID), OperatorID: int64(account.UserID), Platform: in.Platform, CategoryID: in.CategoryID, MediaAccountID: in.MediaAccountID, CompositeOutputID: in.CompositeOutputID, PlatformAccountUID: account.PlatformAccountID, CoverFileID: cover.ID, ResourceSnapshot: snapshot, Content: in.Content, Status: model.StatusPending, NotBefore: in.NotBefore, Revision: 1, CreatedBy: int64(a.ID), RequestKey: in.RequestKey, RequestHash: digest, CreatedAt: now, UpdatedAt: now}
 	return s.Repo.Create(v)
@@ -226,18 +255,34 @@ func (s *Service) Edit(ctx context.Context, a identity.PublicUser, id uint64, in
 	if in.Content.CoverFileID == v.CoverFileID && s.SavedFile != nil {
 		cover, err = s.SavedFile(ctx, v.CoverFileID)
 	} else {
-		cover, err = s.File(ctx, a, in.Content.CoverFileID)
+		cover, err = s.File(ctx, a, in.Content.CoverFileID, v.CategoryID)
 	}
 	if err != nil {
 		return model.Task{}, err
 	}
-	if cover.Type != "image" || cover.SizeBytes <= 0 || len(cover.SHA256) != 64 {
+	if cover.Type != "image" || cover.SizeBytes <= 0 || len(cover.SHA256) != 64 || previewCover(cover) {
 		return model.Task{}, ErrInvalid
+	}
+	if err := verifyCoverSpec(cover, 16, 9); err != nil {
+		return model.Task{}, err
+	}
+	portrait, portraitSnapshot, err := s.preparePortraitCover(ctx, a, in.Content, v.CategoryID, v.CompositeOutputID, in.Content.PortraitCoverFileID == v.Content.PortraitCoverFileID)
+	if err != nil {
+		return model.Task{}, err
+	}
+	coverSnapshot, err := verifyCoverRender(cover, in.Content, v.CompositeOutputID)
+	if err != nil {
+		return model.Task{}, err
 	}
 	var snapshot map[string]any
 	if err := json.Unmarshal(v.ResourceSnapshot, &snapshot); err != nil {
 		return model.Task{}, err
 	}
+	snapshot["portrait_cover_render"] = portraitSnapshot
+	snapshot["portrait_cover_sha256"] = portrait.SHA256
+	snapshot["portrait_cover_name"] = portrait.Name
+	snapshot["portrait_cover_resource_path"] = "/api/v1/file-resources/" + portrait.ResourceToken
+	snapshot["cover_render"] = coverSnapshot
 	snapshot["cover_sha256"] = cover.SHA256
 	snapshot["cover_name"] = cover.Name
 	snapshot["cover_resource_path"] = "/api/v1/file-resources/" + cover.ResourceToken
@@ -247,4 +292,14 @@ func (s *Service) Edit(ctx context.Context, a identity.PublicUser, id uint64, in
 	v.NotBefore = in.NotBefore
 	v.AuditActor = int64(a.ID)
 	return s.Repo.Edit(v, in.ExpectedRevision)
+}
+
+func ListFileReference(a identity.PublicUser, id int64) ([]repository.FileReference, error) {
+	return repository.ListFileReference(database.DB(), a, id)
+}
+
+// A renderer preview is a validation sample and must never become task content.
+func previewCover(f filemodel.File) bool {
+	var metadata filemodel.ImageMetadata
+	return len(f.MetadataJSON) > 0 && json.Unmarshal(f.MetadataJSON, &metadata) == nil && metadata.Preview
 }

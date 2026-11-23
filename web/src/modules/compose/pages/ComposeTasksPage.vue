@@ -20,7 +20,7 @@ import { createMaterialsClient } from '../../../shared/api/materials.js'
 import { createSessionClient } from '../../../shared/api/session.js'
 import ResourceCard from '../../../shared/ui/resource/ResourceCard.vue'
 import ResourcePageHeader from '../../../shared/ui/resource/ResourcePageHeader.vue'
-import ResourceStatusBadge from '../../../shared/ui/resource/ResourceStatusBadge.vue'
+import BusinessStatus from '../../../shared/ui/BusinessStatus.vue'
 import { opColumnWidth } from '../../../shared/ui/resource/opColumnWidth.js'
 import { formatDateTime } from '../../../shared/utils/datetime.js'
 import { createdRangeParams } from '../createdRange.js'
@@ -70,7 +70,6 @@ const pagination = ref({ current: 1, pageSize: 20 })
 const createVisible = ref(false)
 
 const statusLabels = { pending: '排队中', running: '处理中', success: '成功', failed: '失败', cancelled: '已取消' }
-const statusTones = { pending: 'warning', running: 'info', success: 'success', failed: 'danger', cancelled: 'neutral' }
 const stageLabels = {
   pending: '等待源素材',
   validating_input: '校验素材',
@@ -477,14 +476,14 @@ onMounted(() => {
 
 <template>
   <t-loading :loading="loading" :show-overlay="true">
-    <div class="wt-resource-page resource-visual-approved production-page compose-tasks-page">
+    <div class="wt-resource-page resource-visual-approved resource-list-page production-page compose-tasks-page">
       <FeedbackAlert v-if="error" theme="error" :message="error" closable style="margin-bottom:16px" @close="error=''" />
       <ResourcePageHeader title="合成任务" description="查看任务批次、生产进度和执行结果">
         <template #actions>
           <t-button theme="primary" @click="createVisible = true">新建合成任务</t-button>
         </template>
       </ResourcePageHeader>
-      <ResourceCard class="compose-tasks-card">
+      <ResourceCard class="resource-list-panel compose-tasks-card">
         <t-tabs v-model="activeView" class="compose-workspace-tabs"><t-tab-panel value="batches" label="任务批次" /><t-tab-panel value="tasks" label="任务列表" /></t-tabs>
         <ResourceFilterBar>
           <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">综合搜索</span><t-input v-model="filters.search" clearable placeholder="搜索名称或 ID" @enter="query" /></label>
@@ -503,7 +502,7 @@ onMounted(() => {
         <div class="wt-filter-actions"><t-button theme="primary" @click="query">查询</t-button><t-button class="wt-secondary-button" variant="outline" @click="reset">重置</t-button></div>
 </ResourceFilterBar>
         <ComposeTaskSelectionActions v-if="activeView === 'tasks'" :tasks="selectedTaskRows" :can-retry="canRetry" @clear="selectedTaskKeys = []" @busy="bulkBusy = $event" @changed="load({quiet:true})" />
-        <div class="table-scroll-wrap">
+        <div class="table-scroll-wrap resource-data-table">
           <t-table class="wt-resource-table" :data="pagedRows" :columns="columns" row-key="id" v-model:selected-row-keys="selectedTaskKeys" reserve-selected-row-on-paginate hover size="small" :scroll="tableScroll" empty="还没有合成任务">
             <template #id="{ row }"><span class="compose-task-id">{{ row.id }}</span></template>
             <template #name="{ row }"><span class="compose-task-name" :title="activeView === 'batches' ? row.name : taskName(row)">{{ activeView === 'batches' ? row.name : taskName(row) }}</span><span v-if="activeView === 'tasks'" class="compose-task-subline">{{ row.setting_name || '—' }} · {{ triggerLabel(row.trigger_type) }}</span></template>
@@ -513,7 +512,7 @@ onMounted(() => {
             <template #operator="{ row }">{{ row.operator_name || '未记录' }}</template>
             <template #output="{ row }"><t-link v-if="outputID(row)" theme="primary" @click="openOutput(outputID(row))">成片 {{ outputID(row) }}</t-link><span v-else>—</span></template>
             <template #progress="{row}"><ComposeBatchProgress :counts="row.counts" compact /></template>
-            <template #status="{ row }"><ResourceStatusBadge :tone="statusTones[row.status] || 'default'" :label="statusText(row)" /></template>
+            <template #status="{ row }"><BusinessStatus :status="row.status" :label="statusText(row)" /></template>
             <template #created_at="{ row }">{{ formatDateTime(row.created_at) }}</template>
             <template #finished_at="{ row }">{{ formatDateTime(row.finished_at) }}</template>
             <template #op="{ row }">
@@ -564,7 +563,7 @@ onMounted(() => {
         @go-page="goMaterialPage(detail?.material_id)"
       />
 
-      <ResourceOverlay :visible="strategyDrawer.visible" title="策略详情" kind="drawer" :width="880"  @update:visible="strategyDrawer.visible = $event">
+      <ResourceOverlay :visible="strategyDrawer.visible" title="策略详情" kind="drawer" :width="960"  @update:visible="strategyDrawer.visible = $event">
         <t-loading :loading="strategyDrawer.loading" :show-overlay="true">
           <ComposeStrategySummary
             v-if="strategyDrawer.row"
@@ -581,7 +580,7 @@ onMounted(() => {
         </template>
       </ResourceOverlay>
 
-      <ResourceOverlay :visible="outputDrawer.visible" title="成片详情" kind="drawer" :width="880"  @update:visible="outputDrawer.visible = $event">
+      <ResourceOverlay :visible="outputDrawer.visible" title="成片详情" kind="drawer" :width="960"  @update:visible="outputDrawer.visible = $event">
         <t-loading :loading="outputDrawer.loading" :show-overlay="true">
           <ComposeOutputDetail
             v-model:tab="outputDrawer.tab"
@@ -624,7 +623,7 @@ onMounted(() => {
 .compose-task-subline{display:block;margin-top:5px;font-size:12px;color:var(--wt-text-tertiary);}
 .compose-detail__snapshot-fields { margin-top: 16px; }
 /* 失败态用 --wt-danger：它定义在入口加载的 design-token.css 里，
-   且与紧邻「当前状态」的失败徽标（statusTones.failed=danger）同色。 */
+   且与紧邻「当前状态」的失败徽标（failed=danger）同色。 */
 .compose-detail__failure-reason { color: var(--wt-danger); font-weight: 500; }
 .compose-detail__hint { margin: 0; color: var(--wt-text-secondary); font-size: 12px; line-height: 1.5; }
 .compose-detail__grid + .compose-detail__hint, .compose-detail__empty + .compose-detail__hint, .compose-detail__section > .compose-detail__hint + .compose-detail__grid { margin-top: 12px; }

@@ -6,7 +6,7 @@ import { opColumnWidth } from '../../../shared/ui/resource/opColumnWidth.js'
 import { formatDateTime } from '../../../shared/utils/datetime.js'
 import { platformText } from '../strategySettings.js'
 import { outputTitle } from '../outputManagement.js'
-const props=defineProps({rows:{type:Array,default:()=>[]},selectedKeys:{type:Array,default:()=>[]},materialMode:Boolean,videoState:{type:Function,required:true},canDownload:{type:Function,required:true},downloadReason:{type:Function,default:()=>''},downloadingId:Number,categoryName:{type:Function,default:()=> '—'}})
+const props=defineProps({ embedded: { type: Boolean, default: true },rows:{type:Array,default:()=>[]},selectedKeys:{type:Array,default:()=>[]},materialMode:Boolean,videoState:{type:Function,required:true},canDownload:{type:Function,required:true},downloadReason:{type:Function,default:()=>''},downloadingId:Number,categoryName:{type:Function,default:()=> '—'}})
 // Extra viewport space belongs to the name column; checkbox and actions keep their measured widths.
 const tableRoot=ref(null),availableWidth=ref(0)
 let resizeObserver
@@ -27,7 +27,7 @@ const columns = computed(() => [
 const tableScroll = computed(()=>({x:`${columns.value.reduce((sum,col)=>sum+(col.width||0),0)}px`}))
 </script>
 <template>
- <div ref="tableRoot" class="table-scroll-wrap"><t-table class="wt-resource-table" :data="rows" :columns="columns" row-key="id" :selected-row-keys="selectedKeys" reserve-selected-row-on-paginate :scroll="tableScroll" hover size="small" empty="暂无成片" @select-change="emit('update:selectedKeys',$event)">
+ <div ref="tableRoot" class="table-scroll-wrap resource-data-table" :class="{ 'resource-embedded-table is-summary': embedded }"><t-table class="wt-resource-table" :data="rows" :columns="columns" row-key="id" :selected-row-keys="selectedKeys" reserve-selected-row-on-paginate :scroll="tableScroll" hover size="small" empty="暂无成片" @select-change="emit('update:selectedKeys',$event)">
   <template #output="{row}"><div class="output-table__related"><strong :title="outputTitle(row)">{{ outputTitle(row) }}</strong><span>{{ formatDateTime(row.created_at) }}</span><span v-if="materialMode">{{ row.setting_name || '成片设置未记录' }}</span></div></template>
   <template #source="{row}"><div v-if="materialMode" class="output-table__related"><strong>{{ row.strategy_name || '—' }}</strong><t-link v-if="row.batch_id" theme="primary" @click="emit('batch',row.batch_id)">任务批次 {{ row.batch_id }}</t-link><span v-else>任务批次未记录</span></div><div v-else class="output-table__related"><t-link v-if="row.material_id" theme="primary" :title="row.material_title" @click="emit('material',row.material_id)">{{ row.material_title || `素材 ${row.material_id}` }}</t-link><span>{{ row.material_id }}</span></div></template>
   <template #category="{row}">{{ categoryName(row.category_id) }}</template>

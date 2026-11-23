@@ -5,10 +5,12 @@ import ImageLibraryDetail from "./ImageLibraryDetail.vue";
 import "../../../src/shared/styles/resource-list.css";
 import ResourceNameLink from '../../../src/shared/ui/resource/ResourceNameLink.vue';
 import OperationsNavigation from './OperationsNavigation.vue';
+import OperationsAccountMenu from './OperationsAccountMenu.vue';
+import PersonalSettingsPage from '../personal-settings/PersonalSettingsPage.vue';
 import AccountPreview from './AccountPreview.vue';
 import PublishingExecutionSettings from './PublishingExecutionSettings.vue';
 import PlanPage from './PlanPage.vue';
-import {prototypeSession} from './prototypeSession.js';
+import {prototypeSession,currentPrototypeUser} from './prototypeSession.js';
 import {formatDateTime} from '../../../src/shared/utils/datetime.js';
 import ProductionPage from './ProductionPage.vue';
 import {loadProduction} from './production/loader.js';
@@ -284,6 +286,12 @@ provide('publishing-editor-pages', editorPages);
 const productionContext=shallowRef(null);
 const page=ref(readOperationRoute(new URL(location.href)).page), pageNo=ref(1), size=ref(10);
 const isProduction=computed(()=>productionPages.includes(page.value));
+const accountRef=ref(null),accountSceneKey=ref(location.search),accountAcceptedURL=ref(location.pathname+location.search+location.hash);
+const isAccountPage=computed(()=>['personal','settings'].includes(page.value));
+const localEnabled=computed(()=>currentPrototypeUser().role!=='管理员'&&new URLSearchParams(accountSceneKey.value).get('client')!=='web');
+function applyAccountSceneIdentity(){const params=new URLSearchParams(location.search);if(isAccountPage.value&&(params.get('review')==='account'||params.get('role')==='admin'))prototypeSession.actor=params.get('role')==='admin'?'周予宁':'陈小雨'}
+applyAccountSceneIdentity();
+
 async function publishOutputs(ids,platform){
   productionContext.value.sync();
   const resources=ids.map(id=>db.assets.find(a=>a.sourceOutputId===id));
@@ -297,6 +305,7 @@ async function publishOutputs(ids,platform){
 }
 let closingForNavigation=false;
 async function navigate(p, updateURL = true, destinationURL = null, replaceDestination = true) {
+  if(isAccountPage.value&&accountRef.value&&!(await accountRef.value.confirmLeave()))return false;
   if(page.value==='plans'){
     if(!(await planRef.value?.confirmLeave()))return false;
     if(!await persistNow())return false;
@@ -319,6 +328,8 @@ async function navigate(p, updateURL = true, destinationURL = null, replaceDesti
   page.value = p;
   detailOpen.value = false;
   if (updateURL) updateOperationURL(p);
+  accountSceneKey.value=location.search;accountAcceptedURL.value=location.pathname+location.search+location.hash;applyAccountSceneIdentity();
+  window.scrollTo(0,0);
   if(p==='plans')await nextTick().then(()=>planRef.value?.readRoute());
   pageNo.value = 1;
   chosen.value = [];
@@ -335,7 +346,8 @@ async function navigate(p, updateURL = true, destinationURL = null, replaceDesti
 }
 const hash = async () => {
   const route=readOperationRoute(new URL(location.href));
-  if(route.page!==page.value){const previous=page.value;const destinationURL=location.pathname+location.search+location.hash;const moved=await navigate(route.page,false,destinationURL);if(moved===false){if(previous==='plans')history.replaceState(null,'',planRef.value?.currentURL()||operationURL(previous));else updateOperationURL(previous,{},true);return;}}
+  if(route.page!==page.value||(isAccountPage.value&&location.search!==accountSceneKey.value)){const previous=page.value;const destinationURL=location.pathname+location.search+location.hash;const moved=await navigate(route.page,false,destinationURL);if(moved===false){if(['personal','settings'].includes(previous))history.replaceState(null,'',accountAcceptedURL.value);else if(previous==='plans')history.replaceState(null,'',planRef.value?.currentURL()||operationURL(previous));else updateOperationURL(previous,{},true);return;}}
+  if(isAccountPage.value){accountSceneKey.value=location.search;applyAccountSceneIdentity();}
   if(route.page==='plans')await planRef.value?.readRoute();
   if(route.page==='batches'){await nextTick();batchManagerRef.value?.directURL();}
   if(route.page==='tasks'){
@@ -348,12 +360,13 @@ onBeforeUnmount(()=>window.removeEventListener('popstate',hash));
 const planRef=ref(null),planPageView=ref('list');
 async function changePrototypeActor(name){
  if(name===prototypeSession.actor)return;
+ if(isAccountPage.value&&accountRef.value&&!(await accountRef.value.confirmLeave()))return;
  if(page.value==='plans' && !(await planRef.value?.confirmLeave()))return;
  if(isProduction.value&&window.CP?.dialogs.length){if(!(await productionContext.value.confirmLeave()))return;productionContext.value.closeAll();}
  prototypeSession.actor=name;
  if(isProduction.value){productionContext.value.actor=name;productionContext.value.sync();await nextTick();productionContext.value.render();}
 }
-const names=Object.fromEntries(navigationGroups.flatMap(g=>g.pages).map(p=>[p.id,p.label]));
+const names={...Object.fromEntries(navigationGroups.flatMap(g=>g.pages).map(p=>[p.id,p.label])),personal:'我的账号'};
 const query = ref(""),
   applied = ref(""),
   filterStatus = ref(""),
@@ -1487,12 +1500,13 @@ function cloneTask(t) {
     v-if="hydrated"
     class="publish-shell wt-resource-page resource-visual-approved"
   >
-    <OperationsNavigation :page="page" :actor="prototypeSession.actor" @navigate="navigate" @actor-change="changePrototypeActor" />
+    <OperationsNavigation :page="page" :actor="prototypeSession.actor" :local-enabled="localEnabled" @navigate="navigate" @actor-change="changePrototypeActor" />
+    <OperationsAccountMenu @navigate="navigate" />
     <div id="operations-detail-layer" class="operations-detail-layer"></div>
     <main
       v-show="!editorPages.length"
       class="publish-main"
-      :class="{ 'resource-list-page': !taskDetailPage && !batchDetailOpen && (page!=='plans'||planPageView==='list'), 'publishing-task-list': page === 'tasks' && !taskDetailPage, 'resource-page-host': taskDetailPage || batchDetailOpen }"
+      :class="{ 'resource-list-page': !isAccountPage && !taskDetailPage && !batchDetailOpen && (page!=='plans'||planPageView==='list'), 'publishing-task-list': page === 'tasks' && !taskDetailPage, 'resource-page-host': taskDetailPage || batchDetailOpen }"
     >
       <t-alert v-if="storageError" theme="warning" :message="storageError"
         ><template #operation
@@ -1516,6 +1530,7 @@ function cloneTask(t) {
           ></template
         ></t-alert
       >
+      <PersonalSettingsPage v-if="isAccountPage" :key="page+prototypeSession.actor+accountSceneKey" :page="page" ref="accountRef" @navigate="navigateContext" />
       <PlanPage v-if="page === 'plans' && hydrated" :db="db" :persist="persistNow" :key="prototypeSession.actor" ref="planRef" @navigate="navigateContext" @view-change="value=>planPageView=value" />
       <ProductionPage v-if="isProduction && productionContext" :context="productionContext" :page="page" />
       <div v-if="taskDetailPage" class="breadcrumbs" aria-label="当前位置">内容运营 / 发布任务 / 详情</div>
@@ -1532,7 +1547,7 @@ function cloneTask(t) {
 
       </PublishingTaskPage>
       <CoverTemplateManager v-if="page === 'templates' && hydrated" :db="db" :persist="commitTemplates" />
-      <template v-if="!isProduction && page !== 'plans' && page !== 'templates' && !taskDetailPage && !batchDetailOpen">
+      <template v-if="!isAccountPage && !isProduction && page !== 'plans' && page !== 'templates' && !taskDetailPage && !batchDetailOpen">
         <div class="breadcrumbs">
           <span>{{ page === "images" ? "运营工具" : "内容运营" }} / {{ names[page] }}</span>
         </div>
@@ -1577,7 +1592,7 @@ function cloneTask(t) {
         @edit-task="taskMenu($event, 'edit')"
         @preview="openPreview"
       />
-      <ResourceCard class="resource-list-panel" v-if="!isProduction && page !== 'plans' && page !== 'batches' && page !== 'templates'" v-show="!taskDetailPage && !batchDetailOpen">
+      <ResourceCard class="resource-list-panel" v-if="!isAccountPage && !isProduction && page !== 'plans' && page !== 'batches' && page !== 'templates'" v-show="!taskDetailPage && !batchDetailOpen">
         <ResourceFilterBar :class="{'operations-tool-filters': page === 'images'}">
           <label class="wt-filter-field wt-filter-field--wide"
             ><span class="wt-filter-field__label">{{ page === 'tasks' ? '综合搜索' : '名称' }}</span

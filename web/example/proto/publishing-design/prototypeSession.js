@@ -8,3 +8,6 @@ export const prototypePeople = [
 ]
 export const prototypeSession = reactive({ actor:'陈小雨' })
 export const currentPrototypeUser = () => prototypePeople.find(p => p.name === prototypeSession.actor) || prototypePeople[0]
+
+export const prototypeProfiles = reactive(Object.fromEntries(prototypePeople.map(person => [person.id,{nickname:person.name,avatar:'sun'}])))
+export const currentPrototypeProfile = () => prototypeProfiles[currentPrototypeUser().id]

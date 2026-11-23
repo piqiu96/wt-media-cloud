@@ -21,6 +21,7 @@ import { createUsersClient } from '../../../apps/cloud/pages/users/usersApi.js'
 import ResourceCard from '../../../shared/ui/resource/ResourceCard.vue'
 import ResourcePageHeader from '../../../shared/ui/resource/ResourcePageHeader.vue'
 import ResourceStatusBadge from '../../../shared/ui/resource/ResourceStatusBadge.vue'
+import BusinessStatus from '../../../shared/ui/BusinessStatus.vue'
 import MetricList from '../../../shared/ui/resource/MetricList.vue'
 import { formatDateTime } from '../../../shared/utils/datetime.js'
 import { platformLabel } from '../../../shared/utils/platforms.js'
@@ -256,10 +257,6 @@ function statusLabel(status) {
   return ({ pending: '待执行', running: '执行中', success: '成功', partial_success: '部分成功', failed: '失败' })[status] || status || '未知'
 }
 
-function statusTone(status) {
-  return status === 'success' ? 'success' : status === 'failed' ? 'danger' : status === 'running' ? 'info' : 'warning'
-}
-
 function processingLabel(value) {
   return ({ unprocessed: '未入池', pending: '待审核', auto_materialized: '已转素材', material_failed: '转素材失败', duplicate: '已在内容池', failed: '失败' })[value] || value || '未知'
 }
@@ -294,11 +291,11 @@ function hasFailed(task) {
 
 <template>
   <t-loading :loading="loading" :show-overlay="true">
-    <div class="wt-resource-page resource-visual-approved task-page">
+    <div class="wt-resource-page resource-visual-approved resource-list-page task-page">
       <FeedbackAlert v-if="error" theme="error" :message="error" closable style="margin-bottom:16px" @close="error=''" />
       <ResourcePageHeader title="挖掘任务" description="查看发现结果和执行记录，处理失败任务。" />
 
-      <ResourceCard class="task-card">
+      <ResourceCard class="resource-list-panel task-card">
         <ResourceFilterBar>
           <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">综合搜索</span><t-input v-model="filters.search" clearable placeholder="搜索任务 ID / 任务名称 / 来源策略" @enter="load" /></label>
           <label v-if="isAdmin" class="wt-filter-field"><span class="wt-filter-field__label">运营团队</span><BusinessSelect kind="team" filter v-model="teamFilter" clearable @change="changeTeamFilter"><t-option v-for="team in teams" :key="team.id" :value="team.id" :label="team.name" /></BusinessSelect></label>
@@ -311,7 +308,7 @@ function hasFailed(task) {
           </t-select></label>
           <div class="wt-filter-actions"><t-button theme="primary" @click="load">查询</t-button><t-button class="wt-secondary-button" variant="outline" @click="resetFilters">重置</t-button></div>
         </ResourceFilterBar>
-        <div class="table-scroll-wrap">
+        <div class="table-scroll-wrap resource-data-table">
           <t-table class="wt-resource-table" :data="pagedRows" :columns="columns" row-key="id" hover :scroll="tableScroll" empty="暂无挖掘任务">
             <template #name="{ row }">
               <span class="task-name" :title="taskName(row)">{{ taskName(row) }}</span>
@@ -324,7 +321,7 @@ function hasFailed(task) {
             <template #category="{ row }">{{ categoryName(row.snapshot?.category_id) }}</template>
             <template #trigger="{ row }">{{ triggerLabel(row) }}</template>
             <template #found="{ row }"><MetricList :items="foundStats(row)" /></template>
-            <template #status="{ row }"><ResourceStatusBadge :tone="statusTone(row.status)" :label="statusLabel(row.status)" /></template>
+            <template #status="{ row }"><BusinessStatus :status="row.status" :label="statusLabel(row.status)" /></template>
             <template #executed_at="{ row }">{{ formatDateTime(row.created_at) }}</template>
             <template #op="{ row }"><ResourceRowActions><t-button size="small" variant="text" @click="open(row)">详情</t-button><t-button v-if="canManage && hasFailed(row)" size="small" variant="text" class="is-primary" :loading="retrying" @click="retry(row)">重试</t-button></ResourceRowActions></template>
           </t-table>
@@ -338,7 +335,7 @@ function hasFailed(task) {
             <t-tab-panel value="info" label="任务信息" :destroy-on-hide="true">
               <ResourceSection title="基本信息"><ResourceDescriptions>
                 <t-descriptions-item label="任务名称" full>{{ taskName(detail) }}</t-descriptions-item>
-                <t-descriptions-item label="任务 ID">{{ detail.id }}</t-descriptions-item><t-descriptions-item label="状态"><ResourceStatusBadge :tone="statusTone(detail.status)" :label="statusLabel(detail.status)" /></t-descriptions-item>
+                <t-descriptions-item label="任务 ID">{{ detail.id }}</t-descriptions-item><t-descriptions-item label="状态"><BusinessStatus :status="detail.status" :label="statusLabel(detail.status)" /></t-descriptions-item>
                 <t-descriptions-item label="类目">{{ categoryName(detail.snapshot?.category_id) }}</t-descriptions-item><t-descriptions-item label="运营团队">{{ teamName(detail.team_id) }}</t-descriptions-item>
                 <t-descriptions-item label="任务来源"><t-link v-if="isStrategyTask(detail)" theme="primary" @click="openStrategy(detail)">{{ sourceName(detail) }}</t-link><span v-else>{{ sourceName(detail) }}</span></t-descriptions-item><t-descriptions-item label="触发方式">{{ triggerLabel(detail) }}</t-descriptions-item>
                 <t-descriptions-item label="发起人" full>{{ triggerLabel(detail) === '定时' ? '系统' : detail.created_by_name || '—' }}</t-descriptions-item>
@@ -367,7 +364,7 @@ function hasFailed(task) {
             </t-tab-panel>
 
             <t-tab-panel value="items" :label="contentTabLabel" :destroy-on-hide="true">
-              <t-table class="wt-resource-table" :data="pagedContents" :columns="resultColumns" row-key="platform_content_id" hover :scroll="resultScroll" empty="暂无内容">
+              <t-table class="wt-resource-table resource-data-table resource-embedded-table is-summary" :data="pagedContents" :columns="resultColumns" row-key="platform_content_id" hover :scroll="resultScroll" empty="暂无内容">
                 <template #content="{ row }">
                   <div class="task-content-cell">
                     <img v-if="row.cover_url && !failedCovers.has(row.cover_url)" @error="failedCovers.add(row.cover_url)" class="result-cover" :src="row.cover_url" alt="" loading="lazy" referrerpolicy="no-referrer" />

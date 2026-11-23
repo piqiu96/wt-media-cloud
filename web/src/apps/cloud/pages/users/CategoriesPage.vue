@@ -191,14 +191,14 @@ function search() { pagination.value.current = 1; loadCategories() }
 
 <template>
   <t-loading :loading="loading" :show-overlay="true" size="small">
-    <div class="wt-resource-page">
-    <ResourcePageHeader title="类目管理" description="维护类目分类与关联范围">
+    <div class="wt-resource-page resource-visual-approved resource-list-page">
+    <ResourcePageHeader title="类目管理">
       <template #actions>
         <t-button v-if="canManage" theme="primary" @click="openCreate">新增类目</t-button>
       </template>
     </ResourcePageHeader>
     <FeedbackAlert v-if="error" :message="error" theme="error" style="margin-bottom:16px" closable @close="error=''" />
-    <ResourceCard class="system-resource-card">
+    <ResourceCard class="resource-list-panel system-resource-card">
       <ResourceFilterBar>
         <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">综合搜索</span><t-input v-model="filters.keyword" placeholder="类目 ID / 名称" clearable @enter="search" /></label>
         <label class="wt-filter-field"><span class="wt-filter-field__label">一级分类</span><BusinessSelect kind="category" filter v-model="filters.type">
@@ -210,7 +210,7 @@ function search() { pagination.value.current = 1; loadCategories() }
         </t-select></label>
         <div class="wt-filter-actions"><t-button theme="primary" @click="search">查询</t-button><t-button class="wt-secondary-button" variant="outline" @click="resetFilters">重置</t-button></div>
       </ResourceFilterBar>
-      <div class="table-scroll-wrap"><t-table class="wt-resource-table" :data="pagedCategories" :columns="columns" row-key="id" size="small" hover :scroll="tableScroll">
+      <div class="table-scroll-wrap resource-data-table"><t-table class="wt-resource-table" :data="pagedCategories" :columns="columns" row-key="id" size="small" hover :scroll="tableScroll">
         <template #references="{ row }">
           <t-link v-if="hasReferences(row)" theme="primary" @click="openReferences(row)">用户 {{ referenceSummary(row).user_scope_count }} / 账号 {{ referenceSummary(row).media_account_count }}</t-link>
           <span v-else>无用户／账号关联</span>
