@@ -1,423 +1,116 @@
 <script setup>
-import FeedbackAlert from '../../../../shared/ui/feedback/FeedbackAlert.vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { invoke } from '@tauri-apps/api/core'
 import { feedback } from '../../../../shared/ui/feedback/index.js'
-import { computed, onMounted, ref, watch } from "vue"
-// Tauri WebView 需要可解析的静态模块路径。
-import { invoke } from "@tauri-apps/api/core"
-import {
-  createLocalSettingsService,
-  DEFAULT_TAIL_LINES,
-} from "../local-settings/service.js"
-import { formatModified, logKindLabel } from "../local-settings/local-settings-view.js"
-import { createLocalLogsPage, NO_LEVEL } from "./local-logs-view.js"
+import FeedbackAlert from '../../../../shared/ui/feedback/FeedbackAlert.vue'
+import ResourceCard from '../../../../shared/ui/resource/ResourceCard.vue'
+import { createLocalSettingsService, DEFAULT_TAIL_LINES } from '../local-settings/service.js'
+import { formatModified, logKindLabel, formatBytes, describeDiagnostic } from '../local-settings/local-settings-view.js'
+import { createLocalLogsPage, NO_LEVEL } from './local-logs-view.js'
 
-// 日志读取通过 Rust Bridge；WebView CSP 不允许直接请求 Agent 回环端口。
+const props = defineProps({initialSource:{type:String,default:''}})
 const service = createLocalSettingsService({ invoke })
-
-const loading = ref(true)
-const busy = ref("")
-const listing = ref(null)
-const source = ref("")
-const name = ref("")
-const tail = ref(null)
-const level = ref(NO_LEVEL)
-const failure = ref("")
-
-const page = computed(() =>
-  createLocalLogsPage({
-    listing: listing.value,
-    source: source.value,
-    name: name.value,
-    tail: tail.value,
-    level: level.value,
-  })
-)
-
-// The two trees, in the order the listing returned them, with a heading per
-// tree. The directory is shown per tree rather than per file: it is the answer
-// to 「为什么这里是空的」, and repeating it on every row would bury it.
-const treeHeadings = computed(() =>
-  page.value.trees.map((tree) => ({
-    source: tree.source,
-    title: tree.source === "desktop" ? "本机控制台日志" : "本机执行服务日志",
-    directory: tree.directory,
-    files: tree.files,
-    isEmpty: tree.files.length === 0,
-  }))
-)
-
-async function run(key, work) {
-  busy.value = key
-  failure.value = ""
-  try {
-    return await work()
-  } catch (error) {
-    const message = error?.message || String(error) || "操作失败"
-    if (key === 'open') feedback.toast.error(message)
-    else failure.value = message
-    return null
-  } finally {
-    busy.value = ""
-  }
-}
-
+const listing = ref(null), source = ref(''), name = ref(''), tail = ref(null)
+const level = ref(NO_LEVEL), lines = ref(DEFAULT_TAIL_LINES)
+const listLoading = ref(false), tailLoading = ref(false), exporting = ref(false)
+const listError = ref(''), tailError = ref(''), diagnostic = ref(null)
+let listEpoch = 0, tailEpoch = 0
+const messageOf = error => error?.message || String(error) || '读取失败'
+const page = computed(() => createLocalLogsPage({listing:listing.value, source:source.value, name:name.value, tail:tail.value, level:level.value}))
+const sourceLabel = value => value === 'desktop' ? '本机控制台日志' : '本机执行服务日志'
+const lineOptions = [500,1000,5000].map(value => ({label:`${value.toLocaleString()} 行`,value}))
 async function reloadListing() {
-  const next = await run("listing", () => service.logFiles())
-  if (!next) {
-    return false
-  }
-  listing.value = next
-
-  // Keep the selection if it is still there; otherwise land on the first file
-  // the listing offers. A viewer that opened with nothing selected would make a
-  // person click twice to see anything, and one that kept a vanished selection
-  // would show a stale tail under a file that is no longer listed.
-  const stillThere = next.trees.some(
-    (tree) => tree.source === source.value && tree.files.some((file) => file.name === name.value)
-  )
-  if (!stillThere) {
-    const first = next.trees.find((tree) => tree.files.length > 0)
-    source.value = first?.source ?? ""
-    name.value = first?.files[0]?.name ?? ""
-    tail.value = null
-  }
-  return true
-}
-
-async function reloadTail() {
-  if (!source.value || !name.value) {
-    tail.value = null
-    return
-  }
-  // The filter is sent as the wire's `minLevel`, and `null` means 「no filter」 —
-  // not `""`, which the Rust side would parse as an unknown level and refuse.
-  const next = await run("tail", () =>
-    service.logTail({
-      source: source.value,
-      name: name.value,
-      lines: DEFAULT_TAIL_LINES,
-      minLevel: level.value,
-    })
-  )
-  if (next) {
-    tail.value = next
-  }
-}
-
-async function reloadAll() {
-  loading.value = true
+  const epoch = ++listEpoch
+  listLoading.value = true
+  listError.value = ''
   try {
-    const ok = await reloadListing()
-    if (ok) {
-      await reloadTail()
+    const next = await service.logFiles()
+    if (epoch !== listEpoch) return
+    listing.value = next
+    const exists = next.trees.some(tree => tree.source === source.value && tree.files.some(file => file.name === name.value))
+    if (!exists) {
+      const first = next.trees.find(tree => tree.source === props.initialSource && tree.files.length) || next.trees.find(tree => tree.files.length)
+      source.value = first?.source || ''
+      name.value = first?.files[0]?.name || ''
     }
-  } finally {
-    loading.value = false
-  }
+    await reloadTail()
+  } catch (error) { if (epoch === listEpoch) listError.value = messageOf(error) }
+  finally { if (epoch === listEpoch) listLoading.value = false }
 }
-
-// Selecting a file shows it immediately at the current filter: the filter is a
-// property of the viewer, not of the file, so switching files must not silently
-// drop it.
-async function selectFile(nextSource, nextName) {
+async function reloadTail() {
+  const epoch = ++tailEpoch
+  tail.value = null
+  tailError.value = ''
+  if (!source.value || !name.value) { tailLoading.value = false; return }
+  tailLoading.value = true
+  try {
+    const next = await service.logTail({source:source.value,name:name.value,lines:lines.value,minLevel:level.value})
+    if (epoch === tailEpoch) tail.value = next
+  } catch (error) { if (epoch === tailEpoch) tailError.value = messageOf(error) }
+  finally { if (epoch === tailEpoch) tailLoading.value = false }
+}
+function selectFile(nextSource, nextName) {
   source.value = nextSource
   name.value = nextName
-  await reloadTail()
-}
-
-// Changing the filter re-reads rather than re-filtering what is already on
-// screen. The filtering belongs to the command — it is the only side that knows
-// which lines are unclassifiable — and a second filter here could disagree with
-// the count the command reported.
-watch(level, () => {
   void reloadTail()
+}
+watch([level,lines], reloadTail)
+watch(() => props.initialSource, value => {
+ const tree = listing.value?.trees.find(tree => tree.source === value && tree.files.length)
+ if (tree) selectFile(tree.source, tree.files[0].name)
 })
-
 async function openFolder() {
-  const place = source.value
-  if (!place) {
-    return
-  }
-  // The label handed over is the tree's own `source` — literally the word
-  // `local_log_tail` takes. One vocabulary, so the folder that opens is the one
-  // being read.
-  const opened = await run("open", () => service.openPlace(place))
-  if (opened) {
-    feedback.toast.success(`已打开 ${opened}`)
-  }
+  try { await service.openPlace(source.value) }
+  catch (error) { feedback.toast.error(messageOf(error)) }
 }
-
-onMounted(reloadAll)
+async function exportDiagnostic() {
+  if (exporting.value) return
+  exporting.value = true
+  try {
+    const report = await service.diagnosticExport()
+    diagnostic.value = { ...describeDiagnostic(report), path:report.path }
+    if (diagnostic.value.theme === 'success') feedback.toast.success('诊断包已导出')
+    else feedback.toast.info('诊断包已生成，部分信息未收录')
+  } catch (error) { feedback.toast.error(messageOf(error)) }
+  finally { exporting.value = false }
+}
+onMounted(reloadListing)
+onUnmounted(() => { listEpoch++; tailEpoch++ })
 </script>
-
 <template>
-  <t-loading :loading="loading" :show-overlay="true" size="large">
-    <div class="logs-page">
-      <t-card title="本地日志" :bordered="true">
-        <template #description>
-          两侧日志树里的实际文件。左侧是磁盘上的文件，右侧是它尾部的内容。
-        </template>
-
-        <div class="toolbar">
-          <t-select
-            v-model="level"
-            :options="page.filterOptions"
-            :disabled="!!busy"
-            class="level-select"
-            placeholder="级别筛选"
-          />
-          <t-button theme="default" :loading="busy === 'listing'" :disabled="!!busy" @click="reloadAll">
-            刷新
-          </t-button>
-          <t-button
-            v-if="page.canView"
-            theme="default"
-            :loading="busy === 'open'"
-            :disabled="!!busy"
-            @click="openFolder"
-          >
-            打开日志文件夹
-          </t-button>
-        </div>
-
-        <FeedbackAlert
-          v-if="page.appliedFilterText !== '未筛选'"
-          theme="info"
-          class="mt-sm"
-          :message="`当前筛选：${page.appliedFilterText}（该级别及以上，未分级的行不受影响）`"
-        />
-      </t-card>
-
-      <div class="split">
-        <t-card title="日志文件" :bordered="true" class="pane">
-          <template #description>按来源分组；正在写入的文件永远在最前</template>
-          <t-empty v-if="!page.hasTrees" description="未读到日志目录" />
-          <div v-for="tree in treeHeadings" :key="tree.source" class="tree">
-            <div class="tree-head">
-              <span class="tree-title">{{ tree.title }}</span>
-              <span class="tree-dir">{{ tree.directory }}</span>
-            </div>
-            <t-empty v-if="tree.isEmpty" size="small" description="暂无文件" />
-            <ul v-else class="file-list">
-              <li
-                v-for="file in tree.files"
-                :key="`${tree.source}/${file.name}`"
-                class="file-row"
-                :class="{ selected: file.selected }"
-                @click="selectFile(tree.source, file.name)"
-              >
-                <span class="file-name">{{ file.name }}</span>
-                <span class="file-meta">
-                  <t-tag size="small" variant="light-outline">{{ logKindLabel(file.kind) }}</t-tag>
-                  <span class="muted">{{ file.bytes }} B</span>
-                  <span class="muted">{{ formatModified(file.modifiedSeconds) }}</span>
-                </span>
-              </li>
-            </ul>
-          </div>
-        </t-card>
-
-        <t-card :bordered="true" class="pane viewer">
-          <template #description>
-            {{ page.canView ? page.selectedPath : "先在左侧选择一个文件" }}
-          </template>
-          <template #title>
-            {{ page.selectedName || "日志内容" }}
-          </template>
-
-          <div v-if="page.canView" class="meta">
-            <span>{{ page.countsText }}</span>
-            <span v-if="page.selectedDirectory" class="muted">{{ page.selectedDirectory }}</span>
-          </div>
-
-          <FeedbackAlert
-            v-if="page.hiddenNotice"
-            theme="info"
-            class="mt-sm"
-            :message="page.hiddenNotice"
-          />
-          <FeedbackAlert
-            v-if="page.truncatedNotice"
-            theme="warning"
-            class="mt-sm"
-            :message="page.truncatedNotice"
-          />
-
-          <t-empty v-if="page.canView && !page.hasLines" description="没有符合当前筛选的行" />
-          <ol v-else-if="page.hasLines" class="lines">
-            <li
-              v-for="line in page.lines"
-              :key="line.key"
-              class="line"
-              :class="{ continues: line.indent }"
-            >
-              <span class="gutter">
-                <t-tag v-if="line.levelText" size="small" :theme="line.levelTheme" variant="light">
-                  {{ line.levelText }}
-                </t-tag>
-              </span>
-              <span class="text">{{ line.text }}</span>
-            </li>
-          </ol>
-        </t-card>
-      </div>
-
-      <FeedbackAlert v-if="failure" theme="error" class="mt-sm" :message="failure" />
+  <ResourceCard class="logs-page">
+    <div class="log-toolbar">
+      <label class="log-filter"><span>日志级别</span><t-select v-model="level" :options="page.filterOptions" aria-label="日志级别" placeholder="全部" /></label>
+      <label class="log-filter"><span>文件末尾</span><t-select v-model="lines" :options="lineOptions" aria-label="读取行数" /></label>
+      <div class="toolbar-actions"><t-button variant="outline" :loading="listLoading" @click="reloadListing">刷新</t-button><t-button variant="outline" :disabled="!source" @click="openFolder">打开日志目录</t-button><t-button variant="outline" :loading="exporting" @click="exportDiagnostic">导出诊断包</t-button></div>
     </div>
-  </t-loading>
+    <FeedbackAlert v-if="diagnostic" :theme="diagnostic.theme" :message="diagnostic.text" closable @close="diagnostic = null"><template #description><pre class="diagnostic-detail">{{ diagnostic.detail }}</pre></template></FeedbackAlert>
+    <div class="log-panels">
+      <aside class="log-file-list" aria-label="日志文件">
+        <FeedbackAlert v-if="listError" theme="error" :message="listError" />
+        <t-loading :loading="listLoading">
+          <div v-for="tree in page.trees" :key="tree.source" class="log-source">
+            <h3>{{ sourceLabel(tree.source) }}</h3>
+            <button v-for="file in tree.files" :key="file.name" class="log-file" :class="{selected:file.selected}" type="button" :aria-pressed="file.selected" @click="selectFile(tree.source,file.name)"><span class="log-file-name">{{ file.name }}</span><span class="file-meta"><t-tag size="small" :theme="file.kind === 'live' ? 'primary' : 'default'" variant="light">{{ logKindLabel(file.kind) }}</t-tag>{{ formatBytes(file.bytes) }} · {{ formatModified(file.modifiedSeconds) }}</span></button>
+            <p v-if="!tree.files.length" class="secondary">暂无日志文件</p>
+          </div>
+          <t-empty v-if="!listLoading && !page.trees.length && !listError" description="暂无日志文件" />
+        </t-loading>
+      </aside>
+      <section class="log-viewer" aria-label="日志内容">
+        <header v-if="page.canView" class="log-viewer-heading"><strong>{{ name }}</strong><span class="log-path">{{ tail?.path || `${page.selectedDirectory}/${name}` }}</span><span class="secondary">{{ page.countsText }}<template v-if="tail"> · {{ page.appliedFilterText }}<template v-if="level">及以上</template></template></span></header>
+        <FeedbackAlert v-if="tailError" theme="error" :message="tailError"><template #operation><t-button variant="text" @click="reloadTail">重试</t-button></template></FeedbackAlert>
+        <t-loading :loading="tailLoading" class="log-tail-loading">
+          <div v-if="page.hasLines" class="log-tail"><div v-for="entry in page.lines" :key="entry.key" class="log-line"><t-tag v-if="entry.levelText" size="small" :theme="entry.levelTheme" variant="light">{{ entry.levelText }}</t-tag><span v-else class="continuation-level" /><code>{{ entry.text }}</code></div></div>
+          <t-empty v-else-if="!tailLoading && !tailError" :description="page.canView ? '当前范围内没有日志内容' : '请选择日志文件'" />
+        </t-loading>
+        <p v-if="page.hiddenNotice || page.truncatedNotice" class="secondary tail-note">{{ page.hiddenNotice }} {{ page.truncatedNotice }}</p>
+      </section>
+    </div>
+  </ResourceCard>
 </template>
-
 <style scoped>
-.logs-page {
-  margin: 16px;
-}
-
-.toolbar {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  align-items: center;
-}
-
-.level-select {
-  width: 200px;
-}
-
-.mt-sm {
-  margin-top: 12px;
-}
-
-.split {
-  display: grid;
-  grid-template-columns: minmax(280px, 380px) 1fr;
-  gap: 16px;
-  margin-top: 16px;
-}
-
-@media (max-width: 1100px) {
-  .split {
-    grid-template-columns: 1fr;
-  }
-}
-
-.pane {
-  min-width: 0;
-}
-
-.tree + .tree {
-  margin-top: 16px;
-}
-
-.tree-head {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  margin-bottom: 8px;
-}
-
-.tree-title {
-  font-weight: 600;
-}
-
-.tree-dir {
-  color: #8a8a8a;
-  font-size: 12px;
-  word-break: break-all;
-}
-
-.file-list {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.file-row {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 8px;
-  border-radius: 4px;
-  cursor: pointer;
-}
-
-.file-row:hover {
-  background: rgba(30, 64, 175, 0.04);
-}
-
-.file-row.selected {
-  background: rgba(30, 64, 175, 0.06);
-  border-left: 3px solid #2563eb;
-}
-
-.file-name {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 12px;
-  word-break: break-all;
-}
-
-.file-meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  align-items: center;
-  font-size: 12px;
-}
-
-.muted {
-  color: #8a8a8a;
-}
-
-.viewer {
-  display: flex;
-  flex-direction: column;
-}
-
-.meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  align-items: center;
-  font-size: 12px;
-  color: #4a4a4a;
-}
-
-.lines {
-  margin: 12px 0 0;
-  padding: 0;
-  max-height: 60vh;
-  overflow: auto;
-  background: #fbfbf9;
-  border: 1px solid #ededed;
-  border-radius: 4px;
-  list-style: none;
-}
-
-.line {
-  display: flex;
-  gap: 8px;
-  padding: 2px 8px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 12px;
-  line-height: 1.7;
-}
-
-/* A continuation is the record above it, not a record of its own. */
-.line.continues {
-  padding-left: 28px;
-  color: #5a5a5a;
-}
-
-.line:hover {
-  background: rgba(30, 64, 175, 0.04);
-}
-
-.gutter {
-  flex: 0 0 64px;
-}
-
-.text {
-  flex: 1 1 auto;
-  white-space: pre-wrap;
-  word-break: break-all;
-}
+.logs-page { margin-top:16px; min-width:0; }.log-toolbar { display:flex; align-items:center; gap:16px; flex-wrap:wrap; padding-bottom:16px; }.log-filter { display:flex; gap:8px; align-items:center; white-space:nowrap; }.log-filter .t-select__wrap { width:130px; }.toolbar-actions { margin-left:auto; display:flex; gap:8px; flex-wrap:wrap; }.log-panels { display:grid; grid-template-columns:280px minmax(0,1fr); border:1px solid var(--wt-border); border-radius:6px; overflow:hidden; }.log-file-list { min-width:0; overflow:auto; max-height:65vh; padding:16px 12px; border-right:1px solid var(--wt-border); }.log-source h3 { font-size:13px; font-weight:500; color:var(--wt-text-secondary); margin:0 0 10px; }.log-source + .log-source { margin-top:20px; }.log-file { display:grid; gap:6px; width:100%; padding:10px; margin-bottom:4px; text-align:left; border:0; border-left:3px solid transparent; border-radius:4px; background:transparent; cursor:pointer; color:var(--wt-text-secondary); }.log-file:hover { background:var(--wt-bg-page); }.log-file.selected { background:var(--wt-primary-light,#eaf2ff); border-left-color:var(--wt-primary); }.log-file-name { font-size:13px; overflow-wrap:anywhere; }.file-meta { display:flex; flex-wrap:wrap; align-items:center; gap:6px; font-size:11px; color:var(--wt-text-tertiary); }.log-viewer { min-width:0; display:flex; flex-direction:column; max-height:65vh; }.log-viewer-heading { display:grid; gap:6px; padding:16px; border-bottom:1px solid var(--wt-border); flex:none; }.log-viewer-heading strong { font-size:14px; font-weight:500; }.log-path,.secondary { color:var(--wt-text-tertiary); font-size:12px; overflow-wrap:anywhere; line-height:20px; }.log-tail-loading { min-height:120px; min-width:0; overflow:auto; }.log-tail { overflow:auto; padding:12px 16px; }.log-line { display:flex; gap:10px; align-items:flex-start; min-width:max-content; line-height:24px; }.log-line .t-tag,.continuation-level { width:44px; flex:none; justify-content:center; margin-top:3px; }.log-line code { white-space:pre; font-family:ui-monospace,SFMono-Regular,Consolas,monospace; font-size:12px; color:var(--wt-text-secondary); }.tail-note { padding:8px 16px; margin:0; border-top:1px solid var(--wt-border); }.diagnostic-detail { white-space:pre-wrap; overflow-wrap:anywhere; font:inherit; margin:0; }
+@media(max-width:1100px) { .log-panels { grid-template-columns:230px minmax(0,1fr); }.log-filter .t-select__wrap { width:110px; }.toolbar-actions { margin-left:0; } }
+@media(max-width:700px) { .log-panels { grid-template-columns:1fr; }.log-file-list { max-height:220px; border-right:0; border-bottom:1px solid var(--wt-border); } }
 </style>

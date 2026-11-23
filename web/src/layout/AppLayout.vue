@@ -64,13 +64,6 @@ const menuItems = [
   ] },
 ]
 
-const desktopItems = [
-  { value: 'local-environment', title: '桌面环境', icon: 'server', children: [
-    { title: '本地日志', path: '/logs', icon: 'file' },
-    { title: '本机设置', path: '/settings', icon: 'setting' },
-  ] },
-]
-
 // 浏览器窗口是运营/高级运营的桌面端本机资源；开户仍是普通运营专属。代理列表
 // 与网页版一致，不再受本机页面可见性限制。
 const localOnlyPaths = new Set(['/browser-windows'])
@@ -107,9 +100,7 @@ const allItems = computed(() => {
   for (const path of SYSTEM_MANAGEMENT_PATHS) {
     if (!canViewSystemPath(currentUser.value?.role, path)) hiddenPaths.add(path)
   }
-  const sourceItems = isDesktop()
-    ? [...menuItems, ...(desktopEnvAllowed.value ? desktopItems : [])]
-    : menuItems
+  const sourceItems = menuItems
   return sourceItems
     .map((item) => {
       if (!item.children) return hiddenPaths.has(item.path) ? null : item
@@ -180,6 +171,7 @@ async function logout() {
           <span v-if="appVersion" class="sidebar-version">v{{ appVersion }}</span>
         </div>
       </div>
+      <div class="business-navigation">
       <t-menu
         :value="route.path"
         :collapsed="collapsed"
@@ -211,6 +203,12 @@ async function logout() {
           </t-menu-item>
         </template>
       </t-menu>
+      </div>
+      <div v-if="isDesktop() && desktopEnvAllowed" class="desktop-utility">
+        <button type="button" class="desktop-settings-link" :class="{ 'is-active': route.path === '/settings' }" :aria-current="route.path === '/settings' ? 'page' : undefined" :title="collapsed ? '桌面设置' : undefined" aria-label="桌面设置" @click="router.push('/settings')">
+          <t-icon name="setting" /><span v-if="!collapsed">桌面设置</span>
+        </button>
+      </div>
     </t-aside>
 
     <t-layout class="app-main">
@@ -261,7 +259,9 @@ async function logout() {
 .app-shell { height: 100%; }
 .app-aside {
   height: 100%;
-  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   flex-shrink: 0;
   background: #FAFAF8;
   border-right: 1px solid rgba(0, 0, 0, 0.04);
@@ -271,7 +271,14 @@ async function logout() {
 /* Only content-area scrolls. Hidden overflow lets focusing a table action
    scroll this shell sideways and move the footer across the sidebar. */
 .app-main { height: 100%; min-width: 0; overflow: clip; }
+.business-navigation { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; }
+.desktop-utility { flex: none; padding: 12px 16px; border-top: 1px solid var(--wt-border); }
+.desktop-settings-link { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 36px; border: 0; border-radius: 6px; padding: 8px; background: transparent; color: var(--wt-text-secondary); font: inherit; cursor: pointer; white-space: nowrap; }
+.desktop-settings-link:hover { background: var(--wt-bg-hover); }
+.desktop-settings-link.is-active { background: var(--wt-primary-light, #e8f0ff); color: var(--wt-primary); }
+.desktop-settings-link:focus-visible { outline: 2px solid var(--wt-primary); outline-offset: 2px; }
 .sidebar-header {
+  flex-shrink: 0;
   height: 76px;
   padding: 0 20px;
   display: flex;

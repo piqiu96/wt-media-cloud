@@ -260,7 +260,7 @@ describe('diagnostic export reporting', () => {
   it('says where the archive is and what is in it', () => {
     const said = describeDiagnostic(exported())
 
-    expect(said.theme).toBe('success')
+    expect(said.theme).toBe('warning')
     expect(said.text).toContain('wt-media-diagnostic-20260924-225501.tar.gz')
     expect(said.detail).toContain('8.0 KB')
     expect(said.detail).toContain('a'.repeat(64))
@@ -276,7 +276,7 @@ describe('diagnostic export reporting', () => {
   it('flags a bundle made without the Agent', () => {
     const said = describeDiagnostic(exported({ agentState: 'unreachable' }))
 
-    expect(said.theme).toBe('success')
+    expect(said.theme).toBe('warning')
     expect(said.agentUnreachable).toBe(true)
     expect(said.detail).toContain('不可达')
   })

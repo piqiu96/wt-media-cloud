@@ -42,8 +42,8 @@ export const desktopRoutes = [
       { path: "operation-teams", name: "OperationTeams", component: () => import("../cloud/pages/users/TeamsPage.vue") },
       { path: "categories", name: "Categories", component: () => import("../cloud/pages/users/CategoriesPage.vue") },
       // Desktop 独有页面
-      { path: "logs", name: "LocalLogs", component: () => import("./features/local-logs/LocalLogsPage.vue") },
-      { path: "settings", name: "LocalSettings", component: () => import("./features/local-settings/LocalSettingsPage.vue") },
+      { path: "logs", name: "LocalLogs", redirect: { path: "/settings", query: { tab: "log" } } },
+      { path: "settings", name: "LocalSettings", meta: { title: "桌面设置" }, component: () => import("./features/local-settings/LocalSettingsPage.vue") },
     ],
   },
 ]

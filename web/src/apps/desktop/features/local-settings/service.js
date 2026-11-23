@@ -1,4 +1,4 @@
-// The 本机设置 page's window onto the machine the app is running on.
+// The 桌面设置 page's window onto the machine the app is running on.
 //
 // The same shape as `local-agent/service.js`, and for the same reason: the page
 // never talks to a port, a path or a filesystem — it names a **command** and the
@@ -24,6 +24,9 @@
 
 export const LOCAL_SETTINGS_COMMANDS = Object.freeze({
   getSettings: "local_settings_get",
+  pickSaveDirectory: "local_pick_save_directory",
+  removeSearchDirectory: "local_remove_search_directory",
+  openSaveDirectory: "local_open_save_directory",
   setSettings: "local_settings_set",
   pushSaveDirectory: "local_push_save_directory",
   storageUsage: "local_storage_usage",
@@ -85,6 +88,7 @@ export function normalizeSettingsView(value) {
     // normalizer so the page cannot render an empty box that looks filled in.
     saveDir: source.save_dir ?? null,
     file: String(source.file ?? ""),
+    knownSaveDirs: asArray(source.known_save_dirs).map(String),
   };
 }
 
@@ -161,14 +165,14 @@ export function normalizeLogTail(value) {
 export function normalizeStorageUsage(value) {
   const source = asObject(value);
   return {
-    availableBytes: asCount(source.available_bytes),
-    cacheBytes: asCount(source.cache_bytes),
+    availableBytes: asNullableCount(source.available_bytes),
+    cacheBytes: asNullableCount(source.cache_bytes),
     logs: asArray(source.logs).map((entry) => {
       const tree = asObject(entry);
       return {
         source: String(tree.source ?? ""),
         directory: String(tree.directory ?? ""),
-        bytes: asCount(tree.bytes),
+        bytes: asNullableCount(tree.bytes),
         files: asCount(tree.files),
       };
     }),
@@ -321,6 +325,16 @@ export function createLocalSettingsService({ invoke } = {}) {
   const call = typeof invoke === "function" ? invoke : createMockInvoke();
 
   return {
+    async pickSaveDirectory() {
+      const answer = await call(LOCAL_SETTINGS_COMMANDS.pickSaveDirectory);
+      return answer == null ? null : normalizeSettingsView(answer);
+    },
+    async removeSearchDirectory(directory) {
+      return normalizeSettingsView(await call(LOCAL_SETTINGS_COMMANDS.removeSearchDirectory, { directory }));
+    },
+    async openSaveDirectory(directory) {
+      return String(await call(LOCAL_SETTINGS_COMMANDS.openSaveDirectory, { directory }));
+    },
     async getSettings() {
       return normalizeSettingsView(await call(LOCAL_SETTINGS_COMMANDS.getSettings));
     },
@@ -496,10 +510,20 @@ export function createMockInvoke() {
   return async function mockInvoke(command, args = {}) {
     switch (command) {
       case LOCAL_SETTINGS_COMMANDS.getSettings:
-        return clone({ save_dir: saveDir, file });
+        return clone({ save_dir: saveDir, file, known_save_dirs: [...new Set([saveDir, ...searches].filter(Boolean))] });
+      case LOCAL_SETTINGS_COMMANDS.pickSaveDirectory:
+        return null; // 浏览器无法打开原生目录选择器。
+      case LOCAL_SETTINGS_COMMANDS.openSaveDirectory:
+        if (![saveDir, ...searches].includes(args.directory)) throw new Error("目录未登记");
+        return args.directory;
+      case LOCAL_SETTINGS_COMMANDS.removeSearchDirectory:
+        if (args.directory === saveDir || !searches.includes(args.directory)) throw new Error("该目录不能移除");
+        searches = searches.filter(dir => dir !== args.directory);
+        return clone({ save_dir: saveDir, file, known_save_dirs: [...new Set([saveDir, ...searches].filter(Boolean))] });
       case LOCAL_SETTINGS_COMMANDS.setSettings:
         saveDir = args.saveDir ?? null;
-        return clone({ save_dir: saveDir, file });
+        if (saveDir) searches = [saveDir, ...searches.filter(dir => dir !== saveDir)].slice(0, MAX_SEARCH_DIRS);
+        return clone({ save_dir: saveDir, file, known_save_dirs: [...new Set([saveDir, ...searches].filter(Boolean))] });
       case LOCAL_SETTINGS_COMMANDS.addSearchDirectory: {
         // A folder dialog cannot be answered from a browser, so the stand-in
         // names the one directory its pretend machine used to use instead of
