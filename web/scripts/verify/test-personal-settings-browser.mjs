@@ -35,7 +35,7 @@ try {
   await route.fulfill({json:{errcode,message,data,logid:'test'}})
  })
  await page.addInitScript(({base})=>{
-  const settings={save_dir:'/test/current',file:'/test/settings.toml',known_save_dirs:['/test/current','/test/old']}
+  const settings={save_dir:location.search.includes('unset=1')?null:'/test/current',file:'/test/settings.toml',known_save_dirs:['/test/current','/test/old']}
   window.__test={calls:[],pick:null,pushFail:false,slow:false,settings}
   window.__TAURI_INTERNALS__={invoke:async (cmd,args={})=>{
    const test=window.__test;test.calls.push({cmd,args})
@@ -96,6 +96,13 @@ try {
  await page.getByRole('button',{name:'桌面设置',exact:true}).click()
  await page.getByRole('heading',{name:'下载目录',exact:true}).waitFor()
  await page.getByText('/test/current',{exact:true}).waitFor()
+ assert.equal(await page.getByRole('button',{name:'取消默认目录',exact:true}).count(),0)
+ assert.equal(await page.getByText('仅清理可再生缓存和已轮转日志，保留素材、成片与正在写入的日志。',{exact:true}).count(),0)
+ await page.getByRole('region',{name:'存储与清理'}).getByRole('button',{name:'清理',exact:true}).first().click()
+ await page.getByText('仅清理可再生缓存，保留素材和成片。',{exact:true}).waitFor()
+ await page.locator('.resource-feedback-dialog:visible').getByRole('button',{name:'取消',exact:true}).click()
+ await page.getByText('清理缓存？',{exact:true}).waitFor({state:'hidden'})
+ assert.equal(await page.evaluate(()=>window.__test.calls.some(x=>x.cmd==='local_cache_cleanup')),false)
  await page.getByRole('button',{name:'更改目录',exact:true}).click()
  assert.equal(await page.getByRole('dialog').count(),0)
  assert.equal(await page.evaluate(()=>window.__test.settings.save_dir),'/test/current')
@@ -150,6 +157,20 @@ try {
  await page.goto(`${base}/logs`)
  await page.getByText('desktop.log latest',{exact:true}).waitFor()
  assert.match(page.url(),/settings\?tab=log/)
+ await page.goto(`${base}/settings?unset=1`)
+ await page.getByText('请先选择下载目录',{exact:true}).waitFor()
+ const download=page.getByRole('region',{name:'下载目录',exact:true})
+ assert.equal(await download.getByRole('button',{name:'打开目录',exact:true}).count(),0)
+ await download.getByRole('button',{name:'选择目录',exact:true}).click()
+ assert.equal(await page.evaluate(()=>window.__test.settings.save_dir),null)
+ assert.equal(await page.evaluate(()=>window.__test.calls.some(x=>x.cmd==='local_push_save_directory')),false)
+ await page.evaluate(()=>{window.__test.pick='/test/first'})
+ await download.getByRole('button',{name:'选择目录',exact:true}).click()
+ await download.getByRole('button',{name:'更改目录',exact:true}).waitFor()
+ assert.equal(await page.evaluate(()=>window.__test.settings.save_dir),'/test/first')
+ assert.equal(await page.evaluate(()=>window.__test.calls.filter(x=>x.cmd==='local_push_save_directory').length),1)
+ await download.getByRole('button',{name:'打开目录',exact:true}).click()
+ assert.equal(await page.evaluate(()=>window.__test.calls.filter(x=>x.cmd==='local_open_save_directory').at(-1).args.directory),'/test/first')
  assert.deepEqual(errors,[])
  console.log('PASS: profile read/edit/cancel/error/save/topbar/leave guard; native directory cancel/save/apply/open/remove; file partial retry; fixed footer and 4 widths; log stale response and legacy redirect. Screenshots:',output)
 } finally {await browser?.close();await server.close()}

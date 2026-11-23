@@ -68,14 +68,6 @@ async function saveSaveDir() {
     if (dropped.length) await feedback.notice({title:'历史查找目录已更新',message:`登记达到上限，以下目录不再参与查找，文件保留：${dropped.join('、')}`})
   })
 }
-async function clearSaveDir() {
-  if (!await feedback.confirmWarning({ title:'取消默认下载目录？', message:'仅取消默认位置，已下载文件和历史查找登记保留。', confirmText:'取消默认目录' })) return
-  await run('clear', async () => {
-    settings.value = await service.setSaveDir(null)
-    pushNote.value = { theme:'warning', text:'已取消默认下载目录。已运行的执行服务可能仍使用原位置；重启后按任务规则处理。' }
-    feedback.toast.success('默认下载目录已取消')
-  })
-}
 async function addSearchDirectory() {
   await run('add', async () => {
     const answer = await service.pickSearchDirectory()
@@ -165,7 +157,7 @@ onMounted(reload)
                 <FeedbackAlert v-if="settingsError" theme="error" :message="settingsError"><template #operation><t-button variant="text" @click="readSettings">重试</t-button></template></FeedbackAlert>
                 <template v-else>
                   <dl class="path-details"><div><dt>系统配置文件</dt><dd>{{ settings?.file || '未读取到' }}</dd></div></dl>
-                  <div class="setting-row"><div class="setting-value"><span class="directory"><t-icon name="folder" />{{ settings?.saveDir || '请先选择下载目录' }}</span><span class="secondary">新下载的文件保存到此处，更改目录不会搬运已有文件。</span></div><div class="actions"><t-button variant="outline" :loading="busy === 'save'" :disabled="!!busy" @click="saveSaveDir">{{ settings?.saveDir ? '更改目录' : '选择目录' }}</t-button><t-button v-if="settings?.saveDir" variant="outline" :disabled="!!busy" @click="openDirectory(settings.saveDir)">打开目录</t-button><t-button v-if="settings?.saveDir" variant="text" :disabled="!!busy" @click="clearSaveDir">取消默认目录</t-button></div></div>
+                  <div class="setting-row"><div class="setting-value"><span class="directory"><t-icon name="folder" />{{ settings?.saveDir || '请先选择下载目录' }}</span><span class="secondary">新下载的文件保存到此处，更改目录不会搬运已有文件。</span></div><div class="actions"><t-button variant="outline" :loading="busy === 'save'" :disabled="!!busy" @click="saveSaveDir">{{ settings?.saveDir ? '更改目录' : '选择目录' }}</t-button><t-button v-if="settings?.saveDir" variant="outline" :disabled="!!busy" @click="openDirectory(settings.saveDir)">打开目录</t-button></div></div>
                   <FeedbackAlert v-if="pushNote" :theme="pushNote.theme" :message="pushNote.text"><template #operation><t-button v-if="settings?.saveDir" variant="text" :disabled="!!busy" @click="run('push', pushSaveDir)">重试应用</t-button></template></FeedbackAlert>
                 </template>
               </t-loading>
@@ -186,7 +178,6 @@ onMounted(reload)
               <div class="storage-head"><span>内容</span><span>占用空间</span><span>操作</span></div>
               <div class="storage-row"><span>缓存</span><span>{{ formatBytes(usage?.cacheBytes) }}</span><div class="actions"><t-button variant="text" :disabled="!!busy || !usage" @click="clean('cache')">清理</t-button></div></div>
               <div v-for="tree in logSource" :key="tree.source" class="storage-row"><span>{{ tree.label }}</span><span>{{ formatBytes(usage?.logs.find(item => item.source === tree.source)?.bytes) }}</span><div class="actions"><t-button variant="text" @click="viewLogs(tree.source)">查看日志</t-button><t-button variant="text" :disabled="!!busy || !usage" @click="clean(tree.source)">清理</t-button></div></div>
-              <p class="secondary storage-note">仅清理可再生缓存和已轮转日志，保留素材、成片与正在写入的日志。</p>
               <FeedbackAlert v-if="cleanupResult" :theme="cleanupResult.theme" :message="cleanupResult.text"><template #description><pre class="result-detail">{{ cleanupResult.detail }}</pre></template></FeedbackAlert>
             </ResourceSection>
           </ResourceCard>
@@ -215,6 +206,6 @@ onMounted(reload)
   </main>
 </template>
 <style scoped>
-.settings-page { min-width:0; }.settings-tabs { background:transparent; }.settings-content { display:grid; gap:16px; padding-top:16px; }.setting-row { display:flex; align-items:center; justify-content:space-between; gap:16px; padding:12px 0; }.setting-value { display:grid; gap:6px; min-width:0; }.directory { display:flex; align-items:flex-start; gap:8px; overflow-wrap:anywhere; min-width:0; }.directory .t-icon { flex:none; margin-top:3px; color:var(--wt-primary); }.actions { display:flex; align-items:center; gap:8px; flex-wrap:wrap; flex-shrink:0; }.secondary { color:var(--wt-text-tertiary); font-size:13px; line-height:22px; overflow-wrap:anywhere; margin:0; }.section-action { margin-left:auto; font-weight:400; }.path-details { margin:0 0 12px; padding-bottom:16px; border-bottom:1px solid var(--wt-border); }.path-details > div { display:grid; grid-template-columns:112px minmax(0,1fr); gap:16px; }.path-details dt { color:var(--wt-text-tertiary); }.path-details dd { margin:0; overflow-wrap:anywhere; }.history-row + .history-row { border-top:1px solid var(--wt-border); }.storage-head,.storage-row { display:grid; grid-template-columns:minmax(160px,1fr) 140px 200px; gap:16px; align-items:center; padding:14px 16px; }.storage-head { background:var(--wt-bg-table-header,#f2f5fa); font-weight:500; }.storage-row { border-bottom:1px solid var(--wt-border); }.storage-note { margin-top:16px; }.result-detail { white-space:pre-wrap; overflow-wrap:anywhere; margin:4px 0 0; font-family:inherit; font-size:13px; }
+.settings-page { min-width:0; }.settings-tabs { background:transparent; }.settings-content { display:grid; gap:16px; padding-top:16px; }.setting-row { display:flex; align-items:center; justify-content:space-between; gap:16px; padding:12px 0; }.setting-value { display:grid; gap:6px; min-width:0; }.directory { display:flex; align-items:flex-start; gap:8px; overflow-wrap:anywhere; min-width:0; }.directory .t-icon { flex:none; margin-top:3px; color:var(--wt-primary); }.actions { display:flex; align-items:center; gap:8px; flex-wrap:wrap; flex-shrink:0; }.secondary { color:var(--wt-text-tertiary); font-size:13px; line-height:22px; overflow-wrap:anywhere; margin:0; }.section-action { margin-left:auto; font-weight:400; }.path-details { margin:0 0 12px; padding-bottom:16px; border-bottom:1px solid var(--wt-border); }.path-details > div { display:grid; grid-template-columns:112px minmax(0,1fr); gap:16px; }.path-details dt { color:var(--wt-text-tertiary); }.path-details dd { margin:0; overflow-wrap:anywhere; }.history-row + .history-row { border-top:1px solid var(--wt-border); }.storage-head,.storage-row { display:grid; grid-template-columns:minmax(160px,1fr) 140px 200px; gap:16px; align-items:center; padding:14px 16px; }.storage-head { background:var(--wt-bg-table-header,#f2f5fa); font-weight:500; }.storage-row { border-bottom:1px solid var(--wt-border); }.result-detail { white-space:pre-wrap; overflow-wrap:anywhere; margin:4px 0 0; font-family:inherit; font-size:13px; }
 @media(max-width:1100px) { .setting-row { align-items:flex-start; flex-wrap:wrap; }.storage-head,.storage-row { grid-template-columns:minmax(130px,1fr) 90px 155px; padding:12px 8px; gap:8px; }.storage-row .actions { gap:0; } }
 </style>
