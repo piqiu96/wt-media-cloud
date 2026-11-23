@@ -235,11 +235,11 @@ async function logout() {
           <t-dropdown trigger="click">
             <button type="button" class="profile-trigger" aria-label="打开个人菜单">
               <SystemAvatar :avatar-id="currentUser?.avatar_id || 'sky'" :size="30" />
-              <span class="profile-name">{{ currentUser?.nickname || currentUser?.username || '个人信息' }}</span>
+              <span class="profile-name">{{ currentUser?.nickname || currentUser?.username || '我的账号' }}</span>
               <t-icon name="chevron-down" />
             </button>
             <t-dropdown-menu>
-              <t-dropdown-item @click="router.push('/personal-info')">个人信息</t-dropdown-item>
+              <t-dropdown-item @click="router.push('/personal-info')">我的账号</t-dropdown-item>
               <t-dropdown-item @click="logout">退出</t-dropdown-item>
             </t-dropdown-menu>
           </t-dropdown>

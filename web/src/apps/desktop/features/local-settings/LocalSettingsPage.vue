@@ -155,7 +155,7 @@ onMounted(reload)
 
 <template>
   <main class="settings-page">
-    <ResourcePageHeader title="桌面设置" description="管理这台电脑的下载、存储和日志。" />
+    <ResourcePageHeader title="桌面设置" />
     <t-tabs v-model="tab" class="settings-tabs">
       <t-tab-panel value="storage" label="下载与存储">
         <div class="settings-content">
@@ -178,7 +178,7 @@ onMounted(reload)
               <t-empty v-if="!history.length" description="暂无历史查找目录" />
             </ResourceSection>
           </ResourceCard>
-          <ResourceCard><ResourceSection title="整理已下载文件" description="逐个选择保留、移动到当前下载目录或删除，默认保留。"><template #title-extra><t-button class="section-action" variant="outline" :disabled="!!busy || !settings?.saveDir || !!settingsError" @click="openMigration">整理文件</t-button></template><p class="secondary">按下载记录查找文件，仅处理你选中的文件。</p></ResourceSection></ResourceCard>
+          <ResourceCard><ResourceSection title="整理已下载文件" description="逐个选择保留、移动到当前下载目录或删除，默认保留。"><template #title-extra><t-button class="section-action" variant="outline" :disabled="!!busy || !settings?.saveDir || !!settingsError" @click="openMigration">整理文件</t-button></template></ResourceSection></ResourceCard>
           <ResourceCard>
             <ResourceSection title="存储与清理">
               <template #title-extra><div class="section-action actions"><span class="secondary">磁盘可用 {{ formatBytes(usage?.availableBytes) }}</span><t-button variant="text" :loading="usageLoading" :disabled="!!busy" @click="readUsage">刷新</t-button></div></template>

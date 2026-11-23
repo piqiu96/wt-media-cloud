@@ -1062,7 +1062,7 @@ function ensureLocalReady() {
   if (boundIdentity.value && boundIdentity.value.bound === false) {
     feedback.notice({
       title: "尚未绑定比特主账号",
-      message: "当前账号还没有绑定比特浏览器主账号，请先在「个人信息」完成绑定后再操作窗口。",
+      message: "当前账号还没有绑定比特浏览器主账号，请先在「我的账号」完成绑定后再操作窗口。",
     })
     return false
   }
@@ -2158,7 +2158,7 @@ function returnToSyncResult() {
         v-if="bindingMissing"
         theme="warning"
         style="margin-bottom:16px"
-        message="当前账号还没有绑定比特浏览器主账号，尚未建立窗口范围。请先在「个人信息」完成绑定，再同步窗口。"
+        message="当前账号还没有绑定比特浏览器主账号，尚未建立窗口范围。请先在「我的账号」完成绑定，再同步窗口。"
       />
 
       <ResourceStatGrid :items="statItems" interactive :active-key="statusFilter" @select="toggleStatFilter" />
@@ -3026,7 +3026,7 @@ function returnToSyncResult() {
           <FeedbackAlert
             theme="warning"
             style="margin-top:12px"
-            message="请切换回已绑定的比特主账号再重新检测；如需换绑，请到「个人信息」完成确认，本次不会自动改绑。"
+            message="请切换回已绑定的比特主账号再重新检测；如需换绑，请到「我的账号」完成确认，本次不会自动改绑。"
           />
         </div>
         <template #footer>

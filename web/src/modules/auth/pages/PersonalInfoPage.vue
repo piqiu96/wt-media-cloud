@@ -124,7 +124,7 @@ async function load() {
       localAgent.value = agentResult.status === 'fulfilled' ? agentResult.value : null
       deviceId.value = deviceResult.status === 'fulfilled' ? deviceResult.value : ''
     }
-  } catch (e) { error.value = e?.message || '无法加载个人信息' }
+  } catch (e) { error.value = e?.message || '无法加载账号信息' }
   finally { loading.value = false }
 }
 onMounted(load)
@@ -141,7 +141,7 @@ async function saveProfile() {
     avatarId.value = updated.avatar_id || 'sky'
     editing.value = false
     window.dispatchEvent(new Event('wt-media:profile-updated'))
-    feedback.toast.success('个人信息已保存')
+    feedback.toast.success('账号资料已保存')
   } catch (e) { profileError.value = e?.message || '保存失败，请重试' }
   finally { saving.value = false }
 }
@@ -179,7 +179,7 @@ async function bindAccount({ rebind = false } = {}) {
 
 <template>
   <main class="personal-page">
-    <ResourcePageHeader title="个人信息" description="管理账号资料与比特浏览器绑定。" />
+    <ResourcePageHeader title="我的账号" />
     <FeedbackAlert v-if="error" theme="error" :message="error"><template #operation><t-button variant="text" @click="load">重试</t-button></template></FeedbackAlert>
     <t-loading :loading="loading" size="large">
       <div v-if="user" class="account-sections">
@@ -209,7 +209,6 @@ async function bindAccount({ rebind = false } = {}) {
         <ResourceCard v-if="localAgentAllowed">
           <ResourceSection title="比特浏览器">
             <template #title-extra><t-tag class="binding-tag" :theme="binding?.bound ? 'success' : 'default'" variant="light">{{ bindingError ? '读取失败' : binding?.bound ? '已绑定' : '未绑定' }}</t-tag></template>
-            <p class="section-note">每个账号绑定一个比特浏览器主账号，只有该账号下的窗口能执行任务。</p>
             <FeedbackAlert v-if="bindingError" theme="error" :message="bindingError"><template #operation><t-button variant="text" @click="load">重试</t-button></template></FeedbackAlert>
             <template v-else>
               <div class="device-hero"><span class="device-icon"><t-icon name="user-circle" /></span><div><strong>{{ bindingTitle }}</strong><span>{{ bindingSummary }}</span></div></div>
