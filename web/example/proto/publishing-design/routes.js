@@ -4,7 +4,7 @@ export const navigationGroups = [
   {label:'发布管理',pages:[['tasks','发布任务','send'],['batches','发布批次','list'],['plans','发布计划','calendar']].map(([id,label,icon])=>({id,label,icon}))},
   {label:'运营工具',pages:[['images','图片库','image'],['templates','封面模板','template']].map(([id,label,icon])=>({id,label,icon}))},
 ];
-const paths={materials:'production/materials',mine:'production/mine',strategies:'production/strategies','production-tasks':'production/tasks',outputs:'production/outputs',tasks:'publishing/tasks',batches:'publishing/batches',plans:'publishing/plans',images:'tools/images',templates:'tools/templates'};
+const paths={materials:'production/materials',mine:'production/mine',strategies:'production/strategies','production-tasks':'production/tasks',outputs:'production/outputs',tasks:'publishing/tasks',batches:'publishing/batches',plans:'publishing/plans',images:'tools/images',templates:'tools/templates',personal:'account/profile',settings:'desktop/settings'};
 export const productionPages=['materials','mine','strategies','production-tasks','outputs'];
 function operationPath(page='materials',{taskId,batchId,templateId,pending=false,planId,editor=false}={}) {
   const path=operationsBase+'/'+(paths[page]||paths.materials);
@@ -29,6 +29,12 @@ export function legacyOperationURL(url) {
   if(url.pathname.startsWith(operationsBase))return null;
   if(url.searchParams.get('view')==='publishing')return operationURL(['tasks','batches','plans','images','templates'].includes(hash)?hash:'tasks',{taskId:params.get('task'),batchId:params.get('batch'),templateId:params.get('edit'),pending:params.get('pending')==='1'});
   if(url.pathname.includes('/publishing-design/plan/'))return operationURL('plans',{planId:params.get('plan'),editor:hash==='editor'});
+  if(url.pathname.includes('/personal-settings/')) {
+    const params=new URLSearchParams(url.search);
+    const page=params.get('page')==='personal'?'personal':'settings';params.delete('page');params.delete('review');
+    if(url.pathname.endsWith('/review.html'))params.set('review','account');
+    return operationURL(page)+(params.size?'?'+params:'');
+  }
   if(url.pathname.includes('/content-operations/')) {
     const pages={materials:'materials',mine:'mine',strategies:'strategies',tasks:'production-tasks',outputs:'outputs','publish/tasks':'tasks','publish/plans':'plans','tools/images':'images','tools/templates':'templates'};
     return operationURL(pages[hash]||'materials');

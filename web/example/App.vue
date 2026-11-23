@@ -12,6 +12,7 @@ const prototypes = [
   ['浏览器窗口与代理', 'browser-proxy/'], ['社媒账号', 'social-accounts/'],
   ['内容运营工作台', '../operations/production/materials'], ['内容挖掘', 'content-mining/'],
   ['发布管理新版原型', '../operations/publishing/tasks'],
+  ['我的账号与本机设置', '../operations/account/profile'],
   ['发布管理已有评审意见', 'content-operations/publishing-review.html'],
   ['内容生产评审', 'content-operations/review.html?scope=production#page-review'],
 ]
