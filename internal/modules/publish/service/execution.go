@@ -108,7 +108,7 @@ func readExecutionInput(tx *gorm.DB, v model.Task) (model.ExecutionInput, error)
 	if e != nil {
 		return out, e
 	}
-	if !found || owner.Status != identity.UserStatusEnabled || (owner.Role != identity.RoleAdmin && ((owner.Role != identity.RoleOperator && owner.Role != identity.RoleSeniorOperator) || owner.TeamID == nil || int64(*owner.TeamID) != v.TeamID || !slices.Contains(owner.CategoryIDs, identity.CategoryID(v.CategoryID)))) {
+	if !found || !canExecutePublication(owner) || owner.TeamID == nil || int64(*owner.TeamID) != v.TeamID || !slices.Contains(owner.CategoryIDs, identity.CategoryID(v.CategoryID)) {
 		return out, repository.ErrInputChanged
 	}
 	category, found, e := identity.ResolveCategoryIn(tx, identity.CategoryID(v.CategoryID))
@@ -193,6 +193,9 @@ func (s *ExecutionService) readable(a identity.PublicUser, id uint64) (model.Tas
 	return v, e
 }
 func (s *ExecutionService) Start(a identity.PublicUser, id, revision uint64) (model.Task, error) {
+	if !canExecutePublication(a) {
+		return model.Task{}, ErrNotFound
+	}
 	v, e := s.readable(a, id)
 	if e != nil {
 		return v, e

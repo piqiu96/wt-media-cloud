@@ -96,6 +96,9 @@ func CanRead(a identity.PublicUser, v model.Task) bool {
 	t := identity.TeamID(v.TeamID)
 	return a.ID > 0 && a.CanAccess(identity.UserID(v.OperatorID), &t, identity.CategoryID(v.CategoryID))
 }
+func canExecutePublication(a identity.PublicUser) bool {
+	return a.ID > 0 && a.Status == identity.UserStatusEnabled && (a.Role == identity.RoleOperator || a.Role == identity.RoleSeniorOperator)
+}
 func (s *Service) Get(a identity.PublicUser, id uint64) (model.Task, error) {
 	v, e := s.Repo.Get(id)
 	if e == nil && !CanRead(a, v) {
@@ -152,7 +155,7 @@ func contentValid(c model.Content) bool {
 	return strings.TrimSpace(c.Description) != "" && publicationTextLength(c.Description, c.Topics) <= 50 && c.CoverFileID > 0 && c.PortraitCoverFileID > 0 && c.Declaration == "无需声明" && utf8.RuneCountInString(c.Topics) <= 200 && c.Confirmed
 }
 func (s *Service) Create(ctx context.Context, a identity.PublicUser, in CreateInput) (model.Task, error) {
-	if a.ID <= 0 || a.Status != identity.UserStatusEnabled {
+	if !canExecutePublication(a) {
 		return model.Task{}, ErrNotFound
 	}
 	if len(in.RequestKey) < 1 || len(in.RequestKey) > 64 || strings.TrimSpace(in.RequestKey) != in.RequestKey || in.CategoryID <= 0 || in.MediaAccountID == 0 || in.CompositeOutputID <= 0 || !contentValid(in.Content) {

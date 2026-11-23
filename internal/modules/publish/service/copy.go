@@ -6,6 +6,9 @@ import (
 )
 
 func (s *RecoveryService) Copy(actor identity.PublicUser, id, revision uint64) (model.PublicationCopy, error) {
+	if !canExecutePublication(actor) {
+		return model.PublicationCopy{}, ErrNotFound
+	}
 	v, err := s.readable(actor, id)
 	if err != nil {
 		return model.PublicationCopy{}, err

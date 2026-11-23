@@ -29,6 +29,7 @@ import { createPublicationClient } from "../../../shared/api/publication.js";
 import { createComposeClient } from "../../../shared/api/compose.js";
 import { createMediaAccountClient } from "../../../shared/api/mediaAccounts.js";
 import { createSessionClient } from "../../../shared/api/session.js";
+import { canRunLocalAgent } from "../../../utils.js";
 import { createImageClient } from "../../../shared/api/image.js";
 import { handlePublicationHuman } from "../../../shared/api/publicationRun.js";
 import { createPublicationDraftClient } from "../../../shared/api/publicationDraft.js";
@@ -64,6 +65,15 @@ const blankFilters = () => ({
   category_id: "",
   created_range: [],
 });
+const currentUser = ref(null);
+const canPublish = computed(() => canRunLocalAgent(currentUser.value));
+async function publicationUser() {
+  const user = await createSessionClient().me();
+  if (disposed) throw new Error("页面已离开，请重新打开任务列表");
+  currentUser.value = user;
+  if (!canRunLocalAgent(user)) throw new Error("管理员仅可查看和管理云端记录，不承担发布执行");
+  return user;
+}
 const attempts = ref([]);
 const accountSummaryVisible = ref(false), accountSummaryId = ref("");
 function viewAccount(id) {
@@ -299,11 +309,11 @@ async function openCreate(sourceOutput = null, copyInput = null, copyUserId = nu
   draftReady.value = false;
   error.value = "";
   try {
-    const user = await createSessionClient().me();
+    const user = await publicationUser();
     if (disposed) return false;
     if (copyInput && String(user.id) !== String(copyUserId)) throw new Error("登录账号已变化，已丢弃原账号的复制内容，请重新打开任务列表");
     const verifyOwner = async () => {
-      const current = await createSessionClient().me();
+      const current = await publicationUser();
       if (disposed) throw new Error("页面已离开，已丢弃迟到内容");
       if (String(current.id) !== String(user.id)) throw new Error("登录账号已变化，原草稿和复制内容未写入，请重新打开任务列表");
     };
@@ -500,7 +510,7 @@ async function copyTask(row) {
   busy.value = true; error.value = '';
   let input, userId;
   try {
-    userId = String((await createSessionClient().me()).id);
+    userId = String((await publicationUser()).id);
     if (disposed) return;
     input = await client.copy(row.id, row.revision);
   }
@@ -539,6 +549,7 @@ async function startExecution(row) {
   busy.value = true;
   error.value = "";
   try {
+    await publicationUser();
     const task = await client.get(row.id);
     if (!editable(task) || task.revision !== row.revision) throw new Error("任务内容或状态已变化，请核对更新后的列表再操作");
     if (!(await feedback.confirmWarning({title:"确认执行发布",message:`将使用账号「${task.resources.account_name}」自动发布此任务。请确认文案、封面和声明；执行后不能再编辑。`,confirmText:"确认执行"}))) return;
@@ -556,7 +567,7 @@ async function openHumanScene(row) {
   if (busy.value) return;
   busy.value=true;error.value='';
   try {
-    const [task,user]=await Promise.all([client.get(row.id),createSessionClient().me()]);
+    const [task,user]=await Promise.all([client.get(row.id),publicationUser()]);
     if (disposed) return;
     if (task.status!==PublicationStatus.AwaitingHuman || !task.current_attempt_id) throw new Error('任务状态已变化，请刷新后核对');
     await handlePublicationHuman({task,userId:String(user.id)});
@@ -569,7 +580,7 @@ async function continueHumanScene() {
   if (busy.value || !humanTask.value) return;
   busy.value=true;humanError.value='';
   try {
-    const user=await createSessionClient().me();
+    const user=await publicationUser();
     if (disposed) return;
     if (String(user.id)!==humanUserId.value) throw new Error('登录身份已变化，请关闭后重新打开原任务');
     await handlePublicationHuman({task:humanTask.value,userId:humanUserId.value,resume:true});
@@ -616,6 +627,7 @@ async function retryExecution(row) {
   busy.value = true;
   error.value = "";
   try {
+    await publicationUser();
     const task = await client.get(row.id);
     if (!retryable(task) || task.revision !== row.revision) throw new Error("任务内容或状态已变化，请核对更新后的列表再操作");
     if (!(await feedback.confirmWarning({title:"重试任务",message:"确认原尝试无可发布稿件、执行现场已结束。将复查原账号、成片、封面与内容，沿用本任务重新执行；历史尝试与占用保留。",confirmText:"确认重试"}))) return;
@@ -950,7 +962,10 @@ onBeforeUnmount(() => {
   loadSequence++;
 });
 onMounted(async () => {
-  await load();
+  await Promise.all([
+    load(),
+    createSessionClient().me().then(user => { if (!disposed) currentUser.value = user; }).catch(e => { if (!disposed) error.value = e.message; }),
+  ]);
   try {
     categories.value = await compose.listCategories({
       scope: "all",
@@ -959,7 +974,7 @@ onMounted(async () => {
     const publicationId=String(route.query.publication_id||"");
  if(/^[1-9][0-9]*$/.test(publicationId)){await openDetail({id:publicationId});return;}
  const id = String(route.query.output_id || "");
-    if (/^[1-9][0-9]*$/.test(id)) {
+    if (canPublish.value && /^[1-9][0-9]*$/.test(id)) {
       const data = await compose.getComposeOutput(id);
       await openCreate(data.output);
     }
@@ -973,7 +988,7 @@ onMounted(async () => {
     <template v-if="view === 'list'">
       <ResourcePageHeader title="发布任务"
         ><template #actions
-          ><t-button :loading="busy" @click="openCreate"
+          ><t-button v-if="canPublish" :loading="busy" @click="openCreate"
             >快速发布</t-button
           ></template
         ></ResourcePageHeader
@@ -1083,15 +1098,15 @@ onMounted(async () => {
             }}</template>
             <template #op="{ row }">
               <ResourceRowActions>
-                <t-button v-if="editable(row)" class="is-primary" variant="text" size="small" :disabled="busy" @click="startExecution(row)">执行</t-button>
-                <t-button v-if="row.status===PublicationStatus.AwaitingHuman" class="is-primary" variant="text" size="small" :disabled="busy" @click="openHumanScene(row)">去处理</t-button>
+                <t-button v-if="canPublish && editable(row)" class="is-primary" variant="text" size="small" :disabled="busy" @click="startExecution(row)">执行</t-button>
+                <t-button v-if="canPublish && row.status===PublicationStatus.AwaitingHuman" class="is-primary" variant="text" size="small" :disabled="busy" @click="openHumanScene(row)">去处理</t-button>
                 <t-button v-if="[PublicationStatus.Uncertain,PublicationStatus.Reviewing].includes(row.status)" class="is-primary" variant="text" size="small" :disabled="busy" @click="openVerification(row)">{{row.status===PublicationStatus.Reviewing?'补录结果':'核实结果'}}</t-button>
-                <t-button v-if="retryable(row)" class="is-primary" variant="text" size="small" :disabled="busy" @click="retryExecution(row)">重试</t-button>
+                <t-button v-if="canPublish && retryable(row)" class="is-primary" variant="text" size="small" :disabled="busy" @click="retryExecution(row)">重试</t-button>
                 <t-button v-if="editable(row)" variant="text" size="small" :disabled="busy" @click="edit(row)">编辑</t-button>
                 <t-button v-if="cancellable(row)" theme="danger" variant="text" size="small" :disabled="busy" @click="openTermination(row, 'cancel')">终止</t-button>
                 <t-button v-if="abandonable(row)" theme="danger" variant="text" size="small" :disabled="busy" @click="openTermination(row, 'abandon')">放弃</t-button>
                 <t-button v-if="row.work_id" variant="text" size="small" @click="router.push({path:'/work',query:{work_id:row.work_id}})">查看作品</t-button>
-                <t-button v-if="copyable(row)" variant="text" size="small" :disabled="busy" @click="copyTask(row)">复制</t-button>
+                <t-button v-if="canPublish && copyable(row)" variant="text" size="small" :disabled="busy" @click="copyTask(row)">复制</t-button>
                 <t-button variant="text" size="small" :disabled="busy" @click="detailReturn = 'list'; openDetail(row)">详情</t-button>
               </ResourceRowActions>
             </template>

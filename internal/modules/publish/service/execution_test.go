@@ -31,9 +31,10 @@ func (f *executionFake) Complete(v model.Task, u int64, c model.Completion, n ti
 	return model.ExecutionFeedback{}, nil
 }
 func TestExecutionRequiresActorScopeAndRevision(t *testing.T) {
-	f := &executionFake{v: model.Task{ID: 1, OperatorID: 3, Platform: "baidu"}}
+	team := identity.TeamID(7)
+	f := &executionFake{v: model.Task{ID: 1, OperatorID: 3, TeamID: 7, CategoryID: 4, Platform: "baidu"}}
 	s := &ExecutionService{Repo: f}
-	a := identity.PublicUser{ID: 3, Role: identity.RoleAdmin, Status: identity.UserStatusEnabled}
+	a := identity.PublicUser{ID: 3, Role: identity.RoleOperator, Status: identity.UserStatusEnabled, TeamID: &team, CategoryIDs: []identity.CategoryID{4}}
 	if _, e := s.Start(identity.PublicUser{ID: 99, Role: identity.RoleOperator, Status: identity.UserStatusEnabled}, 1, 1); !errors.Is(e, ErrNotFound) {
 		t.Fatal(e)
 	}

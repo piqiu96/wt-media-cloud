@@ -36,7 +36,7 @@ const history = [{ id: 'attempt-A', attempt_no: 1, input_snapshot: { content: { 
 let state;
 beforeEach(async () => {
   vi.clearAllMocks();
-  services.session.me.mockResolvedValue({ id: '9' });
+  services.session.me.mockResolvedValue({ id: '9', role: 'operator' });
   services.draft.get.mockResolvedValue({ payload: null, revision: '0', saved_at: null, schema_version: 1 });
   services.draft.save.mockResolvedValue({ revision: '1' });
   services.draft.clear.mockResolvedValue({ revision: '2' });
@@ -45,7 +45,7 @@ beforeEach(async () => {
   services.publication.list.mockResolvedValue({ items: [], total: 0, summary: {} });
   services.publication.edit.mockImplementation(async (id, input) => ({ ...task(id), content: input.content, revision: '2' }));
   services.publication.create.mockImplementation(async input => ({ ...input, id: 'C', revision: '1', status: 'pending' }));
-  services.accounts.get.mockResolvedValue({ id: '9' });
+  services.accounts.get.mockResolvedValue({ id: '9', role: 'operator' });
   services.compose.getComposeOutput.mockResolvedValue({ output: { id: '10' } });
   // Mount the real page's setup without its visual shell. Navigation and save
   // handlers run unchanged; only external APIs and feedback are substituted.
@@ -369,7 +369,7 @@ it('discards delayed copy content after the signed-in user changes before draft 
  let finish;services.publication.copy.mockImplementation(()=>new Promise(resolve=>{finish=resolve;}));
  const copying=state.copyTask({...task('A'),status:'published'});
  await vi.waitFor(()=>expect(finish).toBeTypeOf('function'));
- services.session.me.mockResolvedValue({id:'different-user'});
+ services.session.me.mockResolvedValue({id:'different-user',role:'operator'});
  finish({platform:'baidu',category_id:'1',content:{description:'原账号私有文案',topics:'',declaration:''}});
  await copying;
  expect(state.view.value).toBe('list');expect(services.draft.get).not.toHaveBeenCalled();expect(services.draft.clear).not.toHaveBeenCalled();
@@ -378,7 +378,7 @@ it('discards delayed copy content after the signed-in user changes before draft 
 it('does not clear an original draft after an account switch during the recovery choice',async()=>{
  services.publication.copy.mockResolvedValue({platform:'baidu',category_id:'1',content:{description:'原账号私有文案',topics:'',declaration:''}});
  services.draft.get.mockResolvedValue({payload:{form:task('D')},revision:'2'});
- services.chooseDraft.mockImplementation(async()=>{services.session.me.mockResolvedValue({id:'different-user'});return 'restart';});
+ services.chooseDraft.mockImplementation(async()=>{services.session.me.mockResolvedValue({id:'different-user',role:'operator'});return 'restart';});
  await state.copyTask({...task('A'),status:'published'});
  expect(services.draft.clear).not.toHaveBeenCalled();expect(state.view.value).toBe('list');
 });
@@ -414,7 +414,7 @@ it('never continues an original scene after the signed-in user changes',async()=
  services.publication.get.mockResolvedValue(waiting);
  services.human.mockResolvedValue({attempt_id:'7',status:'awaiting_human'});
  await state.openHumanScene(waiting);
- services.session.me.mockResolvedValue({id:'10'});
+ services.session.me.mockResolvedValue({id:'10',role:'operator'});
  await state.continueHumanScene();
  expect(services.human).toHaveBeenCalledTimes(1);
  expect(state.humanError.value).toContain('登录身份已变化');
@@ -454,4 +454,35 @@ it('refuses a landscape image for the portrait slot without replacing either cov
  expect(state.form.value.content.cover_file_id).toBe('11');expect(state.form.value.content.portrait_cover_file_id).toBe('12');
  expect(feedback.toast.error).toHaveBeenCalledWith('请选择3:4且不超过5MB的竖版封面');
  expect(state.formError.value).toBe('');
+});
+
+
+it('rejects administrator creation and copy before accessing drafts or copied content', async () => {
+  services.session.me.mockResolvedValue({ id: '1', role: 'admin' });
+  await state.openCreate({ id: '10' });
+  expect(state.view.value).toBe('list');
+  expect(state.form.value).toBe(null);
+  expect(services.draft.get).not.toHaveBeenCalled();
+  expect(services.chooseDraft).not.toHaveBeenCalled();
+  expect(state.error.value).toContain('管理员');
+  await state.copyTask({ ...task('A'), status: 'published' });
+  expect(services.publication.copy).not.toHaveBeenCalled();
+  expect(services.draft.get).not.toHaveBeenCalled();
+});
+
+it('rejects administrator execution and original-scene continuation but keeps Cloud detail accessible', async () => {
+  services.session.me.mockResolvedValue({ id: '1', role: 'admin' });
+  await state.startExecution(task('A'));
+  expect(feedback.confirmWarning).not.toHaveBeenCalled();
+  await state.retryExecution({ ...task('A'), status: 'failed' });
+  expect(feedback.confirmWarning).not.toHaveBeenCalled();
+  await state.openHumanScene({ ...task('A'), status: 'awaiting_human', current_attempt_id: '7' });
+  expect(services.human).not.toHaveBeenCalled();
+  state.humanTask.value = { ...task('A'), status: 'awaiting_human', current_attempt_id: '7' };
+  state.humanUserId.value = '1';
+  await state.continueHumanScene();
+  expect(services.human).not.toHaveBeenCalled();
+  await state.openDetail(task('A'));
+  expect(state.view.value).toBe('detail');
+  expect(state.detail.value.id).toBe('A');
 });

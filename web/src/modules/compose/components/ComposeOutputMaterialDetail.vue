@@ -6,7 +6,7 @@ import FeedbackAlert from '../../../shared/ui/feedback/FeedbackAlert.vue'
 import { materialOutputQuery } from '../outputScope.js'
 import ComposeOutputTable from './ComposeOutputTable.vue'
 import { createComposeClient } from '../../../shared/api/compose.js'
-const props=defineProps({visible:Boolean,material:Object,scope:{type:Object,default:()=>({})},videoState:Function,canDownload:Function,downloadReason:Function,downloadingId:Number,categoryName:Function,busy:Boolean,publicationReason:Function,result:String})
+const props=defineProps({visible:Boolean,material:Object,scope:{type:Object,default:()=>({})},videoState:Function,canDownload:Function,downloadReason:Function,downloadingId:Number,categoryName:Function,busy:Boolean,canPublish:Boolean,publicationReason:Function,result:String})
 const emit=defineEmits(['update:visible','detail','download','downloads','remake','batch','publish'])
 const client=createComposeClient(),rows=ref([]),total=ref(0),page=ref(1),pageSize=ref(10),loading=ref(false),error=ref(''),selectedKeys=ref([]),knownRows=ref({})
 const allForMaterial=ref(false)
@@ -24,7 +24,7 @@ function paginate(data){page.value=data.current;pageSize.value=data.pageSize;loa
    <p v-if="!allForMaterial && Object.values(scope).some(value => value !== '' && value != null)">沿用列表筛选 <t-link theme="primary" @click="viewAll">查看该素材全部成片</t-link></p>
    <FeedbackAlert v-if="error" theme="error" :message="error" />
    <FeedbackAlert v-if="result" theme="info" :message="result" />
-   <ResourceSelectionToolbar :count="selectedKeys.length" unit="个成片" @clear="selectedKeys=[]"><t-button variant="outline" :loading="busy" :disabled="!selectedRows.some(canDownload)" :title="selectedRows.map(downloadReason).filter(Boolean).join('；')" @click="emit('downloads',selectedRows)">下载（{{ selectedKeys.length }}）</t-button><span :title="publishingReason"><t-button variant="outline" :disabled="!!publishingReason" @click="emit('publish',selectedRows)">去发布</t-button></span></ResourceSelectionToolbar>
+   <ResourceSelectionToolbar :count="selectedKeys.length" unit="个成片" @clear="selectedKeys=[]"><t-button variant="outline" :loading="busy" :disabled="!selectedRows.some(canDownload)" :title="selectedRows.map(downloadReason).filter(Boolean).join('；')" @click="emit('downloads',selectedRows)">下载（{{ selectedKeys.length }}）</t-button><span v-if="canPublish" :title="publishingReason"><t-button variant="outline" :disabled="!!publishingReason" @click="emit('publish',selectedRows)">去发布</t-button></span></ResourceSelectionToolbar>
    <t-loading :loading="loading"><ComposeOutputTable :rows="rows" v-model:selected-keys="selectedKeys" material-mode :video-state="videoState" :can-download="canDownload" :download-reason="downloadReason" :downloading-id="downloadingId" :category-name="categoryName" @detail="emit('detail',$event)" @download="emit('download',$event)" @remake="emit('remake',$event)" @batch="emit('batch',$event)" /></t-loading>
    <div class="pagination-bar"><t-pagination :show-jumper="false" :current="page" :page-size="pageSize" :total="total" :page-size-options="[10,20,50]" @change="paginate" /></div>
   </div>

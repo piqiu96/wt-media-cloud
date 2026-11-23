@@ -44,6 +44,9 @@ func (s *RecoveryService) Resolve(actor identity.PublicUser, id uint64, in model
 	return s.Repo.ResolveResult(v, int64(actor.ID), in, time.Now().UTC())
 }
 func (s *RecoveryService) Retry(actor identity.PublicUser, id, revision uint64) (model.Task, error) {
+	if !canExecutePublication(actor) {
+		return model.Task{}, ErrNotFound
+	}
 	v, e := s.readable(actor, id)
 	if e != nil {
 		return v, e
