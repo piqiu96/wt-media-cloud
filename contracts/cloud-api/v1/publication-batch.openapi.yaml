@@ -1,8 +1,8 @@
 openapi: 3.1.0
 info:
-  title: WT Media Publication Batch Preparation
-  version: 2026.11.25.1
-  description: Session API using errcode/message/data/logid. Saves store candidate configuration and current file references atomically with audit. Incomplete content or candidate shortfalls may be saved. Account ownership, category scope and input structure are mandatory. No operation creates an execution task, attempt or reservation.
+  title: WT Media Publication Batch
+  version: 2026.11.25.2
+  description: Session API using errcode/message/data/logid. Saves store candidate configuration and current file references atomically with audit. Incomplete content or candidate shortfalls may be saved. Account ownership, category scope and input structure are mandatory. Only first start creates formal tasks and output occupancy. Attempts are created by actual claim.
 security: [{sessionCookie: []}]
 paths:
   /api/v1/publication-batch:
@@ -15,7 +15,7 @@ paths:
         - {$ref: '#/components/parameters/Platform'}
         - {in: query, name: search, schema: {type: string, maxLength: 100}}
         - {in: query, name: configuration_status, schema: {enum: [incomplete, ready]}}
-        - {in: query, name: execution_status, schema: {enum: [not_started, running, paused, ended, cancelled]}}
+        - {in: query, name: execution_status, schema: {$ref: '#/components/schemas/ExecutionStatus'}}
         - {in: query, name: request_key, schema: {$ref: '#/components/schemas/RequestKey'}}
       responses:
         '200':
@@ -42,7 +42,7 @@ paths:
               unevaluatedProperties: false
       responses:
         '201':
-          description: Same key and same original input replay the saved batch, even when resources have changed.
+          description: Same key and same original input replay the saved batch, even when resources have changed. Saving creates no task, attempt or output occupancy.
           content:
             application/json:
               schema:
@@ -116,7 +116,7 @@ paths:
       operationId: getPublicationBatch
       responses:
         '200':
-          description: Readiness reflects the last saved validation.
+          description: Readiness reflects the last saved validation. Execution projects the current control and verified result counts.
           content:
             application/json:
               schema:
@@ -230,6 +230,180 @@ paths:
         '400': {description: Invalid filter.}
         '404': {description: Caller not eligible for batch preparation or category outside access scope.}
         '503': {description: Resource read unavailable.}
+  /api/v1/publication-batch/{id}/execution-preview:
+    parameters: [{$ref: '#/components/parameters/BatchID'}]
+    post:
+      operationId: previewPublicationBatchExecution
+      description: Read the current batch revision and check the exact selected saved rows, resources, content and original account environment. Recalculate shortfalls against the saved target. A preview creates no permission, task, attempt or occupancy.
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/ExecutionPreviewInput'}}}
+      responses:
+        '200':
+          description: Current execution preview.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - {$ref: '#/components/schemas/Success'}
+                  - {properties: {data: {$ref: '#/components/schemas/ExecutionPreview'}}}
+        '400': {description: Invalid request structure.}
+        '401': {description: Authentication required.}
+        '404': {description: Missing or outside allowed batch scope.}
+        '409':
+          description: Stale configuration revision or batch no longer eligible for first start.
+          content: {application/json: {schema: {$ref: '#/components/schemas/BatchConflict'}}}
+        '503': {description: Required resource or persistence unavailable.}
+
+  /api/v1/publication-batch/{id}/start:
+    parameters: [{$ref: '#/components/parameters/BatchID'}]
+    post:
+      operationId: startPublicationBatch
+      description: Only the owning operator may start. Atomically freeze the saved configuration, create every included task, acquire formal output and file references, authorize the tasks, and record the first start and audit. Recompute the creation shortfalls under the same control. Same key and digest replay the original start response even after subsequent commands. Excluded rows create no task. Actual claim is a separate group and capacity decision.
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/StartBatchInput'}}}
+      responses:
+        '200':
+          description: Original first-start result.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - {$ref: '#/components/schemas/Success'}
+                  - {properties: {data: {$ref: '#/components/schemas/BatchStartResult'}}}
+        '400': {description: Invalid request structure.}
+        '401': {description: Authentication required.}
+        '404': {description: Missing or outside allowed batch scope.}
+        '409':
+          description: Changed revision, conflicting key, changed shortfall, row becoming unready, occupied output, or frozen/stopped parent.
+          content: {application/json: {schema: {$ref: '#/components/schemas/BatchConflict'}}}
+        '503': {description: Required resource or persistence unavailable.}
+
+  /api/v1/publication-batch/{id}/pause:
+    parameters: [{$ref: '#/components/parameters/BatchID'}]
+    post:
+      operationId: pausePublicationBatch
+      description: Pause further dispatch. An already claimed attempt may safely complete and report its original outcome. Preserve the fixed group, next eligible time and task results. Return the pause identity and current exception evidence.
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/BatchReasonCommand'}}}
+      responses:
+        '200':
+          description: Paused batch control.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - {$ref: '#/components/schemas/Success'}
+                  - {properties: {data: {$ref: '#/components/schemas/BatchControlResult'}}}
+        '400': {description: Invalid request structure.}
+        '401': {description: Authentication required.}
+        '404': {description: Missing or outside allowed batch scope.}
+        '409':
+          description: Stale revision or an ineligible parent control state.
+          content: {application/json: {schema: {$ref: '#/components/schemas/BatchConflict'}}}
+        '503': {description: Required resource or persistence unavailable.}
+
+  /api/v1/publication-batch/{id}/resume:
+    parameters: [{$ref: '#/components/parameters/BatchID'}]
+    post:
+      operationId: resumePublicationBatch
+      description: Confirm the current pause and its exact exception subjects and revisions. Preserve recorded outcomes and hold the original group barrier. Prior acknowledgement covers only the same unchanged exception evidence. Repeat the original command through its same request key; changed content under the same key conflicts.
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/ResumeBatchInput'}}}
+      responses:
+        '200':
+          description: Resumed batch control or the original command acknowledgement.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - {$ref: '#/components/schemas/Success'}
+                  - {properties: {data: {$ref: '#/components/schemas/BatchControlResult'}}}
+        '400': {description: Invalid request structure.}
+        '401': {description: Authentication required.}
+        '404': {description: Missing or outside allowed batch scope.}
+        '409':
+          description: Stale revision, changed pause, changed exception set or permanent stop. Details identify the current control and pause basis.
+          content: {application/json: {schema: {$ref: '#/components/schemas/BatchConflict'}}}
+        '503': {description: Required resource or persistence unavailable.}
+
+  /api/v1/publication-batch/{id}/stop:
+    parameters: [{$ref: '#/components/parameters/BatchID'}]
+    post:
+      operationId: stopPublicationBatch
+      description: Permanently fence new dispatch and submit permission. Before first start, end the saved batch without tasks. After start, cancel unclaimed tasks and retain their output occupancy. Started attempts continue original safety settlement and verification; stop never rewrites a real result or releases a still unresolved scene.
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/BatchReasonCommand'}}}
+      responses:
+        '200':
+          description: Permanent stop and task totals at the stop decision.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - {$ref: '#/components/schemas/Success'}
+                  - {properties: {data: {$ref: '#/components/schemas/BatchStopResult'}}}
+        '400': {description: Invalid request structure.}
+        '401': {description: Authentication required.}
+        '404': {description: Missing or outside allowed batch scope.}
+        '409':
+          description: Stale revision or already stopped/ended batch.
+          content: {application/json: {schema: {$ref: '#/components/schemas/BatchConflict'}}}
+        '503': {description: Required resource or persistence unavailable.}
+
+  /api/v1/publication-batch/{id}/finish:
+    parameters: [{$ref: '#/components/parameters/BatchID'}]
+    post:
+      operationId: finishPublicationBatch
+      description: Close a started batch after checking that all formal tasks are safely disposed, including the exact failed set and revisions. Pending, queued, running, awaiting human and uncertain tasks block finish. A verified safe reviewing receipt may still be independently observed for public results. Existing failures and occupancy are retained; subsequent retries are closed.
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/FinishBatchInput'}}}
+      responses:
+        '200':
+          description: Finished batch control with a recorded reason.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - {$ref: '#/components/schemas/Success'}
+                  - {properties: {data: {$ref: '#/components/schemas/BatchControlResult'}}}
+        '400': {description: Invalid request structure.}
+        '401': {description: Authentication required.}
+        '404': {description: Missing or outside allowed batch scope.}
+        '409':
+          description: Unresolved tasks, changed failed basis, stale revision or ineligible parent.
+          content: {application/json: {schema: {$ref: '#/components/schemas/BatchConflict'}}}
+        '503': {description: Required resource or persistence unavailable.}
+
+  /api/v1/publication-batch/{id}/task:
+    parameters: [{$ref: '#/components/parameters/BatchID'}]
+    get:
+      operationId: listPublicationBatchTasks
+      description: Authorize the batch before filtering or paginating its formal tasks. Before first start the result is empty. Candidate configuration is available in the batch detail. Task phases and blocked reasons reflect current parent state and immutable task membership.
+      parameters:
+        - {$ref: '#/components/parameters/Page'}
+        - {$ref: '#/components/parameters/PageSize'}
+        - {in: query, name: media_account_id, schema: {$ref: '#/components/schemas/ID'}}
+        - {in: query, name: status, schema: {$ref: 'publication.openapi.yaml#/components/schemas/TaskStatus'}}
+        - {in: query, name: search, schema: {type: string, maxLength: 100}}
+      responses:
+        '200':
+          description: Scoped page of formal tasks ordered by task_order and id.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - {$ref: '#/components/schemas/Success'}
+                  - {properties: {data: {$ref: '#/components/schemas/BatchTaskPage'}}}
+        '400': {description: Invalid task filter.}
+        '401': {description: Authentication required.}
+        '404': {description: Missing or inaccessible batch.}
+        '503': {description: Read unavailable.}
 components:
   securitySchemes:
     sessionCookie: {type: apiKey, in: cookie, name: wt_media_session}
@@ -344,7 +518,7 @@ components:
             items: {type: array, items: {$ref: '#/components/schemas/BatchSummary'}}
     BatchSummary:
       type: object
-      required: [id, team_id, operator_id, created_by, revision, name, platform, targets, candidate_count, execution_setting, configuration_status, execution_status, allowed_actions, created_at, updated_at]
+      required: [id, team_id, operator_id, created_by, revision, name, platform, targets, candidate_count, execution_setting, configuration_status, execution_status, execution, allowed_actions, created_at, updated_at]
       properties:
         id: {$ref: '#/components/schemas/ID'}
         team_id: {$ref: '#/components/schemas/ID'}
@@ -357,8 +531,9 @@ components:
         candidate_count: {type: integer, minimum: 0}
         execution_setting: {$ref: '#/components/schemas/ExecutionSetting'}
         configuration_status: {enum: [incomplete, ready]}
-        execution_status: {enum: [not_started, running, paused, ended, cancelled]}
-        allowed_actions: {type: array, items: {enum: [edit, copy]}}
+        execution_status: {$ref: '#/components/schemas/ExecutionStatus'}
+        execution: {$ref: '#/components/schemas/BatchExecution'}
+        allowed_actions: {type: array, items: {enum: [edit, copy, start, pause, resume, stop, finish]}}
         created_at: {type: string, format: date-time}
         updated_at: {type: string, format: date-time}
     BatchDetail:
@@ -469,3 +644,214 @@ components:
         unknown_output_count: {type: integer, minimum: 0}
         availability: {enum: [available, empty, unknown]}
         gaps: {type: array, items: {type: string}}
+    Reason: {type: string, minLength: 1, maxLength: 200}
+    ExecutionStatus:
+      type: string
+      enum: [not_started, running, paused, stopping, ended, cancelled]
+    RowKeys:
+      type: array
+      uniqueItems: true
+      items: {type: string, minLength: 1, maxLength: 64}
+    ExecutionPreviewInput:
+      type: object
+      additionalProperties: false
+      required: [expected_revision, row_keys]
+      properties:
+        expected_revision: {$ref: '#/components/schemas/ID'}
+        row_keys:
+          allOf: [{$ref: '#/components/schemas/RowKeys'}]
+          minItems: 1
+    ExecutionIssue:
+      type: object
+      required: [code, message]
+      properties:
+        row_key: {type: string}
+        category_id: {$ref: '#/components/schemas/ID'}
+        field: {type: string}
+        code: {type: string}
+        message: {type: string}
+    CreationShortfall:
+      type: object
+      required: [category_id, target_count, created_count, shortfall]
+      properties:
+        category_id: {$ref: '#/components/schemas/ID'}
+        target_count: {type: integer, minimum: 0}
+        created_count: {type: integer, minimum: 0}
+        shortfall: {type: integer, minimum: 0}
+    ExecutionPreview:
+      type: object
+      required: [batch_id, revision, can_start, rows, shortfalls]
+      properties:
+        batch_id: {$ref: '#/components/schemas/ID'}
+        revision: {$ref: '#/components/schemas/ID'}
+        can_start: {type: boolean, description: All selected rows currently pass required checks. A remaining shortfall needs explicit confirmation at start.}
+        rows:
+          type: array
+          items:
+            type: object
+            required: [row_key, ready, issues]
+            properties:
+              row_key: {type: string}
+              ready: {type: boolean}
+              issues: {type: array, items: {$ref: '#/components/schemas/ExecutionIssue'}}
+        shortfalls: {type: array, items: {$ref: '#/components/schemas/CreationShortfall'}}
+    StartBatchInput:
+      type: object
+      additionalProperties: false
+      required: [request_key, expected_revision, included_row_keys, excluded_row_keys, allow_shortfall, expected_shortfalls]
+      properties:
+        request_key: {$ref: '#/components/schemas/RequestKey'}
+        expected_revision: {$ref: '#/components/schemas/ID'}
+        included_row_keys:
+          allOf: [{$ref: '#/components/schemas/RowKeys'}]
+          minItems: 1
+          description: Included and excluded keys are disjoint and together cover the saved candidates. Included rows must fit the fixed target per category. The server uses saved row order.
+        excluded_row_keys: {$ref: '#/components/schemas/RowKeys'}
+        allow_shortfall: {type: boolean, description: Must be true when the exact included set creates a positive shortfall.}
+        expected_shortfalls:
+          type: array
+          description: One entry for every target category, including zero shortfall. Compared to the server result before commit.
+          items:
+            type: object
+            additionalProperties: false
+            required: [category_id, shortfall]
+            properties:
+              category_id: {$ref: '#/components/schemas/ID'}
+              shortfall: {type: integer, minimum: 0}
+    BatchStartResult:
+      type: object
+      required: [batch_id, revision, execution_status, first_started_at, task_ids, target_count, created_count, creation_shortfall]
+      properties:
+        batch_id: {$ref: '#/components/schemas/ID'}
+        revision: {$ref: '#/components/schemas/ID'}
+        execution_status: {const: running}
+        first_started_at: {type: string, format: date-time}
+        task_ids: {type: array, minItems: 1, items: {$ref: '#/components/schemas/ID'}}
+        target_count: {type: integer, minimum: 0}
+        created_count: {type: integer, minimum: 1}
+        creation_shortfall: {type: integer, minimum: 0}
+    BatchReasonCommand:
+      type: object
+      additionalProperties: false
+      required: [expected_revision, reason]
+      properties:
+        expected_revision: {$ref: '#/components/schemas/ID'}
+        reason: {$ref: '#/components/schemas/Reason'}
+    TaskRevision:
+      type: object
+      additionalProperties: false
+      required: [task_id, revision]
+      properties:
+        task_id: {$ref: '#/components/schemas/ID'}
+        revision: {$ref: '#/components/schemas/ID'}
+    ResumeBatchInput:
+      type: object
+      additionalProperties: false
+      required: [request_key, expected_revision, expected_pause_id, acknowledged_exceptions]
+      properties:
+        request_key: {$ref: '#/components/schemas/RequestKey'}
+        expected_revision: {$ref: '#/components/schemas/ID'}
+        expected_pause_id: {$ref: '#/components/schemas/ID'}
+        acknowledged_exceptions:
+          type: array
+          description: Exact current task IDs and revisions in the returned pause evidence; one item per task. Can be empty for a pause with no exception.
+          items: {$ref: '#/components/schemas/TaskRevision'}
+    FinishBatchInput:
+      type: object
+      additionalProperties: false
+      required: [expected_revision, expected_failed_tasks, reason]
+      properties:
+        expected_revision: {$ref: '#/components/schemas/ID'}
+        expected_failed_tasks:
+          type: array
+          description: Exact current failed task IDs and revisions; one item per task. Can be empty.
+          items: {$ref: '#/components/schemas/TaskRevision'}
+        reason: {$ref: '#/components/schemas/Reason'}
+    BatchPause:
+      type: object
+      required: [id, kind, reason, paused_at, exceptions]
+      properties:
+        id: {$ref: '#/components/schemas/ID'}
+        kind: {type: string, enum: [manual, group_exception, exception_limit]}
+        reason: {type: string}
+        paused_at: {type: string, format: date-time}
+        exceptions:
+          type: array
+          items:
+            type: object
+            required: [task_id, revision, status]
+            properties:
+              task_id: {$ref: '#/components/schemas/ID'}
+              revision: {$ref: '#/components/schemas/ID'}
+              status: {type: string, enum: [failed, awaiting_human, uncertain]}
+              code: {type: string}
+    BatchExecution:
+      type: object
+      required: [phase, first_started_at, execution_group_no, group_task_ids, group_ended_at, next_group_at, pause, stopped_at, ended_at, target_count, created_count, creation_shortfall, published_count, target_shortfall, task_counts]
+      properties:
+        phase: {type: string, enum: [not_started, running, waiting_resources, waiting_interval, awaiting_processing, paused, stopping, ended]}
+        first_started_at: {type: [string, 'null'], format: date-time}
+        execution_group_no: {type: [integer, 'null'], minimum: 1, description: Batch execution group number, independent of any plan ordering.}
+        group_task_ids: {type: array, items: {$ref: '#/components/schemas/ID'}}
+        group_ended_at: {type: [string, 'null'], format: date-time}
+        next_group_at: {type: [string, 'null'], format: date-time}
+        pause: {oneOf: [{type: 'null'}, {$ref: '#/components/schemas/BatchPause'}]}
+        stopped_at: {type: [string, 'null'], format: date-time}
+        ended_at: {type: [string, 'null'], format: date-time}
+        stop_reason: {type: string}
+        finish_reason: {type: string}
+        target_count: {type: integer, minimum: 0}
+        created_count: {type: integer, minimum: 0}
+        creation_shortfall:
+          type: [integer, 'null']
+          minimum: 0
+          description: Null until first start. Thereafter calculated from the frozen target and number of formal tasks.
+        published_count: {type: integer, minimum: 0, description: Distinct formal tasks with verified public work, excluding reviewing and attempts.}
+        target_shortfall: {type: integer, minimum: 0, description: The fixed target less the verified public count, floored at zero.}
+        task_counts:
+          type: object
+          propertyNames: {$ref: 'publication.openapi.yaml#/components/schemas/TaskStatus'}
+          additionalProperties: {type: integer, minimum: 0}
+          description: Omitted task states have a count of zero.
+    BatchControlResult:
+      type: object
+      required: [batch_id, revision, execution_status, execution]
+      properties:
+        batch_id: {$ref: '#/components/schemas/ID'}
+        revision: {$ref: '#/components/schemas/ID'}
+        execution_status: {$ref: '#/components/schemas/ExecutionStatus'}
+        execution: {$ref: '#/components/schemas/BatchExecution'}
+    BatchStopResult:
+      allOf:
+        - {$ref: '#/components/schemas/BatchControlResult'}
+        - required: [cancelled_unclaimed_count, inflight_count]
+          properties:
+            cancelled_unclaimed_count: {type: integer, minimum: 0}
+            inflight_count: {type: integer, minimum: 0}
+    BatchTaskPage:
+      allOf:
+        - {$ref: '#/components/schemas/Page'}
+        - properties:
+            items: {type: array, items: {$ref: 'publication.openapi.yaml#/components/schemas/Publication'}}
+    BatchConflict:
+      type: object
+      required: [errcode, message, data, logid, error]
+      properties:
+        errcode: {type: integer}
+        message: {type: string}
+        data: {type: 'null'}
+        logid: {type: string}
+        error:
+          type: object
+          required: [code]
+          properties:
+            code: {type: string}
+            details:
+              type: object
+              properties:
+                batch_id: {$ref: '#/components/schemas/ID'}
+                current_revision: {$ref: '#/components/schemas/ID'}
+                execution_status: {$ref: '#/components/schemas/ExecutionStatus'}
+                pause: {$ref: '#/components/schemas/BatchPause'}
+                issues: {type: array, items: {$ref: '#/components/schemas/ExecutionIssue'}}
+                shortfalls: {type: array, items: {$ref: '#/components/schemas/CreationShortfall'}}

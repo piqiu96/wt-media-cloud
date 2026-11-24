@@ -1,11 +1,13 @@
 openapi: 3.1.0
 info:
   title: WT Media Cloud-Agent Publication Execution
-  version: 2026.11.22.2
+  version: 2026.11.25.2
   description: >-
-    Additive single-task execution. Agent bearer identifies the account owner; no device identity or
-    generic lease. Claim requires a current Desktop session. Reports are report-safe only for the same
-    owner and current attempt; starting new work, including submitting, rechecks the Desktop session.
+    Owner-scoped publication execution for standalone and batch tasks. New work requires a current
+    Desktop session and Agent contract revision 2026.11.25.2 or newer. Original attempt keepalive,
+    completion, and closure-only check release retain ReportSafe semantics. The profile use record
+    represents the exact original operation and persists until trustworthy closure; elapsed time alone
+    does not release a Profile, account, or unresolved window.
     Task/attempt ids and revisions are decimal strings. Responses use errcode/message/data/logid.
     New execution freezes portrait_cover_sha256/portrait_cover_size in addition to the horizontal cover, and requires matching portrait_cover_sha256 in progress and result evidence. Missing portrait input is refused; no automatic conversion.
     Download grants appear only in responses, never in frozen snapshots, evidence or logs.
@@ -16,16 +18,18 @@ paths:
       security: [{agentBearer: []}]
       requestBody:
         required: true
-        content: {application/json: {schema: {type: object, required: [request_key], additionalProperties: false, properties: {request_key: {type: string, minLength: 1, maxLength: 64}}}}}
+        content: {application/json: {schema: {$ref: '#/components/schemas/PublicationClaimRequest'}}}
       responses:
         '200':
           description: >-
-            data is null when no task is available, otherwise Claim. A repeated owner/request key returns
-            the original attempt with replayed=true, never a new task. A replay without a local record
-            must preserve the scene for verification, not re-enter the browser. No-task creates no row.
+            Data is null when no task is eligible or capacity/Profile is busy. A new claim checks the
+            current batch group and control, actual Profile use, UID, and both effective capacity limits
+            in the attempt transaction. A repeated owner/request key returns the original attempt with
+            replayed=true. Only the known original claimant with durable local state may continue.
+            Stopped, finished and lost attempts receive no new file grants. A busy/no-task reply creates no attempt.
           content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}
         '401': {description: Invalid bearer or Desktop session no longer current.}
-        '409': {description: Input changed, owner/Profile busy, or platform unavailable.}
+        '409': {description: Changed input, platform unavailable, publication_admission_closed during legacy cutover, or publication_agent_upgrade_required for an older Agent requesting new work.}
   /api/v1/cloud-agent/publication-task/{id}/report:
     post:
       operationId: reportPublication
@@ -33,7 +37,15 @@ paths:
       parameters: [{$ref: '#/components/parameters/TaskID'}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/Report'}}}}
       responses:
-        '200': {description: '{task_status,attempt_status,attempt_id,report_seq,stop_requested,stop_reason?,allow_submit}. Omit stage for lightweight keepalive: no history append, resource revalidation or submit permission. Supply stage for progress and pre-submit checks. Invalidated execution input persists stop_reason=PUBLICATION_INPUT_CHANGED without advancing the stage; keepalive returns this stop until the executor safely completes or the attempt is reconciled. Only a fresh submitting report can grant one click; replay never grants it again. A task stop request fences permission with the same task revision. Explicit stop_requested=true and allow_submit=false denies permission; only that received denial plus verified original scene closure proves no click. Missing/failed responses remain uncertain.'}
+        '200':
+          description: >-
+            Ordinary keepalive changes neither task nor batch business revision, appends no progress or audit,
+            and grants no submit permission. scene_parked acknowledges release of only the automatic slot for the
+            original pre-submit attempt; Profile, UID, and window remain held. Replays grant no new permission.
+            Only a fresh submitting report in a current session for an attempt admitted or continued under the current contract can grant one click. Legacy-only attempts retain settlement, including already issued permissions and the original result, without a new permission. A stopped batch prevents new
+            submit permission even after claim. Explicit stop_requested=true with allow_submit=false and verified
+            original scene closure can prove no submission. Missing or failed replies remain uncertain.
+          content: {application/json: {schema: {$ref: '#/components/schemas/FeedbackEnvelope'}}}
         '409': {description: Stale/conflicting report, invalid transition, changed input or unsafe scene.}
   /api/v1/cloud-agent/publication-task/{id}/complete:
     post:
@@ -42,7 +54,9 @@ paths:
       parameters: [{$ref: '#/components/parameters/TaskID'}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/Completion'}}}}
       responses:
-        '200': {description: '{task_status,attempt_status,attempt_id,result_hash}. Exact same result/sequence acknowledges the original write without another state change. Reviewing requires a matching real receipt; public success is verified separately, never inferred from this endpoint.'}
+        '200':
+          description: Exact result and sequence replay acknowledges the original completion. Reviewing requires the real matching receipt. Completion may update original task facts and group progress without reopening a stopped or ended batch. Public success is verified separately.
+          content: {application/json: {schema: {$ref: '#/components/schemas/FeedbackEnvelope'}}}
         '409': {description: Foreign/non-current attempt, stale sequence, conflicting result, or an already resolved scene.}
   /api/v1/cloud-agent/publication-task/{id}/attempt/{attempt_id}:
     get:
@@ -72,19 +86,21 @@ paths:
     get:
       operationId: inspectPublicationScene
       security: [{agentBearer: []}]
-      description: Strict current Desktop session. Validate original owner, task revision, attempt, frozen input, paused pre-submit stage and stop state. Read only; never opens a browser or grants submit.
+      description: Strict current Desktop session. Check original owner, task revision, attempt, frozen input, paused pre-submit stage and parent stop state. Read-only eligibility for the locally registered original scene.
       parameters:
         - {$ref: '#/components/parameters/TaskID'}
         - {in: path, name: attempt_id, required: true, schema: {$ref: '#/components/schemas/ID'}}
         - {in: query, name: expected_revision, required: true, schema: {$ref: '#/components/schemas/ID'}}
       responses:
-        '200': {description: 'Standard envelope data original attempt ExecutionFeedback, allow_submit=false.'}
+        '200':
+          description: Original attempt feedback with allow_submit=false.
+          content: {application/json: {schema: {$ref: '#/components/schemas/FeedbackEnvelope'}}}
         '409': {description: Stale, unsafe, changed input or no original waiting scene eligibility.}
   /api/v1/cloud-agent/publication-task/{id}/resume:
     post:
       operationId: resumePublication
       security: [{agentBearer: []}]
-      description: Continue only a live original pre-submit scene, with current Desktop authentication. Restores the saved stage and original attempt, never creates an attempt or reuploads. Same original expected_revision can confirm a lost reply only while that exact resume remains safe. Submit permission is independently rechecked later.
+      description: Current Desktop session only. Recheck current parent control, original attempt, exact local scene, frozen input and revision. Reacquire an automatic slot before restoring its paused stage. Keep the original attempt, Profile and window. Replay of the original revision confirms only that exact previously accepted resume while safe. Submit permission is checked separately.
       parameters:
         - {$ref: '#/components/parameters/TaskID'}
       requestBody:
@@ -94,60 +110,193 @@ paths:
             schema:
               type: object
               additionalProperties: false
-              required: [attempt_id, expected_revision]
+              required: [attempt_id, expected_revision, capacity]
               properties:
                 attempt_id: {$ref: '#/components/schemas/ID'}
                 expected_revision: {$ref: '#/components/schemas/ID'}
+                capacity: {$ref: '#/components/schemas/ExecutionCapacity'}
       responses:
-        '200': {description: 'Standard envelope data original ExecutionFeedback, running, allow_submit=false.'}
-        '409': {description: Stale original identity/revision, submitted/lost scene, stop or changed input.}
+        '200':
+          description: Original attempt is running with its automatic slot and allow_submit=false.
+          content: {application/json: {schema: {$ref: '#/components/schemas/FeedbackEnvelope'}}}
+        '409': {description: Stale revision, unsafe original scene, parent control, changed input, upgrade required or capacity wait. Wait never starts local actions.}
   /api/v1/cloud-agent/publication-task/check/claim:
     post:
       operationId: claimPublicCheck
       security: [{agentBearer: []}]
-      description: Read one due original reviewing task for the current owner. Advances only the five-minute read schedule and observation generation. No publication attempt, upload, file grant or submit permission is created. A missing reply waits for the next read cycle.
+      description: >-
+        Strict current Desktop session. Claim one due original submission check for this owner. Acquire its
+        actual Profile use and reserve window capacity in the same transaction as the observation generation.
+        Publishing and checking the same BitBrowser main-account/Profile pair conflict before a new attempt or
+        observation generation is created. Journal the exact request key and input before sending. Persist
+        the returned reservation and original snapshot before any read or window activity. Persist a separate
+        possible-open barrier before attempting to open the Profile, then persist trustworthy closure and the
+        exact settlement packet before sending it. Preserve the journal across session replacement until original
+        settlement is acknowledged. With an active replay, continue the original check only when that same-key
+        journal proves the possible-open barrier was never crossed. If crossed or unknown, reconcile the exact
+        old scene before settlement. A released replay returns only its original acknowledgement and never
+        returns a snapshot or creates a new generation.
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/PublicCheckClaimRequest'}}}
       responses:
-        '200': {description: Standard envelope with data null or PublicCheckClaim, content: {application/json: {schema: {type: object, properties: {data: {nullable: true, allOf: [{$ref: '#/components/schemas/PublicCheckClaim'}]}}}}}}
+        '200':
+          description: Active original check, exact released acknowledgement, or data=null when no eligible check or Profile/window is busy.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - {$ref: '#/components/schemas/Success'}
+                  - properties:
+                      data:
+                        oneOf:
+                          - {type: 'null'}
+                          - {$ref: '#/components/schemas/PublicCheckClaim'}
+                          - {$ref: '#/components/schemas/ReleasedPublicCheckClaim'}
         '401': {description: Current Desktop Agent session required.}
+        '409': {description: Request key reused with different input, a newer Agent contract is required, or legacy cutover still closes new admission.}
   /api/v1/cloud-agent/publication-task/{id}/check:
     post:
       operationId: observePublication
       security: [{agentBearer: []}]
       parameters: [{$ref: '#/components/parameters/TaskID'}]
-      description: Record this exact original attempt and generation. Current task revision/input/owner fences manual supplementation and later checks. Only unknown/received/public observations are admitted. Unknown or inaccessible preserves reviewing. A credible public observation atomically records work, task, observation and audit without changing the original attempt. Exact recorded replay confirms the original observation without changing a newer task.
-      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/PublicCheckReport'}}}}
+      description: >-
+        The observation branch requires the current Desktop session and matches the original task, attempt,
+        generation, Profile reservation and current task revision. It records only unknown/received/public
+        observations and releases the original Profile use once verified safe. Credible public evidence records
+        the work, task projection, observation and audit atomically. The explicit release-only branch uses
+        ReportSafe authentication and verifies the original operation and trustworthy no-open/closed disposition.
+        It only settles that Profile use, even if task revision changed or an observation became stale. Exact
+        acknowledgement replay cannot release a successor or apply an observation again.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - {$ref: '#/components/schemas/PublicCheckReport'}
+                - {$ref: '#/components/schemas/PublicCheckRelease'}
       responses:
-        '200': {description: 'Standard envelope data {publication_id,attempt_id,generation,observation_hash}; IDs/generation decimal strings. No submit permission.'}
-        '400': {description: Invalid observation or unsupported conclusion.}
-        '401': {description: Current Desktop Agent session required.}
-        '409': {description: Original task revision/attempt/generation/input changed or observation conflicts.}
+        '200':
+          description: Original observation or release-only acknowledgement.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - {$ref: '#/components/schemas/Success'}
+                  - properties:
+                      data:
+                        oneOf:
+                          - {$ref: '#/components/schemas/PublicCheckAcknowledgement'}
+                          - allOf:
+                              - {$ref: '#/components/schemas/PublicCheckReleaseAcknowledgement'}
+                              - not: {required: [observation_hash]}
+        '400': {description: Invalid observation, release evidence or unsupported conclusion.}
+        '401': {description: Observation requires a current Desktop session. Release-only requires a valid original-owner report-safe token.}
+        '409': {description: Original revision, attempt, generation, input or reservation changed, or evidence conflicts. A stale observation can be followed by original release-only closure.}
 components:
   securitySchemes:
     agentBearer: {type: http, scheme: bearer}
   parameters:
     TaskID: {in: path, name: id, required: true, schema: {$ref: '#/components/schemas/ID'}}
   schemas:
+    RequestKey: {type: string, minLength: 1, maxLength: 64}
+    ExecutionCapacity:
+      type: object
+      additionalProperties: false
+      required: [automatic_slots, window_slots]
+      description: >-
+        Deployment/configured upper bounds through the Agent session, not a count of currently free slots.
+        Effective bounds take the smaller Cloud and Agent values independently and then enforce windows as
+        another constraint on automation. Controlled starting settings are 5 automatic and 10 windows.
+        Runtime Profile/UID availability further limits admission. A larger reported upper bound grants no
+        Cloud or local capacity. Browser checks count towards retained windows.
+      properties:
+        automatic_slots: {type: integer, minimum: 1, maximum: 65535}
+        window_slots: {type: integer, minimum: 1, maximum: 65535}
+    PublicationClaimRequest:
+      type: object
+      additionalProperties: false
+      required: [request_key]
+      properties:
+        request_key: {$ref: '#/components/schemas/RequestKey'}
+        capacity: {$ref: '#/components/schemas/ExecutionCapacity'}
+      description: capacity is mandatory for new work. Legacy request-key-only packets may read an existing original claim without receiving new work or grants.
+    PublicCheckClaimRequest:
+      type: object
+      additionalProperties: false
+      required: [request_key, capacity]
+      properties:
+        request_key: {$ref: '#/components/schemas/RequestKey'}
+        capacity: {$ref: '#/components/schemas/ExecutionCapacity'}
     PublicCheckClaim:
       type: object
-      required: [task, attempt, generation, expected_revision]
+      required: [task, attempt, generation, expected_revision, reservation_id, reservation_state, replayed, browser_fallback_allowed]
       properties:
         browser_fallback_allowed: {type: boolean, description: "False after the task already used a browser fallback. Explicit public-media verification may still use a browser; ordinary lookup failures must not reopen it."}
         task: {type: object, description: 'Original reviewing task, immutable submission ID and exact platform-supplied target_url if known.'}
         attempt: {type: object, description: 'Original frozen input and Profile, no file grants or execution authority.'}
-        generation: {type: string, pattern: '^[1-9][0-9]*$'}
-        expected_revision: {type: string, pattern: '^[1-9][0-9]*$'}
+        generation: {$ref: '#/components/schemas/ID'}
+        expected_revision: {$ref: '#/components/schemas/ID'}
+        reservation_id: {$ref: '#/components/schemas/ID'}
+        reservation_state: {const: active}
+        replayed: {type: boolean}
+    ReleasedPublicCheckClaim:
+      allOf:
+        - {$ref: '#/components/schemas/PublicCheckReleaseAcknowledgement'}
+        - type: object
+          required: [reservation_state, replayed]
+          properties:
+            reservation_state: {const: released}
+            replayed: {const: true}
+            observation_hash: {type: string, pattern: '^[a-f0-9]{64}$', description: Present only when the original acknowledgement recorded an observation.}
+          not: {anyOf: [{required: [task]}, {required: [attempt]}, {required: [expected_revision]}]}
+    ProfileDisposition:
+      type: string
+      enum: [not_opened, closed]
+      description: Original Agent has established no owned browser was opened or its exact owned scene safely closed. Elapsed time or a missing local record is insufficient.
     PublicCheckReport:
       type: object
       additionalProperties: false
-      required: [generation, observation]
+      required: [reservation_id, generation, observation, profile_disposition]
       properties:
-        browser_used: {type: boolean, description: "This read opened an owned Profile scene, which must be safely closed."}
+        browser_used: {type: boolean, description: "This read opened an owned Profile scene."}
         lookup_result: {type: string, enum: [found, not_found, blocked], description: "Optional lookup outcome. not_found requires a complete successful original-account search; blocked stops automatic reads pending operator action."}
-        generation: {type: string, pattern: '^[1-9][0-9]*$'}
+        reservation_id: {$ref: '#/components/schemas/ID'}
+        generation: {$ref: '#/components/schemas/ID'}
+        profile_disposition: {$ref: '#/components/schemas/ProfileDisposition'}
         observation:
           allOf:
             - {$ref: '../../cloud-api/v1/publication.openapi.yaml#/components/schemas/ResultResolution'}
             - {type: object, properties: {conclusion: {type: string, enum: [uncertain, reviewing, published]}}}
+      allOf:
+        - if: {required: [browser_used], properties: {browser_used: {const: true}}}
+          then: {properties: {profile_disposition: {const: closed}}}
+    PublicCheckRelease:
+      type: object
+      additionalProperties: false
+      required: [release_only, reservation_id, attempt_id, generation, profile_disposition]
+      properties:
+        release_only: {const: true}
+        reservation_id: {$ref: '#/components/schemas/ID'}
+        attempt_id: {$ref: '#/components/schemas/ID'}
+        generation: {$ref: '#/components/schemas/ID'}
+        profile_disposition: {$ref: '#/components/schemas/ProfileDisposition'}
+    PublicCheckReleaseAcknowledgement:
+      type: object
+      required: [publication_id, attempt_id, generation, reservation_id, released]
+      properties:
+        publication_id: {$ref: '#/components/schemas/ID'}
+        attempt_id: {$ref: '#/components/schemas/ID'}
+        generation: {$ref: '#/components/schemas/ID'}
+        reservation_id: {$ref: '#/components/schemas/ID'}
+        released: {const: true}
+    PublicCheckAcknowledgement:
+      allOf:
+        - {$ref: '#/components/schemas/PublicCheckReleaseAcknowledgement'}
+        - required: [observation_hash]
+          properties:
+            observation_hash: {type: string, pattern: '^[a-f0-9]{64}$'}
     ID: {type: string, pattern: '^[1-9][0-9]*$'}
     Report:
       type: object
@@ -162,6 +311,9 @@ components:
         attempt_id: {$ref: '#/components/schemas/ID'}
         report_seq: {type: integer, minimum: 1}
         stage: {type: string, enum: [preparing, ready, submitting, awaiting_human]}
+        scene_parked:
+          const: true
+          description: A current Desktop session is required to record new parking evidence. The original controller has stopped automated actions in the pre-submit wait callback and registered the live local scene. At this exact increasing report_seq, the server may release only the automatic slot. Older awaiting_human packets have no such effect.
         platform_uid: {type: string, maxLength: 255}
         bit_profile_id: {type: string, maxLength: 255}
         video_sha256: {type: string, pattern: '^[a-f0-9]{64}$'}
@@ -177,6 +329,8 @@ components:
                 - {required: [video_sha256]}
                 - {required: [cover_sha256]}
                 - {required: [portrait_cover_sha256]}
+        - if: {required: [scene_parked]}
+          then: {required: [stage], properties: {stage: {const: awaiting_human}}}
     Completion:
       type: object
       required: [attempt_id, report_seq, result_hash, result]
@@ -215,12 +369,36 @@ components:
         task: {type: object, description: 'Formal task with decimal-string IDs; ownership and fixed content.'}
         attempt: {type: object, description: 'Attempt with frozen input, owner, Cloud/BitBrowser Profile IDs and file sizes/digests; no grants or secrets.'}
         replayed: {type: boolean}
+        execution_group_no: {type: [integer, 'null'], minimum: 1, description: Fixed batch execution group assigned at claim. Null for a standalone task.}
+        effective_capacity: {$ref: '#/components/schemas/ExecutionCapacity'}
         files: {type: object, description: 'video, cover (16:9), and portrait_cover (3:4) short-lived single-object grants, each {url,size,sha256}; never persist. Omitted on replay of finished/lost work.'}
-    Envelope:
+    ExecutionFeedback:
+      type: object
+      required: [task_status, attempt_status, attempt_id, report_seq, stop_requested, allow_submit]
+      properties:
+        task_status: {$ref: '../../cloud-api/v1/publication.openapi.yaml#/components/schemas/TaskStatus'}
+        attempt_status: {type: string, enum: [running, awaiting_human, completed, interrupted]}
+        attempt_id: {$ref: '#/components/schemas/ID'}
+        report_seq: {type: integer, minimum: 0}
+        stop_requested: {type: boolean}
+        stop_reason: {type: string}
+        allow_submit: {type: boolean}
+        result_hash: {type: [string, 'null']}
+        scene_parked: {type: boolean, description: Cloud currently records the original scene as reliably parked, with no automatic slot.}
+    Success:
       type: object
       required: [errcode, message, data, logid]
       properties:
-        errcode: {type: integer}
+        errcode: {type: integer, const: 0}
         message: {type: string}
         logid: {type: string}
-        data: {oneOf: [{type: 'null'}, {$ref: '#/components/schemas/Claim'}]}
+    FeedbackEnvelope:
+      allOf:
+        - {$ref: '#/components/schemas/Success'}
+        - properties:
+            data: {$ref: '#/components/schemas/ExecutionFeedback'}
+    Envelope:
+      allOf:
+        - {$ref: '#/components/schemas/Success'}
+        - properties:
+            data: {oneOf: [{type: 'null'}, {$ref: '#/components/schemas/Claim'}]}
