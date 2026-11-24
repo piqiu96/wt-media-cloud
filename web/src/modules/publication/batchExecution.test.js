@@ -36,7 +36,7 @@ it("reads current Cloud state before retry and keeps the original start input", 
   const events = [];
   const api = {
     get: vi.fn(async () => { events.push("get"); return { id: batch.id, execution_status: "not_started" }; }),
-    start: vi.fn(async (id, input) => { events.push(input); return { batch_id: id, revision: "6", first_started_at: "2026-11-25T01:00:00Z", task_ids: ["94"] }; }),
+    start: vi.fn(async (id, input) => { events.push(input); return { batch_id: id, revision: "9007199254740996", execution_status: "running", first_started_at: "2026-11-25T01:00:00Z", task_ids: ["94"] }; }),
   };
   const original = execution.buildBatchStart(batch, preview, "original", true);
   await expect(execution.sendBatchCommand(api, batch.id, { action: "start", input: original }, { retry: true }))
@@ -75,16 +75,72 @@ it("uses the batch control endpoints and preserves string values in requests", a
   expect(fetch).toHaveBeenLastCalledWith(`/api/v1/publication-batch/${batch.id}/task?page=2&media_account_id=47`, expect.objectContaining({ method: "GET" }));
 });
 
-it("returns exact started tasks from Cloud after a lost start acknowledgement without reposting", async () => {
+it("recovers a lost start ACK only from the original key receipt after later revisions", async () => {
+  const firstStartedAt = "2026-11-25T01:00:00Z";
+  const latest = { id: batch.id, revision: "9007199254741010", execution_status: "paused",
+    execution: { first_started_at: firstStartedAt } };
+  const receipt = { batch_id: batch.id, revision: "9007199254740996", execution_status: "running",
+    first_started_at: firstStartedAt, task_ids: ["101"] };
   const api = {
-    get: vi.fn().mockResolvedValue({ id: batch.id, revision: "12", execution: { first_started_at: "2026-11-25T01:00:00Z" } }),
+    get: vi.fn().mockResolvedValue(latest),
     tasks: vi.fn().mockResolvedValue({ total: 1, items: [{ id: "101", revision: "20", row_key: "a" }] }),
-    start: vi.fn(),
+    start: vi.fn().mockRejectedValueOnce(new TypeError("原回执丢失")).mockResolvedValueOnce(receipt),
+  };
+  const input = execution.buildBatchStart(batch, preview, "original", true);
+  const command = { action: "start", input };
+  await expect(execution.sendBatchCommand(api, batch.id, command)).rejects.toMatchObject({ outcomeUnknown: true, latest });
+  expect(api.start).toHaveBeenCalledTimes(1);
+  await expect(execution.sendBatchCommand(api, batch.id, command, { retry: true }))
+    .resolves.toEqual({ ...receipt, recovered: true });
+  expect(api.start.mock.calls).toEqual([[batch.id, input], [batch.id, input]]);
+  expect(api.tasks).not.toHaveBeenCalled();
+});
+
+it("keeps the original intent when another revision started the same rows with another key", async () => {
+  const firstStartedAt = "2026-11-25T01:00:00Z";
+  const latest = { id: batch.id, revision: "9007199254740997", execution_status: "running",
+    execution: { first_started_at: firstStartedAt } };
+  const conflict = Object.assign(new Error("发布条件已变化"), { status: 409, code: "publication_conflict",
+    details: { batch_id: batch.id, current_revision: latest.revision, execution_status: "running" } });
+  const api = {
+    get: vi.fn().mockResolvedValueOnce({ ...batch, execution_status: "not_started" }).mockResolvedValue(latest),
+    tasks: vi.fn().mockResolvedValue({ total: 1, items: [{
+      id: "102", revision: "1", row_key: "a", media_account_id: "18", content: { description: "另一版本" },
+    }] }),
+    start: vi.fn().mockRejectedValueOnce(new TypeError("原请求未到达")).mockRejectedValueOnce(conflict),
+  };
+  const input = execution.buildBatchStart(batch, preview, "original", true);
+  const command = { action: "start", input };
+  await expect(execution.sendBatchCommand(api, batch.id, command)).rejects.toMatchObject({ outcomeUnknown: true });
+  await expect(execution.sendBatchCommand(api, batch.id, command, { retry: true }))
+    .rejects.toMatchObject({ outcomeUnknown: true, latest });
+  expect(api.start.mock.calls).toEqual([[batch.id, input], [batch.id, input]]);
+});
+
+it("settles only the original intent when Cloud explicitly proves that another key started the batch", async () => {
+  const latest = { id: batch.id, revision: "9007199254740997", execution_status: "running",
+    execution: { first_started_at: "2026-11-25T01:00:00Z" } };
+  const conflict = Object.assign(new Error("发布条件已变化"), { status: 409, code: "publication_conflict",
+    details: { batch_id: batch.id, current_revision: latest.revision, execution_status: "running", start_request_applied: false } });
+  const api = { get: vi.fn().mockResolvedValue(latest), start: vi.fn().mockRejectedValue(conflict) };
+  const input = execution.buildBatchStart(batch, preview, "original", true);
+  await expect(execution.sendBatchCommand(api, batch.id, { action: "start", input }, { retry: true }))
+    .rejects.toMatchObject({ batchRejection: true, message: "批次已由另一请求开始，请核对正式任务", latest });
+  expect(api.start).toHaveBeenCalledExactlyOnceWith(batch.id, input);
+});
+
+it("cannot clear a pending start from a receipt with the current revision instead of the original revision", async () => {
+  const firstStartedAt = "2026-11-25T01:00:00Z";
+  const latest = { id: batch.id, revision: "9007199254741010", execution: { first_started_at: firstStartedAt } };
+  const api = {
+    get: vi.fn().mockResolvedValue(latest),
+    start: vi.fn().mockResolvedValue({ batch_id: batch.id, revision: latest.revision, execution_status: "running",
+      first_started_at: firstStartedAt, task_ids: ["101"] }),
   };
   const input = execution.buildBatchStart(batch, preview, "original", true);
   await expect(execution.sendBatchCommand(api, batch.id, { action: "start", input }, { retry: true }))
-    .resolves.toEqual({ batch_id: batch.id, revision: "12", task_ids: ["101"], recovered: true });
-  expect(api.start).not.toHaveBeenCalled();
+    .rejects.toMatchObject({ outcomeUnknown: true, latest });
+  expect(api.start).toHaveBeenCalledOnce();
 });
 
 it.each([401, 429])("retains the original resume after an uncertain ACK and a %i retry response", async status => {

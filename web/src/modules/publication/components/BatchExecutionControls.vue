@@ -207,7 +207,7 @@ async function send(operation, retry = false) {
     if (failure.latest || failure.batchRejection || failure.outcomeUnknown) emit("updated", failure.latest);
     error.value = previewProblem(failure, "批次操作未完成");
     if (failure.batchRejection || (failure.outcomeUnknown && !pending.value)) refreshRequired.value = true;
-    if (operation.action === "start" && failure.batchRejection && !failure.latest?.execution?.first_started_at)
+    if (operation.action === "start" && failure.batchRejection && !failure.supersededStart && !failure.latest?.execution?.first_started_at)
       error.value = "批次已保存。启动未获确认，请核对当前 Cloud 状态。\n" + error.value;
     if (operation.action === "start" && failure.batchRejection) {
       preview.value = null;

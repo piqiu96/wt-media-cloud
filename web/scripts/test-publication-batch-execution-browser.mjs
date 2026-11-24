@@ -46,6 +46,7 @@ let freshCreateCount = 0;
 let tasks = [];
 let lostStartRead = false;
 let startCount = 0;
+let startedInput, startReceipt, foreignOriginalInput;
 let expectedResume;
 let resumeReceipt;
 let resumePosts = 0;
@@ -59,6 +60,8 @@ let reviewPreviews = 0;
 let replayInput;
 const isNavigationReview = ["changed-revision", "abandoned-navigation"].includes(review);
 const isPublicResultReview = ["late-publication", "manual-publication"].includes(review);
+const isDifferentStart = ["different-start", "different-start-rejected"].includes(review);
+const rejectsOriginalStart = review === "different-start-rejected";
 const calls = [];
 
 async function routeCloud(route) {
@@ -144,13 +147,33 @@ async function routeCloud(route) {
           errcode: 18003, message: "检查后原成片已占用", data: null,
           error: { code: "publication_conflict", details: { issues: [{ row_key: "row-0", message: "检查后原成片已占用" }] } },
         } });
+        if (isDifferentStart && !foreignOriginalInput) {
+          foreignOriginalInput = input;
+          return route.abort("failed");
+        }
+        if (startReceipt) {
+          if (input.request_key === startedInput.request_key) {
+            assert.deepEqual(input, startedInput);
+            return send(startReceipt);
+          }
+          assert.deepEqual(input, foreignOriginalInput);
+          return route.fulfill({ status: 409, json: {
+            errcode: 18003, message: "发布条件已变化，请重新检查", data: null,
+            error: { code: "publication_conflict", details: {
+              batch_id: current.id, current_revision: current.revision, execution_status: current.execution_status,
+              ...(rejectsOriginalStart && { start_request_applied: false }),
+            } },
+          } });
+        }
         startCount++;
+        startedInput = input;
+        assert.equal(input.expected_revision, current.revision);
         assert.deepEqual(input.included_row_keys, ["row-0", "row-1"]);
         assert.deepEqual(input.excluded_row_keys, ["row-2"]);
         assert.equal(input.allow_shortfall, true);
         assert.deepEqual(input.expected_shortfalls, [{ category_id: "12", shortfall: 2 }]);
         assert.equal(typeof input.request_key, "string");
-        tasks = candidates.slice(0, 2).map((row, index) => ({
+        tasks = current.config.candidates.slice(0, 2).map((row, index) => ({
           ...row, id: String(150 + index), revision: "6", batch_id: id, operator_id: owner.id, platform: "baidu",
           status: index ? "uncertain" : "running", execution_group_no: 1, created_at: now,
           execution_stage: index ? "connection_lost" : "preparing",
@@ -164,6 +187,9 @@ async function routeCloud(route) {
           task_counts: { running: 1, uncertain: 1 } };
         current.execution_status = "running";
         current.allowed_actions = ["pause", "stop"];
+        startReceipt = { batch_id: current.id, revision: current.revision, execution_status: "running", first_started_at: now,
+          task_ids: tasks.map(task => task.id), target_count: 4, created_count: 2, creation_shortfall: 2 };
+        if (isDifferentStart) return send(startReceipt);
         lostStartRead = true;
         return route.abort("failed");
       }
@@ -316,6 +342,52 @@ const regressions = {
     await button("开始发布").click();
     await dialog().getByText(/视频甲.*原成片已占用/).waitFor();
     assert.equal(startPosts(), 2);
+  },
+  "different-start-rejected"() {
+    return regressions["different-start"]();
+  },
+  async "different-start"() {
+    await page.goto(detailURL);
+    await button("开始发布").click();
+    await dialog().getByText("确认按所选范围发布并保留目标缺口", { exact: true }).click();
+    await button("确认开始发布", dialog()).click();
+    await dialog().getByText("操作结果待确认，请核对原请求后继续", { exact: true }).waitFor();
+    const stored = () => page.evaluate(() => Object.entries(localStorage).filter(([key]) => key.startsWith("wt-media:publication-command")));
+    const pending = await stored();
+    assert.equal(pending.length, 1);
+
+    // The server sees a saved edit and start from another session. The candidate
+    // keys survive the edit, while the account, copy and settings have changed.
+    batch.revision = "5";
+    batch.config.candidates = batch.config.candidates.map((row, index) => index === 0
+      ? { ...row, media_account_id: "382", content: { description: "另一会话已发布的配置" } }
+      : row);
+    batch.execution_setting = { ...batch.execution_setting, concurrency_limit: 3 };
+    const other = await browser.newPage();
+    await other.route("**/api/v1/**", routeCloud);
+    await other.goto(detailURL);
+    const result = await other.evaluate(async ({ batchID, input }) => {
+      const response = await fetch("/api/v1/publication-batch/" + batchID + "/start", {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input),
+      });
+      return response.json();
+    }, { batchID: id, input: { ...foreignOriginalInput, request_key: "other-session-key", expected_revision: "5" } });
+    assert.equal(result.data.revision, "6");
+    await other.close();
+
+    await button("核对原启动请求", dialog()).click();
+    const message = rejectsOriginalStart ? "批次已由另一请求开始，请核对正式任务"
+      : "批次已开始，Cloud 未确认原启动请求。请核对现有正式任务。";
+    await dialog().getByText(message, { exact: true }).waitFor();
+    await button("返回", dialog()).click();
+    await dialog().waitFor({ state: "hidden" });
+    await text("另一会话已发布的配置").waitFor();
+    assert.deepEqual(await stored(), rejectsOriginalStart ? [] : pending, "only Cloud's explicit rejection can clear the original intent");
+    if (rejectsOriginalStart) await button("暂停发布").waitFor();
+    else await button("核对原启动请求").waitFor();
+    assert.equal(await text("已核对原启动结果").count(), 0);
+    assert.equal(startPosts(), 3);
+    assert.equal(startCount, 1);
   },
   async "cross-tab"() {
     await page.goto(detailURL);
@@ -509,12 +581,15 @@ async function runBaseline() {
   const outstanding = await page.evaluate(() => Object.keys(localStorage).filter(key => key.startsWith("wt-media:publication-command")));
   assert.equal(outstanding.length, 1);
   lostStartRead = false;
+  batch.revision = "9"; // Later scheduler changes cannot alter the start receipt.
   await browser.close();
   await launch();
   await page.goto(detailURL);
   await button("核对原启动请求").click();
   await text("已核对原启动结果").waitFor();
-  assert.equal(startCount, 1, "an observed started batch is read back without posting start again");
+  assert.equal(startPosts(), 2, "the original package is replayed only after explicit recovery");
+  assert.equal(startCount, 1, "replay of the original receipt creates no additional tasks");
+  assert.equal(await page.evaluate(() => Object.keys(localStorage).filter(key => key.startsWith("wt-media:publication-command")).length), 0);
   await text("本组已安排").waitFor();
   await text("公开发布率").waitFor();
 

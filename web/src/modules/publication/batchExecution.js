@@ -13,15 +13,18 @@ const pauseRef = ({ task_id, revision }) => ({ task_id, revision });
 function conflictAfterReplay(error, id, operation, latest) {
   const { status, code, details } = error || {};
   if (status !== 409 || !details || (details.batch_id != null && details.batch_id !== id)) return false;
+  const { action, input } = operation;
+  // A started batch's generic conflict can mean a different key, a different
+  // digest, or a missing original receipt. It cannot resolve this intent.
+  if (action === "start" && (latest?.execution?.first_started_at ||
+    ["running", "paused", "stopping", "ended"].includes(details.execution_status))) return false;
   if (["publication_conflict", "publication_batch_parent_blocked", "publication_batch_shortfall_changed",
     "publication_batch_pause_changed", "publication_output_occupied"].includes(code) &&
     typeof details.current_revision === "string" && /^[1-9][0-9]*$/.test(details.current_revision)) return true;
 
   // A02 looks up the same-key receipt before reporting row or shortfall
   // conflicts. A replay can therefore prove rejection without a revision.
-  const { action, input } = operation;
-  if (action !== "start" || latest?.id !== id || latest.execution_status !== "not_started" ||
-    latest.execution?.first_started_at) return false;
+  if (action !== "start" || latest?.id !== id || latest.execution_status !== "not_started") return false;
   if (["publication_conflict", "publication_output_occupied"].includes(code) && Array.isArray(details.issues))
     return details.issues.some(issue => input.included_row_keys.includes(issue?.row_key) &&
       typeof issue.message === "string" && issue.message.trim());
@@ -109,59 +112,65 @@ async function readBatchTaskSet(api, id, status) {
 
 export const readBatchFailures = (api, id) => readBatchTaskSet(api, id, "failed");
 
-async function readStartResult(api, current, input) {
-  if (!current?.execution?.first_started_at) return null;
-  const tasks = await readBatchTaskSet(api, current.id);
-  const matching = new Set(tasks.map(task => task.row_key));
-  if (tasks.length !== input.included_row_keys.length || input.included_row_keys.some(key => !matching.has(key))) {
-    const error = new Error("批次已有不同的启动范围，请核对 Cloud 正式任务");
-    error.latest = current;
-    error.batchRejection = true;
-    throw error;
-  }
-  return { batch_id: current.id, revision: current.revision, task_ids: tasks.map(task => task.id), recovered: true };
-}
-
 export async function sendBatchCommand(api, id, operation, { retry = false } = {}) {
   const { action, input } = operation;
   let latest;
   function unknown(cause) {
-    const error = new Error("操作结果待确认，请核对原请求后继续", { cause });
+    const unconfirmedStart = retry && action === "start" && latest?.execution?.first_started_at &&
+      cause?.status === 409 && cause.code === "publication_conflict";
+    const error = new Error(unconfirmedStart
+      ? "批次已开始，Cloud 未确认原启动请求。请核对现有正式任务。"
+      : "操作结果待确认，请核对原请求后继续", { cause });
     error.outcomeUnknown = true;
     error.latest = latest;
     return error;
   }
   async function readBack() {
-    latest = await api.get(id);
-    return action === "start" ? readStartResult(api, latest, input) : null;
+    const current = await api.get(id);
+    if (current?.id !== id) throw new Error("批次读回与原请求不一致");
+    latest = current;
   }
   if (retry) {
     try {
-      const recovered = await readBack();
-      if (recovered) return recovered;
+      await readBack();
     } catch (error) {
-      if (error.batchRejection) throw error;
       throw unknown(error);
     }
   }
   try {
+    // Only the same-key, same-digest A02 receipt proves which start occurred.
+    // The detail and formal task list can show a later revision with the same rows.
     const result = await api[action](id, input);
-    const complete = action === "start" ? !!result?.first_started_at &&
-      Array.isArray(result.task_ids) && result.task_ids.length === input.included_row_keys.length
+    const complete = action === "start"
+      ? result?.execution_status === "running" && !!result.first_started_at &&
+        result.revision === String(BigInt(input.expected_revision) + 1n) &&
+        Array.isArray(result.task_ids) && result.task_ids.length === input.included_row_keys.length &&
+        new Set(result.task_ids).size === result.task_ids.length &&
+        result.task_ids.every(taskID => typeof taskID === "string" && /^[1-9][0-9]*$/.test(taskID))
       : !!result?.execution?.phase;
     if (result?.batch_id !== id || !result.revision || !complete) throw new Error("操作响应不完整");
-    return result;
+    return action === "start" && retry ? { ...result, recovered: true } : result;
   } catch (error) {
-    // A retry can fail before reaching Cloud's original receipt lookup.
-    if (retry ? conflictAfterReplay(error, id, operation, latest) : knownRejection(error)) {
+    if (action === "start" && error?.status === 409 && error.code === "publication_conflict" &&
+        error.details?.batch_id === id && error.details.start_request_applied === false) {
+      const rejection = new Error("批次已由另一请求开始，请核对正式任务", { cause: error });
+      rejection.batchRejection = true;
+      rejection.supersededStart = true;
+      rejection.latest = latest?.execution?.first_started_at ? latest : undefined;
+      throw rejection;
+    }
+    if (!retry && knownRejection(error)) {
       error.batchRejection = true;
       throw error;
     }
     try {
-      const recovered = await readBack();
-      if (recovered) return recovered;
-    } catch (readFailure) {
-      if (readFailure.batchRejection) throw readFailure;
+      await readBack();
+    } catch {
+      // A failed read cannot replace the last known detail or settle the intent.
+    }
+    if (retry && conflictAfterReplay(error, id, operation, latest)) {
+      error.batchRejection = true;
+      throw error;
     }
     throw unknown(error);
   }
