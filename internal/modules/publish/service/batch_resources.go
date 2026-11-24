@@ -223,10 +223,11 @@ func (s *Service) BatchResources(ctx context.Context, a identity.PublicUser, pla
 }
 
 type batchInventory struct {
-	accounts  map[uint64]accounts.Account
-	outputs   map[int64]outputmodel.CompositeOutput
-	limits    map[uint64]int
-	outputIDs []int64
+	accounts           map[uint64]accounts.Account
+	outputs            map[int64]outputmodel.CompositeOutput
+	unavailableOutputs map[int64]bool
+	limits             map[uint64]int
+	outputIDs          []int64
 }
 
 func (v batchInventory) account(s *Service, a identity.PublicUser, id uint64) (accounts.Account, error) {
@@ -246,6 +247,9 @@ func (v batchInventory) account(s *Service, a identity.PublicUser, id uint64) (a
 	return account, err
 }
 func (v batchInventory) output(s *Service, a identity.PublicUser, id int64) (outputmodel.CompositeOutput, error) {
+	if v.unavailableOutputs[id] {
+		return outputmodel.CompositeOutput{}, ErrNotFound
+	}
 	if result, ok := v.outputs[id]; ok {
 		return result, nil
 	}
@@ -260,7 +264,7 @@ func (v batchInventory) output(s *Service, a identity.PublicUser, id int64) (out
 }
 
 func (s *Service) loadAllocation(ctx context.Context, a identity.PublicUser, platform string, targets map[int64]int64, in model.BatchAllocation, authorizeSelection bool) (batchInventory, error) {
-	v := batchInventory{accounts: map[uint64]accounts.Account{}, outputs: map[int64]outputmodel.CompositeOutput{}, limits: map[uint64]int{}, outputIDs: make([]int64, 0, len(in.OutputIDs))}
+	v := batchInventory{accounts: map[uint64]accounts.Account{}, outputs: map[int64]outputmodel.CompositeOutput{}, unavailableOutputs: map[int64]bool{}, limits: map[uint64]int{}, outputIDs: make([]int64, 0, len(in.OutputIDs))}
 	if len(in.Accounts) > s.batchLimits().MaxCandidates || len(in.OutputIDs) > s.batchLimits().MaxCandidates || len(in.ManualPairs) > s.batchLimits().MaxCandidates {
 		return v, ErrInvalid
 	}
@@ -292,15 +296,24 @@ func (s *Service) loadAllocation(ctx context.Context, a identity.PublicUser, pla
 			return v, ErrInvalid
 		}
 		actual, err := v.output(s, a, id)
-		if err != nil {
+		if err != nil && !batchResourceMissing(err) {
 			return v, err
 		}
-		category := actual.CategoryID
-		if !a.CanAccess(a.ID, a.TeamID, category) {
-			return v, ErrNotFound
+		if err == nil {
+			category := actual.CategoryID
+			if !a.CanAccess(a.ID, a.TeamID, category) {
+				err = ErrNotFound
+			} else if _, present := targets[int64(category)]; !present || actual.TeamID != int64(*a.TeamID) || !slices.Contains(actual.Platforms, platform) {
+				err = ErrInvalid
+			}
 		}
-		if _, present := targets[int64(category)]; !present || actual.TeamID != int64(*a.TeamID) || !slices.Contains(actual.Platforms, platform) {
-			return v, ErrInvalid
+		if err != nil {
+			if authorizeSelection {
+				return v, err
+			}
+			// Validation and copy still report each candidate after a selected
+			// output disappears or becomes unreadable. Never reuse its metadata.
+			v.unavailableOutputs[id] = true
 		}
 		chosen[id] = true
 		v.outputIDs = append(v.outputIDs, id)

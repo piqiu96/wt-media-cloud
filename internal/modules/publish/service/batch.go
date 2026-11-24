@@ -372,6 +372,12 @@ func (s *Service) checkBatch(ctx context.Context, a identity.PublicUser, in Batc
 			return checks, batchRowError(row, "media_account_id", "account_limit", "候选超出该账号在本批的上限，或账号不在所选名单中", ErrInvalid)
 		}
 	}
+	for id := range inventory.unavailableOutputs {
+		if !outputs[id] {
+			checks.Issues = append(checks.Issues, model.BatchIssue{Field: "output_ids", Code: "output_unavailable", Message: "所选成片中存在不可用或已超出访问范围的条目"})
+			break
+		}
+	}
 	occupied, err := s.batchOccupied(in.Platform, ids)
 	if err != nil {
 		return checks, err

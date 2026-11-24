@@ -189,3 +189,104 @@ func TestValidateBatchUsesOnlyAuthorizedRevisionBoundRetainedCovers(t *testing.T
 		t.Fatalf("caller-supplied ID treated as retained: %+v calls=%d err=%v", result, savedCalls, err)
 	}
 }
+
+func TestBatchReadinessKeepsOtherRowsWhenSelectedOutputBecomesUnreadable(t *testing.T) {
+	ctx := context.Background()
+	svc, a, quick := fixture()
+	svc.BatchCategory = func(id identity.CategoryID) (identity.Category, bool, error) {
+		return identity.Category{ID: id, Enabled: true}, true, nil
+	}
+	svc.Repo = batchOccupancyFixture{}
+	savedOutput := svc.Output
+	providerFailure := errors.New("production read failed")
+	staleReason := production.ErrComposeOutputForbidden
+	svc.Output = func(actor identity.PublicUser, id int64) (production.ComposeOutputDetail, error) {
+		if id == 43 && actor.Role == identity.RoleOperator {
+			return production.ComposeOutputDetail{}, staleReason
+		}
+		found, err := savedOutput(actor, id)
+		found.Output.ID = id
+		return found, err
+	}
+	protected := model.BatchCandidate{
+		BatchPair: model.BatchPair{CategoryID: 1, MediaAccountID: 12, CompositeOutputID: 43},
+		RowKey:    "protected", InputRevision: "1", FieldRevisions: map[string]string{}, Order: 0, Content: quick.Content,
+	}
+	available := protected
+	available.RowKey, available.CompositeOutputID, available.Order = "available", 42, 1
+	available.Content.Description = ""
+	in := BatchInput{
+		Platform: "baidu", Targets: []model.BatchTarget{{CategoryID: 1, TargetCount: 2}},
+		Config: model.BatchConfig{
+			BatchAllocation: model.BatchAllocation{Accounts: []model.BatchAccountLimit{{MediaAccountID: 12, Limit: 2}}, OutputIDs: []string{"43", "42"}},
+			Candidates:      []model.BatchCandidate{protected, available},
+		},
+		ExecutionSetting: model.BatchExecutionSetting{ConcurrencyLimit: 1, ExceptionTaskLimit: 1, BetweenGroupPolicy: "auto_continue"},
+	}
+	v := model.Batch{
+		ID: 4, Revision: 3, Name: "prepared", TeamID: int64(*a.TeamID), OperatorID: int64(a.ID), Platform: in.Platform, Targets: in.Targets,
+		Config: in.Config, ExecutionSetting: in.ExecutionSetting, ExecutionStatus: model.BatchNotStarted,
+	}
+	checkIssues := func(t *testing.T, ready model.BatchReadiness, err error) {
+		t.Helper()
+		if err != nil {
+			t.Fatalf("expected row issues, got request error: %v", err)
+		}
+		gotUnavailable, gotOther := false, false
+		for _, issue := range ready.Issues {
+			if issue.RowKey == "protected" && issue.Field == "composite_output_id" && issue.Code == "output_unavailable" {
+				gotUnavailable = true
+			}
+			if issue.RowKey == "available" && issue.Code == "description_invalid" {
+				gotOther = true
+			}
+		}
+		if ready.Ready || !gotUnavailable || !gotOther {
+			t.Fatalf("expected independent checks for both rows: %+v", ready)
+		}
+	}
+	t.Run("validation", func(t *testing.T) {
+		svc.BatchRepo = savedBatchFixture{batch: v}
+		ready, err := svc.ValidateBatch(ctx, a, ValidateBatchInput{BatchInput: in, BatchID: v.ID, ExpectedRevision: v.Revision})
+		checkIssues(t, ready, err)
+	})
+	t.Run("copy", func(t *testing.T) {
+		ended := v
+		ended.ExecutionStatus = model.BatchEnded
+		svc.BatchRepo = savedBatchFixture{batch: ended}
+		copied, err := svc.CopyBatch(ctx, a, ended.ID, ended.Revision)
+		checkIssues(t, copied.Readiness, err)
+	})
+	t.Run("unpaired selection", func(t *testing.T) {
+		newBatch := in
+		newBatch.Config.Candidates = []model.BatchCandidate{available}
+		ready, err := svc.ValidateBatch(ctx, a, ValidateBatchInput{BatchInput: newBatch})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, issue := range ready.Issues {
+			if issue.RowKey == "" && issue.Field == "output_ids" && issue.Code == "output_unavailable" {
+				return
+			}
+		}
+		t.Fatalf("missing generic error for unpaired stale selection: %+v", ready)
+	})
+
+	t.Run("strict writes and allocation", func(t *testing.T) {
+		svc.BatchRepo = savedBatchFixture{batch: v}
+		edit := EditBatchInput{BatchInput: in, Name: v.Name, ExpectedRevision: v.Revision}
+		if _, err := svc.EditBatch(ctx, a, v.ID, edit); !errors.Is(err, staleReason) {
+			t.Fatalf("edit accepted inaccessible selection: %v", err)
+		}
+		if _, err := svc.AllocateBatch(ctx, a, BatchAllocationInput{BatchAllocation: in.Config.BatchAllocation, Platform: in.Platform, Targets: in.Targets}); !errors.Is(err, staleReason) {
+			t.Fatalf("allocation accepted inaccessible selection: %v", err)
+		}
+	})
+	t.Run("unexpected dependency failures", func(t *testing.T) {
+		staleReason = providerFailure
+		svc.BatchRepo = savedBatchFixture{batch: v}
+		if _, err := svc.ValidateBatch(ctx, a, ValidateBatchInput{BatchInput: in, BatchID: v.ID, ExpectedRevision: v.Revision}); !errors.Is(err, providerFailure) {
+			t.Fatalf("masked dependency failure: %v", err)
+		}
+	})
+}
