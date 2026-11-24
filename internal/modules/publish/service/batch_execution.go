@@ -281,35 +281,36 @@ func (s *Service) BatchTasks(a identity.PublicUser, id uint64, f BatchTaskFilter
 }
 
 func decorateBatchTask(a identity.PublicUser, b model.Batch, v *model.Task) {
-	v.AllowedActions = []string{}
+	actions := []string{}
+	v.AllowedActions = &actions
 	owner := ownsBatch(a, b)
 	stopped := b.StoppedAt != nil || b.ExecutionStatus == model.BatchEnded || b.ExecutionStatus == model.BatchCancelled || b.ExecutionStatus == model.BatchStopping
 	if stopped {
 		v.CanCancel = false
 	}
 	if v.CanCancel && !stopped && (v.Status != model.StatusRunning || owner) {
-		v.AllowedActions = append(v.AllowedActions, "cancel")
+		*v.AllowedActions = append(*v.AllowedActions, "cancel")
 	}
 	switch v.Status {
 	case model.StatusPending:
 		if v.AuthorizedAt == nil && v.CurrentAttemptID == nil && !stopped {
-			v.AllowedActions = append(v.AllowedActions, "edit")
+			*v.AllowedActions = append(*v.AllowedActions, "edit")
 		}
 	case model.StatusFailed:
 		if owner && !stopped && b.ExecutionStatus == model.BatchRunning &&
 			(v.ExecutionGroupNo == nil || b.ExecutionGroupNo == nil || *v.ExecutionGroupNo != *b.ExecutionGroupNo || b.GroupEndedAt != nil) {
-			v.AllowedActions = append(v.AllowedActions, "retry")
+			*v.AllowedActions = append(*v.AllowedActions, "retry")
 		}
 	case model.StatusAwaitingHuman:
 		if owner && !stopped && b.ExecutionStatus == model.BatchRunning {
-			v.AllowedActions = append(v.AllowedActions, "resume")
+			*v.AllowedActions = append(*v.AllowedActions, "resume")
 		}
 	case model.StatusUncertain:
 		if owner {
-			v.AllowedActions = append(v.AllowedActions, "resolve")
+			*v.AllowedActions = append(*v.AllowedActions, "resolve")
 		}
 	case model.StatusReviewing:
-		v.AllowedActions = append(v.AllowedActions, "resolve")
+		*v.AllowedActions = append(*v.AllowedActions, "resolve")
 	}
 	if v.Status == model.StatusPending || v.Status == model.StatusQueued {
 		switch {

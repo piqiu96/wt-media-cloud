@@ -31,7 +31,7 @@ type Task struct {
 	ExecutionGroupNo     *uint32             `json:"execution_group_no"`
 	ExecutionStage       *AttemptStage       `json:"execution_stage" gorm:"->;-:migration"`
 	ExecutionBlock       *TaskExecutionBlock `json:"execution_block,omitempty" gorm:"-"`
-	AllowedActions       []string            `json:"allowed_actions,omitempty" gorm:"-"`
+	AllowedActions       *[]string           `json:"allowed_actions,omitempty" gorm:"-"`
 	CheckBrowserUsedAt   *time.Time          `json:"-"`
 	CheckNotFoundCount   uint32              `json:"-"`
 	CheckStoppedAt       *time.Time          `json:"-"`
