@@ -119,6 +119,8 @@ const freeze = computed(() => saving.value || preparing.value || !!pending.value
 const canEdit = item => canPrepare.value && item?.allowed_actions?.includes("edit");
 const canCopy = item => canPrepare.value && item?.allowed_actions?.includes("copy");
 const isCreating = computed(() => view.value === "create" || view.value === "copy");
+const validationContext = computed(() => view.value === "edit" && detail.value
+  ? { batch_id: detail.value.id, expected_revision: detail.value.revision } : {});
 
 function categoryName(id) {
   return categories.value.find(item => String(item.id) === id)?.name || "原类目暂不可用";
@@ -446,9 +448,7 @@ async function validate() {
   validating.value = true;
   review.value = null;
   try {
-    const editContext = view.value === "edit"
-      ? { batch_id: detail.value.id, expected_revision: detail.value.revision } : {};
-    const result = await api.validate({ ...input, ...editContext });
+    const result = await api.validate({ ...input, ...validationContext.value });
     if (run !== epoch || JSON.stringify(batchInput(form.value)) !== fingerprint) return;
     review.value = { readiness: result };
     updateCoverResources(configuration, result.cover_resources);
@@ -649,7 +649,8 @@ onBeforeUnmount(() => {
       <BatchResourceSetup v-if="step === 0" :form="form" :catalog="catalog" :categories="categoryOptions"
         :actor="actor" :disabled="freeze" @work="preparing = $event" />
       <BatchCandidateWorkspace v-if="step === 1" :form="form" :catalog="catalog" :categories="categoryOptions"
-        :actor="actor" :recipes="recipes" :cover-files="coverFiles" :disabled="freeze" :focus-key="issueRowKey" @work="preparing = $event" />
+        :actor="actor" :recipes="recipes" :cover-files="coverFiles" :disabled="freeze" :focus-key="issueRowKey"
+        :validation-context="validationContext" @work="preparing = $event" />
       <template v-if="step === 2">
         <ResourceCard>
           <ResourceSection title="准备结果">

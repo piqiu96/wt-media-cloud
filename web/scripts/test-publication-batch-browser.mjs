@@ -122,6 +122,12 @@ try {
   await button("完成").click();
   await next();
   await input("异常任务上限").fill("5");
+  await button("上一步").click();
+  await firstRow.locator(".t-checkbox").click();
+  await button("确认内容").click();
+  await button("确认已核对内容").click();
+  await page.getByText("已确认 0 条，1 条待完善。请查看对应候选。", { exact: true }).waitFor();
+  await next();
   await button("保存批次").click();
   await heading("浏览器批次").waitFor();
   await page.getByText("批次尚未开始，正式发布任务 0 条。", { exact: true }).waitFor();

@@ -11,18 +11,20 @@ import FeedbackAlert from "../../../shared/ui/feedback/FeedbackAlert.vue";
 import PublishingResourcePicker from "./PublishingResourcePicker.vue";
 import BatchCandidateEditor from "./BatchCandidateEditor.vue";
 import BatchSelectedPreparation from "./BatchSelectedPreparation.vue";
+import { createPublicationBatchClient } from "../../../shared/api/publication.js";
 import { createComposeClient } from "../../../shared/api/compose.js";
 import { publicObjectReadUrl } from "../../../shared/utils/objectReadUrl.js";
 import { createFilesClient } from "../../../shared/api/files.js";
 import { feedback } from "../../../shared/ui/feedback/index.js";
 import { batchAccountName, batchOutputID, batchOutputName } from "../useBatchResourceCatalog.js";
-import { coverProfiles, editCandidate, moveEntry, newCandidate, pairOf, replaceCandidatePair } from "../batchPreparation.js";
+import { batchFormProblem, batchInput, coverProfiles, editCandidate, moveEntry, newCandidate, pairOf, replaceCandidatePair, reviewSelectedConfirmations } from "../batchPreparation.js";
 import { coverConfigFromReference, emptyCoverConfig } from "../coverPreparation.js";
 import { contentIssue } from "../eligibility.js";
 
-const props = defineProps({ form: Object, catalog: Object, categories: Array, actor: Object, recipes: Object, coverFiles: Object, focusKey: String, disabled: Boolean });
+const props = defineProps({ form: Object, catalog: Object, categories: Array, actor: Object, recipes: Object, coverFiles: Object, focusKey: String, validationContext: Object, disabled: Boolean });
 const emit = defineEmits(["work"]);
 const compose = createComposeClient();
+const batch = createPublicationBatchClient();
 const files = createFilesClient();
 const selection = ref([]);
 const activeKey = ref(props.focusKey || "");
@@ -31,10 +33,14 @@ const picker = ref("");
 const bulk = ref(false);
 const preview = ref(null);
 const pairError = ref("");
+const confirmationFeedback = ref(null);
+const confirmationRows = ref({});
 let previewSequence = 0;
 const rows = computed(() => props.form.config.candidates);
 const active = computed(() => rows.value.find(row => row.row_key === activeKey.value));
 const selected = computed(() => rows.value.filter(row => selection.value.includes(row.row_key)));
+const pendingConfirmations = computed(() => selected.value.filter(row => !row.content.confirmed));
+const confirmationProblem = computed(() => batchFormProblem(props.form, { requireName: false }));
 const outputFor = row => props.catalog.outputs.get(row?.composite_output_id);
 const accountName = row => batchAccountName(props.catalog.accounts.get(row?.media_account_id));
 const categoryName = id => props.categories.find(item => item.value === id)?.label || "原类目暂不可用";
@@ -52,6 +58,8 @@ function isManual(row) {
   return props.form.config.manual_pairs.some(pair => pair.composite_output_id === row.composite_output_id);
 }
 function statusIssue(row) {
+  const serverIssue = confirmationRows.value[row.row_key];
+  if (serverIssue?.version === JSON.stringify(row)) return serverIssue;
   return contentIssue({ ...row, content: { ...row.content, description: row.content.description || "",
     ...(row.content.cover_file_id === "0" && { cover_file_id: "" }),
     ...(row.content.portrait_cover_file_id === "0" && { portrait_cover_file_id: "" }),
@@ -177,6 +185,44 @@ function activeCovers(row) {
     return [profile.key, selected?.fileId === row.content[profile.file] ? selected : null];
   }));
 }
+async function confirmSelected() {
+  if (props.disabled || confirmationProblem.value || !pendingConfirmations.value.length) return;
+  const selectedRows = pendingConfirmations.value;
+  const configuration = batchInput(props.form);
+  const version = JSON.stringify(configuration);
+  const agreed = await feedback.confirmWarning({
+    title: `确认 ${selectedRows.length} 条候选内容`,
+    message: "请确认你已核对所选候选的文案、实际封面和创作声明。系统会重新检查各条配置。",
+    confirmText: "确认已核对内容",
+  });
+  if (!agreed || props.disabled || JSON.stringify(batchInput(props.form)) !== version) return;
+  emit("work", true);
+  confirmationFeedback.value = null;
+  try {
+    const result = await batch.validate({ ...configuration, ...props.validationContext });
+    if (JSON.stringify(batchInput(props.form)) !== version) {
+      confirmationFeedback.value = { theme: "warning", message: "候选配置已变化，请重新核对后确认" };
+      return;
+    }
+    const { confirmable, blocked } = reviewSelectedConfirmations(selectedRows, result.issues);
+    for (const entry of blocked) {
+      const row = selectedRows.find(item => item.row_key === entry.rowKey);
+      confirmationRows.value[entry.rowKey] = { message: entry.message, version: JSON.stringify(row) };
+    }
+    for (const key of confirmable) {
+      delete confirmationRows.value[key];
+      edit(key, { confirmed: true });
+    }
+    confirmationFeedback.value = {
+      theme: blocked.length ? "warning" : "success",
+      message: blocked.length ? `已确认 ${confirmable.length} 条，${blocked.length} 条待完善。请查看对应候选。` : `已确认 ${confirmable.length} 条候选内容`,
+    };
+  } catch (error) {
+    confirmationFeedback.value = { theme: "error", message: error?.details?.issue?.message || error.message || "核对失败，候选内容已保留" };
+  } finally {
+    emit("work", false);
+  }
+}
 function applyBulk(key, patch, covers) {
   edit(key, patch);
   for (const { profile, file, render } of covers) applyCover(key, profile, file, render);
@@ -190,9 +236,14 @@ function applyBulk(key, patch, covers) {
         <t-button theme="default" variant="outline" :disabled="disabled || !form.targets.length" @click="openPair()">添加候选</t-button>
         <span class="batch-muted">{{ rows.length }} 条候选 · 需要核对文案、封面和声明</span>
       </div>
-      <ResourceSelectionToolbar :count="selected.length" unit="条候选" @clear="selection = []">
+      <ResourceSelectionToolbar :count="selected.length" unit="条候选"
+        :hint="pendingConfirmations.length && confirmationProblem ? '请先在结果总览填写执行设置，再检查并确认所选内容。' : ''"
+        @clear="selection = []">
         <t-button size="small" :disabled="disabled" @click="bulk = true">批量配置</t-button>
+        <t-button size="small" variant="outline" theme="default"
+          :disabled="disabled || !pendingConfirmations.length || !!confirmationProblem" @click="confirmSelected">确认内容</t-button>
       </ResourceSelectionToolbar>
+      <FeedbackAlert v-if="confirmationFeedback" :theme="confirmationFeedback.theme" :message="confirmationFeedback.message" />
       <div class="table-scroll-wrap resource-data-table">
         <t-table class="wt-resource-table" :data="rows" :columns="columns" row-key="row_key" :selected-row-keys="selection"
           :scroll="{ x: '1102px' }" empty="暂无候选，可添加候选或返回资源配置配对"

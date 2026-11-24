@@ -108,3 +108,20 @@ it("invalidates outdated template covers while preserving an unrelated image cov
   expect(updated.field_revisions.cover_render).toBe("1");
   expect(batch.editCandidate(updated, { confirmed: true }).field_revisions.confirmed).toBe("1");
 });
+
+it("lets explicit confirmation proceed only for selected rows with no other server issue", () => {
+  const rows = [
+    { ...candidate, row_key: "ready", content: { confirmed: false } },
+    { ...candidate, row_key: "blocked", content: { confirmed: false } },
+    { ...candidate, row_key: "already-confirmed" },
+  ];
+  const issues = [
+    { row_key: "ready", code: "confirmation_required", field: "confirmed" },
+    { row_key: "blocked", code: "confirmation_required", field: "confirmed" },
+    { row_key: "blocked", code: "cover_missing", field: "cover_file_id", message: "请选择所需规格的封面" },
+    { row_key: "not-selected", code: "output_occupied", message: "此成片已被占用" },
+  ];
+  expect(batch.reviewSelectedConfirmations(rows, issues)).toEqual({
+    confirmable: ["ready"], blocked: [{ rowKey: "blocked", message: "请选择所需规格的封面" }],
+  });
+});

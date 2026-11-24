@@ -212,3 +212,21 @@ export function batchFormProblem(form, { requireName = true } = {}) {
   if (!positive(settings.exception_task_limit)) return "请填写异常任务上限（正整数）";
   return "";
 }
+
+export function reviewSelectedConfirmations(rows, issues) {
+  if (!Array.isArray(issues)) throw new Error("批次检查未返回完整结果");
+  const firstIssue = new Map();
+  for (const issue of issues) {
+    if (issue.code === "confirmation_required" && issue.field === "confirmed") continue;
+    if (issue.row_key && !firstIssue.has(issue.row_key))
+      firstIssue.set(issue.row_key, issue.message || "候选配置仍有待处理项");
+  }
+  const confirmable = [];
+  const blocked = [];
+  for (const row of rows) {
+    if (row.content.confirmed) continue;
+    if (firstIssue.has(row.row_key)) blocked.push({ rowKey: row.row_key, message: firstIssue.get(row.row_key) });
+    else confirmable.push(row.row_key);
+  }
+  return { confirmable, blocked };
+}
