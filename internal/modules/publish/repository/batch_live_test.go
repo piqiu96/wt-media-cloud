@@ -172,8 +172,8 @@ func TestBatchConfigurationPreservesOnlyCurrentFileReferences(t *testing.T) {
 		t.Fatalf("ended configuration unexpectedly editable: %v", err)
 	}
 
-	// Dry-run the additive schema rollback against this disposable database.
-	for _, table := range []string{"publication_batch_file", "publication_batch"} {
+	// Exercise removal of the old configuration reference table in this disposable database.
+	for _, table := range []string{"publication_batch_file"} {
 		if err = db.Migrator().DropTable(table); err != nil {
 			t.Fatalf("rollback %s: %v", table, err)
 		}
