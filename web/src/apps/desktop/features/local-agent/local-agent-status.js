@@ -57,9 +57,12 @@ export function createLocalAgentStatusPage(snapshot, context = {}) {
     bitbrowserStatusText: BITBROWSER_LABELS[bitbrowserStatus] ?? BITBROWSER_LABELS.unknown,
     // 面板行各说各话：本机服务行只看服务自身，比特浏览器行只看比特浏览器自身，
     // 执行凭证行只回答本进程有没有 —— 一行坏了不歪曲另一行的事实。
+    // currentTaskId 来自文件传输状态，缺失时只报告服务连接状态。
     serviceText: !localAgentReady(status)
       ? "未运行"
-      : `已连接，${snapshot?.currentTaskId ? `当前任务 ${snapshot.currentTaskId}` : "当前无任务"}`,
+      : snapshot?.currentTaskId
+        ? `已连接，当前任务 ${snapshot.currentTaskId}`
+        : "已连接",
     bitbrowserText:
       bitbrowserReady(bitbrowserStatus) && snapshot?.mainUserIdMasked ? "已登录指定账号" : BITBROWSER_LABELS[bitbrowserStatus] ?? BITBROWSER_LABELS.unknown,
     credentialText: tokenConfigured ? "已配置" : "未配置",
