@@ -321,10 +321,12 @@ async function syncExecutionDetail(latest, background = false, reloadTasks = tru
       const updated = hasLatest ? latest : await api.get(id);
       if (!current() || updated.id !== id) return;
       const previouslyStarted = formalTasks.value;
+      const reviewsSettled = detail.value.execution?.task_counts?.reviewing > 0 &&
+        (updated.execution?.task_counts?.reviewing ?? 0) === 0;
       detail.value = updated;
       if (!previouslyStarted && formalTasks.value) recordTab.value = "tasks";
       if (!background && recordTab.value === "records") loadRecords(id, recordPage.value);
-      if (reloadTasks && previouslyStarted && recordTab.value === "tasks") {
+      if ((reloadTasks || reviewsSettled) && previouslyStarted && recordTab.value === "tasks") {
         await nextTick();
         if (current()) await taskTable.value?.refresh();
       }

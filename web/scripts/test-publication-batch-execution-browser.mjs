@@ -53,11 +53,12 @@ let expectedFinish;
 let linkedFailedPage = 0;
 const exceptions = [];
 const review = process.env.WT_MEDIA_BATCH_REVIEW;
-let hydrateGate, stoppingGate, stoppingReadStarted, lateTaskGate;
+let hydrateGate, stoppingGate, stoppingReadStarted, lateTaskGate, lateSummaryGate;
 let freshReread = false;
 let reviewPreviews = 0;
 let replayInput;
 const isNavigationReview = ["changed-revision", "abandoned-navigation"].includes(review);
+const isPublicResultReview = ["late-publication", "manual-publication"].includes(review);
 const calls = [];
 
 async function routeCloud(route) {
@@ -106,6 +107,11 @@ async function routeCloud(route) {
         if (current === batch && stoppingGate) {
           stoppingReadStarted();
           await stoppingGate;
+        }
+        if (current === batch && lateSummaryGate) {
+          const gate = lateSummaryGate;
+          lateSummaryGate = null;
+          await gate;
         }
         return send(current);
       case "execution-preview": {
@@ -162,7 +168,7 @@ async function routeCloud(route) {
         return route.abort("failed");
       }
       case "task": {
-        if (review === "late-publication") {
+        if (isPublicResultReview) {
           const items = [...tasks];
           if (lateTaskGate) {
             const { entered, released } = lateTaskGate;
@@ -389,7 +395,10 @@ const regressions = {
     assert.equal(await button("终止发布").count(), 0);
     assert.equal(calls.filter(call => call.method === "POST" && call.endpoint.startsWith("/publication-batch/")).length, 0);
   },
-  async "late-publication"() {
+  "manual-publication"() {
+    return regressions["late-publication"](true);
+  },
+  async "late-publication"(publishBeforeManualSummary = false) {
     batch.targets[0].target_count = 60;
     batch.execution_status = "ended";
     batch.allowed_actions = ["copy"];
@@ -419,12 +428,20 @@ const regressions = {
     let entered, release;
     const taskEntered = new Promise(resolve => { entered = resolve; });
     lateTaskGate = { entered, released: new Promise(resolve => { release = resolve; }) };
+    let releaseSummary;
+    if (publishBeforeManualSummary) lateSummaryGate = new Promise(resolve => { releaseSummary = resolve; });
     const initialQuery = requestForBatch();
     await button("查询").click();
-    await Promise.all([initialQuery, taskEntered]);
+    await taskEntered;
+    if (!publishBeforeManualSummary) await initialQuery;
     batch.execution = { ...batch.execution, published_count: 1, target_shortfall: 59, task_counts: { published: 1, cancelled: 20 } };
     tasks[0] = { ...tasks[0], status: "published", revision: "7", platform_work_id: "5900", allowed_actions: [] };
+    if (publishBeforeManualSummary) {
+      releaseSummary();
+      await initialQuery;
+    }
     await progress.getByText(/1 \/ 60/).waitFor({ timeout: 8000 });
+    if (publishBeforeManualSummary) assert.equal(batchReads().length, 2, "the manual query must supply the terminal summary");
     await reviewing.getByText("0 条", { exact: true }).waitFor();
     assert.equal(taskReads().length, 2, "the final task read must not overlap the older one");
     release();
