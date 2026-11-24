@@ -431,6 +431,46 @@ const regressions = {
     assert.equal(retainedKey, results[0] === "saved" ? "first" : "second");
     await other.close();
   },
+  async "failed-task-actions"() {
+    const failed = {
+      ...candidates[0], id: "150", revision: "6", batch_id: id, platform: "baidu", operator_id: owner.id,
+      status: "failed", current_attempt_id: "90", execution_group_no: 1, created_at: now,
+      can_cancel: false, allowed_actions: [],
+      resources: { account_name: account.name, output_name: outputs[0].name },
+    };
+    tasks = [failed, {
+      ...failed, ...candidates[1], id: "151", current_attempt_id: "91", status: "reviewing", allowed_actions: ["resolve"],
+    }];
+    for (const status of ["paused", "ended"]) {
+      batch.execution_status = status;
+      batch.allowed_actions = status === "paused" ? ["resume", "stop"] : ["copy"];
+      batch.execution = {
+        ...newExecution(), phase: status, first_started_at: now, created_count: 2,
+        pause: status === "paused" ? { id: "3", kind: "manual", reason: "复核原尝试", paused_at: now, exceptions: [] } : null,
+        ended_at: status === "ended" ? now : null, task_counts: { failed: 1, reviewing: 1 },
+      };
+      await page.goto(detailURL);
+      const row = page.getByRole("row").filter({ hasText: "发布文案 0" });
+      await row.getByRole("link", { name: "查看任务", exact: true }).click();
+      await heading("发布任务详情").waitFor();
+      await text("发布失败").waitFor();
+      assert.equal(await button("重试").count(), 0, status + " batch denies retry");
+      assert.equal(await button("放弃").count(), 0, status + " batch denies legacy abandon");
+    }
+
+    await page.getByRole("button", { name: "返回", description: "返回发布批次" }).click();
+    await page.getByRole("link", { name: "补录结果", exact: true }).click();
+    await heading("发布任务详情").waitFor();
+    assert.equal(await button("补录结果").isEnabled(), true, "explicit resolution remains available in ended batches");
+
+    const { batch_id, allowed_actions, ...standalone } = failed;
+    tasks.push({ ...standalone, id: "152", content: { description: "独立失败任务" } });
+    await page.goto(new URL("/publish", base).href);
+    await heading("发布任务").waitFor();
+    const standaloneRow = page.getByRole("row").filter({ hasText: "独立失败任务" });
+    assert.equal(await button("重试", standaloneRow).isEnabled(), true, "standalone fail uses legacy fallback when the actions key is omitted");
+    assert.equal(calls.filter(call => call.method === "POST" && call.endpoint.startsWith("/publication")).length, 0);
+  },
   async "senior"() {
     actor = { ...owner, role: "senior_operator" };
     batch.execution_status = "paused";
