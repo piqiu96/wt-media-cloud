@@ -166,16 +166,19 @@ const disabled = computed(() => waiting.value || refreshRequired.value ||
     action.value === "resume" ? !source.value?.execution?.pause :
       !reason.value.trim() || (action.value === "finish" && !failuresLoaded.value)));
 
-function remember(operation) {
+async function remember(operation) {
   if (!journal || storageError.value) throw new Error("当前客户端无法保留待核对的批次请求");
-  journal.save(operation);
-  pending.value = operation;
-  emit("pending", true);
+  try {
+    await journal.save(operation);
+  } finally {
+    pending.value = journal.read();
+    emit("pending", !!pending.value);
+  }
 }
-function clear(operation) {
+async function clear(operation) {
   if (!["start", "resume"].includes(operation.action)) return;
   try {
-    journal.clear(operation);
+    await journal.clear(operation);
     pending.value = journal.read();
   } catch {
     storageError.value = "待核对的请求未能清除，请检查客户端存储。";
@@ -189,9 +192,9 @@ async function send(operation, retry = false) {
   error.value = "";
   try {
     await checkIdentity();
-    if (["start", "resume"].includes(operation.action) && !retry) remember(operation);
+    if (["start", "resume"].includes(operation.action) && !retry) await remember(operation);
     const result = await sendBatchCommand(api, id, operation, { retry });
-    clear(operation);
+    await clear(operation);
     visible.value = false;
     emit("updated");
     feedback.toast.success({
@@ -200,7 +203,7 @@ async function send(operation, retry = false) {
       finish: "批次已结束，失败记录与成片占用已保留",
     }[operation.action]);
   } catch (failure) {
-    if (failure.batchRejection) clear(operation);
+    if (failure.batchRejection) await clear(operation);
     if (failure.latest || failure.batchRejection || failure.outcomeUnknown) emit("updated", failure.latest);
     error.value = previewProblem(failure, "批次操作未完成");
     if (failure.batchRejection || (failure.outcomeUnknown && !pending.value)) refreshRequired.value = true;

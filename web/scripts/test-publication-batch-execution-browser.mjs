@@ -4,6 +4,7 @@ import { chromium } from "playwright";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 
 const base = process.env.WT_MEDIA_BROWSER_BASE_URL || "http://127.0.0.1:5173";
 const profile = await mkdtemp(join(tmpdir(), "wt-batch-execution-"));
@@ -46,9 +47,16 @@ let tasks = [];
 let lostStartRead = false;
 let startCount = 0;
 let expectedResume;
+let resumeReceipt;
+let resumePosts = 0;
 let expectedFinish;
 let linkedFailedPage = 0;
 const exceptions = [];
+const review = process.env.WT_MEDIA_BATCH_REVIEW;
+let hydrateGate, stoppingGate, stoppingReadStarted;
+let freshReread = false;
+let reviewPreviews = 0;
+const isNavigationReview = ["changed-revision", "abandoned-navigation"].includes(review);
 const calls = [];
 
 async function routeCloud(route) {
@@ -64,7 +72,10 @@ async function routeCloud(route) {
   if (endpoint === "/categories") return send([category]);
   if (endpoint === "/publication/account") return send({ items: [account], total: 1 });
   if (endpoint === "/media-accounts") return send({ items: [{ id: account.id, platform_name: account.name }], total: 1 });
-  if (endpoint === "/publication/output") return send({ items: outputs, total: outputs.length });
+  if (endpoint === "/publication/output") {
+    if (params.has("output_ids") && hydrateGate) await hydrateGate;
+    return send({ items: outputs, total: outputs.length });
+  }
   if (endpoint === "/publication/resource") return send({ availability: "available", available_output_count: 3, account_count: 1, eligible_account_count: 1 });
   if (endpoint === "/publication") return send({ items: tasks, total: tasks.length });
   if (endpoint === "/publication-batch/allocate") return send({ config: { candidates: [{ ...candidates[0] }] }, shortfalls: [] });
@@ -86,11 +97,21 @@ async function routeCloud(route) {
     switch (action) {
       case undefined:
         if (current === batch && lostStartRead) return route.abort("failed");
+        if (current === fresh && review === "changed-revision" && !freshReread) {
+          freshReread = true;
+          nextRevision();
+          current.config.candidates[0].content.description = "另一标签页更新后的文案";
+        }
+        if (current === batch && stoppingGate) {
+          stoppingReadStarted();
+          await stoppingGate;
+        }
         return send(current);
       case "execution-preview": {
+        reviewPreviews++;
         assert.equal(input.expected_revision, current.revision);
         const rows = input.row_keys.map(row_key => {
-          const ready = row_key !== "row-2";
+          const ready = isNavigationReview || row_key !== "row-2";
           return { row_key, ready, issues: ready ? [] : [{ message: "原成片已占用" }] };
         });
         const count = rows.filter(row => row.ready).length;
@@ -99,7 +120,7 @@ async function routeCloud(route) {
           shortfalls: [{ category_id: "12", target_count: target, created_count: count, shortfall: target - count }] });
       }
       case "start": {
-        if (current === fresh) return route.fulfill({ status: 409, json: {
+        if (current === fresh || isNavigationReview) return route.fulfill({ status: 409, json: {
           errcode: 18003, message: "检查后原成片已占用", data: null,
           error: { code: "publication_conflict", details: { issues: [{ row_key: "row-0", message: "检查后原成片已占用" }] } },
         } });
@@ -144,6 +165,13 @@ async function routeCloud(route) {
         };
         return send(control());
       case "resume":
+        resumePosts++;
+        if (resumeReceipt) {
+          assert.deepEqual(input, expectedResume);
+          return resumePosts === 2 ? route.fulfill({ status: 429, json: {
+            errcode: 99999, message: "请稍后再试", data: null,
+          } }) : send(resumeReceipt);
+        }
         expectedResume = input;
         nextRevision();
         current.execution_status = "running";
@@ -151,7 +179,8 @@ async function routeCloud(route) {
         current.execution.phase = "waiting_interval";
         current.execution.pause = null;
         current.execution.next_group_at = "2026-11-25T02:01:00Z";
-        return send(control());
+        resumeReceipt = control();
+        return route.abort("failed");
       case "finish":
         expectedFinish = input;
         nextRevision();
@@ -164,7 +193,7 @@ async function routeCloud(route) {
       case "stop":
         assert.equal(input.reason, "结束后续派发");
         nextRevision();
-        current.execution_status = "cancelled";
+        current.execution_status = "stopping";
         current.allowed_actions = [];
         current.execution.phase = "stopping";
         current.execution.stopped_at = now;
@@ -195,8 +224,127 @@ const dialog = () => page.getByRole("dialog");
 const text = value => page.getByText(value, { exact: true });
 const field = name => page.locator(`[aria-label="${name}"] input, input[aria-label="${name}"]`).first();
 const detailURL = new URL("/publish-batches?search=受控&view=detail&id=" + id, base).href;
-try {
-  await launch();
+async function createAndStart(name) {
+  await page.goto(new URL("/publish-batches", base).href);
+  await button("新建批次").click();
+  await field("批次名称").fill(name);
+  await page.locator('[aria-label="目标类目"]').click();
+  await page.locator(".t-select-option").getByText(category.name, { exact: true }).click();
+  await button("添加类目").click();
+  await button("载入可用资源").click();
+  await button("按顺序自动配对").click();
+  await text("已配对 1 条候选").waitFor();
+  await button("下一步").click();
+  await button("下一步").click();
+  await field("异常任务上限").fill("3");
+  await button("创建并发布").click();
+  await heading(name).waitFor();
+}
+function startPosts() {
+  return calls.filter(call => call.method === "POST" && call.endpoint.endsWith("/start")).length;
+}
+async function requestSettled() {
+  await page.waitForLoadState("networkidle");
+}
+const regressions = {
+  async "changed-revision"() {
+    await createAndStart("启动前配置已变更");
+    await requestSettled();
+    assert.equal(freshCreateCount, 1);
+    assert.equal(startPosts(), 0, "saving revision 4 must not authorize starting revision 5");
+    assert.equal(reviewPreviews, 0);
+  },
+  async "abandoned-navigation"() {
+    batch.targets[0].target_count = candidates.length;
+    let release;
+    hydrateGate = new Promise(resolve => { release = resolve; });
+    await page.goto(new URL("/publish-batches", base).href);
+    const hydrated = page.waitForRequest(request => new URL(request.url()).searchParams.has("output_ids"));
+    await button("开始发布").click();
+    await hydrated;
+    await heading("受控批次").waitFor();
+    await page.getByRole("button", { name: "返回", description: "返回列表" }).click();
+    await heading("发布批次").waitFor();
+    hydrateGate = null;
+    release();
+    await button("受控批次").click();
+    await heading("受控批次").waitFor();
+    await requestSettled();
+    assert.equal(startPosts(), 0, "opening an ordinary detail must not reuse the abandoned start action");
+    assert.equal(reviewPreviews, 0);
+  },
+  async "cross-tab"() {
+    await page.goto(detailURL);
+    const other = await browser.newPage();
+    await other.route("**/api/v1/**", routeCloud);
+    await other.goto(detailURL);
+    const command = (tab, requestKey) => tab.evaluate(async ({ requestKey, id }) => {
+      const { batchCommandJournal } = await import("/src/modules/publication/batchExecution.js");
+      const journal = batchCommandJournal(location.origin, "cloud", "71", id);
+      const operation = { action: "start", input: { request_key: requestKey, expected_revision: "4" } };
+      try {
+        await journal.save(operation);
+        return "saved";
+      } catch {
+        await journal.clear(operation);
+        return "blocked";
+      }
+    }, { requestKey, id });
+    const key = ["wt-media:publication-command:v1", new URL(base).origin, "cloud", owner.id, id].join("|");
+    await page.evaluate(async key => {
+      await new Promise(acquired => {
+        navigator.locks.request(key, () => new Promise(resolve => {
+          window.releaseJournalLock = resolve;
+          acquired();
+        }));
+      });
+    }, key);
+    const saves = Promise.all([command(page, "first"), command(other, "second")]);
+    await page.bringToFront();
+    let queued = 0;
+    for (let attempt = 0; queued !== 2 && attempt < 30; attempt++) {
+      queued = await page.evaluate(async key =>
+        (await navigator.locks.query()).pending.filter(item => item.name === key).length, key);
+      if (queued !== 2) await delay(100);
+    }
+    await page.evaluate(() => window.releaseJournalLock());
+    const results = await saves;
+    assert.equal(queued, 2, "both real tabs must wait for the shared command lock");
+    assert.deepEqual([...results].sort(), ["blocked", "saved"]);
+    const retainedKey = await other.evaluate(key => JSON.parse(localStorage.getItem(key)).input.request_key, key);
+    assert.equal(retainedKey, results[0] === "saved" ? "first" : "second");
+    await other.close();
+  },
+  async "stopping"() {
+    batch.execution_status = "stopping";
+    batch.execution = { ...newExecution(), phase: "stopping", first_started_at: now, stopped_at: now };
+    batch.allowed_actions = [];
+    await page.goto(detailURL);
+    await heading("受控批次").waitFor();
+    const unknownLabelCount = await text("执行状态未知").count();
+    const detailReads = () => calls.filter(call => call.endpoint === "/publication-batch/" + id).length;
+    const initialReads = detailReads();
+    let release;
+    stoppingGate = new Promise(resolve => { release = resolve; });
+    const polling = new Promise(resolve => { stoppingReadStarted = resolve; });
+    await Promise.race([polling, delay(6500)]);
+    assert.equal(detailReads(), initialReads + 1, "a stopping batch must continue reading state");
+    await delay(5200);
+    assert.equal(detailReads(), initialReads + 1, "a slow stopping read must not be superseded every five seconds");
+    batch.execution_status = "cancelled";
+    batch.execution = { ...batch.execution, phase: "ended", ended_at: now };
+    stoppingGate = null;
+    release();
+    await text("结束时间").waitFor();
+    assert.equal(unknownLabelCount, 0, "stopping is a known list and detail state");
+    await delay(5200);
+    assert.equal(detailReads(), initialReads + 1, "terminal state stops polling");
+    await page.goto(new URL("/publish-batches?execution_status=stopping", base).href);
+    await heading("发布批次").waitFor();
+    assert.ok(calls.some(call => call.endpoint === "/publication-batch" && call.params.get("execution_status") === "stopping"));
+  },
+};
+async function runBaseline() {
   await page.goto(detailURL);
   await heading("受控批次").waitFor();
   await button("开始发布").click();
@@ -225,7 +373,15 @@ try {
   await button("继续发布").click();
   await dialog().getByRole("link", { name: /任务 151.*结果待确认/ }).waitFor();
   await button("确认继续发布", dialog()).click();
+  await dialog().getByText("操作结果待确认，请核对原请求后继续", { exact: true }).waitFor();
+  const rateLimited = page.waitForResponse(response => response.url().endsWith("/resume") && response.status() === 429);
+  await button("核对原继续请求", dialog()).click();
+  await rateLimited;
+  await dialog().getByText("操作结果待确认，请核对原请求后继续", { exact: true }).waitFor();
+  await button("核对原继续请求", dialog()).click();
+  await text("已继续发布").waitFor();
   await text("最早下一组").waitFor();
+  assert.equal(resumePosts, 3);
   assert.deepEqual(expectedResume.acknowledged_exceptions, [{ task_id: "151", revision: "6" }]);
   assert.equal(expectedResume.expected_pause_id, "77");
 
@@ -242,7 +398,7 @@ try {
   await dialog().getByText(/未领取任务将取消并保留成片占用/).waitFor();
   await dialog().locator('[aria-label="终止发布原因"] textarea, textarea[aria-label="终止发布原因"]').fill("结束后续派发");
   await button("确认终止发布", dialog()).click();
-  await text("终止收尾").waitFor();
+  await text("终止收尾").first().waitFor();
   assert.equal(await button("继续发布").count(), 0);
   assert.equal(await button("结束批次").count(), 0);
 
@@ -259,20 +415,7 @@ try {
   assert.deepEqual(expectedFinish.expected_failed_tasks, [{ task_id: "150", revision: "25" }]);
   assert.ok(linkedFailedPage > 0);
 
-  await page.goto(new URL("/publish-batches", base).href);
-  await button("新建批次").click();
-  await field("批次名称").fill("保存成功后启动失败");
-  await page.locator('[aria-label="目标类目"]').click();
-  await page.locator(".t-select-option").getByText(category.name, { exact: true }).click();
-  await button("添加类目").click();
-  await button("载入可用资源").click();
-  await button("按顺序自动配对").click();
-  await text("已配对 1 条候选").waitFor();
-  await button("下一步").click();
-  await button("下一步").click();
-  await field("异常任务上限").fill("3");
-  await button("创建并发布").click();
-  await heading("保存成功后启动失败").waitFor();
+  await createAndStart("保存成功后启动失败");
   await dialog().getByText(/检查后原成片已占用/).waitFor();
   assert.equal(freshCreateCount, 1);
   assert.equal(fresh.execution_status, "not_started");
@@ -283,8 +426,13 @@ try {
   await heading("受控批次").waitFor();
   assert.equal(await button("开始发布").count(), 0);
   assert.equal(await button("暂停发布").count(), 0);
+}
+try {
+  await launch();
+  if (review) await regressions[review]();
+  else await runBaseline();
   assert.deepEqual(exceptions, []);
-  console.log("Publication batch execution browser checks passed");
+  console.log("Publication batch execution browser checks passed" + (review ? ": " + review : ""));
 } finally {
   await browser?.close();
   await rm(profile, { recursive: true, force: true });

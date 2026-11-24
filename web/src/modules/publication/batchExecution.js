@@ -10,8 +10,12 @@ export const batchControlLabels = {
 
 const taskRef = ({ id, revision }) => ({ task_id: id, revision });
 const pauseRef = ({ task_id, revision }) => ({ task_id, revision });
-const knownRejection = error => (Number(error?.status) >= 400 && Number(error?.status) < 500 &&
-  ![408, 425].includes(error.status)) || [
+const conflictAfterReplay = error => error?.status === 409 &&
+  ["publication_conflict", "publication_batch_parent_blocked", "publication_batch_shortfall_changed",
+    "publication_batch_pause_changed", "publication_output_occupied"].includes(error.code) &&
+  typeof error.details?.current_revision === "string" && /^[1-9][0-9]*$/.test(error.details.current_revision);
+
+const knownRejection = error => [400, 403, 404, 409, 422].includes(error?.status) || [
   "publication_conflict", "publication_invalid", "publication_not_found", "publication_platform_closed",
 ].includes(error?.code);
 
@@ -133,7 +137,8 @@ export async function sendBatchCommand(api, id, operation, { retry = false } = {
     if (result?.batch_id !== id || !result.revision || !complete) throw new Error("操作响应不完整");
     return result;
   } catch (error) {
-    if (knownRejection(error)) {
+    // A retry can fail before reaching Cloud's original receipt lookup.
+    if (retry ? conflictAfterReplay(error) : knownRejection(error)) {
       error.batchRejection = true;
       throw error;
     }
@@ -147,7 +152,8 @@ export async function sendBatchCommand(api, id, operation, { retry = false } = {
   }
 }
 
-export function batchCommandJournal(origin, runtime, userID, batchID, storage = globalThis.localStorage) {
+export function batchCommandJournal(origin, runtime, userID, batchID,
+  storage = globalThis.localStorage, locks = globalThis.navigator?.locks) {
   const key = ["wt-media:publication-command:v1", origin, runtime, userID, batchID].join("|");
   function read() {
     const stored = storage.getItem(key);
@@ -160,13 +166,21 @@ export function batchCommandJournal(origin, runtime, userID, batchID, storage = 
   return {
     read,
     save(operation) {
-      const current = read();
-      if (current && JSON.stringify(current) !== JSON.stringify(operation))
-        throw new Error("已有待核对的批次请求");
-      storage.setItem(key, JSON.stringify(operation));
+      if (!locks) throw new Error("当前客户端无法安全保留待核对的批次请求");
+      return locks.request(key, () => {
+        const current = read();
+        if (current && JSON.stringify(current) !== JSON.stringify(operation))
+          throw new Error("已有待核对的批次请求");
+        storage.setItem(key, JSON.stringify(operation));
+      });
     },
     clear(operation) {
-      if (read()?.input.request_key === operation.input.request_key) storage.removeItem(key);
+      if (!locks) throw new Error("当前客户端无法安全清除待核对的批次请求");
+      return locks.request(key, () => {
+        const current = read();
+        if (current?.action === operation.action && current.input.request_key === operation.input.request_key)
+          storage.removeItem(key);
+      });
     },
   };
 }

@@ -79,8 +79,7 @@ const executionBusy = ref(false);
 const pendingExecution = ref(false);
 const taskScope = ref({});
 const taskPanel = ref(null);
-let launchAfterNavigation = "";
-let refreshTimer;
+let launchAfterNavigation = null;
 let executionReadSequence = 0;
 let epoch = 0;
 let recordEpoch = 0;
@@ -184,15 +183,22 @@ function showTaskStatus(status) {
   recordTab.value = "tasks";
   nextTick(() => taskPanel.value?.scrollIntoView({ block: "start" }));
 }
-function open(mode, item) {
+async function open(mode, item, { replace = false, start = false } = {}) {
   if (view.value === "list") listScroll = scrollHost(listRoot.value)?.scrollTop || 0;
   const query = { ...listLocation(), view: mode };
   if (item) query.id = item.id;
-  return router.push({ query });
+  const launch = start && item?.revision ? {
+    id: item.id, revision: item.revision, epoch: epoch + 1, path: router.resolve({ query }).fullPath,
+  } : null;
+  launchAfterNavigation = launch;
+  try {
+    return await router[replace ? "replace" : "push"]({ query });
+  } finally {
+    if (launchAfterNavigation === launch) launchAfterNavigation = null;
+  }
 }
 function openToStart(item) {
-  launchAfterNavigation = item.id;
-  return open("detail", item);
+  return open("detail", item, { start: true });
 }
 function back() {
   if (view.value === "edit" && detail.value) return open("detail", detail.value);
@@ -273,9 +279,12 @@ function restore(value) {
   if (pending.value) step.value = 2;
 }
 async function savedDetail(saved, startAfterSave = false) {
-  if (startAfterSave) launchAfterNavigation = saved.id;
   allowLeave = true;
-  await router.replace({ query: { ...listLocation(), view: "detail", id: saved.id } });
+  try {
+    await open("detail", saved, { replace: true, start: startAfterSave });
+  } finally {
+    allowLeave = false;
+  }
 }
 async function finishCreated(saved, startAfterSave = false) {
   routeDraftReady = false;
@@ -312,6 +321,9 @@ async function syncExecutionDetail(latest, background = false) {
 
 async function refresh() {
   const run = ++epoch;
+  // Consume this navigation's intent before any asynchronous detail read.
+  const launch = launchAfterNavigation;
+  launchAfterNavigation = null;
   recordEpoch++;
   validating.value = false;
   executionBusy.value = false;
@@ -366,10 +378,13 @@ async function refresh() {
         catalog.hydrate(configuration.config, { owner: detail.value.operator_id, platform: detail.value.platform, readOnly: !canEdit(detail.value) })
           .catch(error => { if (run === epoch) resourceError.value = problem(error, "部分资源名称读取失败"); }),
       ]);
-      if (run === epoch && launchAfterNavigation === id) {
-        launchAfterNavigation = "";
-        await nextTick();
-        if (run === epoch) executionControls.value?.open("start");
+      if (run === epoch && launch?.epoch === run && launch.path === route.fullPath && launch.id === id) {
+        if (detail.value.revision !== launch.revision) {
+          feedback.toast.info("批次配置已变化，请核对当前详情后重新开始");
+        } else if (!resourceError.value) {
+          await nextTick();
+          if (run === epoch && detail.value?.revision === launch.revision) executionControls.value?.open("start");
+        }
       }
       return;
     }
@@ -553,16 +568,26 @@ async function guardNavigation(to, from) {
   });
 }
 const executionPolling = computed(() => view.value === "detail" &&
-  ["running", "paused"].includes(detail.value?.execution_status));
-watch(executionPolling, (enabled) => {
-  clearInterval(refreshTimer);
-  if (enabled) refreshTimer = setInterval(() => syncExecutionDetail(null, true), 5000);
+  ["running", "paused", "stopping"].includes(detail.value?.execution_status));
+watch(executionPolling, (enabled, _previous, onCleanup) => {
+  if (!enabled) return;
+  let timer;
+  let active = true;
+  onCleanup(() => {
+    clearTimeout(timer);
+    active = false;
+  });
+  async function poll() {
+    await syncExecutionDetail(null, true);
+    if (active && executionPolling.value) timer = setTimeout(poll, 5000);
+  }
+  timer = setTimeout(poll, 5000);
 });
 onBeforeRouteUpdate(guardNavigation);
 onBeforeRouteLeave(guardNavigation);
 onBeforeUnmount(() => {
   disposed = true;
-  clearInterval(refreshTimer);
+  launchAfterNavigation = null;
   epoch++;
   recordEpoch++;
 });

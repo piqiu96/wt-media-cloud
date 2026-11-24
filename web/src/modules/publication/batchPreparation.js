@@ -10,7 +10,7 @@ export const coverProfiles = [
 ];
 
 export const configurationLabels = { ready: "配置就绪", incomplete: "待完善" };
-export const executionLabels = { not_started: "未开始", running: "发布中", paused: "已暂停", ended: "已结束", cancelled: "已取消" };
+export const executionLabels = { not_started: "未开始", running: "发布中", paused: "已暂停", stopping: "终止收尾", ended: "已结束", cancelled: "已取消" };
 export const groupPolicies = [
   { label: "自动继续", value: "auto_continue" },
   { label: "异常暂停", value: "pause_on_exception" },

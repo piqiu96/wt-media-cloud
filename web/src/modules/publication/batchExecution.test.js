@@ -87,22 +87,52 @@ it("returns exact started tasks from Cloud after a lost start acknowledgement wi
   expect(api.start).not.toHaveBeenCalled();
 });
 
-it("recovers only its own persisted command across journal recreation", () => {
+it.each([401, 429])("retains the original resume after an uncertain ACK and a %i retry response", async status => {
+  const input = { request_key: "original", expected_revision: "4", expected_pause_id: "15", acknowledged_exceptions: [] };
+  const command = { action: "resume", input };
+  const latest = { id: batch.id, revision: "5", execution: { phase: "running", pause: null } };
+  const api = {
+    get: vi.fn().mockResolvedValue(latest),
+    resume: vi.fn().mockRejectedValueOnce(new TypeError("响应丢失"))
+      .mockRejectedValueOnce(Object.assign(new Error("暂时不可用"), { status }))
+      .mockResolvedValueOnce({ batch_id: batch.id, revision: "5", execution: { phase: "running" } }),
+  };
+  await expect(execution.sendBatchCommand(api, batch.id, command)).rejects.toMatchObject({ outcomeUnknown: true });
+  await expect(execution.sendBatchCommand(api, batch.id, command, { retry: true }))
+    .rejects.toMatchObject({ outcomeUnknown: true, latest });
+  await expect(execution.sendBatchCommand(api, batch.id, command, { retry: true })).resolves.toMatchObject({ revision: "5" });
+  expect(api.resume.mock.calls).toEqual([[batch.id, input], [batch.id, input], [batch.id, input]]);
+});
+
+it("only clears a replay conflict when Cloud reports its current revision", async () => {
+  const command = { action: "resume", input: { request_key: "original", expected_revision: "4" } };
+  const conflict = new Error("批次依据已变化");
+  Object.assign(conflict, { status: 409, code: "publication_conflict", details: { current_revision: "7" } });
+  const generic = Object.assign(new Error("客户端冲突"), { status: 409 });
+  const api = { get: vi.fn().mockResolvedValue({ id: batch.id }), resume: vi.fn().mockRejectedValueOnce(generic).mockRejectedValueOnce(conflict) };
+  await expect(execution.sendBatchCommand(api, batch.id, command, { retry: true })).rejects.toMatchObject({ outcomeUnknown: true });
+  await expect(execution.sendBatchCommand(api, batch.id, command, { retry: true })).rejects.toMatchObject({ batchRejection: true });
+});
+
+it("recovers only its own persisted command across journal recreation", async () => {
   const data = new Map();
   const storage = {
     getItem: key => data.get(key),
     setItem: (key, value) => data.set(key, value),
     removeItem: key => data.delete(key),
   };
-  const journal = (...scope) => execution.batchCommandJournal(...scope, batch.id, storage);
+  const locks = { request: async (_name, mutate) => mutate() };
+  const journal = (...scope) => execution.batchCommandJournal(...scope, batch.id, storage, locks);
   const scope = ["https://cloud.example.test", "desktop", "17"];
   const command = { action: "start", input: execution.buildBatchStart(batch, preview, "original", true) };
-  journal(...scope).save(command);
+  await journal(...scope).save(command);
   expect(journal(...scope).read()).toEqual(command);
   expect(journal(scope[0], "cloud", scope[2]).read()).toBeNull();
   expect(journal(scope[0], "desktop", "18").read()).toBeNull();
   expect(journal("https://other.example.test", "desktop", scope[2]).read()).toBeNull();
-  journal(...scope).clear(command);
+  await journal(...scope).clear({ ...command, input: { ...command.input, request_key: "different" } });
+  expect(journal(...scope).read()).toEqual(command);
+  await journal(...scope).clear(command);
   expect(journal(...scope).read()).toBeNull();
 });
 
