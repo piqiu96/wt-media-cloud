@@ -24,6 +24,7 @@ import {
   formalBatch,
   batchMetrics,
   batchActions,
+  batchActionLabel,
   rowsFor,
   executionPreview,
   contentEditable,
@@ -161,9 +162,10 @@ function open(b, process = false, updateURL = true, restore = false) {
     if(!restore)window.scrollTo(0, 0);
   }
 }
+const fromPlan = batch => batch && props.db.plans.find(plan =>
+  String(plan.id) === new URL(location.href).searchParams.get('fromPlan') && plan.items?.some(item => item.id === batch.id));
 function returnToList() {
-  const fromPlan=new URL(location.href).searchParams.get('fromPlan');
-  const p=props.db.plans.find(p=>String(p.id)===fromPlan&&p.items?.some(i=>i.id===current.value));
+  const p=fromPlan(batch.value);
   if(p){detailOpen.value=false;emit('navigate',operationURL('plans',{planId:p.id}));return;}
   detailOpen.value = false;
   updateOperationURL("batches");
@@ -173,13 +175,7 @@ watch(detailOpen, (visible) => emit("detail-change", visible), { flush: "sync" }
 watch(() => props.active, (active) => {
   if (!active) detailOpen.value = false;
 });
-function actionLabel(action, row) {
-  if (row?.executionReview) {
-    if (action === "execute") return "开始发布";
-    if (action === "stop") return "终止发布";
-  }
-  return row.preparationOnly && action === "configure" ? "编辑配置" : labels[action];
-}
+const actionLabel = batchActionLabel;
 function setIncluded(keys) {
   included.value = keys;
   checkedScope.value = startReview.value?.signature;
@@ -205,7 +201,7 @@ async function action(b, a) {
   requestKey.value = crypto.randomUUID();
   if (b.executionReview && a === "execute") {
     setIncluded(executionPreview(props.db, b).filter(item => !item.errors.length).map(item => item.task.key));
-    if (startReview.value?.ready.length && !needsScopeConfirmation.value) return submit();
+    if (!b.planReview && startReview.value?.ready.length && !needsScopeConfirmation.value) return submit();
   }
   if (b.executionReview && a === "resume") {
     checkedPause.value = { pauseId: b.pause?.id, exceptionKeys: reviewedExceptions.value.map(item => item.key) };
@@ -487,7 +483,7 @@ defineExpose({ open, action, edit, directURL, operateTask });
   <ResourceDetailPage
     v-if="active && detailOpen && batch"
     title="发布批次详情"
-    back-label="返回发布批次列表"
+    :back-label="batch.planReview && fromPlan(batch) ? '返回发布计划' : '返回发布批次列表'"
     @back="returnToList"
   >
     <BatchDetailContent :db="db" :batch="batch" :read-only="batch.executionReview && currentPrototypeUser().id !== batch.ownerId" v-model:search="taskSearch" v-model:filter="taskFilter" @task="emit('task',$event)" @task-action="taskOp" />
@@ -528,10 +524,11 @@ defineExpose({ open, action, edit, directURL, operateTask });
           <div><strong>{{ startReview.ready.length }}</strong><small>本次发布</small></div>
           <div><strong>{{ startReview.shortfalls.reduce((sum, item) => sum + item.shortfall, 0) }}</strong><small>目标缺口</small></div>
         </div>
-        <p>开始后按所选范围一次建立正式任务。原目标保持不变。</p>
+        <p>{{ batch.planReview ? "按计划冻结的范围开始本批，暂停计划的自动衔接。" : "开始后按所选范围一次建立正式任务。原目标保持不变。" }}</p>
+        <t-checkbox v-if="batch.planReview" v-model="takeover">确认人工接管计划当前批次</t-checkbox>
         <t-checkbox-group :value="included" :options="preview.filter(item => !item.errors.length).map(({ task }) => ({
           label: db.assets.find(asset => asset.id === task.assetId)?.title || '原成片', value: task.key,
-        }))" @change="setIncluded" />
+        }))" :disabled="batch.planReview" @change="setIncluded" />
         <ul v-if="blocked.length" class="batch-blocked">
           <li v-for="item in blocked" :key="item.task.key">{{ db.assets.find(asset => asset.id === item.task.assetId)?.title }}：{{ item.errors.join("；") }}</li>
         </ul>
@@ -640,7 +637,7 @@ defineExpose({ open, action, edit, directURL, operateTask });
         :loading="busy"
         :disabled="
           op === 'execute' && (batch.executionReview
-            ? (!startReview?.ready.length || (needsScopeConfirmation && !partial))
+            ? (!startReview?.ready.length || (needsScopeConfirmation && !partial) || (batch.planReview && !takeover))
             : (!usable.length ||
             (blocked.length && !partial) ||
             (plan(batch) && !batch.sourcePlanId && !takeover)))

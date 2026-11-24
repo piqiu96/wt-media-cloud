@@ -100,7 +100,7 @@ const seedPlans=[
   b('BT-702','批次 02 · B站','B站',{'精彩剪辑':30},'cancelled',0,false)
  ]}
 ];
-const STORAGE_KEY='wt-publishing-plan-v1';
+const STORAGE_KEY=adapters.planReview?'wt-publishing-plan-chg109':'wt-publishing-plan-v1';
 let storageIssue='';
 function loadPrototype(){
  try {const raw=localStorage.getItem(STORAGE_KEY);if(!raw)return null;const data=JSON.parse(raw);
@@ -112,7 +112,7 @@ function loadPrototype(){
  }catch{storageIssue='无法读取上次原型数据，当前使用演示初始数据；本次不会覆盖原存档。';return null;}
 }
 const savedPrototype=loadPrototype();
-if(adapters.importLegacy)adapters.importLegacy(savedPrototype);
+if(adapters.importLegacy&&!adapters.planReview)adapters.importLegacy(savedPrototype);
 let plans=adapters.loadPlans?adapters.loadPlans():savedPrototype?.plans||clone(seedPlans);
 const state={page:'list',planId:null,editor:null,statusFilter:'all',search:'',advanced:false,modal:null,drawer:null,platformExpand:null,taskFilter:'all',reco:'rule',toast:null};
 Object.assign(state,{pageNo:1,pageSize:10,filterDraft:{search:'',status:'all',platform:'',category:''},filters:{search:'',status:'all',platform:'',category:''},recoveryEditor:null,migratedPlanDraftIds:[]},savedPrototype?.ui||{});
@@ -175,15 +175,18 @@ const currentNote=p=>{
  if(p.status==='ended')return {txt:resultText(p.result)||'已结束',type:p.result==='achieved'?'complete':'neutral',reason:'计划已关闭'};
  const manual=openTasks(p).filter(t=>t.status==='pending');
  if(manual.length){const batches=[...new Set(manual.map(t=>t.batchId))];return {txt:`待人工处理 · ${manual.length}项`,type:'alert',reason:batches.length>1?`${batches.length} 个批次有待处理任务`:`${manual[0].batchName}需要介入`};}
+ if(p.planReview&&p.awaitingPublic&&p.control==='执行已结束')return {txt:'等待平台公开或核实',type:'wait',reason:'已接收稿件尚未公开'};
  if(allEnded(p)){
   const gap=Math.max(0,p.target-successOf(p));
-  return gap>0?{txt:`目标缺口 ${gap} 条`,type:'alert',reason:'待确认补量或结束'}:{txt:'目标已达成',type:'complete',reason:'已具备结束条件'};
+  return gap>0?{txt:`目标缺口 ${gap} 条`,type:'alert',reason:p.planReview?'待确认结束':'待确认补量或结束'}:{txt:'目标已达成',type:'complete',reason:'已具备结束条件'};
  }
  const next=firstNotEnded(p);
  if(p.control==='等待继续确认')return {txt:'失败率超过 10%',type:'alert',reason:'等待人工确认'};
  if(p.control==='等待跳过确认')return {txt:'等待确认跳过',type:'alert',reason:''};
  if(p.control==='等待配置')return {txt:'下一批待配置',type:'wait',reason:''};
  if(p.control==='已暂停')return {txt:'已暂停',type:'wait',reason:''};
+ if(p.planReview&&p.status==='ready'){const issue=adapters.startIssue(p.id);return {txt:issue?'待完成批次配置':'全部待执行批次已就绪',type:issue?'alert':'wait',reason:issue};}
+ if(p.planReview&&p.control==='等待资源')return {txt:'等待原资源恢复',type:'wait',reason:'保留冻结配置'};
  if(next?.phase==='ready')return {txt:`${next.name} · 待确认执行`,type:'wait',reason:'人工确认后才能执行'};
  if(next?.phase==='draft')return {txt:`${next.name} · 待配置`,type:'wait',reason:'完成批次资源和内容配置'};
  if(next?.phase==='running')return {txt:`${next.name} · 执行中`,type:'active',reason:'暂无人工待办'};
@@ -193,7 +196,7 @@ let lastFocus=null,lastLayer=null,modalFocus=null,unmountDetail=null,unmountList
 function syncDetailURL(){
  if(!routeInitialised||leaveResolve||routes.readOperationRoute(new URL(location.href)).page!=='plans')return;
  const target=routes.operationURL('plans',{editor:state.page==='editor',planId:state.page==='detail'?state.planId:state.editor?.mode==='edit'?state.editor.sourceId:null});
- if(location.pathname!==target)history.pushState(null,'',target);
+ if(location.pathname!==target)history.pushState(null,'',reviewURL(target));
 }
 function focusKey(el){if(!el||!el.matches?.('button,input,select,textarea,a,[tabindex]'))return null;return {id:el.id,tag:el.tagName,attrs:Object.fromEntries([...el.attributes].filter(a=>a.name.startsWith('data-')).map(a=>[a.name,a.value]))};}
 function findFocus(key){if(!key)return null;if(key.id)return dom.querySelector('#'+CSS.escape(key.id));return [...dom.querySelectorAll(key.tag)].find(el=>Object.entries(key.attrs).every(([k,v])=>el.getAttribute(k)===v));}
@@ -255,11 +258,11 @@ function renderLayout(){return `<div class="plan-content ${state.page==='editor'
 function listView(){const f=state.filters;
  const filtered=plans.filter(p=>p.status!=='draft'&&(f.status==='all'||p.status===f.status)&&(!f.search||[p.name,p.id,p.owner].some(s=>s.toLowerCase().includes(f.search.toLowerCase())))&&(!f.platform||p.platforms.includes(f.platform))&&(!f.category||p.categories.includes(f.category)));
  const pages=Math.max(1,Math.ceil(filtered.length/state.pageSize));state.pageNo=Math.min(pages,Math.max(1,state.pageNo));
- return {draft:clone(state.filterDraft),advanced:state.advanced,appliedCount:[f.platform,f.category].filter(Boolean).length,pageNo:state.pageNo,pageSize:state.pageSize,
+ return {canCreate:!adapters.planReview||adapters.canManage(),draft:clone(state.filterDraft),advanced:state.advanced,appliedCount:[f.platform,f.category].filter(Boolean).length,pageNo:state.pageNo,pageSize:state.pageSize,
   statuses:[['all','全部'],['ready','待执行'],['running','进行中'],['stopping','停止中'],['ended','已结束']].map(([value,label])=>({value,label})),
   platforms:[{value:'',label:'全部'},...PLATFORM_DATA.map(p=>({value:p.name,label:p.name}))],categories:[{value:'',label:'全部'},...CATS.map(c=>({value:c,label:c}))],
   rows:filtered.map(p=>({id:p.id,name:p.name,statusLabel:nameStatus(p.status),statusTheme:['ready','running'].includes(p.status)?'primary':p.status==='stopping'?'warning':'default',result:p.status==='ended'?resultText(p.result):'',note:currentNote(p),success:successOf(p),target:p.target,rate:Math.round(successOf(p)/Math.max(1,p.target)*100),ended:endedCount(p),batches:p.batches.length,dateStart:p.dateStart,dateEnd:p.dateEnd,updated:p.updated,
-   actions:p.legacyReadOnly?[{key:'detail',label:'详情'}]:[...(p.status==='ready'?[{key:'execute',label:'执行',batch:firstNotEnded(p)?.id,disabled:!!executionIssue(p,firstNotEnded(p)),reason:executionIssue(p,firstNotEnded(p))}]:[]),{key:'detail',label:'详情'},...(p.status==='ready'?[{key:'edit',label:'编辑'}]:[]),...(['ready','running'].includes(p.status)?[{key:'cancel',label:'终止',danger:true}]:[]),...(p.status==='draft'?[{key:'delete',label:'删除',danger:true}]:[]),...(p.status==='ended'?[{key:'copy',label:'复制'}]:[])]}))};
+   actions:p.legacyReadOnly||(p.planReview&&!adapters.canManage(p))?[{key:'detail',label:'详情'}]:[...(p.status==='ready'?[{key:'execute',label:'执行',batch:firstNotEnded(p)?.id,disabled:!!executionIssue(p,firstNotEnded(p)),reason:executionIssue(p,firstNotEnded(p))}]:[]),{key:'detail',label:'详情'},...(p.status==='ready'?[{key:'edit',label:'编辑'}]:[]),...(['ready','running'].includes(p.status)?[{key:'cancel',label:'终止',danger:true}]:[]),...(p.status==='draft'?[{key:'delete',label:'删除',danger:true}]:[]),...(p.status==='ended'?[{key:'copy',label:'复制'}]:[])]}))};
 }
 function renderList(){return '<div id="plan-list"></div>';}
 
@@ -432,14 +435,50 @@ function detailView(p) {
   if(p.status==='stopping')notice={tone:'warning',title:'计划已终止，等待在途任务核实',actions:pending[0]?[action('workbench','去处理',pending[0].batchId)]:[]};
   if(p.legacyReadOnly){notice={tone:'info',title:'旧版执行记录'};footer.length=0;}
  }
+ if(p.planReview){
+  const active=p.batches[p.position],following=p.batches[p.position+1];
+  const workbench=(label,b=active)=>b?action('workbench',label,b.id):null;
+  const pendingBatch=p.batches.find(b=>b.id===pending[0]?.batchId);
+  const checkRequired=pending.some(t=>t.checkRequired);
+  const canManage=adapters.canManage(p);
+  footer.length=0;
+  notice=null;
+  if(p.status==='ready'){
+   const issue=executionIssue(p,next);
+   notice={tone:issue?'warning':'info',title:issue?'待完成批次配置':'全部待执行批次已就绪',text:issue||'确认执行后冻结计划与全部批次配置，按顺序启动首批。'};
+   footer.push(action('execute','执行',next?.id,{primary:true,disabled:!!issue,reason:issue}));
+  }else if(p.status==='stopping'){
+   notice={tone:'warning',title:'计划已终止，等待在途任务核实',actions:[workbench('去处理',pendingBatch)].filter(Boolean)};
+  }else if(p.control==='已暂停'){
+   notice={tone:'warning',title:'计划已暂停',text:'暂停后续批次启动。当前批次在原批次工作区处理。',actions:[workbench('查看当前批次')].filter(Boolean)};
+   footer.push(action('resume-plan','恢复计划',null,{primary:true}));
+  }else if(pending.length){
+   notice={tone:'warning',title:checkRequired?'自动核验已停止，待人工核实':'有待处理任务',text:'请在原批次处理人工任务或核实结果，后续批次暂不启动。',actions:[workbench('去处理',pendingBatch)].filter(Boolean)};
+  }else if(['等待继续确认','等待跳过确认'].includes(p.control)){
+   const skip=p.control==='等待跳过确认';
+   notice={tone:'warning',title:skip?'当前批次没有可计算的发布结果':'当前批次失败率超过 10%',actions:[workbench('查看当前批次')].filter(Boolean)};
+   footer.push(action('continue-plan',skip?'确认跳过当前批次':'确认进入下一批',null,{primary:true}));
+  }else if(p.control==='等待资源'){
+   notice={tone:'warning',title:'下一批等待原资源恢复',text:'继续使用冻结配置，原批次和候选保持不变。',actions:following?[action('view-batch','查看下一批',following.id)]:[]};
+  }else if(p.control==='执行中'){
+   notice={tone:'info',title:'按批次顺序自动发布',actions:[workbench('查看当前批次')].filter(Boolean)};
+  }else if(p.control==='执行已结束'&&p.status!=='ended'){
+   notice={tone:p.canSettle?'warning':'info',title:p.canSettle?(gap?`本轮执行已结束，目标缺口 ${gap} 条`:'本轮执行已结束，计划目标已达成'):'本轮执行已结束，等待平台公开或核实',actions:p.reviewBatchId?[action('workbench','去核实',p.reviewBatchId,{pending:false})]:[]};
+   if(p.canSettle)footer.push(action('end-plan','确认结束',null,{primary:true}));
+  }
+  if(['执行中','等待资源','等待继续确认','等待跳过确认'].includes(p.control))footer.push(action('pause-plan','暂停计划'));
+  if(['ready','running'].includes(p.status)&&p.control!=='执行已结束')footer.push(action('cancel','终止计划',null,{danger:true}));
+  if(!canManage)footer.length=0;
+ }
  const tone=s=>({running:'info',ready:'info',stopping:'warning',ended:'neutral',cancelled:'neutral'}[s]||'neutral');
  return {actual,rate,gap,notice,footer,statusLabel:nameStatus(p.status),statusTone:p.status==='ended'&&p.result==='achieved'?'success':tone(p.status),resultLabel:resultText(p.result),originalBatches:p.batches.filter(b=>b.type!=='makeup').length,hasMakeup:p.batches.some(b=>b.type==='makeup'),sumTargets:sumMatrix(p.goals),
   stats:[{key:'target',label:'计划目标',value:p.target,unit:'条'},{key:'success',label:'发布成功',value:actual,unit:'条',tone:'success'},{key:'gap',label:'目标缺口',value:gap,unit:'条',description:'待核实结果不计入已发布'},{key:'batches',label:'批次进度',value:`${endedCount(p)} / ${p.batches.length}`,unit:'批',description:'已结束 / 全部批次'}],
   cells:p.platforms.flatMap(platform=>p.categories.filter(c=>(p.goals[platform]?.[c]||0)>0).map(category=>{const target=p.goals[platform][category],actual=actualByCell(p,platform,category);return {platform,category,target,actual,gap:Math.max(0,target-actual),rate:Math.round(actual/Math.max(1,target)*100)};})),
-  batches:p.batches.map(batch=>{const count=(batch.tasks||[]).filter(t=>['pending','retrying'].includes(t.status)).length,executable=canExecute(p,batch);return {batch,count,executable,target:sumBatch(batch),targets:fmtTargets(batch),statusLabel:nameBatchStatus(batch.phase),statusTone:batch.phase==='ended'?'success':tone(batch.phase),pendingLabel:count?`待处理 ${count}`:batch.phase==='ready'&&executable?'待确认执行':batch.phase==='draft'?'待配置':batch.phase==='draft'?'待配置':'—'};})};
+  batches:p.batches.map(batch=>{const count=(batch.tasks||[]).filter(t=>['pending','retrying'].includes(t.status)).length,executable=canExecute(p,batch);return {batch,count,executable,actions:p.planReview?adapters.batchShortcuts(batch.id):null,current:p.planReview&&!!p.lockedAt&&p.batches[p.position]===batch,target:sumBatch(batch),targets:fmtTargets(batch),statusLabel:p.planReview&&batch.phase!=='draft'?batch.operationalState:nameBatchStatus(batch.phase),statusTone:batch.phase==='ended'?'success':tone(batch.phase),pendingLabel:count?`待处理 ${count}`:batch.phase==='ready'&&executable?'待确认执行':batch.phase==='draft'?'待配置':batch.phase==='draft'?'待配置':'—'};})};
 }
 function renderDetail(){return '<div id="plan-detail"></div>';}
 function executionIssue(p,b){
+ if(p?.planReview)return p.status==='ready'?adapters.startIssue(p.id):'当前计划状态不可执行';
  if(!p||!b)return '暂无可执行批次';
  if(!['ready','running'].includes(p.status))return '当前计划状态不可执行';
  if(openTasks(p).length)return '请先处理当前批次待办';
@@ -498,7 +537,8 @@ function renderModal(){const m=state.modal;if(!m)return '';const p=m.planId?getP
  '目标和批次分配已通过结构校验',
  '账号、成片和执行环境将在批次启动前核验'
  ].map(s=>`<li>${$icon('check-circle',16)} ${E(s)}</li>`).join('')}</ul><div class="hint m-top16">${$icon('info',16)}此确认属于批次执行动作，不会创建新的计划状态；计划首次执行时自动进入「进行中」。</div>`;
- if(adapters.loadPlans)content=`<p class="modal-text">启动「${E(p.name)}」，后续批次按 10% 失败率阈值自动衔接。</p>`;
+ if(p.planReview)content=`<p class="modal-text">确认启动「${E(p.name)}」后，冻结计划目标、批次顺序及全部批次的资源、发布内容和执行设置。只启动「${E(b.name)}」并创建该批的正式任务；后续批次按 10% 失败率阈值衔接。</p><div class="table-wrap resource-data-table resource-embedded-table"><table class="table ex-table"><thead><tr><th>批次</th><th>目标</th><th>候选</th><th>缺口</th></tr></thead><tbody>${p.batches.filter(row=>row.phase!=='cancelled').map(row=>`<tr><td>${E(row.name)}</td><td>${sumBatch(row)}</td><td>${row.candidateCount}</td><td>${Math.max(0,sumBatch(row)-row.candidateCount)}</td></tr>`).join('')}</tbody></table></div>`;
+ else if(adapters.loadPlans)content=`<p class="modal-text">启动「${E(p.name)}」，后续批次按 10% 失败率阈值自动衔接。</p>`;
  footer=cancelBtn+okBtn(adapters.loadPlans?'确认启动':'确认执行','do-execute-batch');wide=true;
  }else if(m.type==='split-batch'){
  const editor=state.editor,bt=editor.batches[m.index];title='拆分发布批次';const sum=sumBatch(bt),sumA=sumVals(m.values||{}),sumB=sum-sumA;
@@ -508,6 +548,11 @@ function renderModal(){const m=state.modal;if(!m)return '';const p=m.planId?getP
  const bt=state.editor.batches[m.index];title='删除批次规划';content=`<p class="modal-text">确认删除「${E(bt.name)}」？该批次的目标数量将回到待分配区。必须重新分配数量才能确认或保存正式计划。</p>`;footer=cancelBtn+dangerBtn('确认删除','do-delete-batch');
  }else if(m.type==='overwrite-reco'){
  title='覆盖现有批次规划？';content=`<p class="modal-text">重新推荐会覆盖当前未锁定批次的人工调整。建议先核对平台 × 类目目标矩阵；已锁定资源的批次不允许整体重新推荐。</p>`;footer=cancelBtn+okBtn('确认重新推荐','do-recommend');
+ }else if(m.type==='end-plan'&&p.planReview){
+ const gap=p.platforms.some(platform=>p.categories.some(category=>actualByCell(p,platform,category)<(p.goals[platform]?.[category]||0)));
+ title='确认结束发布计划';
+ content=gap?`<p class="modal-text">已公开 ${successOf(p)} / ${p.target} 条。按现有结果保留缺口，结束计划。</p><div class="form-field"><label class="field-label">未达成原因<span class="req">*</span></label><textarea rows="3" class="input" data-modal-field="reason">${E(m.reason||'')}</textarea></div>`:'<p class="modal-text">全部计划目标已达成。确认结束计划。</p>';
+ footer=cancelBtn+okBtn('确认结束','do-end-plan');
  }else if(m.type==='end-plan'){
  const g=Math.max(0,p.target-successOf(p));title='确认结束发布计划';content=`<p class="modal-text" style="margin-top:0">所有批次已经结束，但计划目标尚未完全达成。确认后计划将进入「已结束 · 未达成结束」，不再补量或执行。</p><div class="modal-kv"><div><div class="label">计划目标</div><div class="value">${p.target} 条</div></div><div><div class="label">最终发布成功</div><div class="value">${successOf(p)} 条</div></div><div><div class="label">目标缺口</div><div class="value">${g} 条</div></div><div><div class="label">结束结果</div><div class="value">未达成结束</div></div></div><div class="form-field m-top16"><label class="field-label">未达成原因 / 结果说明<span class="req">*</span></label><textarea rows="3" class="input" data-modal-field="reason" placeholder="请说明放弃补量的原因或最终执行结论">${E(m.reason||'')}</textarea></div>`;footer=cancelBtn+okBtn('确认结束','do-end-plan');
  }else if(m.type==='task-verify'){
@@ -573,11 +618,20 @@ function taskDone(m,st,extra={}){const {p,b,t}=findTask(m);
 
 function onAction(act,el){const id=el.dataset.id,idx=Number(el.dataset.idx),p=id?getPlan(id):null;
  if(adapters.loadPlans){
+  if(act==='batch-shortcut'){
+   const batch=p?.batches.find(row=>row.id===el.dataset.batch),action=el.dataset.operation;
+   if(batch&&adapters.batchShortcuts(batch.id).some(item=>item.key===action)){
+    if(action==='detail')adapters.previewBatch(batch.id);
+    else adapters.navigate(routes.operationURL('batches',{batchId:batch.id,pending:action==='process',fromPlan:p.id}),action);
+   }
+   return false;
+  }
+  if(adapters.planReview&&(['new','edit','copy','execute','cancel','end-plan'].includes(act))&&!adapters.canManage(p))return false;
   if(['view-batch','configure-batch','workbench'].includes(act)){
    const b=p?.batches.find(b=>b.id===el.dataset.batch);
    if(b){
     if(act==='view-batch')adapters.previewBatch(b.id);
-    else adapters.navigate(routes.operationURL('batches',{batchId:b.id,pending:act==='workbench',fromPlan:p.id}));
+    else adapters.navigate(routes.operationURL('batches',{batchId:b.id,pending:act==='workbench'&&el.dataset.pending!=='false',fromPlan:p.id}));
    }
    return false;
   }
@@ -585,9 +639,11 @@ function onAction(act,el){const id=el.dataset.id,idx=Number(el.dataset.idx),p=id
   if(operations[act]){
    if(act==='do-cancel-plan'&&!state.modal?.reason?.trim()){setToast('请填写终止原因','error');return false;}
    const draft=state.drawer,pid=id||state.modal?.planId||draft?.planId,plan=getPlan(pid);
+   if(plan?.planReview&&(!adapters.canManage(plan)||act==='create-makeup'))return false;
+   if(plan?.planReview&&act==='do-execute-batch'&&executionIssue(plan,firstNotEnded(plan))){setToast(executionIssue(plan,firstNotEnded(plan)),'error');return false;}
    const value=act==='create-makeup'?{platform:draft.platform,name:draft.name||`补量批次 · ${draft.platform}`,cats:Object.fromEntries(plan.categories.map(c=>[c,draft.values[c]===undefined?Math.max(0,(plan.goals[draft.platform]?.[c]||0)-actualByCell(plan,draft.platform,c)):Number(draft.values[c])]))}:state.modal?.reason;
    if(state.actionBusy)return false;state.actionBusy=true;
-   adapters.action(pid,operations[act],value).then(()=>{state.modal=null;state.drawer=null;state.actionBusy=false;plans=adapters.loadPlans();setToast('计划已更新');}).catch(error=>{state.actionBusy=false;setToast(error.message,'error')});return false;
+   adapters.action(pid,operations[act],value).then(result=>{if(result===false){state.actionBusy=false;return;}state.modal=null;state.drawer=null;state.actionBusy=false;plans=adapters.loadPlans();setToast('计划已更新');}).catch(error=>{state.actionBusy=false;setToast(error.message,'error')});return false;
   }
  }
 
@@ -682,7 +738,7 @@ function onAction(act,el){const id=el.dataset.id,idx=Number(el.dataset.idx),p=id
   case 'do-delete-plan':{
    const pid=state.modal.planId;if(getPlan(pid)?.status!=='draft')break;plans=plans.filter(x=>x.id!==pid);state.modal=null;state.page='list';setToast('草稿已删除');break;
   }
-  case 'end-plan':if(p&&p.status==='running'&&allEnded(p)&&openTasks(p).length===0&&successOf(p)<p.target)openModal('end-plan',{planId:p.id,reason:''});break;
+  case 'end-plan':if(p?.planReview&&p.canSettle)openModal('end-plan',{planId:p.id,reason:''});else if(p&&p.status==='running'&&allEnded(p)&&openTasks(p).length===0&&successOf(p)<p.target)openModal('end-plan',{planId:p.id,reason:''});break;
   case 'do-end-plan':{
    const m=state.modal,p=getPlan(m.planId);if(!m.reason?.trim()){setToast('请填写未达成原因或最终结果说明','error');break;}
    if(p.status!=='running'||successOf(p)>=p.target||!allEnded(p)||openTasks(p).length){setToast('仍有批次或任务未结束，不能确认计划结束','error');break;}
@@ -707,7 +763,7 @@ function onAction(act,el){const id=el.dataset.id,idx=Number(el.dataset.idx),p=id
    b.phase='running';b.executed=true;p.status='running';logPlan(p,`人工确认执行 ${b.name}`);state.modal=null;state.drawer=null;state.page='detail';state.planId=p.id;setToast('批次已启动，计划保持进行中；后续批次继续等待');break;
   }
   case 'makeup':{
-   if(!p||p.status!=='running'||!allEnded(p)||openTasks(p).length)return;
+   if(!p||p.planReview||p.status!=='running'||!allEnded(p)||openTasks(p).length)return;
    state.drawer={type:'makeup',planId:p.id,platform:'',name:'',values:{}};render();break;
   }
   case 'create-makeup':{
@@ -814,7 +870,7 @@ function readDetailURL(){
  const route=routes.readOperationRoute(new URL(location.href));
  if(route.page!=='plans')return false;
  if(route.planId&&getPlan(route.planId)?.status==='draft'){state.page='list';state.planId=null;state.editor=null;return true;}
- if(route.editor){
+ if(route.editor&&(!adapters.planReview||adapters.canManage(route.planId?getPlan(route.planId):null))){
   if(!state.editor){
    if(route.planId)editPlan(route.planId);
    else if(state.recoveryEditor){state.editor=restoreCreation();state.page='editor';}
@@ -825,7 +881,8 @@ function readDetailURL(){
  rememberCreation();state.page=route.planId?'detail':'list';state.planId=route.planId;state.modal=null;state.drawer=null;state.editor=null;
  return true;
 }
-function currentURL(){return routes.operationURL('plans',{editor:state.page==='editor',planId:state.page==='detail'?state.planId:state.editor?.mode==='edit'?state.editor.sourceId:null});}
+function reviewURL(href){if(!adapters.planReview)return href;const next=new URL(href,location.origin);routes.preservePlanReview(next);return next.pathname+next.search;}
+function currentURL(){return reviewURL(routes.operationURL('plans',{editor:state.page==='editor',planId:state.page==='detail'?state.planId:state.editor?.mode==='edit'?state.editor.sourceId:null}));}
 function confirmLeave(){
  if(state.page==='detail'){state.detailScrolls||={};state.detailScrolls[state.planId]=window.scrollY;}
  if(state.editor?.mode==='edit'&&JSON.stringify(state.editor)!==editorBaseline){
@@ -839,7 +896,7 @@ async function readRoute(){
  history.replaceState(null,'',currentURL());
  if(!await confirmLeave())return;
  history.replaceState(null,'',target);state.editor=null;
- readDetailURL();render();window.scrollTo(0,state.page==='list'?listScroll:0);
+ readDetailURL();render();window.scrollTo(0,state.page==='list'?listScroll:state.page==='detail'?state.detailScrolls?.[state.planId]||0:0);
 }
 // Native field help follows common hover/focus/click and Escape behavior.
 listen(host,'click',event=>{const button=event.target.closest('.ex-field-help > button');dom.querySelectorAll('.ex-field-help.is-open').forEach(el=>{if(el!==button?.parentElement)el.classList.remove('is-open')});if(button){button.parentElement.classList.remove('is-dismissed');button.parentElement.classList.add('is-open')}});

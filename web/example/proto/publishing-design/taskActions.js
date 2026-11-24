@@ -32,9 +32,9 @@ export function publicWork(platform, value) {
         : `https://${platform === "B站" ? "www.bilibili.com/video/" : "www.xiaohongshu.com/explore/"}${id}`,
   };
 }
-export function verifyResult(db, t, input, actor) {
+export function verifyResult(db, t, input, actor, { reviewing = false } = {}) {
   if (!["结果待确认", "平台审核中", "待补链接"].includes(t.status)) throw Error("任务状态已变化，请重新打开");
-  if (t.status !== "结果待确认" && input.status !== "已发布") throw Error("仅能补录公开发布结果");
+  if (t.status !== "结果待确认" && !(reviewing && t.status === "平台审核中") && input.status !== "已发布") throw Error("仅能补录公开发布结果");
   if (!actor) throw Error("缺少已认证核实人，无法提交");
   const attempt = t.attemptHistory?.at(-1);
   if (

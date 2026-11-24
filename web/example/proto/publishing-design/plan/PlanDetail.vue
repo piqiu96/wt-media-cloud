@@ -20,7 +20,7 @@ defineEmits(['back'])
     <ResourceNotice v-if="view.notice" :tone="view.notice.tone" :title="view.notice.title">
       {{ view.notice.text }}
       <template v-if="view.notice.actions?.length" #actions>
-        <Button v-for="action in view.notice.actions" :key="action.key" theme="primary" variant="text" :data-act="action.key" :data-id="plan.id" :data-batch="action.batch">{{ action.label }}</Button>
+        <Button v-for="action in view.notice.actions" :key="action.key" theme="primary" variant="text" :data-act="action.key" :data-id="plan.id" :data-batch="action.batch" :data-pending="action.pending === false ? 'false' : undefined">{{ action.label }}</Button>
       </template>
     </ResourceNotice>
     <ResourceCard class="detail-card"><ResourceSection title="计划信息">
@@ -55,12 +55,12 @@ defineEmits(['back'])
       <div class="plan-detail-table resource-data-table resource-embedded-table is-summary" tabindex="0" role="region" aria-label="计划批次推进，可横向滚动">
         <table><thead><tr><th>顺序</th><th>批次名称</th><th>平台 / 类目</th><th class="resource-table-number">目标数</th><th>资源配置</th><th>执行状态</th><th class="resource-table-number">结果</th><th>当前待办</th><th>操作</th></tr></thead><tbody>
           <tr v-for="(row, i) in view.batches" :key="row.batch.id">
-            <td>{{ i + 1 }}</td><td class="plan-detail-batch-name">{{ row.batch.name }}<small>{{ row.batch.id }}{{ row.batch.type === 'makeup' ? ' · 补量批次' : '' }}</small></td>
+            <td>{{ i + 1 }}</td><td class="plan-detail-batch-name">{{ row.batch.name }}<small>{{ row.batch.id }}{{ row.current ? ' · 当前批次' : row.batch.type === 'makeup' ? ' · 补量批次' : '' }}</small></td>
             <td>{{ row.batch.platform }}<small>{{ row.targets }}</small></td><td class="resource-table-number">{{ row.target }}</td>
-            <td>{{ row.batch.configured ? '已锁定' : '未配置' }}</td><td><ResourceStatusBadge :label="row.statusLabel" :tone="row.statusTone" /></td>
+            <td>{{ row.batch.configured ? (plan.planReview && !row.batch.locked ? '已配置' : '已锁定') : '未配置' }}</td><td><ResourceStatusBadge :label="row.statusLabel" :tone="row.statusTone" /></td>
             <td class="resource-table-number">{{ ['ended', 'running', 'stopping'].includes(row.batch.phase) ? `${row.batch.success} / ${row.target}` : '—' }}</td>
             <td><span :class="{ 'plan-detail-pending': row.count }">{{ row.pendingLabel }}</span></td>
-            <td><span v-if="plan.legacyReadOnly">—</span><ResourceRowActions v-else><Button v-if="row.count" class="is-primary" variant="text" data-act="workbench" :data-id="plan.id" :data-batch="row.batch.id">去处理</Button><Button v-else-if="row.batch.phase === 'draft' && plan.status !== 'ended'" class="is-primary" variant="text" data-act="configure-batch" :data-id="plan.id" :data-batch="row.batch.id">去配置</Button><Button variant="text" data-act="view-batch" :data-id="plan.id" :data-batch="row.batch.id">详情</Button></ResourceRowActions></td>
+            <td><span v-if="plan.legacyReadOnly">—</span><ResourceRowActions v-else-if="row.actions"><Button v-for="(action, index) in row.actions" :key="action.key" :class="{ 'is-primary': index === 0 }" variant="text" data-act="batch-shortcut" :data-operation="action.key" :data-id="plan.id" :data-batch="row.batch.id">{{ action.label }}</Button></ResourceRowActions><ResourceRowActions v-else><Button v-if="row.count"  class="is-primary" variant="text" data-act="workbench" :data-id="plan.id" :data-batch="row.batch.id">去处理</Button><Button v-else-if="row.batch.phase === 'draft' && plan.status !== 'ended'" class="is-primary" variant="text" data-act="configure-batch" :data-id="plan.id" :data-batch="row.batch.id">去配置</Button><Button variant="text" data-act="view-batch" :data-id="plan.id" :data-batch="row.batch.id">详情</Button></ResourceRowActions></td>
           </tr>
         </tbody></table>
       </div>
@@ -70,7 +70,7 @@ defineEmits(['back'])
       <ResourceNotice v-else>暂无执行记录</ResourceNotice>
     </ResourceSection></ResourceCard>
     <template v-if="view.footer.length" #footer>
-      <Button v-for="action in view.footer" :key="action.key" :class="{ 'is-danger': action.danger }" :theme="action.primary ? 'primary' : 'default'" :variant="action.danger ? 'text' : action.primary ? 'base' : 'outline'" :data-act="action.key" :data-id="plan.id" :data-batch="action.batch">{{ action.label }}</Button>
+      <Button v-for="action in view.footer" :key="action.key" :disabled="action.disabled" :title="action.reason" :class="{ 'is-danger': action.danger }" :theme="action.primary ? 'primary' : 'default'" :variant="action.danger ? 'text' : action.primary ? 'base' : 'outline'" :data-act="action.key" :data-id="plan.id" :data-batch="action.batch">{{ action.label }}</Button>
     </template>
   </ResourceDetailPage>
   <ResourceDetailPage v-else title="发布计划详情" back-label="返回发布计划列表" @back="$emit('back')"><ResourceCard><ResourceEmptyState title="计划不存在" description="该计划可能已被移除，请返回发布计划列表。" /></ResourceCard></ResourceDetailPage>

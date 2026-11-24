@@ -12,7 +12,8 @@ async function request(route, method = "GET", body, signal) {
     headers["Content-Encoding"] = "gzip";
   }
   signal?.throwIfAborted();
-  const response = await fetch("/__example/publishing/" + route, {
+  const review = new URLSearchParams(globalThis.location?.search).get("review") === "chg109";
+  const response = await fetch("/__example/publishing/" + route + (review ? "?review=chg109" : ""), {
     method,
     headers,
     ...(signal ? { signal } : {}),

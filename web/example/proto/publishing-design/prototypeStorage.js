@@ -2,6 +2,7 @@ import { loadBatchSnapshot, saveBatchSnapshot } from "./batchApi.js";
 // Isolated browser storage for this offline prototype; never used by runtime APIs.
 const DATABASE = "wt-media-publishing-prototype",
   STORE = "snapshots";
+const KEY = new URLSearchParams(globalThis.location?.search).get("review") === "chg109" ? "publishing-chg109" : "publishing";
 let connection;
 function open() {
   if (!connection)
@@ -37,13 +38,14 @@ export async function loadPrototype() {
 async function readPrototype(signal) {
   const db = await open();
   const saved = await new Promise((resolve, reject) => {
-    const request = db.transaction(STORE).objectStore(STORE).get("publishing");
+    const request = db.transaction(STORE).objectStore(STORE).get(KEY);
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
   });
   // A late storage response must not start a migration after timeout.
   signal.throwIfAborted();
   if (saved?.version === 1) return await loadBatchSnapshot(saved.data, signal);
+  if (KEY === "publishing-chg109") return await loadBatchSnapshot(null, signal);
   const legacy = JSON.parse(
     localStorage.getItem("wt-publishing-design-v1") || "null",
   );
@@ -56,7 +58,7 @@ export async function savePrototype(data) {
   const db = await open();
   await new Promise((resolve, reject) => {
     const tx = db.transaction(STORE, "readwrite");
-    tx.objectStore(STORE).put({ version: 1, data: snapshot }, "publishing");
+    tx.objectStore(STORE).put({ version: 1, data: snapshot }, KEY);
     tx.oncomplete = resolve;
     tx.onerror = () => reject(tx.error);
     tx.onabort = () => reject(tx.error || new Error("保存已中断"));

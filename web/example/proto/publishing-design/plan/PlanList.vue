@@ -31,7 +31,7 @@ const columns = [
 
 <template>
   <ResourcePageHeader title="发布计划">
-    <template #actions><Button theme="primary" data-act="new">新建发布计划</Button></template>
+    <template v-if="view.canCreate !== false" #actions><Button theme="primary" data-act="new">新建发布计划</Button></template>
   </ResourcePageHeader>
   <ResourceCard class="resource-list-panel plan-list-panel">
     <ResourceFilterBar>

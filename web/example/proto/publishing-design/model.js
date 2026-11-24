@@ -20,7 +20,7 @@ export const publishingCategories = db => [...new Set([...categories, ...(db.ass
 export const threshold = 0.1;
 export const occupied = (task) => task.status !== "已放弃";
 export const canRetry = (task) =>
-  !task.batchStopped &&
+  !task.batchStopped && !task.planHandedOff &&
   task.status === "执行失败" &&
   task.result === "确认未发布" &&
   !task.claimed &&

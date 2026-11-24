@@ -49,3 +49,18 @@
 组号表示批次内的执行组。可用独立 Profile 少于并发上限时直接按可用数成组；忙、未知占位、现场容量满或没有到时的任务才产生等待。待审核任务仍保留原尝试，不计入公开成功或异常暂停阈值。批次的组间处理与现有任务动作复用既有批次生命周期及发布任务表单。默认旧演示路径及计划页仍用于后续计划设计复核。
 
 浏览器验收使用 `npm run test:publishing-browser -- executionReview.browser.cjs preparationPreview.browser.cjs`。原型产生的发布结果仅用于核对界面、动作与状态。
+
+### CHG109 · 发布计划评审
+
+在 example 服务访问 `/example/operations/publishing/plans?review=chg109`。评审使用同一计划及批次页面，浏览器与预览服务快照按评审模式隔离。示例任务、尝试和结果是合成数据。
+
+| 计划详情 ID | 走查内容 |
+| --- | --- |
+| `PL-109-PREPARE` / `PL-109-READY` | 全部待执行批次先配置；明确执行后冻结全部配置，只为首批起单 |
+| `PL-109-DUPLICATE` | 同平台成片重复，定位两批的候选行 |
+| `PL-109-10` / `PL-109-20` / `PL-109-ZERO` | 自动衔接、确认继续、确认跳过 |
+| `PL-109-PENDING` / `PL-109-PAUSED` / `PL-109-CHECK` | 人工与未知阻断、计划暂停、停止核验后回原任务核实 |
+| `PL-109-PUBLIC` / `PL-109-FINISH` | 审核参与衔接但未公开、保留缺口确认结束 |
+| `PL-109-OPERATOR` | 加 `&role=operator` 查看本人计划；加 `&role=admin` 查看管理员只读视角 |
+
+详情路径在 `/plans` 后追加计划详情 ID。批次“详情”打开只读 Drawer；“去配置”和“去处理”进入原批次，完成或返回时回到原计划。
