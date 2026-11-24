@@ -13,7 +13,14 @@ import (
 // another row. A busy actual Profile is not reserved by group membership.
 func (s ExecutionStore) prepareBatchGroups(user int64, cap model.ExecutionCapacity, now time.Time) error {
 	var ids []uint64
-	if err := s.DB.Model(&model.Batch{}).Where("operator_id=? AND execution_status=? AND (execution_group_no IS NULL OR (group_ended_at IS NOT NULL AND next_group_at<=?))", user, model.BatchRunning, now).Order("id").Limit(100).Pluck("id", &ids).Error; err != nil {
+	if err := s.DB.Model(&model.Batch{}).
+		Where("operator_id=? AND execution_status=? AND started_at IS NOT NULL AND stopped_at IS NULL AND (execution_group_no IS NULL OR (group_ended_at IS NOT NULL AND next_group_at<=?))", user, model.BatchRunning, now).
+		Where(`EXISTS (SELECT 1 FROM publication_task pending
+			WHERE pending.batch_id=publication_batch.id AND pending.status IN ?
+			AND pending.execution_group_no IS NULL AND pending.authorized_at IS NOT NULL
+			AND pending.cancel_requested_at IS NULL AND (pending.not_before IS NULL OR pending.not_before<=?))`,
+			[]model.Status{model.StatusPending, model.StatusQueued}, now).
+		Order("id").Limit(100).Pluck("id", &ids).Error; err != nil {
 		return err
 	}
 	for _, id := range ids {
