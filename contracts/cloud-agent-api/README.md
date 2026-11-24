@@ -32,8 +32,13 @@ Agent records the exact check request before sending, then records the active
 reservation and frozen input before processing. It records a possible-open
 barrier before requesting a browser and durable closure evidence before sending
 settlement. Recovery keeps the original key and settlement after Desktop
-session replacement. A replay of a released key retrieves only its original
-acknowledgement. A current observation still requires strict authentication.
+session replacement. A replay of a released key retrieves only its original acknowledgement. If the
+response is lost before a reservation is persisted locally, the original
+session uses ReportSafe with `settle_unreceived: true` and the durable exact
+request key. An admitted key settles only its original reservation. An
+unadmitted key records a cancellation fence and blocks a racing late claim.
+Both outcomes return acknowledgement only. A current observation still
+requires strict authentication and explicit, consistent closure evidence.
 The separate release-only payload settles only the exact original reservation
 under ReportSafe and cannot apply a public result.
 

@@ -136,9 +136,19 @@ paths:
         journal proves the possible-open barrier was never crossed. If crossed or unknown, reconcile the exact
         old scene before settlement. A released replay returns only its original acknowledgement and never
         returns a snapshot or creates a new generation.
+        The settle_unreceived branch is ReportSafe for the original requesting session and owner. It
+        accepts only the durable original key when the Agent has never persisted a reservation reply or
+        begun work and still proves it never opened the original scene. It returns no work snapshot.
+        An already admitted key releases only that original reservation and returns its acknowledgement.
+        A key with no reservation is atomically tombstoned so a later in-flight claim cannot allocate it.
       requestBody:
         required: true
-        content: {application/json: {schema: {$ref: '#/components/schemas/PublicCheckClaimRequest'}}}
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - {$ref: '#/components/schemas/PublicCheckClaimRequest'}
+                - {$ref: '#/components/schemas/UnreceivedPublicCheckSettlement'}
       responses:
         '200':
           description: Active original check, exact released acknowledgement, or data=null when no eligible check or Profile/window is busy.
@@ -153,7 +163,8 @@ paths:
                           - {type: 'null'}
                           - {$ref: '#/components/schemas/PublicCheckClaim'}
                           - {$ref: '#/components/schemas/ReleasedPublicCheckClaim'}
-        '401': {description: Current Desktop Agent session required.}
+                          - {$ref: '#/components/schemas/CancelledPublicCheckClaim'}
+        '401': {description: Claim requires a current Desktop session. Unreceived settlement requires the valid original-session ReportSafe token.}
         '409': {description: Request key reused with different input, a newer Agent contract is required, or legacy cutover still closes new admission.}
   /api/v1/cloud-agent/publication-task/{id}/check:
     post:
@@ -229,6 +240,20 @@ components:
       properties:
         request_key: {$ref: '#/components/schemas/RequestKey'}
         capacity: {$ref: '#/components/schemas/ExecutionCapacity'}
+    UnreceivedPublicCheckSettlement:
+      type: object
+      additionalProperties: false
+      required: [request_key, settle_unreceived]
+      properties:
+        request_key: {$ref: '#/components/schemas/RequestKey'}
+        settle_unreceived: {const: true}
+    CancelledPublicCheckClaim:
+      type: object
+      additionalProperties: false
+      required: [request_key, reservation_state]
+      properties:
+        request_key: {$ref: '#/components/schemas/RequestKey'}
+        reservation_state: {const: cancelled}
     PublicCheckClaim:
       type: object
       required: [task, attempt, generation, expected_revision, reservation_id, reservation_state, replayed, browser_fallback_allowed]
@@ -254,7 +279,7 @@ components:
     ProfileDisposition:
       type: string
       enum: [not_opened, closed]
-      description: Original Agent has established no owned browser was opened or its exact owned scene safely closed. Elapsed time or a missing local record is insufficient.
+      description: The original caller verified the exact Profile is closed. not_opened additionally requires durable evidence that this reservation never attempted to open a browser. closed requires verified closure of its owned scene. Elapsed time or a missing local record is insufficient.
     PublicCheckReport:
       type: object
       additionalProperties: false
@@ -268,7 +293,15 @@ components:
         observation:
           allOf:
             - {$ref: '../../cloud-api/v1/publication.openapi.yaml#/components/schemas/ResultResolution'}
-            - {type: object, properties: {conclusion: {type: string, enum: [uncertain, reviewing, published]}}}
+            - type: object
+              properties:
+                conclusion: {type: string, enum: [uncertain, reviewing, published]}
+                evidence:
+                  type: object
+                  required: [scene_closed]
+                  properties:
+                    scene_closed: {const: true}
+              description: Both Profile dispositions require explicit scene_closed=true. A conflicting observation leaves the original Profile use held.
       allOf:
         - if: {required: [browser_used], properties: {browser_used: {const: true}}}
           then: {properties: {profile_disposition: {const: closed}}}
@@ -374,7 +407,7 @@ components:
         files: {type: object, description: 'video, cover (16:9), and portrait_cover (3:4) short-lived single-object grants, each {url,size,sha256}; never persist. Omitted on replay of finished/lost work.'}
     ExecutionFeedback:
       type: object
-      required: [task_status, attempt_status, attempt_id, report_seq, stop_requested, allow_submit]
+      required: [task_status, attempt_status, attempt_id, report_seq, stop_requested, allow_submit, scene_parked]
       properties:
         task_status: {$ref: '../../cloud-api/v1/publication.openapi.yaml#/components/schemas/TaskStatus'}
         attempt_status: {type: string, enum: [running, awaiting_human, completed, interrupted]}
@@ -384,7 +417,7 @@ components:
         stop_reason: {type: string}
         allow_submit: {type: boolean}
         result_hash: {type: [string, 'null']}
-        scene_parked: {type: boolean, description: Cloud currently records the original scene as reliably parked, with no automatic slot.}
+        scene_parked: {type: boolean, description: True only while Cloud records the original scene as reliably parked with no automatic slot. Successful parking and exact replay return this explicit flag. A client must treat a missing legacy flag as unconfirmed.}
     Success:
       type: object
       required: [errcode, message, data, logid]
