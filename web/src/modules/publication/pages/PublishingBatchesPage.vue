@@ -79,8 +79,10 @@ const executionBusy = ref(false);
 const pendingExecution = ref(false);
 const taskScope = ref({});
 const taskPanel = ref(null);
+const taskTable = ref(null);
 let launchAfterNavigation = null;
 let executionReadSequence = 0;
+let executionRefresh = null;
 let epoch = 0;
 let recordEpoch = 0;
 let listScroll = 0;
@@ -302,20 +304,39 @@ async function finishCreated(saved, startAfterSave = false) {
   await savedDetail(saved, startAfterSave);
 }
 
-async function syncExecutionDetail(latest, background = false) {
+async function syncExecutionDetail(latest, background = false, reloadTasks = true) {
   const id = detail.value?.id;
   if (view.value !== "detail" || !id || (background && (executionBusy.value || pendingExecution.value))) return;
   const run = epoch;
+  const hasLatest = latest?.id === id;
+  while (!hasLatest && executionRefresh?.run === run) {
+    if (background) return executionRefresh.promise;
+    await executionRefresh.promise;
+    if (run !== epoch) return;
+  }
   const read = ++executionReadSequence;
+  const current = () => run === epoch && read === executionReadSequence;
+  const promise = (async () => {
+    try {
+      const updated = hasLatest ? latest : await api.get(id);
+      if (!current() || updated.id !== id) return;
+      const previouslyStarted = formalTasks.value;
+      detail.value = updated;
+      if (!previouslyStarted && formalTasks.value) recordTab.value = "tasks";
+      if (!background && recordTab.value === "records") loadRecords(id, recordPage.value);
+      if (reloadTasks && previouslyStarted && recordTab.value === "tasks") {
+        await nextTick();
+        if (current()) await taskTable.value?.refresh();
+      }
+    } catch (error) {
+      if (!background && current()) resourceError.value = problem(error, "重新读取批次状态失败");
+    }
+  })();
+  executionRefresh = { run, promise };
   try {
-    const updated = latest?.id === id ? latest : await api.get(id);
-    if (run !== epoch || read !== executionReadSequence || updated.id !== id) return;
-    const previouslyStarted = formalTasks.value;
-    detail.value = updated;
-    if (!previouslyStarted && formalTasks.value) recordTab.value = "tasks";
-    if (!background && recordTab.value === "records") loadRecords(id, recordPage.value);
-  } catch (error) {
-    if (!background && run === epoch) resourceError.value = problem(error, "重新读取批次状态失败");
+    await promise;
+  } finally {
+    if (executionRefresh?.promise === promise) executionRefresh = null;
   }
 }
 
@@ -568,7 +589,8 @@ async function guardNavigation(to, from) {
   });
 }
 const executionPolling = computed(() => view.value === "detail" &&
-  ["running", "paused", "stopping"].includes(detail.value?.execution_status));
+  (["running", "paused", "stopping"].includes(detail.value?.execution_status) ||
+    detail.value?.execution?.task_counts?.reviewing > 0));
 watch(executionPolling, (enabled, _previous, onCleanup) => {
   if (!enabled) return;
   let timer;
@@ -716,8 +738,9 @@ onBeforeUnmount(() => {
           </div>
         </t-tab-panel>
         <t-tab-panel v-else value="tasks" label="正式发布任务">
-          <BatchFormalTasks :batch="detail" :account-options="taskAccountOptions" :account-name="accountName" :output-name="outputName"
-            :task-link="taskLink" :scope="taskScope" :active="recordTab === 'tasks'" @scope="taskScope = $event" />
+          <BatchFormalTasks ref="taskTable" :batch="detail" :account-options="taskAccountOptions" :account-name="accountName" :output-name="outputName"
+            :task-link="taskLink" :scope="taskScope" :active="recordTab === 'tasks'" @scope="taskScope = $event"
+            @refresh-summary="syncExecutionDetail(null, false, false)" />
         </t-tab-panel>
         <t-tab-panel value="records" label="操作记录">
           <div class="batch-tab">

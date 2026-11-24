@@ -17,13 +17,15 @@ const props = defineProps({
   scope: { type: Object, required: true },
   active: Boolean,
 });
-const emit = defineEmits(["scope"]);
+const emit = defineEmits(["scope", "refresh-summary"]);
 const api = createPublicationBatchClient();
 const state = ref({ items: [], total: 0 });
 const fields = ref({});
 const loading = ref(false);
 const error = ref("");
 let sequence = 0;
+let taskRead = null;
+let disposed = false;
 const columns = [
   { colKey: "id", title: "任务 ID", width: 135 },
   { colKey: "content", title: "发布文案", ellipsis: true, width: 204 },
@@ -44,18 +46,33 @@ async function load() {
   }
   loading.value = true;
   error.value = "";
+  const { id } = props.batch;
+  const query = props.scope;
+  const key = JSON.stringify([id, query]);
+  if (taskRead?.key !== key) taskRead = { key, promise: api.tasks(id, query) };
+  const request = taskRead;
   try {
-    const page = await api.tasks(props.batch.id, props.scope);
+    const page = await request.promise;
     if (run === sequence) state.value = page;
   } catch (failure) {
     if (run === sequence) error.value = failure.message || "读取正式任务失败";
   } finally {
+    if (taskRead === request) taskRead = null;
     if (run === sequence) loading.value = false;
   }
 }
+async function refresh() {
+  // A summary read can finish while an older task response is still pending.
+  while (!disposed && props.active && taskRead) await taskRead.promise.catch(() => {});
+  if (!disposed && props.active) await load();
+}
+defineExpose({ refresh });
 watch(() => JSON.stringify(props.scope), () => { fields.value = { ...props.scope }; }, { immediate: true });
-watch(() => [props.batch.id, props.batch.revision, JSON.stringify(props.batch.execution), JSON.stringify(props.scope), props.active], load, { immediate: true });
-onBeforeUnmount(() => { sequence++; });
+watch([() => props.batch.id, () => JSON.stringify(props.scope), () => props.active], load, { immediate: true });
+onBeforeUnmount(() => {
+  disposed = true;
+  sequence++;
+});
 
 function apply(page = 1, pageSize = props.scope.page_size) {
   const { search, status, media_account_id } = fields.value;
@@ -63,9 +80,15 @@ function apply(page = 1, pageSize = props.scope.page_size) {
   if (JSON.stringify(next) === JSON.stringify(props.scope)) load();
   else emit("scope", next);
 }
+function query(resetPage = false) {
+  const filtersChanged = ["search", "status", "media_account_id"].some(key =>
+    (fields.value[key] || "") !== (props.scope[key] || ""));
+  apply(resetPage || filtersChanged ? 1 : props.scope.page);
+  emit("refresh-summary");
+}
 function reset() {
   fields.value = {};
-  apply();
+  query(true);
 }
 function taskAction(task) {
   const actions = task.allowed_actions || [];
@@ -81,7 +104,7 @@ function taskAction(task) {
     <ResourceFilterBar>
       <label class="wt-filter-field wt-filter-field--wide">
         <span class="wt-filter-field__label">搜索任务</span>
-        <t-input v-model="fields.search" aria-label="搜索任务" :maxlength="100" clearable @enter="apply()" />
+        <t-input v-model="fields.search" aria-label="搜索任务" :maxlength="100" clearable @enter="query()" />
       </label>
       <label class="wt-filter-field">
         <span class="wt-filter-field__label">发布账号</span>
@@ -92,7 +115,7 @@ function taskAction(task) {
         <t-select v-model="fields.status" aria-label="任务状态" :options="statuses" placeholder="全部" clearable />
       </label>
       <div class="wt-filter-actions">
-        <t-button theme="primary" :disabled="loading" @click="apply()">查询</t-button>
+        <t-button theme="primary" :disabled="loading" @click="query()">查询</t-button>
         <t-button theme="default" variant="outline" :disabled="loading" @click="reset">重置</t-button>
       </div>
     </ResourceFilterBar>

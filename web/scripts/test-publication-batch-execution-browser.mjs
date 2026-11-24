@@ -53,7 +53,7 @@ let expectedFinish;
 let linkedFailedPage = 0;
 const exceptions = [];
 const review = process.env.WT_MEDIA_BATCH_REVIEW;
-let hydrateGate, stoppingGate, stoppingReadStarted;
+let hydrateGate, stoppingGate, stoppingReadStarted, lateTaskGate;
 let freshReread = false;
 let reviewPreviews = 0;
 let replayInput;
@@ -162,6 +162,16 @@ async function routeCloud(route) {
         return route.abort("failed");
       }
       case "task": {
+        if (review === "late-publication") {
+          const items = [...tasks];
+          if (lateTaskGate) {
+            const { entered, released } = lateTaskGate;
+            lateTaskGate = null;
+            entered();
+            await released;
+          }
+          return send({ items, total: 21, page: Number(params.get("page")), page_size: Number(params.get("page_size")) });
+        }
         const status = params.get("status");
         const list = tasks.filter(item => !status || item.status === status);
         if (status === "failed") linkedFailedPage++;
@@ -342,6 +352,103 @@ const regressions = {
     const retainedKey = await other.evaluate(key => JSON.parse(localStorage.getItem(key)).input.request_key, key);
     assert.equal(retainedKey, results[0] === "saved" ? "first" : "second");
     await other.close();
+  },
+  async "senior"() {
+    actor = { ...owner, role: "senior_operator" };
+    batch.execution_status = "paused";
+    batch.allowed_actions = ["resume", "stop"];
+    batch.execution = {
+      ...newExecution(), phase: "paused", first_started_at: now, created_count: 1,
+      task_counts: { uncertain: 1 }, pause: { id: "3", kind: "manual", reason: "合成任务核对", paused_at: now, exceptions: [] },
+    };
+    tasks = [{
+      ...candidates[0], id: "150", revision: "6", batch_id: id, platform: "baidu", operator_id: owner.id,
+      status: "uncertain", execution_group_no: 1, created_at: now, allowed_actions: ["resolve"],
+      resources: { account_name: account.name, output_name: outputs[0].name },
+    }];
+    const link = detailURL + "&tab=tasks&task_status=uncertain&task_search=发布文案&task_page_size=20";
+    await page.goto(link);
+    await button("继续发布").waitFor();
+    await button("终止发布").waitFor();
+    await page.getByRole("link", { name: "核实结果", exact: true }).click();
+    await heading("发布任务详情").waitFor();
+    await button("核实结果").waitFor();
+    await page.getByRole("button", { name: "返回", description: "返回发布批次" }).click();
+    await button("继续发布").waitFor();
+    const returned = new URL(page.url()).searchParams;
+    assert.equal(returned.get("task_status"), "uncertain");
+    assert.equal(returned.get("task_search"), "发布文案");
+    assert.equal(returned.get("task_page_size"), "20");
+
+    actor = { ...actor, id: "72" };
+    batch.allowed_actions = [];
+    await page.goto(link);
+    await heading("受控批次").waitFor();
+    await page.getByText("批次配置由所属运营处理", { exact: true }).waitFor();
+    assert.equal(await button("继续发布").count(), 0);
+    assert.equal(await button("终止发布").count(), 0);
+    assert.equal(calls.filter(call => call.method === "POST" && call.endpoint.startsWith("/publication-batch/")).length, 0);
+  },
+  async "late-publication"() {
+    batch.targets[0].target_count = 60;
+    batch.execution_status = "ended";
+    batch.allowed_actions = ["copy"];
+    batch.execution = {
+      ...newExecution(), phase: "ended", first_started_at: now, ended_at: now, target_count: 60,
+      created_count: 21, creation_shortfall: 39, target_shortfall: 60, task_counts: { reviewing: 1, cancelled: 20 },
+    };
+    tasks = [{
+      ...candidates[0], id: "150", revision: "6", batch_id: id, platform: "baidu", operator_id: owner.id,
+      status: "reviewing", execution_group_no: 1, created_at: now, allowed_actions: ["resolve"],
+      resources: { account_name: account.name, output_name: outputs[0].name },
+    }];
+    const batchReads = () => calls.filter(call => call.endpoint === "/publication-batch/" + id);
+    const taskReads = () => calls.filter(call => call.endpoint === "/publication-batch/" + id + "/task");
+    const requestForBatch = () => page.waitForResponse(response => new URL(response.url()).pathname.endsWith("/publication-batch/" + id));
+    const progress = page.getByRole("group", { name: "公开发布率", exact: true });
+    const reviewing = page.getByText("待平台公开", { exact: true }).locator("..");
+    await page.goto(detailURL + "&tab=tasks&task_search=发布文案&task_page=2&task_page_size=20");
+    await progress.getByText(/0 \/ 60/).waitFor();
+    await reviewing.getByText("1 条", { exact: true }).waitFor();
+    const row = page.getByRole("row").filter({ hasText: "发布文案 0" });
+    await row.getByText("平台审核中", { exact: true }).waitFor();
+    assert.equal(taskReads().at(-1).params.get("page"), "2");
+
+    // Hold a task read that started before the independent public check.
+    // The ended summary can catch up while this response is still in flight.
+    let entered, release;
+    const taskEntered = new Promise(resolve => { entered = resolve; });
+    lateTaskGate = { entered, released: new Promise(resolve => { release = resolve; }) };
+    const initialQuery = requestForBatch();
+    await button("查询").click();
+    await Promise.all([initialQuery, taskEntered]);
+    batch.execution = { ...batch.execution, published_count: 1, target_shortfall: 59, task_counts: { published: 1, cancelled: 20 } };
+    tasks[0] = { ...tasks[0], status: "published", revision: "7", platform_work_id: "5900", allowed_actions: [] };
+    await progress.getByText(/1 \/ 60/).waitFor({ timeout: 8000 });
+    await reviewing.getByText("0 条", { exact: true }).waitFor();
+    assert.equal(taskReads().length, 2, "the final task read must not overlap the older one");
+    release();
+    await row.getByText("已发布", { exact: true }).waitFor();
+    const settled = taskReads().at(-1).params;
+    assert.equal(settled.get("search"), "发布文案");
+    assert.equal(settled.get("page"), "2");
+    assert.equal(settled.get("page_size"), "20");
+    const counts = [batchReads().length, taskReads().length];
+    await delay(5300);
+    assert.deepEqual([batchReads().length, taskReads().length], counts, "ended batch with no reviews stops polling");
+
+    const queried = requestForBatch();
+    await button("查询").click();
+    await queried;
+    await row.getByText("已发布", { exact: true }).waitFor();
+    assert.equal(taskReads().at(-1).params.get("page"), "2");
+    const reset = Promise.all([requestForBatch(), page.waitForResponse(response =>
+      new URL(response.url()).pathname.endsWith("/publication-batch/" + id + "/task"))]);
+    await button("重置").click();
+    await reset;
+    assert.equal(taskReads().at(-1).params.get("search"), null);
+    assert.equal(taskReads().at(-1).params.get("page"), "1");
+    assert.equal(startPosts(), 0);
   },
   async "stopping"() {
     batch.execution_status = "stopping";
