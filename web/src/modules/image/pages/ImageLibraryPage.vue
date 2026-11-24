@@ -283,8 +283,8 @@ onMounted(() => {
         >重试加载类目</t-button
       ></FeedbackAlert
     >
-    <ResourceCard class="resource-list-panel">
-      <ResourceFilterBar>
+    <ResourceCard class="resource-list-panel image-library-panel">
+      <ResourceFilterBar class="image-library-filters">
         <label class="wt-filter-field wt-filter-field--wide"
           ><span class="wt-filter-field__label">图片名称</span
           ><t-input v-model="filters.search" @enter="query"
@@ -331,24 +331,32 @@ onMounted(() => {
             ]"
         /></label>
         <div class="wt-filter-actions">
-          <ResourceAdvancedToggle v-model="advanced" /><t-button @click="query"
-            >查询</t-button
-          ><t-button theme="default" variant="outline" @click="reset"
-            >重置</t-button
-          >
+          <t-button theme="primary" @click="query">查询</t-button>
+          <t-button theme="default" variant="outline" @click="reset">重置</t-button>
         </div>
-        <div v-if="advanced" class="wt-advanced-filters">
-          <label class="wt-filter-field"
-            ><span class="wt-filter-field__label">来源</span
-            ><t-select
-              placeholder="全部"
-              v-model="filters.source"
-              :options="[
-                { label: '全部', value: '' },
-                { label: '上传图片', value: 'upload' },
-                { label: '模板生成', value: 'render' },
-              ]"
-          /></label>
+        <div class="image-advanced-section">
+          <ResourceAdvancedToggle
+            v-model="advanced"
+            :count="Number(!!applied.source)"
+            controls="image-library-advanced-filters"
+          />
+          <div
+            v-if="advanced"
+            id="image-library-advanced-filters"
+            class="wt-advanced-filters"
+          >
+            <label class="wt-filter-field"
+              ><span class="wt-filter-field__label">来源</span
+              ><t-select
+                placeholder="全部"
+                v-model="filters.source"
+                :options="[
+                  { label: '全部', value: '' },
+                  { label: '上传图片', value: 'upload' },
+                  { label: '模板生成', value: 'render' },
+                ]"
+            /></label>
+          </div>
         </div>
       </ResourceFilterBar>
       <ResourceSelectionToolbar
@@ -518,6 +526,45 @@ onMounted(() => {
   </div>
 </template>
 <style scoped>
+.image-library-panel {
+  container: image-library / inline-size;
+}
+.image-library-page .image-library-panel .image-library-filters {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-items: end;
+}
+.image-library-page .image-library-panel .image-library-filters > .wt-filter-field {
+  width: 100%;
+  max-width: none;
+}
+.image-library-filters > .wt-filter-actions {
+  justify-self: end;
+  margin-left: 0;
+  flex-wrap: nowrap;
+}
+@container image-library (min-width: 960px) {
+  .image-library-page .image-library-panel .image-library-filters {
+    grid-template-columns: minmax(180px, 1.5fr) repeat(4, minmax(110px, 1fr)) max-content;
+  }
+}
+@container image-library (max-width: 640px) {
+  .image-library-page .image-library-panel .image-library-filters {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@container image-library (max-width: 420px) {
+  .image-library-page .image-library-panel .image-library-filters {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.image-advanced-section {
+  display: grid;
+  grid-column: 1 / -1;
+  gap: 16px;
+  min-width: 0;
+}
 .image-cell {
   display: flex;
   align-items: center;

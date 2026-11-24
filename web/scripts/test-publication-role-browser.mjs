@@ -36,7 +36,7 @@ try {
             invoke: async (command, args) => {
               window.__nativeCalls.push(command);
               await window.__recordNativeCall(command);
-              if (command === 'get_public_config') return { cloud_base_url: base };
+              if (command === 'get_public_config') return { environment: 'dev', cloud_base_url: base };
               if (command === 'local_publication_draft_get') return { payload: null, revision: '0', saved_at: null, schema_version: 1 };
               if (command === 'local_agent_token_facts') return { configured: true };
               if (command === 'local_saved_file_states') return {};

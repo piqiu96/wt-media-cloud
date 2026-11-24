@@ -49,7 +49,8 @@ const search = ref(route.query.search ? String(route.query.search) : '')
 const contentID = ref(route.query.content_id ? String(route.query.content_id) : '')
 const platform = ref('')
 const sourceType = ref('')
-const status = ref('')
+// 关联跳转须能定位已处理内容；普通进入默认待处理。
+const status = ref(['search', 'content_id', 'strategy_id', 'crawl_task_id', 'material_id'].some((key) => String(route.query[key] ?? '').trim()) ? '' : 'pending')
 const publishedRange = ref([])
 const sortBy = ref('published_at')
 const sortOrder = ref('desc')
@@ -158,7 +159,7 @@ useAutoRefresh(() => load({ quiet: true }), {
 })
 
 function reset() {
-  search.value = ''; contentID.value = ''; platform.value = ''; sourceType.value = ''; status.value = ''; strategyFilter.value = ''; taskFilter.value = ''; materialFilter.value = ''; publishedRange.value = []; teamFilter.value = ''; categoryFilter.value = defaultCategoryIDs()
+  search.value = ''; contentID.value = ''; platform.value = ''; sourceType.value = ''; status.value = 'pending'; strategyFilter.value = ''; taskFilter.value = ''; materialFilter.value = ''; publishedRange.value = []; teamFilter.value = ''; categoryFilter.value = defaultCategoryIDs()
   load()
 }
 
@@ -597,7 +598,6 @@ function openImageViewer(url) {
             <label class="wt-filter-field"><span class="wt-filter-field__label">发布时间</span><ResourceDateRange v-model="publishedRange" /></label>
             <label class="wt-filter-field"><span class="wt-filter-field__label">来源方式</span><t-select v-model="sourceType" clearable placeholder="全部"><t-option value="link" label="ID/链接发现" /><t-option value="search" label="关键词发现" /><t-option value="author" label="博主发现" /><t-option value="strategy" label="挖掘策略" /></t-select></label>
             <label v-if="isAdmin" class="wt-filter-field"><span class="wt-filter-field__label">运营团队</span><BusinessSelect kind="team" filter v-model="teamFilter" clearable @change="changeTeamFilter"><t-option v-for="team in teams" :key="team.id" :value="team.id" :label="team.name" /></BusinessSelect></label>
-            <label class="wt-filter-field"><span class="wt-filter-field__label">内容 ID</span><t-input v-model="contentID" clearable placeholder="精确匹配" /></label>
             <div class="wt-filter-actions"><t-button theme="primary" @click="load">查询</t-button><t-button class="wt-secondary-button" variant="outline" @click="reset">重置</t-button></div>
         </ResourceFilterBar>
         <ResourceSelectionToolbar v-if="!isLibrary" :count="selectedRowKeys.length" unit="条内容" @clear="selectedRowKeys = []">

@@ -4,6 +4,20 @@ import { describe, expect, it } from 'vitest'
 const source = readFileSync(new URL('./ContentPoolPage.vue', import.meta.url), 'utf8')
 
 describe('content pool page', () => {
+  it.each([
+    [{}, 'pending'],
+    [{ search: '   ' }, 'pending'],
+    [{ search: 'existing-platform-id' }, ''],
+    [{ content_id: '123' }, ''],
+    [{ crawl_task_id: '42' }, ''],
+    [{ strategy_id: '9' }, ''],
+    [{ material_id: '17' }, ''],
+  ])('keeps explicit linked lookups independent of processing status: %j', (query, expected) => {
+    const declaration = source.match(/^const status = ref\(.*$/m)[0]
+    const initialStatus = new Function('ref', 'route', `${declaration}; return status.value`)
+    expect(initialStatus((value) => ({ value }), { query })).toBe(expected)
+  })
+
   it('uses the shared resource layout and exposes the M3-A actions', () => {
     expect(source).toContain('ResourcePageHeader')
     // 概览指标与分页总数重复，已移除（AdminUI 规范 §3.3）。

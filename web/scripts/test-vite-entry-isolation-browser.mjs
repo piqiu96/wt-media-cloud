@@ -24,12 +24,22 @@ try {
     contexts.push(context);
     if (entry === 'desktop') await context.addInitScript(({ base }) => {
       // Native configuration is the only shell capability this page needs.
-      window.__TAURI_INTERNALS__ = { invoke: async command => command === 'get_public_config' ? { cloud_base_url: base, cloud_env: 'dev' } : {} };
+      window.__TAURI_INTERNALS__ = {
+        invoke: async command => {
+          if (command === 'get_public_config') return { environment: 'dev', cloud_base_url: base, cloud_env: 'dev' };
+          if (command === 'local_agent_token_facts') return { configured: true };
+          if (command === 'local_publication_draft_get') return { payload: null, revision: '0', saved_at: null, schema_version: 1 };
+          if (command === 'plugin:app|version') return '0.1.0-dev';
+          return {};
+        },
+        transformCallback: () => 1,
+        unregisterCallback: () => {},
+      };
     }, { base });
     await context.route('**/api/v1/**', async route => {
       assert.equal(route.request().method(), 'GET', 'This regression must never send a business write');
       const url = new URL(route.request().url());
-      const data = url.pathname.endsWith('/auth/me') ? { id: '1', role: 'admin', username: 'cache-regression' }
+      const data = url.pathname.endsWith('/auth/me') ? { id: '1', role: 'operator', username: 'cache-regression' }
         : url.pathname.endsWith('/categories') ? []
         : { items: [], total: 0, summary: { all: 0 } };
       await route.fulfill({ json: { errcode: 0, message: 'ok', data } });

@@ -132,7 +132,7 @@ async function login(options = {}) {
       <header class="login-topbar">
         <router-link v-if="!isDesktop()" to="/home" class="brand-link" aria-label="起飞官网"><BrandLogo /></router-link>
         <BrandLogo v-else />
-        <span class="version-pill">v{{ version }}</span>
+        <span v-if="isDesktop() && version" class="version-pill">v{{ version }}</span>
       </header>
 
       <section class="login-layout">

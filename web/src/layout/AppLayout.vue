@@ -168,7 +168,7 @@ async function logout() {
         <BrandLogo :compact="collapsed" />
         <div v-if="!collapsed" class="sidebar-meta">
           <span class="sidebar-env">{{ isDesktop() ? '桌面端' : '网页版' }}</span>
-          <span v-if="appVersion" class="sidebar-version">v{{ appVersion }}</span>
+          <span v-if="isDesktop() && appVersion" class="sidebar-version">v{{ appVersion }}</span>
         </div>
       </div>
       <div class="business-navigation">
