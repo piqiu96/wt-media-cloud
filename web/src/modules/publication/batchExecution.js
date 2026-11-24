@@ -10,14 +10,19 @@ export const batchControlLabels = {
 
 const taskRef = ({ id, revision }) => ({ task_id: id, revision });
 const pauseRef = ({ task_id, revision }) => ({ task_id, revision });
-function conflictAfterReplay(error, id, operation, latest) {
+function conflictAfterReplay(error, id, operation, latest, readAfterFailure) {
   const { status, code, details } = error || {};
   if (status !== 409 || !details || (details.batch_id != null && details.batch_id !== id)) return false;
   const { action, input } = operation;
-  // A started batch's generic conflict can mean a different key, a different
-  // digest, or a missing original receipt. It cannot resolve this intent.
-  if (action === "start" && (latest?.execution?.first_started_at ||
-    ["running", "paused", "stopping", "ended"].includes(details.execution_status))) return false;
+  if (action === "start") {
+    // A prior read can predate another start. Only fresh unstarted evidence
+    // supports clearing a generic replay conflict.
+    const phase = details.execution_status;
+    const unstartedConflict = details.batch_id === id && phase === "not_started";
+    const unstartedRead = readAfterFailure && latest?.execution_status === "not_started";
+    if (latest?.execution?.first_started_at || (phase !== undefined && phase !== "not_started") ||
+        !(unstartedConflict || unstartedRead)) return false;
+  }
   if (["publication_conflict", "publication_batch_parent_blocked", "publication_batch_shortfall_changed",
     "publication_batch_pause_changed", "publication_output_occupied"].includes(code) &&
     typeof details.current_revision === "string" && /^[1-9][0-9]*$/.test(details.current_revision)) return true;
@@ -163,12 +168,14 @@ export async function sendBatchCommand(api, id, operation, { retry = false } = {
       error.batchRejection = true;
       throw error;
     }
+    let readAfterFailure = false;
     try {
       await readBack();
+      readAfterFailure = true;
     } catch {
-      // A failed read cannot replace the last known detail or settle the intent.
+      // Keep the last known detail for display even if it cannot settle the intent.
     }
-    if (retry && conflictAfterReplay(error, id, operation, latest)) {
+    if (retry && conflictAfterReplay(error, id, operation, latest, readAfterFailure)) {
       error.batchRejection = true;
       throw error;
     }

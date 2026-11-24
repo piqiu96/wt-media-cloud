@@ -117,6 +117,40 @@ it("keeps the original intent when another revision started the same rows with a
   expect(api.start.mock.calls).toEqual([[batch.id, input], [batch.id, input]]);
 });
 
+it.each(["cancelled", "stopping", "future_status", undefined])(
+  "preserves an original start after a %s conflict and a failed second read",
+  async executionStatus => {
+    const current = { id: batch.id, revision: batch.revision, execution_status: "not_started",
+      execution: { first_started_at: null } };
+    const response = Object.assign(new Error("发布条件已变化"), { status: 409, code: "publication_conflict",
+      details: { batch_id: batch.id, current_revision: "9007199254741000", execution_status: executionStatus } });
+    const calls = [];
+    const api = {
+      get: vi.fn().mockImplementationOnce(async () => { calls.push("read before replay"); return current; })
+        .mockImplementationOnce(async () => { calls.push("failed read after replay"); throw new TypeError("网络中断"); }),
+      start: vi.fn(async () => { calls.push("same-key replay"); throw response; }),
+    };
+    const input = execution.buildBatchStart(batch, preview, "original", true);
+    await expect(execution.sendBatchCommand(api, batch.id, { action: "start", input }, { retry: true }))
+      .rejects.toMatchObject({ outcomeUnknown: true, latest: current });
+    expect(api.start).toHaveBeenCalledExactlyOnceWith(batch.id, input);
+    expect(calls).toEqual(["read before replay", "same-key replay", "failed read after replay"]);
+  },
+);
+
+it("clears a structured replay rejection when Cloud explicitly reports the batch is still unstarted", async () => {
+  const current = { id: batch.id, revision: batch.revision, execution_status: "not_started" };
+  const response = Object.assign(new Error("发布条件已变化"), { status: 409, code: "publication_conflict",
+    details: { batch_id: batch.id, current_revision: "9007199254741000", execution_status: "not_started" } });
+  const api = {
+    get: vi.fn().mockResolvedValueOnce(current).mockRejectedValueOnce(new TypeError("网络中断")),
+    start: vi.fn().mockRejectedValue(response),
+  };
+  const input = execution.buildBatchStart(batch, preview, "original", true);
+  await expect(execution.sendBatchCommand(api, batch.id, { action: "start", input }, { retry: true }))
+    .rejects.toMatchObject({ batchRejection: true });
+});
+
 it("settles only the original intent when Cloud explicitly proves that another key started the batch", async () => {
   const latest = { id: batch.id, revision: "9007199254740997", execution_status: "running",
     execution: { first_started_at: "2026-11-25T01:00:00Z" } };
