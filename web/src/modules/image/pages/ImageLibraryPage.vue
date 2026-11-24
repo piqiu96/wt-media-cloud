@@ -543,7 +543,7 @@ onMounted(() => {
   margin-left: 0;
   flex-wrap: nowrap;
 }
-@container image-library (min-width: 1024px) {
+@container image-library (min-width: 960px) {
   .image-library-page .image-library-panel .image-library-filters {
     grid-template-columns: minmax(180px, 1.5fr) repeat(4, minmax(110px, 1fr)) max-content;
   }

@@ -60,7 +60,7 @@ try {
     assert.ok(Math.abs(layout.fields.at(-1).bottom - layout.actions.bottom) <= 1, `actions baseline ${width}: ${JSON.stringify(layout)}`)
     assert.ok(Math.abs(layout.fields[0].x - layout.toggle.x) <= 1, `advanced left alignment ${width}`)
     assert.ok(Math.abs(layout.toggle.y - layout.fields.at(-1).bottom - 20) <= 1, `advanced row gap ${width}: ${JSON.stringify(layout)}`)
-    if (width >= 1440) assert.equal(layout.columns, 6, `wide layout ${width}`)
+    if (width >= 1280) assert.equal(layout.columns, 6, `wide layout ${width}`)
     const before = requests.length
     await toggle.click()
     const advanced = page.locator('#image-library-advanced-filters')
