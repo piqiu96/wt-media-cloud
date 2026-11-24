@@ -5,12 +5,15 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	filemodel "github.com/wt-media/wt-media-cloud/internal/modules/files/model"
 	files "github.com/wt-media/wt-media-cloud/internal/modules/files/service"
 	identity "github.com/wt-media/wt-media-cloud/internal/modules/identity/service"
+	imagemodel "github.com/wt-media/wt-media-cloud/internal/modules/image/model"
+	imagerepo "github.com/wt-media/wt-media-cloud/internal/modules/image/repository"
 	accounts "github.com/wt-media/wt-media-cloud/internal/modules/mediaaccount/service"
 	outputmodel "github.com/wt-media/wt-media-cloud/internal/modules/production/model"
 	production "github.com/wt-media/wt-media-cloud/internal/modules/production/service"
@@ -229,5 +232,77 @@ func TestBatchSaveAndDeleteSerializeOnFile(t *testing.T) {
 	}
 	if _, err := s.BatchByRequest(9, v.RequestKey); !errors.Is(err, repo.ErrNotFound) {
 		t.Fatalf("failed create left a batch: %v", err)
+	}
+}
+
+func TestBatchFileReferenceBlocksConcurrentImageUnregisterAfterSnapshot(t *testing.T) {
+	db := isolated(t)
+	if err := db.Exec("CREATE TABLE operation_teams(id BIGINT UNSIGNED PRIMARY KEY)").Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec("INSERT INTO operation_teams(id) VALUES(7)").Error; err != nil {
+		t.Fatal(err)
+	}
+	applyFileMigration(t, db, "20261121_110_image_asset.sql")
+	imageStore := imagerepo.Store{DB: db}
+	asset, err := imageStore.Register(imagemodel.ImageAsset{FileID: 2, TeamID: 7, Name: "race", CreatedBy: 9, UpdatedBy: 9, AllowAsCover: true, Enabled: true, Revision: 1, CategoryIDs: []string{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	held, snapshot, release := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	var observed sync.Once
+	const callback = "test:batch_reference_delete_snapshot"
+	if err = db.Callback().Row().After("gorm:row").Register(callback, func(tx *gorm.DB) {
+		if strings.Contains(tx.Statement.SQL.String(), "image_asset AS a") {
+			observed.Do(func() { close(snapshot) })
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	defer db.Callback().Row().Remove(callback)
+	batchStore := store(db)
+	batchStore.LockFiles = func(tx *gorm.DB, ids []int64) error {
+		if err := files.LockAvailable(tx, ids); err != nil {
+			return err
+		}
+		close(held)
+		<-release
+		return nil
+	}
+	v := model.Batch{TeamID: 7, OperatorID: 9, CreatedBy: 9, Name: "race", Platform: "baidu", RequestKey: "unregister-race", RequestHash: "a", Revision: 1,
+		ConfigurationStatus: model.BatchIncomplete, ExecutionStatus: model.BatchNotStarted, Targets: []model.BatchTarget{{CategoryID: 1, TargetCount: 1}},
+		Config:          model.BatchConfig{Candidates: []model.BatchCandidate{{Content: model.Content{CoverFileID: 2}}}},
+		CandidatesCount: 1, ExecutionSetting: model.BatchExecutionSetting{ConcurrencyLimit: 1, ExceptionTaskLimit: 1, BetweenGroupPolicy: "auto_continue"}}
+	saved, deleted := make(chan error, 1), make(chan error, 1)
+	go func() { _, err := batchStore.CreateBatch(v); saved <- err }()
+	select {
+	case <-held:
+	case err := <-saved:
+		t.Fatalf("batch create did not lock: %v", err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("batch writer did not hold file")
+	}
+	go func() {
+		deleted <- imageStore.Delete(asset.ID, asset.Revision, service.CheckFileReferences)
+	}()
+	select {
+	case <-snapshot:
+		close(release)
+	case err := <-deleted:
+		close(release)
+		t.Fatalf("image unregister returned before snapshot: %v", err)
+	case <-time.After(5 * time.Second):
+		close(release)
+		t.Fatal("image unregister did not establish snapshot")
+	}
+	if err := <-saved; err != nil {
+		t.Fatal(err)
+	}
+	if err := <-deleted; !errors.Is(err, files.ErrInUse) {
+		t.Fatalf("concurrent unregister should retain library registration: %v", err)
+	}
+	if _, err = imageStore.Get(asset.ID); err != nil {
+		t.Fatalf("registration missing: %v", err)
 	}
 }

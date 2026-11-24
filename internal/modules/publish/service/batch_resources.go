@@ -291,14 +291,16 @@ func (s *Service) loadAllocation(ctx context.Context, a identity.PublicUser, pla
 		if err != nil || id <= 0 || strconv.FormatInt(id, 10) != raw || chosen[id] {
 			return v, ErrInvalid
 		}
-		if authorizeSelection {
-			actual, err := v.output(s, a, id)
-			if err != nil {
-				return v, err
-			}
-			if !outputMatches(actual, int64(*a.TeamID), int64(actual.CategoryID), platform) {
-				return v, ErrInvalid
-			}
+		actual, err := v.output(s, a, id)
+		if err != nil {
+			return v, err
+		}
+		category := actual.CategoryID
+		if !a.CanAccess(a.ID, a.TeamID, category) {
+			return v, ErrNotFound
+		}
+		if _, present := targets[int64(category)]; !present || actual.TeamID != int64(*a.TeamID) || !slices.Contains(actual.Platforms, platform) {
+			return v, ErrInvalid
 		}
 		chosen[id] = true
 		v.outputIDs = append(v.outputIDs, id)

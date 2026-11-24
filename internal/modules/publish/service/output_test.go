@@ -40,7 +40,11 @@ func TestOutputCandidatesUseProductionScopeAndGlobalOccupancy(t *testing.T) {
 			s.Repo = repo
 			input := production.ListComposeOutputsInput{Page: 8, PageSize: 10, Search: "source", Platform: "baidu"}
 			s.OutputPage = func(_ context.Context, actor identity.PublicUser, got production.ListComposeOutputsInput) (OutputPage, error) {
-				if !reflect.DeepEqual(actor, a) || !reflect.DeepEqual(got, input) {
+				want := input
+				if role == identity.RoleSeniorOperator {
+					want.CategoryIDs = a.CategoryIDs
+				}
+				if !reflect.DeepEqual(actor, a) || !reflect.DeepEqual(got, want) {
 					t.Fatalf("production actor or filters changed: %+v %+v", actor, got)
 				}
 				return OutputPage{Items: []outputmodel.CompositeOutput{{ID: 129}, {ID: 130}, {ID: 131}}, Total: 83, Page: 8, PageSize: 10}, nil
@@ -80,5 +84,28 @@ func TestOutputCandidatesFailClosedOnProviderOrOccupancyReadFailure(t *testing.T
 	repo.err = errors.New("database unavailable")
 	if page, err := s.OutputCandidates(context.Background(), a, in); !errors.Is(err, repo.err) || len(page.Items) > 0 {
 		t.Fatalf("unknown occupancy shown as available: %+v %v", page, err)
+	}
+}
+
+func TestPublicationOutputNarrowsSeniorCategoryBeforeProductionPagination(t *testing.T) {
+	svc, actor, _ := fixture()
+	actor.Role = identity.RoleSeniorOperator
+	actor.CategoryIDs = []identity.CategoryID{1}
+	repo := &candidateTasks{memoryTasks: svc.Repo.(*memoryTasks)}
+	svc.Repo = repo
+	input := production.ListComposeOutputsInput{Page: 1, PageSize: 1, Platform: "baidu", OutputIDs: []int64{90, 91}}
+	svc.OutputPage = func(_ context.Context, _ identity.PublicUser, got production.ListComposeOutputsInput) (OutputPage, error) {
+		if !reflect.DeepEqual(got.CategoryIDs, []identity.CategoryID{1}) || !reflect.DeepEqual(got.OutputIDs, input.OutputIDs) {
+			return OutputPage{Items: []outputmodel.CompositeOutput{{ID: 90, CategoryID: 2}}, Total: 2, Page: 1, PageSize: 1}, nil
+		}
+		return OutputPage{Items: []outputmodel.CompositeOutput{{ID: 91, CategoryID: 1}}, Total: 1, Page: 1, PageSize: 1}, nil
+	}
+	page, err := svc.OutputCandidates(context.Background(), actor, input)
+	if err != nil || page.Total != 1 || len(page.Items) != 1 || page.Items[0].CompositeOutputID != 91 {
+		t.Fatalf("category not applied before pagination: %+v %v", page, err)
+	}
+	input.CategoryID = 2
+	if _, err = svc.OutputCandidates(context.Background(), actor, input); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("explicit unauthorized category: %v", err)
 	}
 }

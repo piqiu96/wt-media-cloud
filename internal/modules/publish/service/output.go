@@ -3,6 +3,8 @@ package service
 import (
 	"context"
 	"errors"
+	"slices"
+
 	identity "github.com/wt-media/wt-media-cloud/internal/modules/identity/service"
 	outputmodel "github.com/wt-media/wt-media-cloud/internal/modules/production/model"
 	production "github.com/wt-media/wt-media-cloud/internal/modules/production/service"
@@ -40,7 +42,23 @@ func (s *Service) OutputCandidates(ctx context.Context, a identity.PublicUser, i
 	if s.OutputPage == nil {
 		return empty, errors.New("output candidate provider unavailable")
 	}
-	// Production retains all output visibility, owner, team and category rules.
+	// Production still enforces owner and team scope. Senior operators also
+	// need a publication category constraint before production counts rows.
+	if in.CategoryID > 0 && !a.CanAccess(a.ID, a.TeamID, in.CategoryID) {
+		return empty, ErrNotFound
+	}
+	if a.Role == identity.RoleSeniorOperator {
+		allowed := make([]identity.CategoryID, 0, len(a.CategoryIDs))
+		for _, category := range a.CategoryIDs {
+			if len(in.CategoryIDs) == 0 || slices.Contains(in.CategoryIDs, category) {
+				allowed = append(allowed, category)
+			}
+		}
+		if len(allowed) == 0 {
+			return OutputCandidatePage{Items: []OutputCandidate{}, Page: in.Page, PageSize: in.PageSize}, nil
+		}
+		in.CategoryIDs = allowed
+	}
 	page, err := s.OutputPage(ctx, a, in)
 	if err != nil {
 		return empty, err

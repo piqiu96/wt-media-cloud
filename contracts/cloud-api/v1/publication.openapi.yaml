@@ -8,7 +8,7 @@ paths:
     post:
       operationId: generatePublicationContent
       security: [{sessionCookie: []}]
-      description: Generate complete DeepSeek JSON suggestions for one or multiple rows after authorizing the actual output and category. Does not adopt, confirm, create tasks or publish. No automatic POST replay. Selected fields only; declarations are never generated. Client applies each field only when row/input/field revision and latest request still match. Deadline 180 seconds, connection close cancels unfinished work.
+      description: Generate complete DeepSeek JSON suggestions for one or multiple rows after authorizing the actual output and the caller's publication category. Does not adopt, confirm, create tasks or publish. No automatic POST replay. Selected fields only; declarations are never generated. Client applies each field only when row/input/field revision and latest request still match. Deadline 180 seconds, connection close cancels unfinished work.
       requestBody:
         required: true
         content:
@@ -91,7 +91,7 @@ paths:
     get:
       operationId: listPublicationOutputCandidates
       security: [{sessionCookie: []}]
-      description: Production service owns output visibility, authorization and pagination. Publication adds an exact decimal composite_output_id alias and occupied for the selected platform, from all tasks still holding formal occupancy, including terminal states and irrespective of occupying task owner. The generated occupied_output_id column releases abandoned tasks, matching the existing create uniqueness constraint. Occupied rows remain visible with a reason; no occupying task identity is returned. This read creates no reservation and the existing atomic create uniqueness remains authoritative.
+      description: Publication narrows the actor's production output scope to permitted publication categories before count and pagination. Publication adds an exact decimal composite_output_id alias and occupied for the selected platform, from all tasks still holding formal occupancy, including terminal states and irrespective of occupying task owner. The generated occupied_output_id column releases abandoned tasks, matching the existing create uniqueness constraint. Occupied rows remain visible with a reason; no occupying task identity is returned. This read creates no reservation and the existing atomic create uniqueness remains authoritative.
       parameters:
         - {in: query, name: platform, required: true, schema: {type: string, enum: [baidu, bilibili, xiaohongshu]}}
         - {in: query, name: page, schema: {type: integer, minimum: 1, default: 1}}
@@ -101,7 +101,7 @@ paths:
         - {in: query, name: output_ids, schema: {type: string, pattern: '^[1-9][0-9]*(,[1-9][0-9]*)*$'}, description: Comma-separated distinct IDs (up to 1000). Applies along with filters before pagination.}
       responses:
         '200':
-          description: Existing compose-output read projection plus a required boolean occupied on every row; total/page/page_size retain the production page. No task details, credentials or additional grants.
+          description: Existing compose-output read projection plus a decimal-string composite_output_id and a required boolean occupied on every row; total/page/page_size retain the production page. No task details, credentials or additional grants.
           content:
             application/json:
               schema:

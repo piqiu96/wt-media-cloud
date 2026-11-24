@@ -70,8 +70,13 @@ func ValidateBatchGeneration(a identity.PublicUser, in GenerationInput) error {
 	if !canPrepareBatch(a) {
 		return ErrNotFound
 	}
-	_, _, err := generationSelection(in)
-	return err
+	if _, _, err := generationSelection(in); err != nil {
+		return err
+	}
+	if !a.CanAccess(a.ID, a.TeamID, identity.CategoryID(in.CategoryID)) {
+		return ErrNotFound
+	}
+	return nil
 }
 
 // PreparePublicationGeneration authorizes the source before opening a stream or
@@ -84,12 +89,18 @@ func (s *Service) PreparePublicationGeneration(a identity.PublicUser, in Generat
 	if err != nil {
 		return nil, err
 	}
+	if !a.CanAccess(a.ID, a.TeamID, identity.CategoryID(in.CategoryID)) {
+		return nil, ErrNotFound
+	}
 	if s.Output == nil {
 		return nil, errors.New("output provider unavailable")
 	}
 	detail, err := s.Output(a, in.CompositeOutputID)
 	if err != nil {
 		return nil, err
+	}
+	if !a.CanAccess(a.ID, a.TeamID, detail.Output.CategoryID) {
+		return nil, ErrNotFound
 	}
 	if int64(detail.Output.CategoryID) != in.CategoryID {
 		return nil, ErrInvalid

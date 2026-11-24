@@ -82,13 +82,20 @@ paths:
   /api/v1/publication-batch/validate:
     post:
       operationId: validatePublicationBatch
-      description: Checks current resources, candidate coverage and complete publication content. Advisory, read-only and time-sensitive.
+      description: Checks current resources, candidate coverage and complete publication content. Advisory, read-only and time-sensitive. For an existing edit, supply batch_id and expected_revision together. The server checks current edit scope and revision before using unchanged saved cover references.
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              allOf: [{$ref: '#/components/schemas/Configuration'}]
+              allOf:
+                - {$ref: '#/components/schemas/Configuration'}
+                - properties:
+                    batch_id: {$ref: '#/components/schemas/ID'}
+                    expected_revision: {$ref: '#/components/schemas/ID'}
+                  dependentRequired:
+                    batch_id: [expected_revision]
+                    expected_revision: [batch_id]
               unevaluatedProperties: false
       responses:
         '200':
@@ -100,7 +107,8 @@ paths:
                   - {$ref: '#/components/schemas/Success'}
                   - {properties: {data: {$ref: '#/components/schemas/Readiness'}}}
         '400': {description: Invalid configuration structure.}
-        '404': {description: Resource outside access scope.}
+        '404': {description: Batch or resource outside access scope.}
+        '409': {description: 'Configuration changed or is frozen. Details include batch_id and current_revision.'}
         '503': {description: Dependency unavailable.}
   /api/v1/publication-batch/{id}:
     parameters: [{$ref: '#/components/parameters/BatchID'}]

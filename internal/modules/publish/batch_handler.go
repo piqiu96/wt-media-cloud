@@ -37,7 +37,10 @@ func decodeBatch(c *app.RequestContext, out any) error {
 	if len(c.Request.Body()) > batchPayloadLimit {
 		return service.ErrInvalid
 	}
-	return decode(c, out)
+	if err := decode(c, out); err != nil {
+		return err
+	}
+	return checkBatchRequestFields(c.Request.Body(), out)
 }
 
 func failBatch(c *app.RequestContext, err error) {
@@ -196,7 +199,7 @@ func ValidateBatch(ctx context.Context, c *app.RequestContext) {
 	if !ok {
 		return
 	}
-	var in service.BatchInput
+	var in service.ValidateBatchInput
 	if err := decodeBatch(c, &in); err != nil {
 		failBatch(c, err)
 		return

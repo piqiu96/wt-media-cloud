@@ -124,3 +124,39 @@ func TestCreateRefusesCombinedTextOverLimitWithoutTruncation(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestGenerationRejectsSeniorOutsidePublicationCategoryBeforeProviders(t *testing.T) {
+	svc, actor, _ := fixture()
+	actor.Role = identity.RoleSeniorOperator
+	actor.CategoryIDs = []identity.CategoryID{2}
+	in := generationInput()
+	sourceCalls, modelCalls := 0, 0
+	underlying := svc.Output
+	svc.Output = func(a identity.PublicUser, id int64) (production.ComposeOutputDetail, error) {
+		sourceCalls++
+		return underlying(a, id)
+	}
+	svc.GenerateJSON = func(context.Context, string, string) (string, error) {
+		modelCalls++
+		return `{"description":"scope denied","topics":""}`, nil
+	}
+	if err := ValidateBatchGeneration(actor, in); !errors.Is(err, ErrNotFound) {
+		t.Errorf("batch preflight scope = %v", err)
+	}
+	run, err := svc.PreparePublicationGeneration(actor, in)
+	if run != nil {
+		_, _ = run(context.Background())
+	}
+	if !errors.Is(err, ErrNotFound) || sourceCalls != 0 || modelCalls != 0 {
+		t.Fatalf("unauthorized generation: result=%v source_calls=%d model_calls=%d", err, sourceCalls, modelCalls)
+	}
+	// Spoofing an authorized category still cannot send a title from a protected category.
+	in.CategoryID = 2
+	run, err = svc.PreparePublicationGeneration(actor, in)
+	if run != nil {
+		_, _ = run(context.Background())
+	}
+	if !errors.Is(err, ErrNotFound) || sourceCalls != 1 || modelCalls != 0 {
+		t.Fatalf("mismatched source category: result=%v source_calls=%d model_calls=%d", err, sourceCalls, modelCalls)
+	}
+}

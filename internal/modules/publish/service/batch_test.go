@@ -6,7 +6,9 @@ import (
 	"strings"
 	"testing"
 
+	filemodel "github.com/wt-media/wt-media-cloud/internal/modules/files/model"
 	identity "github.com/wt-media/wt-media-cloud/internal/modules/identity/service"
+	images "github.com/wt-media/wt-media-cloud/internal/modules/image/service"
 	accounts "github.com/wt-media/wt-media-cloud/internal/modules/mediaaccount/service"
 	outputmodel "github.com/wt-media/wt-media-cloud/internal/modules/production/model"
 	production "github.com/wt-media/wt-media-cloud/internal/modules/production/service"
@@ -96,5 +98,94 @@ func TestBatchChangesOnlyInvalidateAffectedConfirmation(t *testing.T) {
 	reconcileBatchConfirmations(prior, current)
 	if !current[0].Content.Confirmed || current[1].Content.Confirmed || !current[2].Content.Confirmed {
 		t.Fatalf("wrong confirmation projection: %+v", current)
+	}
+}
+
+func TestBatchSelectedOutputMustBelongToTargetAndAuthorizedCategory(t *testing.T) {
+	svc, a, _ := fixture()
+	a.Role = identity.RoleSeniorOperator
+	a.CategoryIDs = []identity.CategoryID{1, 2}
+	svc.BatchCategory = func(id identity.CategoryID) (identity.Category, bool, error) {
+		return identity.Category{ID: id, Enabled: true}, true, nil
+	}
+	original := svc.Output
+	svc.Output = func(a identity.PublicUser, id int64) (production.ComposeOutputDetail, error) {
+		got, err := original(a, id)
+		got.Output.CategoryID = 2
+		return got, err
+	}
+	in := BatchAllocationInput{Platform: "baidu", Targets: []model.BatchTarget{{CategoryID: 1, TargetCount: 3}}, BatchAllocation: model.BatchAllocation{Accounts: []model.BatchAccountLimit{}, OutputIDs: []string{"42"}}}
+	if _, err := svc.AllocateBatch(context.Background(), a, in); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("output outside target accepted: %v", err)
+	}
+	settings := model.BatchExecutionSetting{ConcurrencyLimit: 1, ExceptionTaskLimit: 1, BetweenGroupPolicy: "auto_continue"}
+	input := BatchInput{Platform: in.Platform, Targets: in.Targets, Config: model.BatchConfig{BatchAllocation: in.BatchAllocation, Candidates: []model.BatchCandidate{}}, ExecutionSetting: settings}
+	if _, err := svc.checkBatch(context.Background(), a, input, nil, true); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("config output outside target allowed: %v", err)
+	}
+	a.CategoryIDs = []identity.CategoryID{1}
+	if _, err := svc.AllocateBatch(context.Background(), a, in); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("output outside actor scope accepted: %v", err)
+	}
+}
+
+type savedBatchFixture struct {
+	BatchRepository
+	batch model.Batch
+}
+
+func (r savedBatchFixture) GetBatch(id uint64) (model.Batch, error) {
+	if id != r.batch.ID {
+		return model.Batch{}, ErrNotFound
+	}
+	return r.batch, nil
+}
+
+func TestValidateBatchUsesOnlyAuthorizedRevisionBoundRetainedCovers(t *testing.T) {
+	svc, a, _ := fixture()
+	svc.BatchCategory = func(id identity.CategoryID) (identity.Category, bool, error) {
+		return identity.Category{ID: id, Enabled: true}, true, nil
+	}
+	svc.Repo = batchOccupancyFixture{}
+	svc.File = func(context.Context, identity.PublicUser, int64, int64) (filemodel.File, error) {
+		return filemodel.File{}, images.ErrInvalid
+	}
+	savedCalls := 0
+	svc.SavedFile = func(_ context.Context, id int64) (filemodel.File, error) {
+		savedCalls++
+		dimensions := []byte(`{"width":160,"height":90}`)
+		if id == 22 {
+			dimensions = []byte(`{"width":90,"height":120}`)
+		}
+		return filemodel.File{ID: id, Type: "image", SizeBytes: 1, SHA256: strings.Repeat("a", 64), MetadataJSON: dimensions}, nil
+	}
+	row := model.BatchCandidate{BatchPair: model.BatchPair{CategoryID: 1, MediaAccountID: 12, CompositeOutputID: 42}, RowKey: "row", InputRevision: "1", FieldRevisions: map[string]string{}, Content: model.Content{
+		CoverFileID: 21, PortraitCoverFileID: 22, Description: "已确认文案", Declaration: "无需声明", Confirmed: true,
+	}}
+	target := []model.BatchTarget{{CategoryID: 1, TargetCount: 1}}
+	saved := model.Batch{ID: 1, Revision: 3, TeamID: int64(*a.TeamID), OperatorID: int64(a.ID), ExecutionStatus: model.BatchNotStarted, Platform: "baidu", Targets: target, Config: model.BatchConfig{Candidates: []model.BatchCandidate{row}}}
+	svc.BatchRepo = savedBatchFixture{batch: saved}
+	config := BatchInput{Platform: "baidu", Targets: target, Config: model.BatchConfig{Candidates: []model.BatchCandidate{row}}, ExecutionSetting: model.BatchExecutionSetting{ConcurrencyLimit: 1, ExceptionTaskLimit: 1, BetweenGroupPolicy: "auto_continue"}}
+	ctx := context.Background()
+	req := ValidateBatchInput{BatchInput: config, BatchID: 1, ExpectedRevision: 3}
+	result, err := svc.ValidateBatch(ctx, a, req)
+	if err != nil || !result.Ready || savedCalls != 2 {
+		t.Fatalf("valid current retained covers: %+v calls=%d err=%v", result, savedCalls, err)
+	}
+	req.ExpectedRevision = 2
+	if _, err = svc.ValidateBatch(ctx, a, req); !errors.Is(err, ErrConflict) || savedCalls != 2 {
+		t.Fatalf("stale validation: %v calls=%d", err, savedCalls)
+	}
+	req.ExpectedRevision = 3
+	foreign := a
+	foreign.ID++
+	foreign.Role = identity.RoleSeniorOperator
+	if _, err = svc.ValidateBatch(ctx, foreign, req); !errors.Is(err, ErrNotFound) || savedCalls != 2 {
+		t.Fatalf("foreign validation: %v calls=%d", err, savedCalls)
+	}
+	req.Config.Candidates[0].Content.CoverFileID = 999
+	result, err = svc.ValidateBatch(ctx, a, req)
+	if err != nil || result.Ready || savedCalls != 3 {
+		t.Fatalf("caller-supplied ID treated as retained: %+v calls=%d err=%v", result, savedCalls, err)
 	}
 }

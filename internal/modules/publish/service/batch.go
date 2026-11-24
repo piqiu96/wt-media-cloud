@@ -66,6 +66,11 @@ type EditBatchInput struct {
 	Name             string `json:"name"`
 	ExpectedRevision uint64 `json:"expected_revision,string"`
 }
+type ValidateBatchInput struct {
+	BatchInput
+	BatchID          uint64 `json:"batch_id,string"`
+	ExpectedRevision uint64 `json:"expected_revision,string"`
+}
 type CopyBatchResult struct {
 	BatchInput
 	Name           string               `json:"name"`
@@ -455,9 +460,22 @@ func (s *Service) checkBatch(ctx context.Context, a identity.PublicUser, in Batc
 	return checks, nil
 }
 
-func (s *Service) ValidateBatch(ctx context.Context, a identity.PublicUser, in BatchInput) (model.BatchReadiness, error) {
-	// Allocation controls are validated as data but do not suppress per-candidate readiness for changed stock.
-	return s.checkBatch(ctx, a, in, nil, false)
+func (s *Service) ValidateBatch(ctx context.Context, a identity.PublicUser, in ValidateBatchInput) (model.BatchReadiness, error) {
+	if (in.BatchID == 0) != (in.ExpectedRevision == 0) {
+		return model.BatchReadiness{}, ErrInvalid
+	}
+	if in.BatchID == 0 {
+		return s.checkBatch(ctx, a, in.BatchInput, nil, false)
+	}
+	current, err := s.editableBatch(a, in.BatchID, in.ExpectedRevision)
+	if err != nil {
+		return model.BatchReadiness{}, err
+	}
+	if current.Platform != in.Platform {
+		return model.BatchReadiness{}, ErrInvalid
+	}
+	reconcileBatchConfirmations(current.Config.Candidates, in.Config.Candidates)
+	return s.checkBatch(ctx, a, in.BatchInput, &current, false)
 }
 
 func withBatchConfig(v model.Batch, name string, in BatchInput, readiness model.BatchReadiness) model.Batch {
@@ -546,20 +564,28 @@ func reconcileBatchConfirmations(old []model.BatchCandidate, rows []model.BatchC
 	}
 }
 
+func (s *Service) editableBatch(a identity.PublicUser, id, revision uint64) (model.Batch, error) {
+	v, err := s.loadBatch(a, id)
+	if err != nil {
+		return model.Batch{}, err
+	}
+	if !ownsBatch(a, v) {
+		return model.Batch{}, ErrNotFound
+	}
+	if v.Revision != revision || v.StartedAt != nil || v.ExecutionStatus != model.BatchNotStarted {
+		return model.Batch{}, &BatchConflictError{BatchID: v.ID, Revision: v.Revision}
+	}
+	return v, nil
+}
+
 func (s *Service) EditBatch(ctx context.Context, a identity.PublicUser, id uint64, in EditBatchInput) (model.BatchDetail, error) {
 	var empty model.BatchDetail
 	if in.ExpectedRevision == 0 || !validBatchName(in.Name) {
 		return empty, ErrInvalid
 	}
-	v, err := s.loadBatch(a, id)
+	v, err := s.editableBatch(a, id, in.ExpectedRevision)
 	if err != nil {
 		return empty, err
-	}
-	if !ownsBatch(a, v) {
-		return empty, ErrNotFound
-	}
-	if v.Revision != in.ExpectedRevision || v.StartedAt != nil || v.ExecutionStatus != model.BatchNotStarted {
-		return empty, &BatchConflictError{BatchID: v.ID, Revision: v.Revision}
 	}
 	if v.Platform != in.Platform {
 		return empty, ErrInvalid
