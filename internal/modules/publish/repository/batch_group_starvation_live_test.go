@@ -118,3 +118,57 @@ func TestBatchGroupAdmissionPagesPastHundredBusyProfiles(t *testing.T) {
 		t.Fatalf("original busy holder changed: %+v %v", originalHistory, err)
 	}
 }
+
+func TestClaimPagesPastHundredLegacyQueuedTasksOnBusyProfile(t *testing.T) {
+	s, makeTask := executionStore(t)
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	holder := makeTask("mixed-queue-holder", 42, "holder-account")
+	if _, err := s.Start(holder, holder.Revision, 9, now); err != nil {
+		t.Fatal(err)
+	}
+	held := acceptanceClaim(t, s, "mixed-queue-held-attempt", now)
+	old := map[uint64]model.Task{}
+	for i := 0; i < 100; i++ {
+		outputID := int64(2000 + i)
+		if err := s.DB.Exec("INSERT INTO composite_outputs VALUES(?)", outputID).Error; err != nil {
+			t.Fatal(err)
+		}
+		queued := makeTask(fmt.Sprintf("mixed-queue-old-%d", i), outputID, fmt.Sprintf("blocked-account-%d", i))
+		queued, err := s.Start(queued, queued.Revision, 9, now)
+		if err != nil || queued.Status != model.StatusQueued || queued.BatchID != nil {
+			t.Fatalf("legacy queued fixture: %+v %v", queued, err)
+		}
+		old[queued.ID] = queued
+	}
+	fresh := starvationBatch(t, s, 500, 38, now)
+	const requestKey = "mixed-queue-independent-batch"
+	claim, err := s.ClaimWithCapacity(9, requestKey, acceptanceCapacity, now)
+	grouped, e := s.GetBatch(fresh.ID)
+	if e != nil || grouped.ExecutionGroupNo == nil || *grouped.ExecutionGroupNo != 1 {
+		t.Fatalf("fresh batch must have a fixed first group: %+v %v", grouped.Execution, e)
+	}
+	if err != nil || claim == nil || claim.Task.BatchID == nil || *claim.Task.BatchID != fresh.ID || claim.Attempt.Input.ProfileID != 38 {
+		t.Fatalf("legacy queued page starved already-grouped independent batch: %+v %v", claim, err)
+	}
+	replay, err := s.ClaimWithCapacity(9, requestKey, acceptanceCapacity, now)
+	if err != nil || replay == nil || !replay.Replayed || replay.Task.ID != claim.Task.ID || replay.Attempt.ID != claim.Attempt.ID {
+		t.Fatalf("original request did not replay the same attempt: %+v %v", replay, err)
+	}
+	for id, before := range old {
+		after, err := s.Get(id)
+		if err != nil || after.Revision != before.Revision || after.Status != model.StatusQueued || after.CurrentAttemptID != nil {
+			t.Fatalf("busy old queued task changed: %+v %v", after, err)
+		}
+	}
+	var attempts, uses int64
+	if err = s.DB.Model(&model.Attempt{}).Count(&attempts).Error; err != nil || attempts != 2 {
+		t.Fatalf("claim retries created blank attempts: %d %v", attempts, err)
+	}
+	if err = s.DB.Model(&model.ProfileUse{}).Where("released_at IS NULL").Count(&uses).Error; err != nil || uses != 2 {
+		t.Fatalf("physical Profile uses: %d %v", uses, err)
+	}
+	original, err := s.Attempt(held.Task.ID)
+	if err != nil || len(original) != 1 || original[0].Status != model.AttemptStatusRunning {
+		t.Fatalf("original busy holder lost: %+v %v", original, err)
+	}
+}

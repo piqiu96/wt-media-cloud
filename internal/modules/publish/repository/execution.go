@@ -143,93 +143,101 @@ func (s ExecutionStore) ClaimWithCapacity(user int64, key string, agent model.Ex
 	if e := s.prepareBatchGroups(user, cap, now); e != nil {
 		return nil, e
 	}
-	var candidates []model.Task
-	if e := s.DB.Where(`operator_id=? AND status=? AND authorized_at IS NOT NULL AND cancel_requested_at IS NULL AND (not_before IS NULL OR not_before<=?)
+	var after uint64
+	for {
+		var candidates []model.Task
+		if e := s.DB.Where(`operator_id=? AND status=? AND authorized_at IS NOT NULL AND cancel_requested_at IS NULL AND (not_before IS NULL OR not_before<=?)
   AND (batch_id IS NULL OR EXISTS (SELECT 1 FROM publication_batch b WHERE b.id=publication_task.batch_id AND b.execution_status='running'
    AND b.stopped_at IS NULL AND b.group_ended_at IS NULL AND b.execution_group_no=publication_task.execution_group_no))`,
-		user, model.StatusQueued, now).Order("id").Limit(100).Find(&candidates).Error; e != nil {
-		return nil, e
+			user, model.StatusQueued, now).Where("id>?", after).Order("id").Limit(100).Find(&candidates).Error; e != nil {
+			return nil, e
+		}
+		for _, candidate := range candidates {
+			var claimed model.Claim
+			e := pureTransaction(s.DB, func(tx *gorm.DB) error {
+				parent, e := lockTaskBatch(tx, candidate)
+				if e != nil {
+					return e
+				}
+				if !canDispatch(parent, candidate) {
+					return ErrParentBlocked
+				}
+				if e = admissionOpen(tx); e != nil {
+					return e
+				}
+				input, e := s.readInput(tx, candidate)
+				if e != nil {
+					return e
+				}
+				slot, e := freeAutomaticSlot(tx, user, cap.AutomaticSlots)
+				if e != nil {
+					return e
+				}
+				if slot == 0 {
+					return ErrCapacityWait
+				}
+				available, e := batchAutomaticAvailable(tx, parent)
+				if e != nil {
+					return e
+				}
+				if !available {
+					return ErrCapacityWait
+				}
+				use, e := tryProfileUse(tx, user, candidate, input, "publish", cap.WindowSlots, now)
+				if e != nil {
+					return e
+				}
+				v, e := taskSnapshot(tx.Clauses(clause.Locking{Strength: "UPDATE"}), candidate.ID)
+				if e != nil {
+					return e
+				}
+				if !sameCandidate(candidate, v) || v.OperatorID != user || v.Status != model.StatusQueued || v.AuthorizedAt == nil ||
+					v.CurrentAttemptID != nil || v.CancelRequestedAt != nil || v.NotBefore != nil && v.NotBefore.After(now) || !canDispatch(parent, v) {
+					return ErrConflict
+				}
+				a := model.Attempt{AdmissionSlot: use.WindowSlot, AutomaticSlot: &slot, AdmissionV2: true, ExecutionGroupNo: v.ExecutionGroupNo,
+					PublicationID: v.ID, AttemptNo: v.AttemptCount + 1, ExecutorUserID: user, ProfileID: input.ProfileID, ClaimRequestKey: key, Input: input,
+					Status: model.AttemptStatusRunning, Stage: model.AttemptStageClaimed, StartedAt: now, HeartbeatAt: now, Steps: []byte(`[]`), Evidence: []byte(`{}`)}
+				if e = tx.Create(&a).Error; e != nil {
+					return e
+				}
+				if e = tx.Model(&model.ProfileUse{}).Where("id=?", use.ID).Update("attempt_id", a.ID).Error; e != nil {
+					return e
+				}
+				if e = updateTask(tx, v, map[string]any{"status": model.StatusRunning, "current_attempt_id": a.ID, "attempt_count": a.AttemptNo, "updated_at": now}); e != nil {
+					return e
+				}
+				if e = audit(tx, user, v.ID, "publication.claim", v.Revision+1); e != nil {
+					return e
+				}
+				v.Revision++
+				v.Status, v.CurrentAttemptID, v.AttemptCount = model.StatusRunning, &a.ID, a.AttemptNo
+				v.CanCancel = true
+				claimed = model.Claim{Task: v, Attempt: a, ExecutionGroupNo: v.ExecutionGroupNo, EffectiveCapacity: &cap}
+				return nil
+			})
+			if e == nil {
+				return &claimed, nil
+			}
+			var duplicate *driver.MySQLError
+			if errors.As(e, &duplicate) && duplicate.Number == 1062 {
+				if prior, err := s.prior(user, key); err != nil || prior != nil {
+					return prior, err
+				}
+				continue
+			}
+			if errors.Is(e, ErrConflict) || errors.Is(e, ErrNotFound) || errors.Is(e, ErrProfileUse) || errors.Is(e, ErrCapacityWait) || errors.Is(e, ErrParentBlocked) {
+				continue
+			}
+			return nil, e
+		}
+		if len(candidates) < 100 {
+			return s.prior(user, key)
+		}
+		// A Profile/input conflict does not change the queued row. Continue past
+		// this page so old blocked tasks cannot hide later independent work.
+		after = candidates[len(candidates)-1].ID
 	}
-	for _, candidate := range candidates {
-		var claimed model.Claim
-		e := pureTransaction(s.DB, func(tx *gorm.DB) error {
-			parent, e := lockTaskBatch(tx, candidate)
-			if e != nil {
-				return e
-			}
-			if !canDispatch(parent, candidate) {
-				return ErrParentBlocked
-			}
-			if e = admissionOpen(tx); e != nil {
-				return e
-			}
-			input, e := s.readInput(tx, candidate)
-			if e != nil {
-				return e
-			}
-			slot, e := freeAutomaticSlot(tx, user, cap.AutomaticSlots)
-			if e != nil {
-				return e
-			}
-			if slot == 0 {
-				return ErrCapacityWait
-			}
-			available, e := batchAutomaticAvailable(tx, parent)
-			if e != nil {
-				return e
-			}
-			if !available {
-				return ErrCapacityWait
-			}
-			use, e := tryProfileUse(tx, user, candidate, input, "publish", cap.WindowSlots, now)
-			if e != nil {
-				return e
-			}
-			v, e := taskSnapshot(tx.Clauses(clause.Locking{Strength: "UPDATE"}), candidate.ID)
-			if e != nil {
-				return e
-			}
-			if !sameCandidate(candidate, v) || v.OperatorID != user || v.Status != model.StatusQueued || v.AuthorizedAt == nil ||
-				v.CurrentAttemptID != nil || v.CancelRequestedAt != nil || v.NotBefore != nil && v.NotBefore.After(now) || !canDispatch(parent, v) {
-				return ErrConflict
-			}
-			a := model.Attempt{AdmissionSlot: use.WindowSlot, AutomaticSlot: &slot, AdmissionV2: true, ExecutionGroupNo: v.ExecutionGroupNo,
-				PublicationID: v.ID, AttemptNo: v.AttemptCount + 1, ExecutorUserID: user, ProfileID: input.ProfileID, ClaimRequestKey: key, Input: input,
-				Status: model.AttemptStatusRunning, Stage: model.AttemptStageClaimed, StartedAt: now, HeartbeatAt: now, Steps: []byte(`[]`), Evidence: []byte(`{}`)}
-			if e = tx.Create(&a).Error; e != nil {
-				return e
-			}
-			if e = tx.Model(&model.ProfileUse{}).Where("id=?", use.ID).Update("attempt_id", a.ID).Error; e != nil {
-				return e
-			}
-			if e = updateTask(tx, v, map[string]any{"status": model.StatusRunning, "current_attempt_id": a.ID, "attempt_count": a.AttemptNo, "updated_at": now}); e != nil {
-				return e
-			}
-			if e = audit(tx, user, v.ID, "publication.claim", v.Revision+1); e != nil {
-				return e
-			}
-			v.Revision++
-			v.Status, v.CurrentAttemptID, v.AttemptCount = model.StatusRunning, &a.ID, a.AttemptNo
-			v.CanCancel = true
-			claimed = model.Claim{Task: v, Attempt: a, ExecutionGroupNo: v.ExecutionGroupNo, EffectiveCapacity: &cap}
-			return nil
-		})
-		if e == nil {
-			return &claimed, nil
-		}
-		var duplicate *driver.MySQLError
-		if errors.As(e, &duplicate) && duplicate.Number == 1062 {
-			if prior, err := s.prior(user, key); err != nil || prior != nil {
-				return prior, err
-			}
-			continue
-		}
-		if errors.Is(e, ErrConflict) || errors.Is(e, ErrNotFound) || errors.Is(e, ErrProfileUse) || errors.Is(e, ErrCapacityWait) || errors.Is(e, ErrParentBlocked) {
-			continue
-		}
-		return nil, e
-	}
-	return s.prior(user, key)
 }
 
 // Retry only pure database races, before any external action or grant signing.
