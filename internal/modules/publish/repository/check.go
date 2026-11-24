@@ -40,6 +40,9 @@ func (s ExecutionStore) SchedulePublicCheck(now time.Time) error {
 }
 
 func (s ExecutionStore) ClaimPublicCheck(user int64, now time.Time) (*model.PublicCheckClaim, error) {
+	if s.RequireAdmission {
+		return nil, ErrAgentUpgrade
+	}
 	if user <= 0 {
 		return nil, ErrNotFound
 	}
@@ -111,6 +114,23 @@ func (s ExecutionStore) ObservePublication(candidate model.Task, user int64, r m
 	sum := sha256.Sum256(raw)
 	hash := hex.EncodeToString(sum[:])
 	err = currentTransaction(s.DB, func(tx *gorm.DB) error {
+		parent, err := lockTaskBatch(tx, candidate)
+		if err != nil {
+			return err
+		}
+		var use model.ProfileUse
+		if r.ReservationID != 0 {
+			use, err = lockedCheckUse(tx, r.ReservationID, user)
+			if err != nil {
+				return err
+			}
+			if use.PublicationID != candidate.ID || use.AttemptID == nil || *use.AttemptID != r.Observation.AttemptID ||
+				use.CheckGeneration == nil || *use.CheckGeneration != r.Generation || use.CheckRevision == nil || *use.CheckRevision != r.Observation.ExpectedRevision {
+				return ErrProfileUse
+			}
+		} else if s.RequireAdmission {
+			return ErrAgentUpgrade
+		}
 		v, err := taskSnapshot(tx, candidate.ID)
 		if err != nil {
 			return err
@@ -118,17 +138,23 @@ func (s ExecutionStore) ObservePublication(candidate model.Task, user int64, r m
 		if v.OperatorID != user {
 			return ErrNotFound
 		}
-		ack = model.PublicCheckAcknowledgement{PublicationID: v.ID, AttemptID: r.Observation.AttemptID, Generation: r.Generation, ObservationHash: hash}
+		ack = model.PublicCheckAcknowledgement{ReservationID: r.ReservationID, Released: r.ReservationID != 0, PublicationID: v.ID, AttemptID: r.Observation.AttemptID, Generation: r.Generation, ObservationHash: hash}
 		var prior model.PublicationObservation
 		err = tx.Where("publication_id=? AND generation=?", v.ID, r.Generation).First(&prior).Error
 		if err == nil {
 			if prior.ObserverID != user || prior.AttemptID != r.Observation.AttemptID || prior.ObservationHash != hash {
 				return ErrConflict
 			}
+			if r.ReservationID != 0 && (use.ReleasedAt == nil || use.ObservationHash == nil || *use.ObservationHash != hash || use.Disposition == nil || *use.Disposition != r.ProfileDisposition) {
+				return ErrProfileUse
+			}
 			return nil // Confirm the recorded fact without changing a newer task.
 		}
 		if !errors.Is(err, gorm.ErrRecordNotFound) {
 			return err
+		}
+		if r.ReservationID != 0 && use.ReleasedAt != nil {
+			return ErrProfileUse
 		}
 		in := r.Observation
 		if v.CheckStoppedAt != nil || v.AcceptedAt == nil || !now.Before(v.AcceptedAt.Add(publicCheckLifetime)) || v.Status != model.StatusReviewing || v.Revision != in.ExpectedRevision || v.CheckGeneration != r.Generation || v.PlatformSubmissionID == nil || v.CurrentAttemptID == nil || *v.CurrentAttemptID != in.AttemptID {
@@ -208,7 +234,15 @@ func (s ExecutionStore) ObservePublication(candidate model.Task, user int64, r m
 		if err = tx.Create(&observation).Error; err != nil {
 			return err
 		}
-		return auditDetails(tx, user, v.ID, "publication.observed", map[string]any{"revision": v.Revision + 1, "generation": r.Generation, "observation_hash": hash, "conclusion": in.Conclusion})
+		if r.ReservationID != 0 {
+			if err = releaseCheckUse(tx, &use, r.ProfileDisposition, &hash, now); err != nil {
+				return err
+			}
+		}
+		if err = auditDetails(tx, user, v.ID, "publication.observed", map[string]any{"revision": v.Revision + 1, "generation": r.Generation, "observation_hash": hash, "conclusion": in.Conclusion}); err != nil {
+			return err
+		}
+		return advanceBatch(tx, parent, now)
 	})
 	return ack, err
 }

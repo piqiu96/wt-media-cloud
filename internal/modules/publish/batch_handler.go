@@ -27,6 +27,13 @@ func registerBatchRoutes(h *server.Hertz) {
 	h.POST("/api/v1/publication-batch/allocate", AllocateBatch)
 	h.POST("/api/v1/publication-batch/validate", ValidateBatch)
 	h.GET("/api/v1/publication-batch/:id", GetBatch)
+	h.POST("/api/v1/publication-batch/:id/execution-preview", PreviewBatchExecution)
+	h.POST("/api/v1/publication-batch/:id/start", StartBatch)
+	h.POST("/api/v1/publication-batch/:id/pause", PauseBatch)
+	h.POST("/api/v1/publication-batch/:id/resume", ResumeBatch)
+	h.POST("/api/v1/publication-batch/:id/stop", StopBatch)
+	h.POST("/api/v1/publication-batch/:id/finish", FinishBatch)
+	h.GET("/api/v1/publication-batch/:id/task", ListBatchTasks)
 	h.GET("/api/v1/publication-batch/:id/copy", CopyBatch)
 	h.GET("/api/v1/publication-batch/:id/record", ListBatchRecords)
 	h.PUT("/api/v1/publication-batch/:id/configuration", EditBatchConfiguration)
@@ -44,6 +51,9 @@ func decodeBatch(c *app.RequestContext, out any) error {
 }
 
 func failBatch(c *app.RequestContext, err error) {
+	if failBatchControl(c, err) {
+		return
+	}
 	var conflict *service.BatchConflictError
 	var field *service.BatchInputError
 	var details any

@@ -1,4 +1,5 @@
 import { pendingContentEditable, batchTaskActions } from "./batchLifecycle.js";
+import { currentPrototypeUser } from "./prototypeSession.js";
 import { canRetry, validate } from "./model.js";
 export const displayStatus = (t) =>
   t.status === "执行失败" ? "发布失败" : t.status;
@@ -26,6 +27,7 @@ export const canCancelTask = (t) => {
 };
 export function allowedActions(t, db) {
   const batch = db?.batches?.find(b => b.id === t.batchId);
+  if (batch?.executionReview && currentPrototypeUser().id !== batch.ownerId) return ["detail"];
   if (batch) {
     const actions = batchTaskActions(db, batch, t).filter(a =>
       a === "cancel" ? canCancelTask(t) : a === "start" ? !t.claimed : true);

@@ -1,5 +1,5 @@
 schema_version: 1
-revision: "2026.11.25.1"
+revision: "2026.11.25.2"
 errors:
   publication_invalid: {errcode: 18001, http_status: 400, retryable: false, message: Invalid publication content, resources or batch configuration.}
   publication_not_found: {errcode: 18002, http_status: 404, retryable: false, message: Missing or inaccessible publication resource or batch.}
@@ -7,3 +7,11 @@ errors:
   publication_output_occupied: {errcode: 18004, http_status: 409, retryable: false, message: Output already occupied on this platform.}
   publication_platform_closed: {errcode: 18005, http_status: 409, retryable: false, message: Requested platform is not supported.}
   publication_unavailable: {errcode: 18006, http_status: 503, retryable: true, message: Publication operation incomplete; retry the same request key and content.}
+  publication_batch_parent_blocked: {errcode: 18007, http_status: 409, retryable: false, message: Current parent control or execution group blocks this command.}
+  publication_batch_shortfall_changed: {errcode: 18008, http_status: 409, retryable: false, message: The exact creation shortfall needs current confirmation.}
+  publication_batch_pause_changed: {errcode: 18009, http_status: 409, retryable: false, message: The pause or its exception basis changed.}
+  publication_batch_unresolved: {errcode: 18010, http_status: 409, retryable: false, message: Unresolved tasks or a changed failure set prevent finish.}
+  publication_capacity_wait: {errcode: 18011, http_status: 409, retryable: true, message: Original-scene continuation must wait for capacity.}
+  publication_agent_upgrade_required: {errcode: 18012, http_status: 409, retryable: false, message: New publication work requires the current Agent contract.}
+  publication_profile_use_conflict: {errcode: 18013, http_status: 409, retryable: false, message: The original Profile use identity or settlement evidence conflicts.}
+  publication_admission_closed: {errcode: 18014, http_status: 409, retryable: true, message: Publication admission is temporarily closed during legacy Profile reconciliation.}

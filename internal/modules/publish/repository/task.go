@@ -56,7 +56,9 @@ const cancellationProjection = `publication_task.*, (cancel_requested_at IS NULL
  AND active_attempt.publication_id=publication_task.id
  AND active_attempt.executor_user_id=publication_task.operator_id
  AND active_attempt.status='running' AND active_attempt.submit_started_at IS NULL
- AND active_attempt.result_hash IS NULL AND active_attempt.resolved_at IS NULL)))) AS can_cancel`
+ AND active_attempt.result_hash IS NULL AND active_attempt.resolved_at IS NULL)))) AS can_cancel,
+ (SELECT a.stage FROM publication_attempt a WHERE a.id=publication_task.current_attempt_id
+ AND a.publication_id=publication_task.id) AS execution_stage`
 
 func (s Store) ByRequest(actor int64, key string) (model.Task, error) {
 	var v model.Task
@@ -102,6 +104,13 @@ func (s Store) Edit(v model.Task, revision uint64) (model.Task, error) {
 	err := s.DB.Transaction(func(tx *gorm.DB) error {
 		if s.LockFiles == nil {
 			return errors.New("file reference locking unavailable")
+		}
+		parent, err := lockTaskBatch(tx, v)
+		if err != nil {
+			return err
+		}
+		if stoppedParent(parent) {
+			return ErrParentBlocked
 		}
 		var old model.Task
 		if err := tx.First(&old, v.ID).Error; err != nil {

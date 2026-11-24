@@ -11,7 +11,7 @@
 import { readGenerationStream } from './generationStream.js'
 
 export class ApiError extends Error {
-  constructor({ errcode = 99999, message = '未知错误', logid = '', type = '', code = '', details = null, retryable = false, recovery_action = '' }) {
+  constructor({ errcode = 99999, message = '未知错误', logid = '', type = '', code = '', details = null, retryable = false, recovery_action = '', status }) {
     super(message)
     this.name = 'ApiError'
     this.errcode = errcode
@@ -21,6 +21,7 @@ export class ApiError extends Error {
     this.details = details
     this.retryable = retryable
     this.recovery_action = recovery_action
+    this.status = status
   }
 }
 
@@ -42,6 +43,7 @@ async function parseResponse(response) {
   const apiErr = body.error || {}
   throw new ApiError({
     errcode: body.errcode,
+    status: response.status,
     message: body.message || '请求失败',
     logid: body.logid || '',
     type: apiErr.type || '',

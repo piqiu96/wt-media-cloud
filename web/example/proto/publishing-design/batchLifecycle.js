@@ -1,6 +1,8 @@
 // Shared policy for the existing example and its loopback preview service.
 import { batchCreationDraft, migrateBatchCreationDrafts } from "./creationDrafts.js";
 import { validate, canRetry } from "./model.js";
+import { createPublication } from "./relationships.js";
+import { executionExceptions, executionPause, profileOf, reconcileExecutionGroup } from "./batchExecutionSettings.js";
 const copy = (x) => JSON.parse(JSON.stringify(x));
 export const rowsFor = (db, b) => db.tasks.filter((t) => t.batchId === b.id);
 export const formalBatch = (db, b) => !!b.preparationOnly || rowsFor(db, b).length > 0;
@@ -15,13 +17,15 @@ export const contentEditable = (db, b) =>
   rowsFor(db, b).some((t) => !isDisposed(t)) &&
   b.phase === "内容预检通过";
 export const isPendingTask = (t, b) =>
+  b.executionReview ? ["结果待确认", "等待人工", "待补链接"].includes(t.status) || (t.status === "执行失败" && !b.endedAt) :
   ["执行失败", "结果待确认", "等待人工", "平台审核中", "待补链接"].includes(t.status) ||
   (started(b) && t.status === "待执行");
 export function batchMetrics(db, b) {
   const rows = rowsFor(db, b),
     total = rows.length,
     target = (b.targets || []).reduce((n, t) => n + Number(t.count), 0),
-    published = rows.filter((t) => t.status === "已发布").length,
+    published = rows.filter(t => t.status === "已发布" && (!b.executionReview ||
+      (t.publicAt && t.workId && (db.works || []).some(work => work.id === t.workId && work.platform === t.platform && work.sourceTaskIds?.includes(t.id))))).length,
     disposed = rows.filter(isDisposed).length;
   const pending = rows.filter((t) => isPendingTask(t, b)).length;
   const failed = rows.filter((t) => t.status === "执行失败").length;
@@ -30,6 +34,11 @@ export function batchMetrics(db, b) {
     target,
     published,
     failed,
+    ...(b.executionReview && {
+      exceptions: executionExceptions(db, b).length,
+      reviewing: rows.filter(t => t.status === "平台审核中").length,
+      shortfall: Math.max(0, target - total),
+    }),
     disposed,
     pending,
     progress: target ? Math.round((published / target) * 100) : 0,
@@ -43,6 +52,17 @@ export function batchMetrics(db, b) {
   };
 }
 export function batchState(db, b) {
+  if (b.executionReview) {
+    if (b.control === "已取消") return "已取消";
+    if (!started(b)) return "未开始";
+    if (b.endedAt) return "已结束";
+    if (b.control === "已暂停") return "已暂停";
+    const tasks = rowsFor(db, b);
+    const running = tasks.some(task => ["排队中", "执行中"].includes(task.status));
+    if (running) return "执行中";
+    if (executionExceptions(db, b).length) return "待处理";
+    return "已结束";
+  }
   if (b.preparationOnly) return "未开始";
   const rows = rowsFor(db, b);
   if (b.control === "已取消") return "已取消";
@@ -67,7 +87,23 @@ export const stoppable = (db, b) =>
   rowsFor(db, b).some(
     (t) => ["待执行", "排队中"].includes(t.status) && !t.claimed,
   );
+const finishable = (db, batch) => started(batch) && !batch.endedAt &&
+  rowsFor(db, batch).some(task => task.status === "执行失败") &&
+  !rowsFor(db, batch).some(task => ["排队中", "执行中", "等待人工", "结果待确认", "待执行"].includes(task.status));
+
 export function batchActions(db, b) {
+  if (b.executionReview) {
+    const state = batchState(db, b);
+    if (state === "未开始") return ["execute", "configure", "detail", "cancel"];
+    if (["已结束", "已取消"].includes(state)) return ["detail", "copy"];
+    return [
+      batchMetrics(db, b).pending ? "process" : "detail",
+      ...(state === "已暂停" && !b.stoppedAt ? ["resume"] : []),
+      ...(state === "执行中" && !b.stoppedAt ? ["pause"] : []),
+      ...(finishable(db, b) ? ["finish"] : []),
+      ...(!b.stoppedAt && rowsFor(db, b).some(task => ["排队中", "执行中"].includes(task.status)) ? ["stop"] : []),
+    ];
+  }
   if (b.preparationOnly) return ["configure", "detail"];
   const s = batchState(db, b);
   if (s === "草稿") return ["configure", "detail", "cancel"];
@@ -135,8 +171,9 @@ export function batchTaskActions(db, b, t) {
   if (["平台审核中", "待补链接"].includes(t.status)) return ["supplement"];
   if (t.status === "执行失败") {
     if (!canRetry({ ...t, batchStopped: false })) return ["verify"];
+    if (b.executionReview && b.endedAt) return [];
     return [
-      ...(!b.stoppedAt ? ["retry"] : []),
+      ...(!b.stoppedAt && !b.endedAt && (!b.executionReview || b.control !== "已暂停") ? ["retry"] : []),
       ...(executionChecks(t, db).length ? ["repair"] : []),
       "abandon",
     ];
@@ -152,9 +189,28 @@ export function batchTaskActions(db, b, t) {
   return [];
 }
 export function executionPreview(db, b, check = executionChecks) {
+  if (b.executionReview && !started(b)) return b.candidates.map(task => {
+    const errors = [...check(task, db)];
+    const account = db.accounts.find(item => item.id === task.accountId);
+    if (account?.ownerId !== b.ownerId) errors.push("只能使用批次所属运营本人的发布账号");
+    if (!profileOf(account)) errors.push("账号没有可用的浏览器环境");
+    return { task, errors };
+  });
   return rowsFor(db, b)
     .filter((t) => t.status === "待执行" && !t.claimed)
     .map((t) => ({ task: t, errors: check(t, db) }));
+}
+export function startReviewScope(db, batch, included, check = executionChecks) {
+  const preview = executionPreview(db, batch, check);
+  const ready = preview.filter(entry => !entry.errors.length && (!included || included.includes(entry.task.key)));
+  const shortfalls = batch.targets.map(target => ({
+    category: target.category, target: target.count,
+    shortfall: Math.max(0, target.count - ready.filter(entry => entry.task.category === target.category).length),
+  }));
+  return { preview, ready, shortfalls, signature: JSON.stringify({
+    rows: preview.map(entry => [entry.task.key, entry.errors]),
+    included: ready.map(entry => entry.task.key), shortfalls,
+  }) };
 }
 export function freezeBatch(db, b) {
   if (started(b)) return;
@@ -173,6 +229,7 @@ export function freezeBatch(db, b) {
           }
         : {}),
     },
+    ...(b.executionReview && { executionSettings: b.executionSettings }),
     tasks: rowsFor(db, b).map((t) =>
       Object.fromEntries(
         ["id", ...identityKeys, ...contentKeys]
@@ -212,7 +269,45 @@ export function runBatchCommand(
   )
     throw Error("批次已变化，请刷新后重试");
   const state = batchState(db, b);
-  if (action === "execute") {
+  if (b.executionReview && action === "execute") {
+    if (state !== "未开始") throw Error("当前批次已启动或终止");
+    const scope = startReviewScope(db, b, input.included, check);
+    if (scope.signature !== input.scope) throw Error("候选或缺口已变化，批次仍保留为已保存未开始，请重新检查");
+    if (!scope.ready.length) throw Error("没有可开始发布的候选，批次已保存未开始");
+    if ((scope.shortfalls.some(item => item.shortfall) || scope.ready.length !== scope.preview.length) && !input.partial)
+      throw Error("请确认本次发布范围与目标缺口");
+    const candidates = b.candidates;
+    const { tasks } = createPublication(db, {
+      platform: b.platform, rows: scope.ready.map(entry => entry.task), name: b.name, batchId: b.id,
+      partial: input.partial,
+    });
+    b.candidates = candidates;
+    b.log.pop();
+    freezeBatch(db, b);
+    tasks.forEach(task => { task.status = "排队中"; });
+    b.control = "执行中";
+    reconcileExecutionGroup(db, b);
+    record(b, "开始发布", `已建立 ${tasks.length} 条正式任务并授权，原目标保留`);
+  } else if (b.executionReview && action === "pause") {
+    if (!batchActions(db, b).includes(action)) throw Error("当前不能暂停批次");
+    executionPause(b, input.reason || "人工暂停后续发布");
+    record(b, "暂停发布", b.pause.reason);
+  } else if (b.executionReview && action === "resume") {
+    const keys = executionExceptions(db, b).map(entry => entry.key);
+    if (!batchActions(db, b).includes(action) || b.pause?.id !== input.pauseId ||
+        JSON.stringify(keys) !== JSON.stringify(input.exceptionKeys))
+      throw Error("暂停依据或异常范围已变化，请重新核对");
+    b.acknowledgedExceptions = [...new Set([...(b.acknowledgedExceptions || []), ...keys])];
+    b.control = "执行中";
+    b.pause = null;
+    reconcileExecutionGroup(db, b);
+    record(b, "继续发布", "已确认当前异常范围，保留待办与历史");
+  } else if (b.executionReview && action === "finish") {
+    if (!finishable(db, b)) throw Error("仍有未决执行，当前不能结束此批");
+    b.endedAt = new Date().toISOString();
+    b.control = "已结束";
+    record(b, "结束批次", "保留明确失败及成片占用，关闭本批重试");
+  } else if (action === "execute") {
     if (state !== "待执行" || b.stoppedAt)
       throw Error("当前批次不可执行，已停止或终结的批次不能重启");
     const preview = executionPreview(db, b, check),
@@ -258,8 +353,13 @@ export function runBatchCommand(
       `已接受 ${ready.length} 条任务；异常 ${preview.length - ready.length} 条`,
     );
   } else if (action === "stop") {
-    if (!stoppable(db, b)) throw Error("当前没有可停止的未启动任务");
+    if (b.executionReview ? !batchActions(db, b).includes("stop") : !stoppable(db, b))
+      throw Error("当前没有可停止的未启动任务");
     b.stoppedAt = new Date().toISOString();
+    if (b.executionReview) {
+      b.control = "已停止";
+      b.pause = null;
+    }
     rowsFor(db, b).forEach((t) => {
       t.batchStopped = true;
       if (["待执行", "排队中"].includes(t.status) && !t.claimed) {
@@ -273,10 +373,11 @@ export function runBatchCommand(
     record(
       b,
       "停止发布",
-      "只停止未启动任务，已发布与在途任务保持原状态；禁止重启及新重试",
+      b.executionReview && input.reason ? input.reason + "。已停止后续派发，在途等待原尝试结果。" :
+        "只停止未启动任务，已发布与在途任务保持原状态；禁止重启及新重试",
     );
   } else if (action === "cancel") {
-    if (started(b) || !["草稿", "待执行"].includes(state))
+    if (started(b) || !["草稿", "待执行", "未开始"].includes(state))
       throw Error("首次执行后不能取消批次，请使用停止发布");
     rowsFor(db, b).forEach((t) => {
       if (t.status === "待执行") {
@@ -452,7 +553,8 @@ export function protectBatchSnapshot(before, after) {
       throw Error(
         `B-${b.id} 首次执行锁定不可撤销（${n.firstStartedAt !== b.firstStartedAt ? "执行时间" : "冻结快照"}已变化）`,
       );
-    if (started(b) && JSON.stringify(b.rules) !== JSON.stringify(n.rules))
+    if (started(b) && (JSON.stringify(b.rules) !== JSON.stringify(n.rules) ||
+        JSON.stringify(b.executionSettings) !== JSON.stringify(n.executionSettings)))
       throw Error("首次执行后发布设置不可修改");
     if (b.stoppedAt && n.stoppedAt !== b.stoppedAt)
       throw Error("停止发布不能恢复");

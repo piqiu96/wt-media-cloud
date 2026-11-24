@@ -40,13 +40,19 @@ func (batchFile) TableName() string { return "publication_batch_file" }
 func (s Store) BatchByRequest(actor int64, key string) (model.Batch, error) {
 	var v model.Batch
 	err := s.DB.Where("created_by=? AND request_key=?", actor, key).First(&v).Error
-	return v, missing(err)
+	if err != nil {
+		return v, missing(err)
+	}
+	return s.enrichBatch(v)
 }
 
 func (s Store) GetBatch(id uint64) (model.Batch, error) {
 	var v model.Batch
 	err := s.DB.First(&v, id).Error
-	return v, missing(err)
+	if err != nil {
+		return v, missing(err)
+	}
+	return s.enrichBatch(v)
 }
 
 func batchScope(q *gorm.DB, a identity.PublicUser) *gorm.DB {
@@ -92,7 +98,16 @@ func (s Store) ListBatches(f BatchFilter) ([]model.Batch, int64, error) {
 	}
 	rows := []model.Batch{}
 	err := q.Omit("config_json", "readiness_json", "request_hash").Order("created_at DESC,id DESC").Offset((f.Page - 1) * f.PageSize).Limit(f.PageSize).Find(&rows).Error
-	return rows, total, err
+	if err != nil {
+		return nil, 0, err
+	}
+	for i, v := range rows {
+		rows[i], err = s.enrichBatch(v)
+		if err != nil {
+			return nil, 0, err
+		}
+	}
+	return rows, total, nil
 }
 
 func (s Store) CreateBatch(v model.Batch) (model.Batch, error) {
@@ -118,7 +133,10 @@ func (s Store) CreateBatch(v model.Batch) (model.Batch, error) {
 			return prior, nil
 		}
 	}
-	return v, err
+	if err != nil {
+		return v, err
+	}
+	return s.enrichBatch(v)
 }
 
 func (s Store) EditBatch(v model.Batch, revision uint64) (model.Batch, error) {
@@ -154,7 +172,10 @@ func (s Store) EditBatch(v model.Batch, revision uint64) (model.Batch, error) {
 		}
 		return auditBatch(tx, v, "publication_batch.configure")
 	})
-	return v, err
+	if err != nil {
+		return v, err
+	}
+	return s.enrichBatch(v)
 }
 
 func (s Store) replaceBatchFiles(tx *gorm.DB, v model.Batch) error {
@@ -210,7 +231,15 @@ func listBatchFileReferences(db *gorm.DB, a identity.PublicUser, id int64) ([]Fi
 }
 
 func auditBatch(tx *gorm.DB, v model.Batch, event string) error {
-	return tx.Exec(`INSERT INTO audit_logs(id,actor_user_id,action,target_type,target_id,summary_json,created_at) VALUES(?,?,?,'publication_batch',?,?,?)`, id.NewID("audit"), v.OperatorID, event, fmt.Sprint(v.ID), mustJSON(map[string]string{"revision": fmt.Sprint(v.Revision)}), time.Now().UTC()).Error
+	return auditBatchDetails(tx, v, v.OperatorID, event, map[string]string{"revision": fmt.Sprint(v.Revision)})
+}
+
+func auditBatchDetails(tx *gorm.DB, v model.Batch, actor int64, event string, details any) error {
+	var actorValue any
+	if actor > 0 {
+		actorValue = actor
+	}
+	return tx.Exec(`INSERT INTO audit_logs(id,actor_user_id,action,target_type,target_id,summary_json,created_at) VALUES(?,?,?,'publication_batch',?,?,?)`, id.NewID("audit"), actorValue, event, fmt.Sprint(v.ID), mustJSON(details), time.Now().UTC()).Error
 }
 
 func (s Store) ListBatchRecords(id uint64, page, size int) ([]model.BatchRecord, int64, error) {

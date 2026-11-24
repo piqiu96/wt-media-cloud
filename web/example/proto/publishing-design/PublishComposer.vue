@@ -37,6 +37,7 @@ const props = defineProps({
   db: { type: Object, required: true },
   persist: { type: Function, default: async () => true },
   preparationOnly: Boolean,
+  executionReview: Boolean,
 });
 const emit = defineEmits(["edit", "preview", "created", "return-source", "closed"]);
 const copy = (value) => JSON.parse(JSON.stringify(value));
@@ -629,14 +630,15 @@ function applyReplacement() {
   }
   replaceRow.value = null;
 }
-async function savePreparation() {
+async function savePreparation(start = false) {
+  if (busy.value || contentBusy.value) return;
   busy.value = true;
   const index = props.db.batches.findIndex(batch => batch.id === state.batchId);
   const previous = props.db.batches[index];
   const localDraft = props.db.publishDraft;
   let record;
   try {
-    record = preparationRecord(state, { id: previous?.id || nextId(props.db), actor: currentPrototypeUser(), existing: previous });
+    record = preparationRecord(state, { id: previous?.id || nextId(props.db), actor: currentPrototypeUser(), existing: previous, executionReview: props.executionReview });
     if (previous) props.db.batches.splice(index, 1, record);
     else {
       props.db.batches.unshift(record);
@@ -645,7 +647,7 @@ async function savePreparation() {
     if (!(await props.persist())) throw Error("保存失败，当前输入已保留。");
     visible.value = false;
     await nextTick();
-    emit("created", { batch: record, tasks: [] });
+    emit("created", { batch: record, tasks: [], start });
   } catch (error) {
     if (record) {
       if (previous) props.db.batches.splice(index, 1, previous);
@@ -1076,8 +1078,11 @@ defineExpose({
           v-else
           :loading="busy || contentBusy"
           :disabled="contentBusy || (!preparationOnly && (!state.rows.length || !!issues.length))"
+          :theme="executionReview ? 'default' : 'primary'" :variant="executionReview ? 'outline' : 'base'"
           @click="create"
           >{{ preparationOnly ? (state.batchId ? "保存修改" : "保存批次") : "创建批次" }}</t-button
+        ><t-button v-if="executionReview && state.step === 3" theme="primary" :loading="busy"
+          :disabled="contentBusy" @click="savePreparation(true)">{{ state.batchId ? "开始发布" : "创建并发布" }}</t-button
         ></template
       ></template
     >

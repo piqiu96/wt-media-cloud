@@ -12,6 +12,7 @@ import {
   processHuman,
 } from "./proto/publishing-design/taskActions.js";
 import { canRetry } from "./proto/publishing-design/model.js";
+import { reconcileExecutionGroup } from "./proto/publishing-design/batchExecutionSettings.js";
 import { queueTask } from "./proto/publishing-design/relationships.js";
 import { planAction, protectPlanSnapshot } from "./proto/publishing-design/planBridge.js";
 import {
@@ -162,7 +163,19 @@ export function createBatchStore({ file, check } = {}) {
           )
             throw Error("任务已变化，请重新打开");
           if (input.action === "cancel") cancelPublication(t, input.reason);
-          else if (input.action === "human") processHuman(t, input.human);
+          else if (input.action === "human") {
+            if (b.executionReview && input.human === "validated") {
+              if (b.control !== "执行中" || b.stoppedAt || b.endedAt || !t.suspendedAt)
+                throw Error("批次或原现场当前不可继续，保留原尝试");
+              const account = db.accounts.find(item => item.id === t.accountId);
+              const active = db.tasks.filter(item => item.status === "执行中");
+              if (active.filter(item => item.batchId === b.id).length >= b.executionSettings.concurrency ||
+                  active.filter(item => db.accounts.find(row => row.id === item.accountId)?.ownerId === account?.ownerId).length >= 5)
+                throw Error("自动执行名额已满，原现场仍保留");
+            }
+            processHuman(t, input.human);
+            if (b.executionReview && t.status === "执行中") delete t.suspendedAt;
+          }
           else if (["verify", "supplement"].includes(input.action)) {
             if (input.action === "verify" && t.status === "执行失败") {
               if (canRetry({ ...t, batchStopped: false }))
@@ -214,6 +227,7 @@ export function createBatchStore({ file, check } = {}) {
             if (errors.length) throw Error(errors.join("；"));
             if (!queueTask(db, t, { retry: true })) throw Error("任务已变化");
           } else throw Error("不支持的任务操作");
+          if (b.executionReview) reconcileExecutionGroup(db, b, Date.now(), { dispatch: false });
           b.updatedAt = new Date().toISOString();
           b.version = (b.version || 0) + 1;
           b.log ||= [];

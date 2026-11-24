@@ -119,7 +119,18 @@ func projectBatch(a identity.PublicUser, v model.Batch) model.Batch {
 	v.AllowedActions = []string{}
 	if ownsBatch(a, v) {
 		if v.ExecutionStatus == model.BatchNotStarted && v.StartedAt == nil {
-			v.AllowedActions = append(v.AllowedActions, "edit")
+			v.AllowedActions = append(v.AllowedActions, "edit", "start", "stop")
+		}
+		if v.ExecutionStatus == model.BatchRunning {
+			v.AllowedActions = append(v.AllowedActions, "pause", "stop")
+		}
+		if v.ExecutionStatus == model.BatchPaused {
+			v.AllowedActions = append(v.AllowedActions, "resume", "stop")
+		}
+		if (v.ExecutionStatus == model.BatchRunning || v.ExecutionStatus == model.BatchPaused) &&
+			v.Execution.TaskCounts[model.StatusPending]+v.Execution.TaskCounts[model.StatusQueued]+v.Execution.TaskCounts[model.StatusRunning]+
+				v.Execution.TaskCounts[model.StatusAwaitingHuman]+v.Execution.TaskCounts[model.StatusUncertain] == 0 {
+			v.AllowedActions = append(v.AllowedActions, "finish")
 		}
 		if batchCopyAllowed(v) {
 			v.AllowedActions = append(v.AllowedActions, "copy")
@@ -152,7 +163,7 @@ func (s *Service) ListBatches(a identity.PublicUser, f BatchFilter) (BatchPage[m
 	if !validBatchPagination(f.Page, f.PageSize) ||
 		f.RequestKey != "" && !validBatchKey(f.RequestKey) ||
 		f.ConfigurationStatus != "" && f.ConfigurationStatus != model.BatchIncomplete && f.ConfigurationStatus != model.BatchReady ||
-		f.ExecutionStatus != "" && !slices.Contains([]string{model.BatchNotStarted, model.BatchRunning, model.BatchPaused, model.BatchEnded, model.BatchCancelled}, f.ExecutionStatus) {
+		f.ExecutionStatus != "" && !slices.Contains([]string{model.BatchNotStarted, model.BatchRunning, model.BatchPaused, model.BatchStopping, model.BatchEnded, model.BatchCancelled}, f.ExecutionStatus) {
 		return empty, ErrInvalid
 	}
 	if s.BatchRepo == nil {

@@ -1,8 +1,8 @@
 openapi: 3.1.0
 info:
-  title: WT Media Single Publication Preparation
-  version: 2026.11.25.1
-  description: Administrators manage Cloud records only. Senior operators execute and copy only their own tasks and create with their own accounts. Managers may cancel unclaimed tasks; stopping a claimed scene or verifying an uncertain scene belongs to the task operator. Managers supplement reviewing results or abandon failed tasks only against the exact original recorded safe disposition, checked by the existing transaction. Task platform_submission_id/target_url contain original receipts; platform_work_id/work_url/work_id only identify verified public work (ADR-0035). Creating never authorizes execution or submits a platform post. Execution requires separate revision-bound start authorization. Baidu task preparation is available. IDs and revisions are decimal strings; timestamps RFC3339. Uses errcode/message/data/logid.
+  title: WT Media Publication Task
+  version: 2026.11.25.2
+  description: Administrators manage Cloud records only. Senior operators execute and copy only their own tasks and create with their own accounts. Managers may cancel unclaimed tasks; stopping a claimed scene or verifying an uncertain scene belongs to the task operator. Managers supplement reviewing results or abandon failed tasks only against the exact original recorded safe disposition, checked by the existing transaction. Task platform_submission_id/target_url contain original receipts; platform_work_id/work_url/work_id only identify verified public work (ADR-0035). Standalone creation requires separate revision-bound start authorization. Batch tasks receive formal authorization at first batch start and dispatch only through their current fixed group and parent control. Baidu task preparation is available. IDs and revisions are decimal strings; timestamps RFC3339. Uses errcode/message/data/logid.
 paths:
   /api/v1/publication/generate:
     post:
@@ -158,7 +158,7 @@ paths:
         '200': {description: Updated Publication, revision incremented. Platform/account/output/category remain fixed.}
         '400': {description: Invalid or unconfirmed content.}
         '404': {description: Task absent or outside actor scope.}
-        '409': {description: Revision changed, task claimed/authorized or no longer pending. Reload before editing.}
+        '409': {description: Revision changed, task claimed or authorized, task no longer pending, or parent configuration is frozen. Reload before editing.}
   /api/v1/publication/{id}/start:
     post:
       operationId: startPublication
@@ -167,14 +167,14 @@ paths:
       requestBody: {required: true, content: {application/json: {schema: {type: object, required: [expected_revision], additionalProperties: false, properties: {expected_revision: {$ref: '#/components/schemas/ID'}}}}}}
       responses:
         '200': {description: 'Authorized task, pending until not_before or queued when due. Never creates an attempt; frozen inputs cannot subsequently be edited.'}
-        '409': {description: 'Revision/state conflict, unavailable resource or platform not open for execution.'}
+        '409': {description: 'Revision/state conflict, parent or group forbids separate authorization, unavailable resource or platform not open.'}
   /api/v1/publication/{id}/attempt:
     get:
       operationId: getPublicationAttemptHistory
       security: [{sessionCookie: []}]
       parameters: [{in: path, name: id, required: true, schema: {$ref: '#/components/schemas/ID'}}]
       responses:
-        '200': {description: 'Owner-scoped attempt history without credentials, signed grants or mutable old input.'}
+        '200': {description: 'Scope-checked original attempt history, including assigned execution_group_no for each batch attempt, without credentials, signed grants or mutable old input.'}
   /api/v1/publication/{id}/resolve:
     post:
       operationId: resolvePublication
@@ -191,8 +191,8 @@ paths:
       parameters: [{in: path, name: id, required: true, schema: {$ref: '#/components/schemas/ID'}}]
       requestBody: {required: true, content: {application/json: {schema: {type: object, required: [expected_revision], additionalProperties: false, properties: {expected_revision: {$ref: '#/components/schemas/ID'}}}}}}
       responses:
-        '200': {description: 'Same failed task queued after current resource and safe-resolution checks; keeps input, output occupancy and history. Only claim creates the next attempt. No editing, replacement resources or implicit retry of unknown work.'}
-        '409': {description: 'Stale revision, unresolved/publishable old scene, stopped task or unavailable original resources.'}
+        '200': {description: 'Same failed task becomes eligible after original-attempt, resource, current revision and parent checks. Input, output occupancy and history are retained. A batch retry waits for eligible group dispatch. Only claim creates the next attempt.'}
+        '409': {description: 'Stale revision, unresolved or publishable old scene, disallowed parent control, stopped task or unavailable original resources.'}
   /api/v1/publication/{id}/cancel:
     post:
       operationId: cancelPublication
@@ -200,7 +200,7 @@ paths:
       parameters: [{in: path, name: id, required: true, schema: {$ref: '#/components/schemas/ID'}}]
       requestBody: {required: true, content: {application/json: {schema: {type: object, required: [expected_revision, reason], additionalProperties: false, properties: {expected_revision: {$ref: '#/components/schemas/ID'}, reason: {type: string, minLength: 1, maxLength: 200}}}}}}
       responses:
-        '200': {description: 'Unclaimed pending/queued task cancelled atomically against claim. Running original attempt without issued submission permission receives a stop request and remains running until verified original safe-close/unsubmitted completion projects cancelled. Unknown completion remains uncertain. Retains output occupancy, authorization history and immutable original attempt result. Task read models include advisory boolean can_cancel; command always rechecks atomically.'}
+        '200': {description: 'Unclaimed pending/queued task cancelled atomically against claim. Running original attempt without issued submission permission receives a stop request and remains running until verified original safe-close/unsubmitted completion projects cancelled. Unknown completion remains uncertain. Retains output occupancy, authorization history and immutable original attempt result. Task read models include advisory boolean can_cancel; command always rechecks atomically alongside the parent stop, claim and submit fences.'}
         '409': {description: 'Stale revision, issued submission permission, prior stop request or unsafe state. Missing submission timestamp never proves safe closure.'}
   /api/v1/publication/{id}/abandon:
     post:
@@ -329,14 +329,31 @@ components:
         topics: {type: string, maxLength: 200}
         declaration: {type: string, enum: [无需声明]}
         confirmed: {type: boolean, const: true}
+    TaskStatus:
+      type: string
+      enum: [pending, queued, running, awaiting_human, uncertain, reviewing, failed, published, cancelled, abandoned]
     Publication:
       type: object
       required: [id, platform, status, revision, content, resources, operator_id, composite_output_id]
       properties:
         id: {$ref: '#/components/schemas/ID'}
         platform: {type: string}
-        status: {type: string}
+        status: {$ref: '#/components/schemas/TaskStatus'}
         revision: {$ref: '#/components/schemas/ID'}
+        batch_id: {type: [string, 'null'], pattern: '^[1-9][0-9]*$', description: Null for standalone tasks.}
+        row_key: {type: string, description: Frozen saved row identity for a batch task.}
+        task_order: {type: integer, minimum: 0}
+        execution_group_no: {type: [integer, 'null'], minimum: 1}
+        execution_stage: {type: [string, 'null'], enum: [claimed, preparing, ready, submitting, awaiting_human, connection_lost, finished, null]}
+        execution_block:
+          type: object
+          required: [code, message]
+          properties:
+            code: {type: string}
+            message: {type: string}
+        allowed_actions:
+          type: array
+          items: {type: string, enum: [edit, start, cancel, retry, resume, resolve, abandon, copy]}
         operator_id: {$ref: '#/components/schemas/ID'}
         composite_output_id: {$ref: '#/components/schemas/ID'}
         content: {$ref: '#/components/schemas/Content'}

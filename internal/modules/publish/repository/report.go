@@ -18,7 +18,7 @@ func currentAttempt(tx *gorm.DB, task uint64, user int64, attempt uint64) (model
 		return v, model.Attempt{}, ErrNotFound
 	}
 	var a model.Attempt
-	e = tx.Where("id=? AND publication_id=? AND executor_user_id=?", attempt, task, user).First(&a).Error
+	e = tx.Session(&gorm.Session{}).Where("id=? AND publication_id=? AND executor_user_id=?", attempt, task, user).First(&a).Error
 	return v, a, missing(e)
 }
 func feedback(v model.Task, a model.Attempt) model.ExecutionFeedback {
@@ -26,7 +26,7 @@ func feedback(v model.Task, a model.Attempt) model.ExecutionFeedback {
 	if a.ErrorCode != nil && *a.ErrorCode == model.ExecutionInputChanged {
 		reason = *a.ErrorCode
 	}
-	return model.ExecutionFeedback{StopReason: reason, TaskStatus: v.Status, AttemptStatus: a.Status, AttemptID: a.ID, Seq: a.ReportSeq, StopRequested: reason != "" || v.CancelRequestedAt != nil || v.AuthorizedAt == nil || v.Status != model.StatusRunning && v.Status != model.StatusAwaitingHuman, ResultHash: a.ResultHash}
+	return model.ExecutionFeedback{SceneParked: a.Status == model.AttemptStatusAwaitingHuman && a.ReliablyParkedAt != nil && a.AutomaticSlot == nil, StopReason: reason, TaskStatus: v.Status, AttemptStatus: a.Status, AttemptID: a.ID, Seq: a.ReportSeq, StopRequested: reason != "" || v.CancelRequestedAt != nil || v.AuthorizedAt == nil || v.Status != model.StatusRunning && v.Status != model.StatusAwaitingHuman, ResultHash: a.ResultHash}
 }
 
 type reportStep struct {
@@ -41,6 +41,18 @@ func verified(a model.Attempt, r model.ExecutionReport) bool {
 func (s ExecutionStore) Report(candidate model.Task, user int64, r model.ExecutionReport, currentSession bool, now time.Time) (model.ExecutionFeedback, error) {
 	var out model.ExecutionFeedback
 	e := currentTransaction(s.DB, func(tx *gorm.DB) error {
+		parent, e := lockTaskBatch(tx, candidate)
+		if e != nil {
+			return e
+		}
+		if r.Stage != "" {
+			if e = lockPublishUse(tx, r.AttemptID); e != nil {
+				return e
+			}
+		}
+		if r.SceneParked && (r.Stage != model.AttemptStageAwaitingHuman || !currentSession) {
+			return ErrConflict
+		}
 		if r.Stage == "" {
 			// No stage means keepalive only. It never revalidates resources,
 			// appends history, changes task revision, or grants submission.
@@ -60,7 +72,7 @@ func (s ExecutionStore) Report(candidate model.Task, user int64, r model.Executi
 				}
 				a.ReportSeq = r.Seq
 			}
-			out = feedback(v, a)
+			out = parentFeedback(v, a, parent)
 			return nil
 		}
 		if !currentSession && r.Stage != model.AttemptStageAwaitingHuman {
@@ -81,7 +93,7 @@ func (s ExecutionStore) Report(candidate model.Task, user int64, r model.Executi
 			if len(steps) == 0 || steps[len(steps)-1].Report != r {
 				return ErrConflict
 			}
-			out = feedback(v, a)
+			out = parentFeedback(v, a, parent)
 			return nil // An old permission is never returned again.
 		}
 		switch r.Stage {
@@ -124,11 +136,26 @@ func (s ExecutionStore) Report(candidate model.Task, user int64, r model.Executi
 				}
 				a.ErrorCode = &reason
 				a.ReportSeq = r.Seq
-				out = feedback(v, a)
+				out = parentFeedback(v, a, parent)
 				return nil
 			}
 		}
-		allowed := r.Stage == model.AttemptStageSubmitting && v.Status == model.StatusRunning && v.AuthorizedAt != nil && v.CancelRequestedAt == nil && (v.NotBefore == nil || !v.NotBefore.After(now))
+		if r.Stage == model.AttemptStageSubmitting && s.RequireAdmission && !stoppedParent(parent) {
+			if !a.AdmissionV2 {
+				out = parentFeedback(v, a, parent)
+				out.StopRequested, out.StopReason = true, "PUBLICATION_AGENT_UPGRADE_REQUIRED"
+				return nil
+			}
+			if e = admissionOpen(tx); e != nil {
+				if !errors.Is(e, ErrAdmissionClosed) {
+					return e
+				}
+				out = parentFeedback(v, a, parent)
+				out.StopRequested, out.StopReason = true, "PUBLICATION_ADMISSION_CLOSED"
+				return nil
+			}
+		}
+		allowed := r.Stage == model.AttemptStageSubmitting && !stoppedParent(parent) && v.Status == model.StatusRunning && v.AuthorizedAt != nil && v.CancelRequestedAt == nil && (v.NotBefore == nil || !v.NotBefore.After(now))
 		previousStage := a.Stage
 		steps = append(steps, reportStep{Seq: r.Seq, Report: r, At: now})
 		a.Stage = r.Stage
@@ -149,6 +176,14 @@ func (s ExecutionStore) Report(candidate model.Task, user int64, r model.Executi
 			updates["status"] = a.Status
 			taskUpdates["status"] = v.Status
 		}
+		if r.SceneParked && a.ReliablyParkedAt == nil {
+			if a.PausedStage == nil && !awaitingHuman {
+				return ErrConflict
+			}
+			updates["automatic_slot"], updates["reliably_parked_at"] = nil, now
+			a.AutomaticSlot, a.ReliablyParkedAt = nil, &now
+		}
+
 		// Bind permission to the task authorization/version as well as the
 		// report version, so concurrent cancellation cannot be overwritten.
 		if e := updateTask(tx, v, taskUpdates); e != nil {
@@ -163,9 +198,9 @@ func (s ExecutionStore) Report(candidate model.Task, user int64, r model.Executi
 				return e
 			}
 		}
-		out = feedback(v, a)
+		out = parentFeedback(v, a, parent)
 		out.AllowSubmit = allowed
-		return nil
+		return advanceBatch(tx, parent, now)
 	})
 	return out, e
 }
@@ -180,6 +215,13 @@ func (s ExecutionStore) Complete(candidate model.Task, user int64, r model.Compl
 		return out, ErrConflict
 	}
 	e = currentTransaction(s.DB, func(tx *gorm.DB) error {
+		parent, e := lockTaskBatch(tx, candidate)
+		if e != nil {
+			return e
+		}
+		if e = lockPublishUse(tx, r.AttemptID); e != nil {
+			return e
+		}
 		v, a, e := currentAttempt(tx, candidate.ID, user, r.AttemptID)
 		if e != nil {
 			return e
@@ -188,7 +230,7 @@ func (s ExecutionStore) Complete(candidate model.Task, user int64, r model.Compl
 			if *a.ResultHash != r.ResultHash || a.ReportSeq != r.Seq {
 				return ErrConflict
 			}
-			out = feedback(v, a)
+			out = parentFeedback(v, a, parent)
 			return nil
 		}
 		if r.Seq == 0 || r.Seq <= a.ReportSeq || a.ResolvedAt != nil || a.Status == model.AttemptStatusCompleted {
@@ -238,16 +280,33 @@ func (s ExecutionStore) Complete(candidate model.Task, user int64, r model.Compl
 		if e := audit(tx, user, v.ID, "publication.result", v.Revision+1); e != nil {
 			return e
 		}
+		if attemptStatus == model.AttemptStatusCompleted {
+			if e = releasePublishUse(tx, a.ID, now); e != nil {
+				return e
+			}
+		}
 		v.Status = taskStatus
 		v.Revision++
 		a.Status = attemptStatus
 		a.ReportSeq = r.Seq
 		a.ResultHash = &r.ResultHash
-		out = feedback(v, a)
-		return nil
+		out = parentFeedback(v, a, parent)
+		return advanceBatch(tx, parent, now)
 	})
 	return out, e
 }
+
+func parentFeedback(v model.Task, a model.Attempt, b *model.Batch) model.ExecutionFeedback {
+	out := feedback(v, a)
+	if stoppedParent(b) {
+		out.StopRequested = true
+		if out.StopReason == "" {
+			out.StopReason = "PUBLICATION_BATCH_STOPPED"
+		}
+	}
+	return out
+}
+
 func optional(v string) any {
 	if v == "" {
 		return nil

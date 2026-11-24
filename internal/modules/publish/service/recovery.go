@@ -3,6 +3,7 @@ package service
 import (
 	identity "github.com/wt-media/wt-media-cloud/internal/modules/identity/service"
 	"github.com/wt-media/wt-media-cloud/internal/modules/publish/model"
+	"github.com/wt-media/wt-media-cloud/internal/modules/publish/repository"
 	"time"
 )
 
@@ -123,4 +124,24 @@ func (s *RecoveryService) Resume(user int64, id uint64, in model.HumanContinuati
 		return model.ExecutionFeedback{}, ErrNotFound
 	}
 	return s.Repo.Resume(v, user, in, time.Now().UTC())
+}
+
+func (s *RecoveryService) ResumeWithCapacity(user int64, id uint64, in model.HumanContinuation, capacity model.ExecutionCapacity) (model.ExecutionFeedback, error) {
+	if user <= 0 || id == 0 || !in.Valid() {
+		return model.ExecutionFeedback{}, ErrInvalid
+	}
+	v, err := s.Repo.Get(id)
+	if err != nil {
+		return model.ExecutionFeedback{}, err
+	}
+	if v.OperatorID != user {
+		return model.ExecutionFeedback{}, ErrNotFound
+	}
+	repo, ok := s.Repo.(interface {
+		ResumeWithCapacity(model.Task, int64, model.HumanContinuation, model.ExecutionCapacity, time.Time) (model.ExecutionFeedback, error)
+	})
+	if !ok {
+		return model.ExecutionFeedback{}, repository.ErrAgentUpgrade
+	}
+	return repo.ResumeWithCapacity(v, user, in, capacity, time.Now().UTC())
 }

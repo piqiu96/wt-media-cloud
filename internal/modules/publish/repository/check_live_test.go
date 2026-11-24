@@ -17,6 +17,11 @@ import (
 func reviewingPublication(t *testing.T) (repo.ExecutionStore, model.Claim, model.Task) {
 	t.Helper()
 	s, c, _ := unresolvedPublication(t)
+	return s, c, resolveReviewingPublication(t, s, c)
+}
+
+func resolveReviewingPublication(t *testing.T, s repo.ExecutionStore, c model.Claim) model.Task {
+	t.Helper()
 	v, _ := s.Get(c.Task.ID)
 	in := publicResolution(c, v)
 	in.Conclusion = model.StatusReviewing
@@ -28,7 +33,7 @@ func reviewingPublication(t *testing.T) (repo.ExecutionStore, model.Claim, model
 	if err != nil {
 		t.Fatal(err)
 	}
-	return s, c, v
+	return v
 }
 func TestLivePublicCheckIsReadOnlyUntilCrediblePublicReport(t *testing.T) {
 	s, c, v := reviewingPublication(t)

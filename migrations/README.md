@@ -103,3 +103,43 @@ For a rollback, stop batch writes, preserve both tables in a restorable backup,
 and roll back the application first. Dropping `publication_batch_file` before
 `publication_batch` removes saved batch data and its deletion protection. Resume
 deletion after restoring references or removing the batch data intentionally.
+
+## Migration 117 publication admission cutover
+
+Before applying on an existing installation, stop legacy Cloud claim writers.
+Close or drain old Agent publish/check work and verify the actual original
+BitBrowser profiles. Continue already-authorized result settlement using the
+matching original ReportSafe channel where necessary. Every running,
+awaiting-human, or unresolved interrupted publication attempt is carried
+forward as an active automatic and window holder. Duplicate actual identities,
+missing identities and invalid holder identity stop migration. Reconcile the
+source attempt through its original evidence before retrying.
+
+Migration 117 records a closed global publication admission gate when legacy
+check generations exist. An old check can have committed its claim without
+leaving a Profile use record. Confirm the old Agent/check process cannot open
+any further window and all affected actual profiles are safely closed. A
+check generation, schedule deadline or completed migration alone cannot prove
+closure. Retain the closed gate if any affected Profile remains unknown.
+
+Read or record the cutover from the DB operator console on the intended
+deployment database. Store a short operational evidence reference, with no
+credentials or local browser data. The verification update is only valid
+after the above actual process and Profile checks.
+
+```sql
+SELECT id, legacy_check_count, verified_at, verification_reference
+FROM publication_admission_cutover;
+
+UPDATE publication_admission_cutover
+SET verified_at=UTC_TIMESTAMP(6), verification_reference='verified deployment evidence reference'
+WHERE id=1 AND verified_at IS NULL;
+```
+
+The gate is read by new claims, authorized starts and scene resumptions.
+Existing original-result settlement remains available. On a fresh schema with
+no legacy check generations the row starts verified. Before reverting to old
+code, close admission, drain or safely settle v2 Profile holders, preserve
+batch tasks and historical attempts in a restorable backup, and verify legacy
+bounds. Schema 117 introduces foreign keys and v2 state which require explicit
+data preservation for rollback.

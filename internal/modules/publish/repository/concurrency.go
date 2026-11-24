@@ -7,7 +7,7 @@ import (
 
 func taskSnapshot(tx *gorm.DB, id uint64) (model.Task, error) {
 	var v model.Task
-	e := tx.First(&v, id).Error
+	e := tx.Session(&gorm.Session{}).First(&v, id).Error
 	return v, missing(e)
 }
 

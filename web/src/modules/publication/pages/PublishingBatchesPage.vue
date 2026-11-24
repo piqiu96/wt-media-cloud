@@ -31,6 +31,10 @@ import {
 } from "../batchPreparation.js";
 import BatchResourceSetup from "../components/BatchResourceSetup.vue";
 import BatchCandidateWorkspace from "../components/BatchCandidateWorkspace.vue";
+import BatchExecutionControls from "../components/BatchExecutionControls.vue";
+import BatchExecutionDetail from "../components/BatchExecutionDetail.vue";
+import BatchFormalTasks from "../components/BatchFormalTasks.vue";
+import { batchPhases, batchTaskLocation } from "../batchExecution.js";
 import "../batchPreparation.css";
 
 const api = createPublicationBatchClient();
@@ -70,6 +74,15 @@ const listRoot = ref(null);
 const stageHost = ref(null);
 const newDraft = ref(null);
 const persisted = ref(false);
+const executionControls = ref(null);
+const executionBusy = ref(false);
+const pendingExecution = ref(false);
+const taskScope = ref({});
+const taskPanel = ref(null);
+const taskTable = ref(null);
+let launchAfterNavigation = null;
+let executionReadSequence = 0;
+let executionRefresh = null;
 let epoch = 0;
 let recordEpoch = 0;
 let listScroll = 0;
@@ -82,11 +95,11 @@ const listColumns = [
   { colKey: "id", title: "批次 ID", width: 140 },
   { colKey: "name", title: "批次名称", ellipsis: true, width: 210 },
   { colKey: "platform", title: "平台", width: 92 },
-  { colKey: "coverage", title: "目标 / 候选", width: 120 },
+  { colKey: "coverage", title: "目标 / 数量", width: 130 },
   { colKey: "configuration_status", title: "配置状态", width: 106 },
   { colKey: "execution_status", title: "执行状态", width: 106 },
   { colKey: "updated_at", title: "更新时间", width: 180 },
-  { colKey: "op", title: "操作", width: 130, fixed: "right" },
+  { colKey: "op", title: "操作", width: 180, fixed: "right" },
 ];
 const candidateColumns = [
   { colKey: "output", title: "候选成片", width: 244 },
@@ -101,7 +114,10 @@ const recordColumns = [
   { colKey: "actor", title: "操作人", width: 160 },
 ];
 const eventNames = { "publication_batch.create": "保存批次", "publication_batch.configure": "保存配置修改", created: "保存批次", configuration_updated: "保存配置修改",
-  publication_batch_created: "保存批次", publication_batch_configuration_updated: "保存配置修改" };
+  publication_batch_created: "保存批次", publication_batch_configuration_updated: "保存配置修改",
+  "publication_batch.start": "开始发布", "publication_batch.pause": "暂停发布",
+  "publication_batch.resume": "继续发布", "publication_batch.stop": "终止发布",
+  "publication_batch.finish": "结束批次", };
 const platformOptions = ["baidu", "bilibili", "xiaohongshu"].map(value => ({ value, label: platformLabel(value) }));
 const options = labels => Object.entries(labels).map(([value, label]) => ({ value, label }));
 const categoryOptions = computed(() => categories.value.filter(item => item.enabled !== false).map(item => ({ label: item.name, value: String(item.id) })));
@@ -118,6 +134,10 @@ const dirty = computed(() => !!form.value && JSON.stringify(dirtyInput()) !== fo
 const freeze = computed(() => saving.value || preparing.value || !!pending.value);
 const canEdit = item => canPrepare.value && item?.allowed_actions?.includes("edit");
 const canCopy = item => canPrepare.value && item?.allowed_actions?.includes("copy");
+const canStart = item => canPrepare.value && item?.operator_id === String(actor.value?.id) && item?.allowed_actions?.includes("start");
+const formalTasks = computed(() => !!detail.value?.execution?.first_started_at);
+const taskAccountOptions = computed(() => [...new Set(detail.value?.config?.candidates?.map(row => row.media_account_id) || [])]
+  .filter(id => catalog.accounts.has(id)).map(value => ({ value, label: batchAccountName(catalog.accounts.get(value)) })));
 const isCreating = computed(() => view.value === "create" || view.value === "copy");
 const validationContext = computed(() => view.value === "edit" && detail.value
   ? { batch_id: detail.value.id, expected_revision: detail.value.revision } : {});
@@ -150,11 +170,37 @@ function scrollHost(element) {
   while (parent && !/(auto|scroll)/.test(getComputedStyle(parent).overflowY)) parent = parent.parentElement;
   return parent || document.scrollingElement;
 }
-function open(mode, item) {
+function taskContextFromRoute() {
+  return {
+    search: rawQuery("task_search"), status: rawQuery("task_status"), media_account_id: rawQuery("task_media_account_id"),
+    page: Math.max(1, Number.parseInt(rawQuery("task_page"), 10) || 1),
+    page_size: [10, 20, 50].find(size => size === Number(rawQuery("task_page_size"))) || 10,
+  };
+}
+function taskLink(id) {
+  return batchTaskLocation(detail.value.id, id, listLocation(), taskScope.value);
+}
+function showTaskStatus(status) {
+  taskScope.value = { ...taskScope.value, page: 1, status };
+  recordTab.value = "tasks";
+  nextTick(() => taskPanel.value?.scrollIntoView({ block: "start" }));
+}
+async function open(mode, item, { replace = false, start = false } = {}) {
   if (view.value === "list") listScroll = scrollHost(listRoot.value)?.scrollTop || 0;
   const query = { ...listLocation(), view: mode };
   if (item) query.id = item.id;
-  return router.push({ query });
+  const launch = start && item?.revision ? {
+    id: item.id, revision: item.revision, epoch: epoch + 1, path: router.resolve({ query }).fullPath,
+  } : null;
+  launchAfterNavigation = launch;
+  try {
+    return await router[replace ? "replace" : "push"]({ query });
+  } finally {
+    if (launchAfterNavigation === launch) launchAfterNavigation = null;
+  }
+}
+function openToStart(item) {
+  return open("detail", item, { start: true });
 }
 function back() {
   if (view.value === "edit" && detail.value) return open("detail", detail.value);
@@ -234,7 +280,15 @@ function restore(value) {
   pending.value = value.pending || null;
   if (pending.value) step.value = 2;
 }
-async function finishCreated(saved) {
+async function savedDetail(saved, startAfterSave = false) {
+  allowLeave = true;
+  try {
+    await open("detail", saved, { replace: true, start: startAfterSave });
+  } finally {
+    allowLeave = false;
+  }
+}
+async function finishCreated(saved, startAfterSave = false) {
   routeDraftReady = false;
   const key = pending.value?.request_key;
   if (newDraft.value && key) {
@@ -247,14 +301,56 @@ async function finishCreated(saved) {
   }
   pending.value = null;
   feedback.toast.success("批次已保存");
-  allowLeave = true;
-  await router.replace({ query: { ...listLocation(), view: "detail", id: saved.id } });
+  await savedDetail(saved, startAfterSave);
+}
+
+async function syncExecutionDetail(latest, background = false, reloadTasks = true) {
+  const id = detail.value?.id;
+  if (view.value !== "detail" || !id || (background && (executionBusy.value || pendingExecution.value))) return;
+  const run = epoch;
+  const hasLatest = latest?.id === id;
+  while (!hasLatest && executionRefresh?.run === run) {
+    if (background) return executionRefresh.promise;
+    await executionRefresh.promise;
+    if (run !== epoch) return;
+  }
+  const read = ++executionReadSequence;
+  const current = () => run === epoch && read === executionReadSequence;
+  const promise = (async () => {
+    try {
+      const updated = hasLatest ? latest : await api.get(id);
+      if (!current() || updated.id !== id) return;
+      const previouslyStarted = formalTasks.value;
+      const reviewsSettled = detail.value.execution?.task_counts?.reviewing > 0 &&
+        (updated.execution?.task_counts?.reviewing ?? 0) === 0;
+      detail.value = updated;
+      if (!previouslyStarted && formalTasks.value) recordTab.value = "tasks";
+      if (!background && recordTab.value === "records") loadRecords(id, recordPage.value);
+      if ((reloadTasks || reviewsSettled) && previouslyStarted && recordTab.value === "tasks") {
+        await nextTick();
+        if (current()) await taskTable.value?.refresh();
+      }
+    } catch (error) {
+      if (!background && current()) resourceError.value = problem(error, "重新读取批次状态失败");
+    }
+  })();
+  executionRefresh = { run, promise };
+  try {
+    await promise;
+  } finally {
+    if (executionRefresh?.promise === promise) executionRefresh = null;
+  }
 }
 
 async function refresh() {
   const run = ++epoch;
+  // Consume this navigation's intent before any asynchronous detail read.
+  const launch = launchAfterNavigation;
+  launchAfterNavigation = null;
   recordEpoch++;
   validating.value = false;
+  executionBusy.value = false;
+  pendingExecution.value = false;
   loading.value = true;
   form.value = null;
   detail.value = null;
@@ -267,6 +363,7 @@ async function refresh() {
   formError.value = "";
   issueRowKey.value = "";
   recordTab.value = "candidates";
+  taskScope.value = taskContextFromRoute();
   records.value = { items: [], total: 0 };
   recordsLoading.value = false;
   recordPage.value = 1;
@@ -296,6 +393,7 @@ async function refresh() {
       .then(result => { if (run === epoch) categories.value = result || []; })
       .catch(error => { if (run === epoch) resourceError.value = problem(error, "类目读取失败"); });
     if (view.value === "detail") {
+      recordTab.value = formalTasks.value ? "tasks" : "candidates";
       const configuration = emptyBatch(detail.value);
       updateCoverResources(configuration, detail.value.readiness?.cover_resources);
       await Promise.all([
@@ -303,6 +401,14 @@ async function refresh() {
         catalog.hydrate(configuration.config, { owner: detail.value.operator_id, platform: detail.value.platform, readOnly: !canEdit(detail.value) })
           .catch(error => { if (run === epoch) resourceError.value = problem(error, "部分资源名称读取失败"); }),
       ]);
+      if (run === epoch && launch?.epoch === run && launch.path === route.fullPath && launch.id === id) {
+        if (detail.value.revision !== launch.revision) {
+          feedback.toast.info("批次配置已变化，请核对当前详情后重新开始");
+        } else if (!resourceError.value) {
+          await nextTick();
+          if (run === epoch && detail.value?.revision === launch.revision) executionControls.value?.open("start");
+        }
+      }
       return;
     }
     if (view.value === "edit") {
@@ -391,7 +497,7 @@ async function saveDraft() {
     saving.value = false;
   }
 }
-async function save() {
+async function save(startAfterSave = false) {
   if (saving.value || preparing.value || !form.value) return;
   formError.value = "";
   issueRowKey.value = "";
@@ -410,8 +516,7 @@ async function save() {
       });
       if (!saved?.id || !saved?.revision) throw new Error("保存响应不完整，请重新核对批次记录");
       feedback.toast.success("批次修改已保存");
-      allowLeave = true;
-      await router.replace({ query: { ...listLocation(), view: "detail", id: saved.id } });
+      await savedDetail(saved, startAfterSave);
       return;
     }
     const retry = !!pending.value;
@@ -421,7 +526,7 @@ async function save() {
       await newDraft.value.save(snapshot({ ...payload(), pending: input }));
       pending.value = input;
     }
-    await finishCreated(await sendNewBatch(api, pending.value, { retry }));
+    await finishCreated(await sendNewBatch(api, pending.value, { retry }), !retry && startAfterSave);
   } catch (error) {
     if (error.batchSaveRejected) {
       pending.value = null;
@@ -475,7 +580,7 @@ async function guardNavigation(to, from) {
     return true;
   }
   if (to.fullPath === from.fullPath) return true;
-  if (saving.value || preparing.value) return false;
+  if (saving.value || preparing.value || executionBusy.value) return false;
   if (!dirty.value || !form.value || pending.value) return true;
   if (isCreating.value && !persisted.value) return true;
   const creation = isCreating.value;
@@ -485,10 +590,28 @@ async function guardNavigation(to, from) {
     confirmText: "离开",
   });
 }
+const executionPolling = computed(() => view.value === "detail" &&
+  (["running", "paused", "stopping"].includes(detail.value?.execution_status) ||
+    detail.value?.execution?.task_counts?.reviewing > 0));
+watch(executionPolling, (enabled, _previous, onCleanup) => {
+  if (!enabled) return;
+  let timer;
+  let active = true;
+  onCleanup(() => {
+    clearTimeout(timer);
+    active = false;
+  });
+  async function poll() {
+    await syncExecutionDetail(null, true);
+    if (active && executionPolling.value) timer = setTimeout(poll, 5000);
+  }
+  timer = setTimeout(poll, 5000);
+});
 onBeforeRouteUpdate(guardNavigation);
 onBeforeRouteLeave(guardNavigation);
 onBeforeUnmount(() => {
   disposed = true;
+  launchAfterNavigation = null;
   epoch++;
   recordEpoch++;
 });
@@ -520,20 +643,28 @@ onBeforeUnmount(() => {
       <FeedbackAlert v-if="pageError" theme="error" :message="pageError" />
       <div class="table-scroll-wrap resource-data-table">
         <t-table class="wt-resource-table" :columns="listColumns" :data="list.items || []" row-key="id" :loading="loading"
-           :scroll="{ x: '1084px' }" :empty="pageError ? '读取失败' : '暂无匹配的发布批次'">
+           :scroll="{ x: '1144px' }" :empty="pageError ? '读取失败' : '暂无匹配的发布批次'">
           <template #id="{ row }"><ResourceId :value="row.id" label="批次 ID" /></template>
           <template #name="{ row }"><ResourceNameLink @click="open('detail', row)">{{ row.name }}</ResourceNameLink></template>
           <template #platform="{ row }">{{ platformLabel(row.platform) }}</template>
-          <template #coverage="{ row }">{{ targetSum(row.targets) }} / {{ row.candidate_count }}</template>
+          <template #coverage="{ row }">
+            {{ targetSum(row.targets) }} / {{ row.execution?.first_started_at ? row.execution.created_count : row.candidate_count }}
+            <small class="batch-muted batch-task-block">{{ row.execution?.first_started_at ? "正式任务" : "候选配置" }}</small>
+          </template>
           <template #configuration_status="{ row }">
             <ResourceStatusBadge :label="configState(row)" :tone="row.configuration_status === 'ready' ? 'success' : 'warning'" />
           </template>
-          <template #execution_status="{ row }"><ResourceStatusBadge :label="executionState(row)" /></template>
+          <template #execution_status="{ row }">
+            <ResourceStatusBadge :label="executionState(row)" />
+            <small v-if="row.execution?.phase && row.execution.phase !== row.execution_status"
+              class="batch-muted batch-task-block">{{ batchPhases[row.execution.phase] }}</small>
+          </template>
           <template #updated_at="{ row }">{{ formatPublicationTime(row.updated_at) }}</template>
           <template #op="{ row }"><ResourceRowActions>
+            <t-button v-if="canStart(row)" variant="text" size="small" @click="openToStart(row)">开始发布</t-button>
             <t-button v-if="canEdit(row)" variant="text" size="small" @click="open('edit', row)">编辑配置</t-button>
             <t-button v-if="canCopy(row)" variant="text" size="small" @click="open('copy', row)">复制批次</t-button>
-            <t-button v-if="!canEdit(row) && !canCopy(row)" variant="text" size="small" @click="open('detail', row)">查看</t-button>
+            <t-button v-if="!canEdit(row) && !canCopy(row) && !canStart(row)" variant="text" size="small" @click="open('detail', row)">查看</t-button>
           </ResourceRowActions></template>
         </t-table>
       </div>
@@ -544,7 +675,7 @@ onBeforeUnmount(() => {
     </ResourceCard>
   </div>
 
-  <ResourceDetailPage v-else-if="view === 'detail' && detail" :title="detail.name" @back="back">
+  <ResourceDetailPage v-else-if="view === 'detail' && detail" :title="detail.name" :busy="executionBusy" @back="back">
     <FeedbackAlert v-if="resourceError" theme="warning" :message="resourceError" />
     <ResourceCard>
       <ResourceSection title="批次信息">
@@ -566,7 +697,8 @@ onBeforeUnmount(() => {
         ]" :key="item.label" :label="item.label">{{ item.value }}</t-descriptions-item></ResourceDescriptions>
       </ResourceSection>
     </ResourceCard>
-    <ResourceCard>
+    <BatchExecutionDetail :batch="detail" @tasks="showTaskStatus" />
+    <ResourceCard v-if="!formalTasks">
       <ResourceSection title="目标与缺口">
         <ul class="batch-categories">
           <li v-for="entry in detail.readiness?.shortfalls || []" :key="entry.category_id">
@@ -583,9 +715,9 @@ onBeforeUnmount(() => {
         </ul>
       </ResourceSection>
     </ResourceCard>
-    <ResourceCard>
+    <ResourceCard><div ref="taskPanel">
       <t-tabs :value="recordTab" @change="$event === 'records' ? showRecords() : (recordTab = $event)">
-        <t-tab-panel value="candidates" label="候选配置">
+        <t-tab-panel v-if="!formalTasks" value="candidates" label="候选配置">
           <div class="batch-tab">
             <p v-if="detail.execution_status === 'not_started'" class="batch-muted">批次尚未开始，正式发布任务 0 条。</p>
             <div class="table-scroll-wrap resource-data-table">
@@ -607,6 +739,11 @@ onBeforeUnmount(() => {
             </div>
           </div>
         </t-tab-panel>
+        <t-tab-panel v-else value="tasks" label="正式发布任务">
+          <BatchFormalTasks ref="taskTable" :batch="detail" :account-options="taskAccountOptions" :account-name="accountName" :output-name="outputName"
+            :task-link="taskLink" :scope="taskScope" :active="recordTab === 'tasks'" @scope="taskScope = $event"
+            @refresh-summary="syncExecutionDetail(null, false, false)" />
+        </t-tab-panel>
         <t-tab-panel value="records" label="操作记录">
           <div class="batch-tab">
             <FeedbackAlert v-if="recordsError" theme="error" :message="recordsError" />
@@ -626,13 +763,15 @@ onBeforeUnmount(() => {
           </div>
         </t-tab-panel>
       </t-tabs>
-    </ResourceCard>
+    </div></ResourceCard>
     <template #footer>
-      <span v-if="!canEdit(detail) && !canCopy(detail)" class="resource-footer-status batch-muted">
+      <span v-if="!canPrepare || detail.operator_id !== String(actor?.id)" class="resource-footer-status batch-muted">
         {{ !canPrepare ? '当前角色可查看批次' : detail.operator_id !== String(actor?.id) ? '批次配置由所属运营处理' : '当前状态不允许编辑或复制' }}
       </span>
-      <t-button v-if="canCopy(detail)" theme="primary" @click="open('copy', detail)">复制批次</t-button>
-      <t-button v-if="canEdit(detail)" theme="primary" @click="open('edit', detail)">编辑配置</t-button>
+      <t-button v-if="canCopy(detail) && !pendingExecution" theme="default" variant="outline" :disabled="executionBusy" @click="open('copy', detail)">复制批次</t-button>
+      <t-button v-if="canEdit(detail) && !pendingExecution" theme="default" variant="outline" :disabled="executionBusy" @click="open('edit', detail)">编辑配置</t-button>
+      <BatchExecutionControls ref="executionControls" :batch="detail" :actor="actor" :row-label="rowLabel" :category-name="categoryName"
+        :task-link="taskLink" @updated="syncExecutionDetail" @busy="executionBusy = $event" @pending="pendingExecution = $event" />
     </template>
   </ResourceDetailPage>
 
@@ -700,8 +839,12 @@ onBeforeUnmount(() => {
       <t-button v-if="isCreating && persisted && !pending" theme="default" variant="outline" :disabled="freeze" @click="saveDraft">保存续编</t-button>
       <t-button v-if="step > 0 && !pending" theme="default" variant="outline" :disabled="freeze" @click="goStep(step - 1)">上一步</t-button>
       <t-button v-if="step < 2" theme="primary" :disabled="freeze" @click="goStep(step + 1)">下一步</t-button>
-      <t-button v-else theme="primary" :loading="saving" :disabled="preparing" @click="save">
+      <t-button v-else :theme="pending ? 'primary' : 'default'" :variant="pending ? 'base' : 'outline'"
+        :loading="saving" :disabled="preparing" @click="save()">
         {{ pending ? "查询或重试原请求" : detail ? "保存修改" : "保存批次" }}
+      </t-button>
+      <t-button v-if="step === 2 && !pending" theme="primary" :loading="saving" :disabled="preparing" @click="save(true)">
+        {{ detail ? "开始发布" : "创建并发布" }}
       </t-button>
     </template>
   </ResourceEditorPage>

@@ -188,12 +188,15 @@ func Resume(_ context.Context, c *app.RequestContext) {
 		fail(c, err)
 		return
 	}
-	var in model.HumanContinuation
+	var in struct {
+		model.HumanContinuation
+		Capacity model.ExecutionCapacity `json:"capacity"`
+	}
 	if err = decode(c, &in); err != nil {
 		fail(c, err)
 		return
 	}
-	v, err := service.WiredRecovery().Resume(auth.Claims.UserID, id, in)
+	v, err := service.WiredRecovery().ResumeWithCapacity(auth.Claims.UserID, id, in.HumanContinuation, in.Capacity)
 	if err != nil {
 		fail(c, err)
 		return

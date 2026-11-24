@@ -90,7 +90,7 @@ describe('aggregateWorkEnv', () => {
 describe('work env rows', () => {
   it('keeps the service row connected while bitbrowser is down', () => {
     const env = aggregateWorkEnv({ snapshot: healthySnapshot({ bitbrowser_status: 'unreachable' }), cloudUser, binding, tokenFacts })
-    expect(env.page.serviceText).toBe('已连接，当前无任务')
+    expect(env.page.serviceText).toBe('已连接')
     expect(env.page.bitbrowserText).toBe('不可达')
   })
 
@@ -216,12 +216,14 @@ describe('loadWorkEnvInputs', () => {
 // 接线用例：真实线格式经 normalizeLocalAgentStatus（service 边界）后进聚合，
 // 钉死「service 输出形状 = 聚合输入形状」这条链——形状漂移在此变红。
 describe('work env wiring from the agent wire shape', () => {
-  it('reports a fully green panel from a normalized real-agent snapshot', () => {
+  it('reports connectivity when the native snapshot has no transfer task ID, including during publication', () => {
+    // The same snapshot can accompany an active publication. Only the transfer
+    // store fills current_task_id, so the pill cannot infer publication activity.
     const snapshot = normalizeLocalAgentStatus(healthySnapshot())
     const env = aggregateWorkEnv({ snapshot, cloudUser, binding, tokenFacts })
     expect(env.workable).toBe(true)
     expect(env.blockers).toEqual([])
-    expect(env.page.serviceText).toBe('已连接，当前无任务')
+    expect(env.page.serviceText).toBe('已连接')
     expect(env.page.bitbrowserText).toBe('已登录指定账号')
   })
 

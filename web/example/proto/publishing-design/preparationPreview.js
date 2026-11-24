@@ -8,7 +8,7 @@ export const previewExecutionSettings = () => ({
   exceptionLimit: null,
 });
 
-export function preparationRecord(state, { id, actor, existing, now = new Date().toISOString() }) {
+export function preparationRecord(state, { id, actor, existing, executionReview = false, now = new Date().toISOString() }) {
   const settings = state.executionSettings;
   if (!state.name.trim() || state.platforms[0] !== "百家号" || !state.categories.length)
     throw Error("请填写批次名称并添加目标类目。");
@@ -18,7 +18,9 @@ export function preparationRecord(state, { id, actor, existing, now = new Date()
       !Number.isSafeInteger(settings.exceptionLimit) || settings.exceptionLimit < 1)
     throw Error("请填写有效的执行设置，包括异常任务上限。");
   return {
-    ...existing, id, preparationOnly: true, ownerId: actor.id, createdBy: actor.name,
+    ...existing, id, preparationOnly: true,
+    ...(executionReview && { executionReview: true, version: (existing?.version || 0) + 1 }),
+    ownerId: actor.id, createdBy: actor.name,
     name: state.name.trim(), platform: state.platforms[0], categories: clone(state.categories),
     targets: clone(state.targets), candidates: clone(state.rows), executionSettings: clone(settings),
     draft: { ...clone(state), batchId: id, resourcesLocked: false },
