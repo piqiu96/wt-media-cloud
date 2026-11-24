@@ -13,6 +13,13 @@ import (
 func (s ExecutionStore) Cancel(candidate model.Task, in model.Cancellation, actor int64, now time.Time) (model.Task, error) {
 	var out model.Task
 	err := currentTransaction(s.DB, func(tx *gorm.DB) error {
+		parent, err := lockTaskBatch(tx, candidate)
+		if err != nil {
+			return err
+		}
+		if stoppedParent(parent) {
+			return ErrParentBlocked
+		}
 		v, err := taskSnapshot(tx, candidate.ID)
 		if err != nil {
 			return err
@@ -47,6 +54,9 @@ func (s ExecutionStore) Cancel(candidate model.Task, in model.Cancellation, acto
 		if err := auditDetails(tx, actor, v.ID, "publication.cancel", map[string]any{"revision": v.Revision + 1, "reason": in.Reason, "basis": basis}); err != nil {
 			return err
 		}
+		if err = advanceBatch(tx, parent, now); err != nil {
+			return err
+		}
 		return tx.First(&out, v.ID).Error
 	})
 	return out, err
@@ -58,6 +68,10 @@ func (s ExecutionStore) Abandon(candidate model.Task, actor int64, in model.Aban
 	}
 	var out model.Task
 	err := currentTransaction(s.DB, func(tx *gorm.DB) error {
+		parent, err := lockTaskBatch(tx, candidate)
+		if err != nil {
+			return err
+		}
 		v, err := taskSnapshot(tx, candidate.ID)
 		if err != nil {
 			return err
@@ -76,6 +90,9 @@ func (s ExecutionStore) Abandon(candidate model.Task, actor int64, in model.Aban
 			return err
 		}
 		if err := auditDetails(tx, actor, v.ID, "publication.abandon", map[string]any{"revision": v.Revision + 1, "verification": in}); err != nil {
+			return err
+		}
+		if err = advanceBatch(tx, parent, now); err != nil {
 			return err
 		}
 		return tx.First(&out, v.ID).Error

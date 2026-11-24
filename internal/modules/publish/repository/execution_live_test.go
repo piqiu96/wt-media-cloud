@@ -33,7 +33,7 @@ func executionStore(t *testing.T) (repo.ExecutionStore, func(string, int64, stri
 		if id == 0 {
 			return model.ExecutionInput{}, repo.ErrNotFound
 		}
-		return model.ExecutionInput{ProfileID: id, BitProfileID: fmt.Sprint("bit-", id), PlatformUID: v.PlatformAccountUID, Content: v.Content, VideoSHA256: strings.Repeat("a", 64), CoverSHA256: strings.Repeat("b", 64), VideoSize: 16, CoverSize: 8}, nil
+		return model.ExecutionInput{ProfileID: id, BitMainUserID: "fixture-main", BitProfileID: fmt.Sprint("bit-", id), PlatformUID: v.PlatformAccountUID, Content: v.Content, VideoSHA256: strings.Repeat("a", 64), CoverSHA256: strings.Repeat("b", 64), VideoSize: 16, CoverSize: 8}, nil
 	}}
 	makeTask := func(key string, output int64, uid string) model.Task {
 		v := task(key, output, 1)

@@ -26,7 +26,11 @@ type HumanContinuation struct {
 func (v HumanContinuation) Valid() bool { return v.AttemptID > 0 && v.ExpectedRevision > 0 }
 
 type Attempt struct {
-	AdmissionSlot      uint8           `json:"-" gorm:"default:1"`
+	ExecutionGroupNo   *uint32         `json:"execution_group_no"`
+	AutomaticSlot      *uint16         `json:"-"`
+	ReliablyParkedAt   *time.Time      `json:"-"`
+	AdmissionV2        bool            `json:"-"`
+	AdmissionSlot      uint16          `json:"-" gorm:"default:1"`
 	ID                 uint64          `json:"id,string"`
 	PublicationID      uint64          `json:"publication_id,string"`
 	AttemptNo          uint32          `json:"attempt_no"`
@@ -58,7 +62,9 @@ type Attempt struct {
 func (Attempt) TableName() string { return "publication_attempt" }
 
 type Claim struct {
-	Task     Task    `json:"task"`
-	Attempt  Attempt `json:"attempt"`
-	Replayed bool    `json:"replayed"`
+	Task              Task               `json:"task"`
+	Attempt           Attempt            `json:"attempt"`
+	Replayed          bool               `json:"replayed"`
+	ExecutionGroupNo  *uint32            `json:"execution_group_no"`
+	EffectiveCapacity *ExecutionCapacity `json:"effective_capacity,omitempty"`
 }

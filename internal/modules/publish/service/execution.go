@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/wt-media/wt-media-cloud/internal/config"
 	"github.com/wt-media/wt-media-cloud/internal/infra/database"
 	files "github.com/wt-media/wt-media-cloud/internal/modules/files/service"
 	identity "github.com/wt-media/wt-media-cloud/internal/modules/identity/service"
@@ -54,7 +55,11 @@ type GrantedClaim struct {
 }
 
 func ExecutionStore() repository.ExecutionStore {
-	return NewExecutionStore(database.DB())
+	store := NewExecutionStore(database.DB())
+	settings := config.Get().App.PublicationExecution.WithDefaults()
+	store.Capacity = model.ExecutionCapacity{AutomaticSlots: settings.AutomaticSlots, WindowSlots: settings.WindowSlots}
+	store.RequireAdmission = true
+	return store
 }
 func NewExecutionStore(db *gorm.DB) repository.ExecutionStore {
 	return repository.ExecutionStore{Store: repository.Store{DB: db, LockFiles: files.LockAvailable}, ReadInput: readExecutionInput, RecordWork: func(tx *gorm.DB, v model.Task, a model.Attempt, in model.ResultResolution, now time.Time) (uint64, error) {
@@ -142,6 +147,9 @@ func readExecutionInput(tx *gorm.DB, v model.Task) (model.ExecutionInput, error)
 		return out, repository.ErrInputChanged
 	}
 	portrait, e := files.ReadSavedReference(tx, v.Content.PortraitCoverFileID)
+	if errors.Is(e, files.ErrNotFound) {
+		return out, repository.ErrInputChanged
+	}
 	if e != nil {
 		return out, e
 	}
@@ -249,6 +257,33 @@ func (s *ExecutionService) Claim(ctx context.Context, user int64, key string) (*
 	out.Files = &grants
 	return out, nil
 }
+func (s *ExecutionService) ClaimWithCapacity(ctx context.Context, user int64, key string, capacity model.ExecutionCapacity) (*GrantedClaim, error) {
+	if user <= 0 || !validKey(key) {
+		return nil, ErrInvalid
+	}
+	repo, ok := s.Repo.(interface {
+		ClaimWithCapacity(int64, string, model.ExecutionCapacity, time.Time) (*model.Claim, error)
+	})
+	if !ok {
+		return nil, errors.New("publication capacity admission provider unavailable")
+	}
+	c, err := repo.ClaimWithCapacity(user, key, capacity, time.Now().UTC())
+	if err != nil || c == nil {
+		return nil, err
+	}
+	out := &GrantedClaim{Claim: *c}
+	if !capacity.Valid() || !c.Attempt.AdmissionV2 || c.Task.CancelRequestedAt != nil ||
+		c.Task.Status != model.StatusRunning || c.Attempt.Status != model.AttemptStatusRunning || c.Attempt.Stage != model.AttemptStageClaimed {
+		return out, nil
+	}
+	grants, err := s.Grant(ctx, *c)
+	if err != nil {
+		return nil, err
+	}
+	out.Files = &grants
+	return out, nil
+}
+
 func (s *ExecutionService) Report(user int64, id uint64, in model.ExecutionReport, current bool) (model.ExecutionFeedback, error) {
 	if user <= 0 || in.AttemptID == 0 || in.Seq == 0 {
 		return model.ExecutionFeedback{}, ErrInvalid

@@ -66,7 +66,23 @@ func (c PublicationBatchConfig) WithDefaults() PublicationBatchConfig {
 	return c
 }
 
+type PublicationExecutionConfig struct {
+	AutomaticSlots uint16 `toml:"automatic_slots"`
+	WindowSlots    uint16 `toml:"window_slots"`
+}
+
+func (c PublicationExecutionConfig) WithDefaults() PublicationExecutionConfig {
+	if c.AutomaticSlots == 0 {
+		c.AutomaticSlots = 5
+	}
+	if c.WindowSlots == 0 {
+		c.WindowSlots = 10
+	}
+	return c
+}
+
 type AppConfig struct {
+	PublicationExecution  PublicationExecutionConfig  `toml:"publication_execution"`
 	PublicationBatch      PublicationBatchConfig      `toml:"publication_batch"`
 	PublicationGeneration PublicationGenerationConfig `toml:"publication_generation"`
 	Name                  string                      `toml:"name"`

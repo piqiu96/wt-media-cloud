@@ -25,24 +25,31 @@ type Content struct {
 	Confirmed           bool         `json:"confirmed"`
 }
 type Task struct {
-	CheckBrowserUsedAt   *time.Time `json:"-"`
-	CheckNotFoundCount   uint32     `json:"-"`
-	CheckStoppedAt       *time.Time `json:"-"`
-	NextCheckAt          *time.Time `json:"-"`
-	CheckGeneration      uint64     `json:"-"`
-	LastCheckedAt        *time.Time `json:"last_checked_at"`
-	LastCheckMessage     *string    `json:"last_check_message"`
-	CanCancel            bool       `json:"can_cancel" gorm:"->;-:migration"`
-	CancelRequestedAt    *time.Time `json:"cancel_requested_at"`
-	AcceptedAt           *time.Time `json:"accepted_at"`
-	PublishedAt          *time.Time `json:"published_at"`
-	PlatformSubmissionID *string    `json:"platform_submission_id"`
-	TargetURL            *string    `json:"target_url"`
-	WorkID               *uint64    `json:"work_id,string"`
-	PlatformWorkID       *string    `json:"platform_work_id"`
-	WorkURL              *string    `json:"work_url"`
-	FailureCode          *string    `json:"failure_code"`
-	FailureMessage       *string    `json:"failure_message"`
+	BatchID              *uint64             `json:"batch_id,string"`
+	TaskOrder            uint32              `json:"task_order"`
+	RowKey               *string             `json:"row_key,omitempty"`
+	ExecutionGroupNo     *uint32             `json:"execution_group_no"`
+	ExecutionStage       *AttemptStage       `json:"execution_stage" gorm:"->;-:migration"`
+	ExecutionBlock       *TaskExecutionBlock `json:"execution_block,omitempty" gorm:"-"`
+	AllowedActions       []string            `json:"allowed_actions,omitempty" gorm:"-"`
+	CheckBrowserUsedAt   *time.Time          `json:"-"`
+	CheckNotFoundCount   uint32              `json:"-"`
+	CheckStoppedAt       *time.Time          `json:"-"`
+	NextCheckAt          *time.Time          `json:"-"`
+	CheckGeneration      uint64              `json:"-"`
+	LastCheckedAt        *time.Time          `json:"last_checked_at"`
+	LastCheckMessage     *string             `json:"last_check_message"`
+	CanCancel            bool                `json:"can_cancel" gorm:"->;-:migration"`
+	CancelRequestedAt    *time.Time          `json:"cancel_requested_at"`
+	AcceptedAt           *time.Time          `json:"accepted_at"`
+	PublishedAt          *time.Time          `json:"published_at"`
+	PlatformSubmissionID *string             `json:"platform_submission_id"`
+	TargetURL            *string             `json:"target_url"`
+	WorkID               *uint64             `json:"work_id,string"`
+	PlatformWorkID       *string             `json:"platform_work_id"`
+	WorkURL              *string             `json:"work_url"`
+	FailureCode          *string             `json:"failure_code"`
+	FailureMessage       *string             `json:"failure_message"`
 
 	AuditActor         int64           `json:"-" gorm:"-"`
 	ID                 uint64          `json:"id,string"`
@@ -67,6 +74,11 @@ type Task struct {
 	RequestHash        string          `json:"-"`
 	CreatedAt          time.Time       `json:"created_at"`
 	UpdatedAt          time.Time       `json:"updated_at"`
+}
+
+type TaskExecutionBlock struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
 }
 
 func (Task) TableName() string { return "publication_task" }

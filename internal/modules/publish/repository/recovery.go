@@ -50,6 +50,10 @@ func (s ExecutionStore) ResolveResult(candidate model.Task, actor int64, in mode
 	}
 	var out model.Task
 	e := currentTransaction(s.DB, func(tx *gorm.DB) error {
+		parent, e := lockTaskBatch(tx, candidate)
+		if e != nil {
+			return e
+		}
 		v, e := taskSnapshot(tx, candidate.ID)
 		if e != nil {
 			return e
@@ -112,7 +116,15 @@ func (s ExecutionStore) ResolveResult(candidate model.Task, actor int64, in mode
 		if e := updateAttempt(tx, a, changes); e != nil {
 			return e
 		}
+		if in.Conclusion != model.StatusUncertain {
+			if e := releasePublishUse(tx, a.ID, now); e != nil {
+				return e
+			}
+		}
 		if e := auditDetails(tx, actor, v.ID, "publication.resolve", map[string]any{"revision": v.Revision + 1, "verification": in}); e != nil {
+			return e
+		}
+		if e = advanceBatch(tx, parent, now); e != nil {
 			return e
 		}
 		return tx.First(&out, v.ID).Error
@@ -122,6 +134,19 @@ func (s ExecutionStore) ResolveResult(candidate model.Task, actor int64, in mode
 func (s ExecutionStore) Retry(candidate model.Task, revision uint64, actor int64, now time.Time) (model.Task, error) {
 	var out model.Task
 	e := currentTransaction(s.DB, func(tx *gorm.DB) error {
+		parent, e := lockTaskBatch(tx, candidate)
+		if e != nil {
+			return e
+		}
+		if parent != nil && (parent.ExecutionStatus != model.BatchRunning || stoppedParent(parent) ||
+			parent.ExecutionGroupNo != nil && candidate.ExecutionGroupNo != nil && *parent.ExecutionGroupNo == *candidate.ExecutionGroupNo && parent.GroupEndedAt == nil) {
+			return ErrParentBlocked
+		}
+		if s.RequireAdmission {
+			if e = admissionOpen(tx); e != nil {
+				return e
+			}
+		}
 		if _, e := s.readInput(tx, candidate); e != nil {
 			return e
 		}
@@ -142,10 +167,10 @@ func (s ExecutionStore) Retry(candidate model.Task, revision uint64, actor int64
 		// Keep the original immutable result and occupancy. Only the next claim
 		// creates a new attempt; the old attempt stays available for exact read-back.
 		status := model.StatusQueued
-		if v.NotBefore != nil && v.NotBefore.After(now) {
+		if parent != nil || v.NotBefore != nil && v.NotBefore.After(now) {
 			status = model.StatusPending
 		}
-		if e := updateTask(tx, v, map[string]any{"status": status, "current_attempt_id": nil, "authorized_at": now, "updated_at": now, "failure_code": nil, "failure_message": nil}); e != nil {
+		if e := updateTask(tx, v, map[string]any{"status": status, "current_attempt_id": nil, "authorized_at": now, "updated_at": now, "failure_code": nil, "failure_message": nil, "execution_group_no": nil}); e != nil {
 			return e
 		}
 		if e := audit(tx, actor, v.ID, "publication.retry", v.Revision+1); e != nil {

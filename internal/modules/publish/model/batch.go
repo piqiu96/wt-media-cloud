@@ -80,6 +80,7 @@ const (
 	BatchNotStarted = "not_started"
 	BatchRunning    = "running"
 	BatchPaused     = "paused"
+	BatchStopping   = "stopping"
 	BatchEnded      = "ended"
 	BatchCancelled  = "cancelled"
 )
@@ -99,6 +100,20 @@ type Batch struct {
 	ConfigurationStatus string                `json:"configuration_status"`
 	ExecutionStatus     string                `json:"execution_status"`
 	StartedAt           *time.Time            `json:"-"`
+	ExecutionGroupNo    *uint32               `json:"-"`
+	GroupEndedAt        *time.Time            `json:"-"`
+	NextGroupAt         *time.Time            `json:"-"`
+	StoppedAt           *time.Time            `json:"-"`
+	EndedAt             *time.Time            `json:"-"`
+	StopReason          string                `json:"-"`
+	FinishReason        string                `json:"-"`
+	PauseID             uint64                `json:"-"`
+	Pause               *BatchPause           `json:"-" gorm:"column:pause_json;serializer:json"`
+	ExceptionAck        map[string]string     `json:"-" gorm:"column:exception_ack_json;serializer:json"`
+	StartRequestKey     *string               `json:"-"`
+	StartRequestHash    *string               `json:"-"`
+	StartReceipt        *BatchStartResult     `json:"-" gorm:"column:start_receipt_json;serializer:json"`
+	Execution           BatchExecution        `json:"execution" gorm:"-"`
 	Revision            uint64                `json:"revision,string"`
 	RequestKey          string                `json:"-"`
 	RequestHash         string                `json:"-"`

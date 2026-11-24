@@ -40,6 +40,13 @@ func (s ExecutionStore) humanScene(tx *gorm.DB, candidate model.Task, user int64
 func (s ExecutionStore) GetHumanScene(candidate model.Task, user int64, in model.HumanContinuation) (model.ExecutionFeedback, error) {
 	var out model.ExecutionFeedback
 	err := currentTransaction(s.DB, func(tx *gorm.DB) error {
+		b, err := lockTaskBatch(tx, candidate)
+		if err != nil {
+			return err
+		}
+		if stoppedParent(b) {
+			return ErrParentBlocked
+		}
 		v, a, err := s.humanScene(tx, candidate, user, in, false)
 		if err != nil {
 			return err
@@ -50,8 +57,31 @@ func (s ExecutionStore) GetHumanScene(candidate model.Task, user int64, in model
 	return out, err
 }
 func (s ExecutionStore) Resume(candidate model.Task, user int64, in model.HumanContinuation, now time.Time) (model.ExecutionFeedback, error) {
+	if s.RequireAdmission {
+		return model.ExecutionFeedback{}, ErrAgentUpgrade
+	}
+	return s.ResumeWithCapacity(candidate, user, in, model.ExecutionCapacity{AutomaticSlots: 3, WindowSlots: 3}, now)
+}
+func (s ExecutionStore) ResumeWithCapacity(candidate model.Task, user int64, in model.HumanContinuation, agent model.ExecutionCapacity, now time.Time) (model.ExecutionFeedback, error) {
 	var out model.ExecutionFeedback
-	err := currentTransaction(s.DB, func(tx *gorm.DB) error {
+	if !agent.Valid() {
+		return out, ErrAgentUpgrade
+	}
+	limit := s.localCapacity(agent)
+	err := pureTransaction(s.DB, func(tx *gorm.DB) error {
+		parent, err := lockTaskBatch(tx, candidate)
+		if err != nil {
+			return err
+		}
+		if stoppedParent(parent) || parent != nil && parent.ExecutionStatus != model.BatchRunning {
+			return ErrParentBlocked
+		}
+		if err = admissionOpen(tx); err != nil {
+			return err
+		}
+		if err = lockPublishUse(tx, in.AttemptID); err != nil {
+			return err
+		}
 		v, a, err := s.humanScene(tx, candidate, user, in, true)
 		if err != nil {
 			return err
@@ -60,10 +90,29 @@ func (s ExecutionStore) Resume(candidate model.Task, user int64, in model.HumanC
 			out = feedback(v, a)
 			return nil
 		}
+		slot := a.AutomaticSlot
+		if slot == nil {
+			available, e := batchAutomaticAvailable(tx, parent)
+			if e != nil {
+				return e
+			}
+			if !available {
+				return ErrCapacityWait
+			}
+			free, e := freeAutomaticSlot(tx, user, limit.AutomaticSlots)
+			if e != nil {
+				return e
+			}
+			if free == 0 {
+				return ErrCapacityWait
+			}
+			slot = &free
+		}
+
 		if err = updateTask(tx, v, map[string]any{"status": model.StatusRunning, "updated_at": now}); err != nil {
 			return err
 		}
-		if err = updateAttempt(tx, a, map[string]any{"status": model.AttemptStatusRunning, "stage": *a.PausedStage, "last_resume_revision": in.ExpectedRevision, "heartbeat_at": now}); err != nil {
+		if err = updateAttempt(tx, a, map[string]any{"status": model.AttemptStatusRunning, "stage": *a.PausedStage, "last_resume_revision": in.ExpectedRevision, "heartbeat_at": now, "automatic_slot": slot, "reliably_parked_at": nil, "admission_v2": true}); err != nil {
 			return err
 		}
 		if err = audit(tx, user, v.ID, "publication.resume", v.Revision+1); err != nil {
@@ -72,6 +121,7 @@ func (s ExecutionStore) Resume(candidate model.Task, user int64, in model.HumanC
 		v.Status = model.StatusRunning
 		a.Status = model.AttemptStatusRunning
 		a.Stage = *a.PausedStage
+		a.AutomaticSlot, a.ReliablyParkedAt = slot, nil
 		out = feedback(v, a)
 		return nil
 	})

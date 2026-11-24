@@ -14,6 +14,7 @@ import (
 )
 
 type ExecutionReport struct {
+	SceneParked         bool         `json:"scene_parked,omitempty"`
 	PortraitCoverSHA256 string       `json:"portrait_cover_sha256,omitempty"`
 	AttemptID           uint64       `json:"attempt_id,string"`
 	Seq                 uint64       `json:"report_seq"`
@@ -67,6 +68,7 @@ func ParseResult(raw json.RawMessage) (ExecutionResult, error) {
 const ExecutionInputChanged = "PUBLICATION_INPUT_CHANGED"
 
 type ExecutionFeedback struct {
+	SceneParked   bool          `json:"scene_parked"`
 	StopReason    string        `json:"stop_reason,omitempty"`
 	TaskStatus    Status        `json:"task_status"`
 	AttemptStatus AttemptStatus `json:"attempt_status"`

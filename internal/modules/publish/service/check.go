@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/wt-media/wt-media-cloud/internal/modules/publish/model"
+	"github.com/wt-media/wt-media-cloud/internal/modules/publish/repository"
 )
 
 type PublicCheckRepository interface {
@@ -32,4 +33,29 @@ func (s *PublicCheckService) Observe(user int64, id uint64, in model.PublicCheck
 		return model.PublicCheckAcknowledgement{}, ErrNotFound
 	}
 	return s.Repo.ObservePublication(v, user, in, time.Now().UTC())
+}
+
+func (s *PublicCheckService) ClaimV2(actor model.CheckActor, in model.CheckClaimInput) (any, error) {
+	if actor.UserID <= 0 || !validKey(in.RequestKey) {
+		return nil, ErrInvalid
+	}
+	repo, ok := s.Repo.(interface {
+		ClaimPublicCheckV2(model.CheckActor, model.CheckClaimInput, time.Time) (any, error)
+	})
+	if !ok {
+		return nil, repository.ErrAgentUpgrade
+	}
+	return repo.ClaimPublicCheckV2(actor, in, time.Now().UTC())
+}
+func (s *PublicCheckService) Release(actor model.CheckActor, id uint64, in model.PublicCheckRelease) (model.PublicCheckReleaseAck, error) {
+	if actor.UserID <= 0 || id == 0 || !in.Valid() {
+		return model.PublicCheckReleaseAck{}, ErrInvalid
+	}
+	repo, ok := s.Repo.(interface {
+		ReleasePublicCheck(model.CheckActor, uint64, model.PublicCheckRelease, time.Time) (model.PublicCheckReleaseAck, error)
+	})
+	if !ok {
+		return model.PublicCheckReleaseAck{}, repository.ErrAgentUpgrade
+	}
+	return repo.ReleasePublicCheck(actor, id, in, time.Now().UTC())
 }

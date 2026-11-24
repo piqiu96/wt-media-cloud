@@ -16,7 +16,12 @@ import (
 func unresolvedPublication(t *testing.T) (repo.ExecutionStore, model.Claim, model.Completion) {
 	t.Helper()
 	s, makeTask := ownedStore(t)
-	v := makeTask(0)
+	c, packet := unresolvedPublicationFrom(t, s, makeTask(0))
+	return s, c, packet
+}
+
+func unresolvedPublicationFrom(t *testing.T, s repo.ExecutionStore, v model.Task) (model.Claim, model.Completion) {
+	t.Helper()
 	now := time.Now().UTC()
 	if _, e := s.Start(v, 1, 9, now); e != nil {
 		t.Fatal(e)
@@ -34,7 +39,7 @@ func unresolvedPublication(t *testing.T) (repo.ExecutionStore, model.Claim, mode
 	if _, e = s.Complete(c.Task, 9, packet, now); e != nil {
 		t.Fatal(e)
 	}
-	return s, *c, packet
+	return *c, packet
 }
 func resolution(c model.Claim, v model.Task) model.ResultResolution {
 	return model.ResultResolution{AttemptID: c.Attempt.ID, ExpectedRevision: v.Revision, Conclusion: "failed", Evidence: model.VerificationEvidence{PlatformUID: c.Attempt.Input.PlatformUID, Reason: "执行在上传前失败", Basis: "已检查原账号稿件及本机原尝试，确认没有可继续发布稿件，原执行进程与浏览器已经结束", SceneClosed: true, NoPublishableWork: true}}
