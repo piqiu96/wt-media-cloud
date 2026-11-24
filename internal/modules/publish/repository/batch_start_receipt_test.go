@@ -124,3 +124,91 @@ func TestBatchStartTransactionProvesAnotherKeyWithoutChangingParent(t *testing.T
 		t.Fatalf("same key ambiguity was cleared: %s", raw)
 	}
 }
+
+func TestBatchStartStoredReceiptRequiresEveryNonNullTypedField(t *testing.T) {
+	s, b, _ := testExecutableBatch(t, 1, 10, "auto_continue")
+	var original string
+	if err := s.DB.Table("publication_batch").Select("start_receipt_json").Where("id=?", b.ID).Scan(&original).Error; err != nil {
+		t.Fatal(err)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(original), &fields); err != nil {
+		t.Fatal(err)
+	}
+	if string(fields["creation_shortfall"]) != "0" {
+		t.Fatalf("fixture must exercise explicit zero shortfall: %s", original)
+	}
+	required := []string{"batch_id", "revision", "execution_status", "first_started_at", "task_ids", "target_count", "created_count", "creation_shortfall"}
+	cases := []struct{ name, field, kind string }{{name: "complete zero shortfall"}}
+	for _, field := range required {
+		for _, kind := range []string{"missing", "null", "wrong type"} {
+			cases = append(cases, struct{ name, field, kind string }{name: field + "/" + kind, field: field, kind: kind})
+		}
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			copyFields := map[string]json.RawMessage{}
+			for key, value := range fields {
+				copyFields[key] = value
+			}
+			switch tc.kind {
+			case "missing":
+				delete(copyFields, tc.field)
+			case "null":
+				copyFields[tc.field] = json.RawMessage("null")
+			case "wrong type":
+				copyFields[tc.field] = json.RawMessage(`{}`)
+			}
+			stored, err := json.Marshal(copyFields)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err = s.DB.Table("publication_batch").Where("id=?", b.ID).Update("start_receipt_json", string(stored)).Error; err != nil {
+				t.Fatal(err)
+			}
+			loaded, err := s.GetBatch(b.ID)
+			if err != nil {
+				t.Fatalf("malformed receipt should not prevent read-only batch inspection: %v", err)
+			}
+			_, err = repo.ReplayBatchStart(loaded, "different-pending-key", "different-digest")
+			if !errors.Is(err, repo.ErrConflict) {
+				t.Fatalf("another-key result must remain conflict: %v", err)
+			}
+			raw, e := json.Marshal(err)
+			if e != nil {
+				t.Fatal(e)
+			}
+			var details map[string]any
+			if e = json.Unmarshal(raw, &details); e != nil {
+				t.Fatal(e)
+			}
+			flag, present := details["start_request_applied"]
+			complete := tc.field == ""
+			if present != complete || present && flag != false {
+				t.Fatalf("damaged persisted receipt incorrectly proved not-applied: field=%s kind=%s details=%s", tc.field, tc.kind, raw)
+			}
+			keyJSON, _ := json.Marshal(*loaded.StartRequestKey)
+			hashJSON, _ := json.Marshal(*loaded.StartRequestHash)
+			if strings.Contains(string(raw), string(keyJSON)) || strings.Contains(string(raw), string(hashJSON)) {
+				t.Fatalf("original start identity leaked: %s", raw)
+			}
+			if complete {
+				result, e := repo.ReplayBatchStart(loaded, *loaded.StartRequestKey, *loaded.StartRequestHash)
+				if e != nil || result == nil {
+					t.Fatalf("complete zero receipt did not replay: %+v %v", result, e)
+				}
+				marshaled, e := json.Marshal(result)
+				if e != nil {
+					t.Fatal(e)
+				}
+				var output map[string]json.RawMessage
+				if e = json.Unmarshal(marshaled, &output); e != nil {
+					t.Fatal(e)
+				}
+				if len(output) != len(required) || string(output["creation_shortfall"]) != "0" {
+					t.Fatalf("successful receipt wire format changed: %s", marshaled)
+				}
+			}
+		})
+	}
+}

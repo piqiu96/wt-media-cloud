@@ -1,6 +1,8 @@
 package model
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
 	"time"
 )
@@ -65,7 +67,31 @@ type BatchStartResult struct {
 	TargetCount       int64     `json:"target_count"`
 	CreatedCount      int64     `json:"created_count"`
 	CreationShortfall int64     `json:"creation_shortfall"`
+
+	invalidJSON bool
 }
+
+// UnmarshalJSON keeps storage corruption distinct from an explicit zero value.
+// A damaged historical receipt must not prevent reading its parent batch, but
+// it cannot prove whether a start request was applied or be replayed as success.
+func (r *BatchStartResult) UnmarshalJSON(data []byte) error {
+	type wire BatchStartResult
+	var decoded wire
+	var fields map[string]json.RawMessage
+	valid := json.Unmarshal(data, &decoded) == nil && json.Unmarshal(data, &fields) == nil
+	for _, key := range []string{"batch_id", "revision", "execution_status", "first_started_at", "task_ids", "target_count", "created_count", "creation_shortfall"} {
+		value, present := fields[key]
+		if !present || bytes.Equal(bytes.TrimSpace(value), []byte("null")) {
+			valid = false
+		}
+	}
+	*r = BatchStartResult(decoded)
+	r.invalidJSON = !valid
+	return nil
+}
+
+// HasCompleteJSON also accepts newly constructed results before persistence.
+func (r BatchStartResult) HasCompleteJSON() bool { return !r.invalidJSON }
 
 type BatchControlResult struct {
 	BatchID         uint64         `json:"batch_id,string"`

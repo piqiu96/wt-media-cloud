@@ -74,7 +74,7 @@ func stoppedParent(b *model.Batch) bool {
 func validBatchStartReceipt(v model.Batch) bool {
 	r := v.StartReceipt
 	if v.StartRequestKey == nil || *v.StartRequestKey == "" || v.StartRequestHash == nil || *v.StartRequestHash == "" ||
-		r == nil || r.BatchID != v.ID || r.Revision < 2 || r.Revision > v.Revision || r.ExecutionStatus != model.BatchRunning ||
+		r == nil || !r.HasCompleteJSON() || r.BatchID != v.ID || r.Revision < 2 || r.Revision > v.Revision || r.ExecutionStatus != model.BatchRunning ||
 		v.StartedAt == nil || r.FirstStartedAt.IsZero() || !r.FirstStartedAt.Equal(*v.StartedAt) ||
 		r.CreatedCount <= 0 || r.CreatedCount != int64(len(r.TaskIDs)) {
 		return false
