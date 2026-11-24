@@ -6,7 +6,7 @@ const emit = defineEmits(['update:modelValue'])
 <template>
   <div class="resource-advanced-toggle">
     <t-button theme="primary" variant="text" :aria-expanded="modelValue" :aria-controls="controls" @click="emit('update:modelValue', !modelValue)">
-      高级筛选<span v-if="count">（{{ count }}）</span><ChevronDownIcon :class="{ 'is-expanded': modelValue }" />
+      高级筛选<span v-if="count">（已生效 {{ count }} 项）</span><ChevronDownIcon :class="{ 'is-expanded': modelValue }" />
     </t-button>
   </div>
 </template>

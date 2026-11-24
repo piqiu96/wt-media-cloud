@@ -1,4 +1,6 @@
 import { createApp } from "vue"
+import { invoke } from "@tauri-apps/api/core"
+import { setDesktopEnvironment } from "../../shared/ui/desktopBrand.js"
 import { createPinia } from "pinia"
 import TDesign from "tdesign-vue-next"
 import { createDesktopRouter } from "./router"
@@ -103,7 +105,13 @@ router.beforeEach(async (to, from, next) => {
 // Resolve the Cloud origin from the bundled native config before the router or
 // any API client makes its first request. An unavailable config remains empty;
 // the HTTP client then reports that fact instead of guessing a loopback server.
-void cloudBaseUrl().then((origin) => {
+void invoke<{ environment: string }>("get_public_config").then((config) => {
+  setDesktopEnvironment(config.environment)
+  return cloudBaseUrl()
+}).then((origin) => {
   setDesktopCloudOrigin(origin)
   app.mount("#app")
+}).catch(() => {
+  const root = document.getElementById("app")
+  if (root) root.textContent = "桌面配置读取失败，请重新启动应用；仍失败时请重新安装对应版本。"
 })
