@@ -12,6 +12,8 @@ const props = defineProps({
   output: Object,
   category: String,
   disabled: Boolean,
+  batchSettings: Boolean,
+  groupName: { type: String, default: "publication" },
 });
 const emit = defineEmits([
   "update:config",
@@ -278,7 +280,7 @@ onBeforeUnmount(() => {
       >
         <input
           type="radio"
-          :name="`publication-cover-method-${aspect.join('-')}`"
+          :name="`${groupName}-cover-method-${aspect.join('-')}`"
           :value="choice.value"
           :checked="config.method === choice.value"
           :disabled="disabled"
@@ -291,7 +293,7 @@ onBeforeUnmount(() => {
       </label>
     </div>
     <template v-if="config.method === 'image'">
-      <div class="publication-cover-image-actions">
+      <div v-if="!batchSettings" class="publication-cover-image-actions">
         <t-button
           variant="outline"
           :disabled="disabled || !output?.thumbnail?.file_id || !coverMatchesRatio(output.thumbnail,...aspect)"
@@ -345,7 +347,7 @@ onBeforeUnmount(() => {
             :variant="
               config.background_source === 'output' ? 'base' : 'outline'
             "
-            :disabled="disabled || !output?.thumbnail?.file_id"
+            :disabled="disabled || (!batchSettings && !output?.thumbnail?.file_id)"
             @click="
               update({
                 background_source: 'output',
@@ -372,7 +374,7 @@ onBeforeUnmount(() => {
             : "使用模板纯色背景"
         }}
       </p>
-      <label class="publication-cover-field"
+      <label v-if="!batchSettings" class="publication-cover-field"
         ><ResourceRequiredLabel>封面标题</ResourceRequiredLabel
         ><t-input
           :value="config.title"
@@ -380,7 +382,7 @@ onBeforeUnmount(() => {
           placeholder="输入封面主标题"
           @change="update({ title: $event })"
       /></label>
-      <div>
+      <div v-if="!batchSettings">
         <t-button
           variant="outline"
           :loading="rendering"

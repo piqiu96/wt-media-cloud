@@ -28,6 +28,7 @@ var (
 )
 
 type ListComposeOutputsInput struct {
+	OutputIDs     []int64               `json:"-"`
 	Page          int                   `json:"page"`
 	PageSize      int                   `json:"page_size"`
 	MaterialID    int64                 `json:"material_id"`

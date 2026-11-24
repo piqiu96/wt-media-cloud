@@ -16,6 +16,14 @@ func GeneratePublicationContent(_ context.Context, c *app.RequestContext) {
 	if !ok {
 		return
 	}
+	if len(c.Request.Body()) > batchPayloadLimit {
+		fail(c, service.ErrInvalid)
+		return
+	}
+	if batchGenerationRequest(c) {
+		generateBatchContent(c, actor)
+		return
+	}
 	var in service.GenerationInput
 	if err := decode(c, &in); err != nil {
 		fail(c, err)

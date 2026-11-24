@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -162,7 +163,9 @@ func (s Store) Delete(id, revision uint64, check func(*gorm.DB, int64) error) er
 		if e = files.LockAvailable(tx, []int64{v.FileID}); e != nil {
 			return e
 		}
-		// Re-read after acquiring the shared reference lock.
+		// The initial registration read may precede a reference writer's
+		// commit. Read committed gives all subsequent reference checks a
+		// current view once the shared file lock has been acquired.
 		v, e = (Store{DB: tx}).Get(id)
 		if e != nil {
 			return e
@@ -184,5 +187,5 @@ func (s Store) Delete(id, revision uint64, check func(*gorm.DB, int64) error) er
 			return ErrConflict
 		}
 		return nil
-	})
+	}, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
 }

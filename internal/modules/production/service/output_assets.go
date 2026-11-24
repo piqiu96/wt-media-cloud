@@ -61,6 +61,14 @@ func (s *ComposeOutputService) outputFilter(actor identity.PublicUser, input Lis
 		}
 		return invalid()
 	}
+	if input.OutputIDs != nil {
+		for _, id := range input.OutputIDs {
+			if id <= 0 {
+				return invalid()
+			}
+		}
+		f.RestrictIDs, f.OutputIDs = true, input.OutputIDs
+	}
 	f.TeamID = scope.TeamID
 	f.OperatorID = scope.OperatorID
 	ids := append([]identity.CategoryID(nil), input.CategoryIDs...)

@@ -1,35 +1,33 @@
 openapi: 3.1.0
 info:
   title: WT Media Single Publication Preparation
-  version: 2026.11.22.1
+  version: 2026.11.25.1
   description: Administrators manage Cloud records only. Senior operators execute and copy only their own tasks and create with their own accounts. Managers may cancel unclaimed tasks; stopping a claimed scene or verifying an uncertain scene belongs to the task operator. Managers supplement reviewing results or abandon failed tasks only against the exact original recorded safe disposition, checked by the existing transaction. Task platform_submission_id/target_url contain original receipts; platform_work_id/work_url/work_id only identify verified public work (ADR-0035). Creating never authorizes execution or submits a platform post. Execution requires separate revision-bound start authorization. Baidu task preparation is available. IDs and revisions are decimal strings; timestamps RFC3339. Uses errcode/message/data/logid.
 paths:
   /api/v1/publication/generate:
     post:
       operationId: generatePublicationContent
       security: [{sessionCookie: []}]
-      description: Generate one complete DeepSeek JSON suggestion after authorizing the actual output and category. Does not adopt, confirm, create tasks or publish. No automatic POST replay. Selected fields only; declarations are never generated. Client applies each field only when row/input/field revision and latest request still match. Deadline 180 seconds, connection close cancels unfinished work.
+      description: Generate complete DeepSeek JSON suggestions for one or multiple rows after authorizing the actual output and the caller's publication category. Does not adopt, confirm, create tasks or publish. No automatic POST replay. Selected fields only; declarations are never generated. Client applies each field only when row/input/field revision and latest request still match. Deadline 180 seconds, connection close cancels unfinished work.
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              type: object
-              additionalProperties: false
-              required: [row_key, input_revision, platform, category_id, composite_output_id, fields, field_revisions, content]
-              properties:
-                row_key: {type: string, minLength: 1, maxLength: 64}
-                input_revision: {type: string, pattern: '^[1-9][0-9]*$'}
-                platform: {type: string, enum: [baidu]}
-                category_id: {$ref: '#/components/schemas/ID'}
-                composite_output_id: {$ref: '#/components/schemas/ID'}
-                fields: {type: array, minItems: 1, maxItems: 3, uniqueItems: true, items: {type: string, enum: [description, cover_title, topics]}}
-                field_revisions: {type: object, additionalProperties: {type: string, pattern: '^(0|[1-9][0-9]*)$'}, description: Exactly the selected fields.}
-                content: {type: object, additionalProperties: false, properties: {description: {type: string, maxLength: 1000}, cover_title: {type: string, maxLength: 2000}, topics: {type: string, maxLength: 200}}}
-                instruction: {type: string, maxLength: 500}
+              oneOf:
+                - {$ref: '#/components/schemas/GenerationInput'}
+                - type: object
+                  additionalProperties: false
+                  required: [items]
+                  properties:
+                    items:
+                      type: array
+                      minItems: 1
+                      maxItems: 50
+                      items: {$ref: '#/components/schemas/GenerationInput'}
       responses:
         '200':
-          description: 'SSE start/progress/item_result or item_error/done. Each item echoes row_key/input_revision. item_result.result contains content (exact selected fields) and field_revisions. Partial, malformed, extra or overlong model output is an item_error; current inputs remain unchanged.'
+          description: 'SSE start/progress/item_result or item_error/done. Each batch item echoes row_key/input_revision/field_revisions. Batch items have unique row_key. Structural errors reject the request before streaming and unavailable row resources produce item_error. Deadline may emit a terminal error with completed item counts. item_result.result contains content (exact selected fields) and field_revisions. Partial, malformed, extra or overlong model output is an item_error; current inputs remain unchanged.'
           content:
             text/event-stream: {schema: {type: string}}
         '400': {description: Invalid fields or generation basis.}
@@ -93,16 +91,17 @@ paths:
     get:
       operationId: listPublicationOutputCandidates
       security: [{sessionCookie: []}]
-      description: Production service owns output visibility, authorization and pagination. Publication adds only occupied for the selected platform, from all tasks still holding formal occupancy, including terminal states and irrespective of occupying task owner. The generated occupied_output_id column releases abandoned tasks, matching the existing create uniqueness constraint. Occupied rows remain visible with a reason; no occupying task identity is returned. This read creates no reservation and the existing atomic create uniqueness remains authoritative.
+      description: Publication narrows the actor's production output scope to permitted publication categories before count and pagination. Publication adds an exact decimal composite_output_id alias and occupied for the selected platform, from all tasks still holding formal occupancy, including terminal states and irrespective of occupying task owner. The generated occupied_output_id column releases abandoned tasks, matching the existing create uniqueness constraint. Occupied rows remain visible with a reason; no occupying task identity is returned. This read creates no reservation and the existing atomic create uniqueness remains authoritative.
       parameters:
         - {in: query, name: platform, required: true, schema: {type: string, enum: [baidu, bilibili, xiaohongshu]}}
         - {in: query, name: page, schema: {type: integer, minimum: 1, default: 1}}
         - {in: query, name: page_size, schema: {type: integer, minimum: 1, maximum: 100, default: 10}}
         - {in: query, name: search, schema: {type: string, maxLength: 100}}
         - {in: query, name: category_id, schema: {$ref: '#/components/schemas/ID'}}
+        - {in: query, name: output_ids, schema: {type: string, pattern: '^[1-9][0-9]*(,[1-9][0-9]*)*$'}, description: Comma-separated distinct IDs (up to 1000). Applies along with filters before pagination.}
       responses:
         '200':
-          description: Existing compose-output read projection plus a required boolean occupied on every row; total/page/page_size retain the production page. No task details, credentials or additional grants.
+          description: Existing compose-output read projection plus a decimal-string composite_output_id and a required boolean occupied on every row; total/page/page_size retain the production page. No task details, credentials or additional grants.
           content:
             application/json:
               schema:
@@ -247,6 +246,20 @@ components:
   securitySchemes:
     sessionCookie: {type: apiKey, in: cookie, name: wt_media_session}
   schemas:
+    GenerationInput:
+      type: object
+      additionalProperties: false
+      required: [row_key, input_revision, platform, category_id, composite_output_id, fields, field_revisions, content]
+      properties:
+        row_key: {type: string, minLength: 1, maxLength: 64}
+        input_revision: {type: string, pattern: '^[1-9][0-9]*$'}
+        platform: {type: string, enum: [baidu]}
+        category_id: {$ref: '#/components/schemas/ID'}
+        composite_output_id: {$ref: '#/components/schemas/ID'}
+        fields: {type: array, minItems: 1, maxItems: 3, uniqueItems: true, items: {type: string, enum: [description, cover_title, topics]}}
+        field_revisions: {type: object, additionalProperties: {type: string, pattern: '^(0|[1-9][0-9]*)$'}, description: Exactly the selected fields.}
+        content: {type: object, additionalProperties: false, properties: {description: {type: string, maxLength: 1000}, cover_title: {type: string, maxLength: 2000}, topics: {type: string, maxLength: 200}}}
+        instruction: {type: string, maxLength: 500}
     ResultResolution:
       type: object
       additionalProperties: false

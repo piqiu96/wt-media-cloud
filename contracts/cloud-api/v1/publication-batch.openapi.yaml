@@ -1,0 +1,471 @@
+openapi: 3.1.0
+info:
+  title: WT Media Publication Batch Preparation
+  version: 2026.11.25.1
+  description: Session API using errcode/message/data/logid. Saves store candidate configuration and current file references atomically with audit. Incomplete content or candidate shortfalls may be saved. Account ownership, category scope and input structure are mandatory. No operation creates an execution task, attempt or reservation.
+security: [{sessionCookie: []}]
+paths:
+  /api/v1/publication-batch:
+    get:
+      operationId: listPublicationBatch
+      description: Scope before count and pagination. Operators see their own records. Senior operators see their team; all target categories must be in scope. Administrators can read across teams. Exact request_key lookup is creator scoped and independent of other filters.
+      parameters:
+        - {$ref: '#/components/parameters/Page'}
+        - {$ref: '#/components/parameters/PageSize'}
+        - {$ref: '#/components/parameters/Platform'}
+        - {in: query, name: search, schema: {type: string, maxLength: 100}}
+        - {in: query, name: configuration_status, schema: {enum: [incomplete, ready]}}
+        - {in: query, name: execution_status, schema: {enum: [not_started, running, paused, ended, cancelled]}}
+        - {in: query, name: request_key, schema: {$ref: '#/components/schemas/RequestKey'}}
+      responses:
+        '200':
+          description: Scope-filtered batch page.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - {$ref: '#/components/schemas/Success'}
+                  - {properties: {data: {$ref: '#/components/schemas/BatchPage'}}}
+        '400': {description: Invalid filters.}
+        '401': {description: Authentication required.}
+        '503': {description: Read unavailable.}
+    post:
+      operationId: createPublicationBatch
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - {$ref: '#/components/schemas/Configuration'}
+                - {required: [name, request_key], properties: {name: {$ref: '#/components/schemas/Name'}, request_key: {$ref: '#/components/schemas/RequestKey'}}}
+              unevaluatedProperties: false
+      responses:
+        '201':
+          description: Same key and same original input replay the saved batch, even when resources have changed.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - {$ref: '#/components/schemas/Success'}
+                  - {properties: {data: {$ref: '#/components/schemas/BatchDetail'}}}
+        '400': {description: Invalid identity or candidate/settings structure.}
+        '404': {description: Batch preparation or resource outside access scope.}
+        '409': {description: Same request key with different input or platform closed.}
+        '503': {description: Dependency or persistence unavailable. Recover by exact original key.}
+  /api/v1/publication-batch/allocate:
+    post:
+      operationId: allocatePublicationBatch
+      description: Read-only. Apply valid manual pairs first, then allocate by target order, account order and output order. A per-account limit is shared across categories. The same output appears at most once. Current occupation is checked without reserving anything.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - {$ref: '#/components/schemas/Allocation'}
+                - {required: [platform, targets, accounts, output_ids], properties: {platform: {const: baidu}, targets: {$ref: '#/components/schemas/Targets'}}}
+              unevaluatedProperties: false
+      responses:
+        '200':
+          description: Proposed pairs and per-target shortfalls.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - {$ref: '#/components/schemas/Success'}
+                  - {properties: {data: {$ref: '#/components/schemas/AllocationResult'}}}
+        '400': {description: Invalid allocation or manual pairing.}
+        '404': {description: Resource outside access scope.}
+        '409': {description: Manually paired output has been occupied.}
+        '503': {description: Required resource read failed.}
+  /api/v1/publication-batch/validate:
+    post:
+      operationId: validatePublicationBatch
+      description: Checks current resources, candidate coverage and complete publication content. Advisory, read-only and time-sensitive. For an existing edit, supply batch_id and expected_revision together. The server checks current edit scope and revision before using unchanged saved cover references.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - {$ref: '#/components/schemas/Configuration'}
+                - properties:
+                    batch_id: {$ref: '#/components/schemas/ID'}
+                    expected_revision: {$ref: '#/components/schemas/ID'}
+                  dependentRequired:
+                    batch_id: [expected_revision]
+                    expected_revision: [batch_id]
+              unevaluatedProperties: false
+      responses:
+        '200':
+          description: Current readiness.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - {$ref: '#/components/schemas/Success'}
+                  - {properties: {data: {$ref: '#/components/schemas/Readiness'}}}
+        '400': {description: Invalid configuration structure.}
+        '404': {description: Batch or resource outside access scope.}
+        '409': {description: 'Configuration changed or is frozen. Details include batch_id and current_revision.'}
+        '503': {description: Dependency unavailable.}
+  /api/v1/publication-batch/{id}:
+    parameters: [{$ref: '#/components/parameters/BatchID'}]
+    get:
+      operationId: getPublicationBatch
+      responses:
+        '200':
+          description: Readiness reflects the last saved validation.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - {$ref: '#/components/schemas/Success'}
+                  - {properties: {data: {$ref: '#/components/schemas/BatchDetail'}}}
+        '404': {description: Missing or outside read scope.}
+        '503': {description: Read unavailable.}
+  /api/v1/publication-batch/{id}/configuration:
+    parameters: [{$ref: '#/components/parameters/BatchID'}]
+    put:
+      operationId: updatePublicationBatchConfiguration
+      description: Replace the full configuration before first start with revision CAS. Candidate edits preserve row keys when retaining the same row. A target does not decrease as a side effect of deleting candidates. Platform is fixed after creation. Actual changes invalidate only affected confirmations.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - {$ref: '#/components/schemas/Configuration'}
+                - {required: [name, expected_revision], properties: {name: {$ref: '#/components/schemas/Name'}, expected_revision: {$ref: '#/components/schemas/ID'}}}
+              unevaluatedProperties: false
+      responses:
+        '200':
+          description: Updated batch.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - {$ref: '#/components/schemas/Success'}
+                  - {properties: {data: {$ref: '#/components/schemas/BatchDetail'}}}
+        '400': {description: Invalid identity or configuration structure.}
+        '404': {description: Missing or outside edit scope.}
+        '409': {description: 'Current revision conflict or frozen configuration. Error details include batch_id and current_revision.'}
+        '503': {description: Dependency or persistence unavailable.}
+  /api/v1/publication-batch/{id}/copy:
+    parameters: [{$ref: '#/components/parameters/BatchID'}]
+    get:
+      operationId: copyPublicationBatchConfiguration
+      description: Own eligible ended/cancelled batch only. Return a whitelisted new-batch input with source_id and source_revision, fresh resource/readiness checks and no inherited authorization, scheduling, confirmation or cover products. Editable candidates can be reallocated against current resources.
+      parameters:
+        - {in: query, name: expected_revision, required: true, schema: {$ref: '#/components/schemas/ID'}}
+      responses:
+        '200':
+          description: Allowed new batch input and source.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - {$ref: '#/components/schemas/Success'}
+                  - {properties: {data: {$ref: '#/components/schemas/CopyResult'}}}
+        '404': {description: Missing or outside copy scope.}
+        '409': {description: Revision or copy eligibility conflict.}
+        '503': {description: Dependency unavailable.}
+  /api/v1/publication-batch/{id}/record:
+    parameters: [{$ref: '#/components/parameters/BatchID'}]
+    get:
+      operationId: listPublicationBatchRecord
+      parameters:
+        - {$ref: '#/components/parameters/Page'}
+        - {$ref: '#/components/parameters/PageSize'}
+      responses:
+        '200':
+          description: Batch operation records.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - {$ref: '#/components/schemas/Success'}
+                  - {properties: {data: {$ref: '#/components/schemas/RecordPage'}}}
+        '404': {description: Missing or outside read scope.}
+        '503': {description: Read unavailable.}
+  /api/v1/publication/account:
+    get:
+      operationId: listPublicationAccount
+      description: Enabled operating user only. Filter current actor ownership before count or pagination. Provides eligibility with a reason; excludes account credentials.
+      parameters:
+        - {$ref: '#/components/parameters/Page'}
+        - {$ref: '#/components/parameters/PageSize'}
+        - {$ref: '#/components/parameters/CategoryID'}
+        - {in: query, name: platform, required: true, schema: {$ref: '#/components/schemas/Platform'}}
+        - {in: query, name: search, schema: {type: string, maxLength: 100}}
+      responses:
+        '200':
+          description: Accounts of the current actor and publication qualifications.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - {$ref: '#/components/schemas/Success'}
+                  - {properties: {data: {$ref: '#/components/schemas/AccountPage'}}}
+        '400': {description: Invalid filter.}
+        '404': {description: Caller not eligible for batch preparation or category outside access scope.}
+        '503': {description: Account read unavailable.}
+  /api/v1/publication/resource:
+    get:
+      operationId: getPublicationResource
+      description: Availability for current user and target category. Unknown outputs are counted separately. Read failures use 503.
+      parameters:
+        - {in: query, name: platform, required: true, schema: {$ref: '#/components/schemas/Platform'}}
+        - {in: query, name: category_id, required: true, schema: {$ref: '#/components/schemas/ID'}}
+      responses:
+        '200':
+          description: Resource observations.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - {$ref: '#/components/schemas/Success'}
+                  - {properties: {data: {$ref: '#/components/schemas/Resource'}}}
+        '400': {description: Invalid filter.}
+        '404': {description: Caller not eligible for batch preparation or category outside access scope.}
+        '503': {description: Resource read unavailable.}
+components:
+  securitySchemes:
+    sessionCookie: {type: apiKey, in: cookie, name: wt_media_session}
+  parameters:
+    BatchID: {in: path, name: id, required: true, schema: {$ref: '#/components/schemas/ID'}}
+    CategoryID: {in: query, name: category_id, schema: {$ref: '#/components/schemas/ID'}}
+    Page: {in: query, name: page, schema: {type: integer, minimum: 1, default: 1}}
+    PageSize: {in: query, name: page_size, schema: {type: integer, minimum: 1, maximum: 100, default: 20}}
+    Platform: {in: query, name: platform, schema: {$ref: '#/components/schemas/Platform'}}
+  schemas:
+    ID: {type: string, pattern: '^[1-9][0-9]*$'}
+    Revision: {type: string, pattern: '^(0|[1-9][0-9]*)$'}
+    Platform: {type: string, enum: [baidu, bilibili, xiaohongshu]}
+    RequestKey: {type: string, minLength: 1, maxLength: 64}
+    Name: {type: string, minLength: 1, maxLength: 100}
+    Targets:
+      type: array
+      minItems: 1
+      maxItems: 100
+      description: Unique category IDs, ordered by priority. Target counts use nonnegative JavaScript-safe integers; targets may exceed available candidates.
+      items:
+        type: object
+        additionalProperties: false
+        required: [category_id, target_count]
+        properties:
+          category_id: {$ref: '#/components/schemas/ID'}
+          target_count: {type: integer, minimum: 0, maximum: 9007199254740991}
+    Pair:
+      type: object
+      additionalProperties: false
+      required: [category_id, media_account_id, composite_output_id]
+      properties:
+        category_id: {$ref: '#/components/schemas/ID'}
+        media_account_id: {$ref: '#/components/schemas/ID'}
+        composite_output_id: {$ref: '#/components/schemas/ID'}
+    Allocation:
+      type: object
+      properties:
+        accounts:
+          type: array
+          description: Instance candidate input bound (default 1000).
+          items:
+            type: object
+            additionalProperties: false
+            required: [media_account_id, limit]
+            properties:
+              media_account_id: {$ref: '#/components/schemas/ID'}
+              limit: {type: integer, minimum: 1, maximum: 9007199254740991}
+        output_ids: {type: array, description: Instance candidate input bound (default 1000)., uniqueItems: true, items: {$ref: '#/components/schemas/ID'}}
+        manual_pairs: {type: array, description: Instance candidate input bound (default 1000)., items: {$ref: '#/components/schemas/Pair'}}
+    Candidate:
+      type: object
+      additionalProperties: false
+      required: [row_key, input_revision, field_revisions, category_id, media_account_id, composite_output_id, order, content]
+      properties:
+        row_key: {type: string, minLength: 1, maxLength: 64}
+        input_revision: {$ref: '#/components/schemas/ID'}
+        field_revisions: {type: object, maxProperties: 16, additionalProperties: {$ref: '#/components/schemas/Revision'}}
+        category_id: {$ref: '#/components/schemas/ID'}
+        media_account_id: {$ref: '#/components/schemas/ID'}
+        composite_output_id: {$ref: '#/components/schemas/ID'}
+        order: {type: integer, minimum: 0, maximum: 9007199254740991}
+        cover_title: {type: string, maxLength: 2000}
+        not_before: {type: [string, 'null'], format: date-time}
+        content:
+          type: object
+          additionalProperties: false
+          properties:
+            description: {type: string, maxLength: 1000}
+            topics: {type: string, maxLength: 200}
+            declaration: {type: string, maxLength: 100}
+            cover_file_id: {$ref: '#/components/schemas/Revision'}
+            portrait_cover_file_id: {$ref: '#/components/schemas/Revision'}
+            cover_render: {$ref: 'publication.openapi.yaml#/components/schemas/CoverRender'}
+            portrait_cover_render: {$ref: 'publication.openapi.yaml#/components/schemas/CoverRender'}
+            confirmed: {type: boolean}
+    ExecutionSetting:
+      type: object
+      additionalProperties: false
+      required: [concurrency_limit, group_interval_seconds, between_group_policy, exception_task_limit]
+      properties:
+        concurrency_limit: {type: integer, minimum: 1, description: Deployment bound defaults to 20.}
+        group_interval_seconds: {type: integer, minimum: 0, description: Deployment bound defaults to 86400.}
+        between_group_policy: {enum: [auto_continue, pause_on_exception]}
+        exception_task_limit: {type: integer, minimum: 1, maximum: 4294967295}
+    Configuration:
+      type: object
+      required: [platform, targets, config, execution_setting]
+      properties:
+        platform: {const: baidu}
+        targets: {$ref: '#/components/schemas/Targets'}
+        config: {$ref: '#/components/schemas/Config'}
+        execution_setting: {$ref: '#/components/schemas/ExecutionSetting'}
+    Success:
+      type: object
+      required: [errcode, message, data, logid]
+      properties:
+        errcode: {type: integer, const: 0}
+        message: {type: string}
+        logid: {type: string}
+    Page:
+      type: object
+      required: [items, total, page, page_size]
+      properties:
+        total: {type: integer, minimum: 0}
+        page: {type: integer, minimum: 1}
+        page_size: {type: integer, minimum: 1, maximum: 100}
+    BatchPage:
+      allOf:
+        - {$ref: '#/components/schemas/Page'}
+        - properties:
+            items: {type: array, items: {$ref: '#/components/schemas/BatchSummary'}}
+    BatchSummary:
+      type: object
+      required: [id, team_id, operator_id, created_by, revision, name, platform, targets, candidate_count, execution_setting, configuration_status, execution_status, allowed_actions, created_at, updated_at]
+      properties:
+        id: {$ref: '#/components/schemas/ID'}
+        team_id: {$ref: '#/components/schemas/ID'}
+        operator_id: {$ref: '#/components/schemas/ID'}
+        created_by: {$ref: '#/components/schemas/ID'}
+        revision: {$ref: '#/components/schemas/ID'}
+        name: {$ref: '#/components/schemas/Name'}
+        platform: {$ref: '#/components/schemas/Platform'}
+        targets: {$ref: '#/components/schemas/Targets'}
+        candidate_count: {type: integer, minimum: 0}
+        execution_setting: {$ref: '#/components/schemas/ExecutionSetting'}
+        configuration_status: {enum: [incomplete, ready]}
+        execution_status: {enum: [not_started, running, paused, ended, cancelled]}
+        allowed_actions: {type: array, items: {enum: [edit, copy]}}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+    BatchDetail:
+      allOf:
+        - {$ref: '#/components/schemas/BatchSummary'}
+        - required: [config, readiness]
+          properties:
+            config: {$ref: '#/components/schemas/Config'}
+            readiness: {$ref: '#/components/schemas/Readiness'}
+    Config:
+      allOf:
+        - {$ref: '#/components/schemas/Allocation'}
+        - required: [candidates]
+          properties:
+            candidates:
+              type: array
+              description: Candidate input bound set by instance, with a default of 1000.
+              items: {$ref: '#/components/schemas/Candidate'}
+      unevaluatedProperties: false
+    CopyResult:
+      allOf:
+        - {$ref: '#/components/schemas/Configuration'}
+        - required: [source_id, source_revision, name, readiness]
+          properties:
+            source_id: {$ref: '#/components/schemas/ID'}
+            source_revision: {$ref: '#/components/schemas/ID'}
+            name: {$ref: '#/components/schemas/Name'}
+            readiness: {$ref: '#/components/schemas/Readiness'}
+    Shortfall:
+      type: object
+      required: [category_id, target_count, candidate_count, shortfall]
+      properties:
+        category_id: {$ref: '#/components/schemas/ID'}
+        target_count: {type: integer, minimum: 0}
+        candidate_count: {type: integer, minimum: 0}
+        shortfall: {type: integer, minimum: 0}
+    AllocationResult:
+      type: object
+      required: [config, shortfalls]
+      properties:
+        config: {$ref: '#/components/schemas/Config'}
+        shortfalls: {type: array, items: {$ref: '#/components/schemas/Shortfall'}}
+    Readiness:
+      type: object
+      required: [ready, issues, shortfalls, cover_resources]
+      properties:
+        ready: {type: boolean}
+        issues:
+          type: array
+          items:
+            type: object
+            required: [code, message]
+            properties:
+              row_key: {type: string}
+              category_id: {$ref: '#/components/schemas/ID'}
+              field: {type: string}
+              code: {type: string}
+              message: {type: string}
+        shortfalls: {type: array, items: {$ref: '#/components/schemas/Shortfall'}}
+        cover_resources:
+          type: array
+          items:
+            type: object
+            required: [row_key]
+            properties:
+              row_key: {type: string}
+              cover_resource_path: {type: string}
+              portrait_cover_resource_path: {type: string}
+    AccountPage:
+      allOf:
+        - {$ref: '#/components/schemas/Page'}
+        - properties:
+            items:
+              type: array
+              items:
+                type: object
+                required: [id, name, platform, category_ids, eligible, reason]
+                properties:
+                  id: {$ref: '#/components/schemas/ID'}
+                  name: {type: string}
+                  platform: {$ref: '#/components/schemas/Platform'}
+                  category_ids: {type: array, items: {$ref: '#/components/schemas/ID'}}
+                  eligible: {type: boolean}
+                  reason: {type: string}
+    RecordPage:
+      allOf:
+        - {$ref: '#/components/schemas/Page'}
+        - properties:
+            items:
+              type: array
+              items:
+                type: object
+                required: [id, actor_id, event, created_at]
+                properties:
+                  id: {type: string, description: Opaque audit identifier.}
+                  actor_id: {type: [string, 'null'], pattern: '^[1-9][0-9]*$'}
+                  event: {type: string}
+                  created_at: {type: string, format: date-time}
+    Resource:
+      type: object
+      required: [as_of, account_count, eligible_account_count, output_count, available_output_count, unknown_output_count, availability, gaps]
+      properties:
+        as_of: {type: string, format: date-time}
+        account_count: {type: integer, minimum: 0}
+        eligible_account_count: {type: integer, minimum: 0}
+        output_count: {type: integer, minimum: 0}
+        available_output_count: {type: integer, minimum: 0}
+        unknown_output_count: {type: integer, minimum: 0}
+        availability: {enum: [available, empty, unknown]}
+        gaps: {type: array, items: {type: string}}

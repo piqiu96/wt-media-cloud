@@ -20,7 +20,9 @@ import { publishMethodLabel } from "./publishingSettings.js";
 import { taskInterval } from "./batchExecutionSettings.js";
 import { initCandidate } from "./content.js";
 import { recommendCategoryQuantities } from "./batchRecommendations.js";
-import { createPublication } from "./relationships.js";
+import { createPublication, nextId } from "./relationships.js";
+import { currentPrototypeUser } from "./prototypeSession.js";
+import { preparationRecord, previewExecutionSettings, previewGroupPolicies } from "./preparationPreview.js";
 import { ensureCoverResults } from "./covers.js";
 import { feedback } from "../../../src/shared/ui/feedback/index.js";
 import {
@@ -34,6 +36,7 @@ import "./batchCreation.css";
 const props = defineProps({
   db: { type: Object, required: true },
   persist: { type: Function, default: async () => true },
+  preparationOnly: Boolean,
 });
 const emit = defineEmits(["edit", "preview", "created", "return-source", "closed"]);
 const copy = (value) => JSON.parse(JSON.stringify(value));
@@ -78,6 +81,7 @@ const state = reactive({
   resourcesLocked: false,
   savedAt: null,
   taskIntervalSeconds: 0,
+  executionSettings: previewExecutionSettings(),
 });
 const editBaseline = ref('');
 watch(visible, value => { if (value) { createdResult.value = null; resultSaved.value = false; } });
@@ -104,7 +108,7 @@ const plan = computed(() => props.db.plans.find((p) => p.id === state.planId));
 const allowedPlatforms = computed(() =>
   plan.value
     ? [...new Set(plan.value.targets.map((t) => t.platform))]
-    : platforms,
+    : props.preparationOnly ? ["百家号"] : platforms,
 );
 const allowedCategories = computed(() =>
   plan.value
@@ -115,7 +119,7 @@ const allowedCategories = computed(() =>
             .map((t) => t.category),
         ),
       ]
-    : publishingCategories(props.db),
+    : publishingCategories(props.db).filter(category => !props.preparationOnly || currentPrototypeUser().categories.includes(category)),
 );
 const asset = (id) => props.db.assets.find((v) => v.id === id);
 const account = (id) => props.db.accounts.find((a) => a.id === id);
@@ -124,6 +128,7 @@ const eligibleAccounts = computed(() =>
     .filter(
       (a) =>
         a.enabled &&
+        (!props.preparationOnly || a.ownerId === currentPrototypeUser().id) &&
         a.loginValid !== false &&
         a.platform === platform.value &&
         a.categories.some((c) => state.categories.includes(c)),
@@ -194,11 +199,7 @@ const issues = computed(() =>
 );
 const ready = computed(() => state.rows.length - issues.value.length);
 const stage = computed(() => (state.step < 2 ? 0 : state.step - 1));
-const stages = [
-  ["资源配置"],
-  ["内容配置"],
-  ["创建检查"],
-];
+const stages = computed(() => props.preparationOnly ? [["资源配置"], ["内容准备"], ["结果总览"]] : [["资源配置"], ["内容配置"], ["创建检查"]]);
 const reviewRows = computed(()=>reviewPending.value ? issues.value : state.rows);
 const categoryAssets = computed(()=>availableAssets.value.filter(asset=>asset.category===availableCategory.value));
 function showReviewPending(){reviewPending.value=true;reviewPage.value=1;nextTick(()=>root.value?.querySelector('.batch-review-table')?.scrollIntoView({block:'start'}));}
@@ -390,7 +391,11 @@ async function openCreation(source = null) {
       return;
     }
   }
-  Object.assign(state, batchCreationDraft(source?.copyBatch), { creationKey: crypto.randomUUID() });
+  Object.assign(state, batchCreationDraft(source?.copyBatch), {
+    creationKey: crypto.randomUUID(), executionSettings: previewExecutionSettings(),
+  });
+  if (props.preparationOnly) state.platforms = ["百家号"];
+
   if(source?.assetIds?.length){
     state.assets=[...source.assetIds];
     state.sourceAssetIds=[...source.assetIds];
@@ -406,7 +411,7 @@ async function openCreation(source = null) {
 }
 function resume() {
   if (!props.db.publishDraft?.active || props.db.publishDraft.mode === "快速发布" || props.db.publishDraft.batchId) return;
-  Object.assign(state, batchCreationDraft(), copy(props.db.publishDraft), { creationKey: props.db.publishDraft.creationKey || crypto.randomUUID() });
+  Object.assign(state, batchCreationDraft(), { executionSettings: previewExecutionSettings() }, copy(props.db.publishDraft), { creationKey: props.db.publishDraft.creationKey || crypto.randomUUID() });
   if (state.step === 1) state.step = 0;
   state.rows.forEach(initCandidate);
   activeCategory.value = state.categories[0] || "";
@@ -449,7 +454,7 @@ function openBatch(batch) {
   const saved = batch.draft;
   Object.assign(state, {
     mode: "批量发布",
-    step: saved?.step < 2 ? 0 : saved?.step || 0,
+    step: props.preparationOnly || saved?.step < 2 ? 0 : saved?.step || 0,
     platforms: [batch.platform],
     categories: batch.targets.filter((t) => t.count > 0).map((t) => t.category),
     assets: saved?.assets || batch.candidates?.map((r) => r.assetId) || [],
@@ -469,7 +474,8 @@ function openBatch(batch) {
     categoryAccountIds: saved?.categoryAccountIds || {},
     accountLimits: saved?.accountLimits || {},
     accountOrder: saved?.accountOrder || [],
-    resourcesLocked: saved?.resourcesLocked || saved?.step >= 2,
+    resourcesLocked: !props.preparationOnly && (saved?.resourcesLocked || saved?.step >= 2),
+    executionSettings: copy(batch.executionSettings || previewExecutionSettings()),
     taskIntervalSeconds: saved?.taskIntervalSeconds ?? batch.rules?.taskIntervalSeconds ?? 0,
   });
   state.rows.forEach(initCandidate);
@@ -528,7 +534,7 @@ async function next() {
       errors.value = ["请选择一个平台和至少一个内容类目。"];
       return;
     }
-    if (!state.rows.length) {
+    if (!props.preparationOnly && !state.rows.length) {
       errors.value = ["当前没有可匹配的账号与成片，请调整类目数量或补充可用资源。"];
       return;
     }
@@ -536,7 +542,8 @@ async function next() {
       errors.value = resourceErrors.value;
       return;
     }
-    lockOpen.value = true;
+    if (props.preparationOnly) state.step = 2;
+    else lockOpen.value = true;
     return;
   }
   if (state.step === 2) {
@@ -564,6 +571,7 @@ async function confirmResources() {
 function back() {
   errors.value = [];
   if (state.step === 3) state.step = 2;
+  else if (props.preparationOnly && state.step === 2) state.step = 0;
 }
 function rematch() {
   recommendAssets();
@@ -614,14 +622,44 @@ function applyReplacement() {
     }
     const i = state.rows.indexOf(old);
     initCandidate(replacementRow);
+    if (props.preparationOnly) Object.assign(replacementRow, { key: old.key, candidateId: old.candidateId });
     replacementRow.overrides = ["assetId"];
     state.rows[i] = replacementRow;
     state.assets = state.rows.map((r) => r.assetId);
   }
   replaceRow.value = null;
 }
+async function savePreparation() {
+  busy.value = true;
+  const index = props.db.batches.findIndex(batch => batch.id === state.batchId);
+  const previous = props.db.batches[index];
+  const localDraft = props.db.publishDraft;
+  let record;
+  try {
+    record = preparationRecord(state, { id: previous?.id || nextId(props.db), actor: currentPrototypeUser(), existing: previous });
+    if (previous) props.db.batches.splice(index, 1, record);
+    else {
+      props.db.batches.unshift(record);
+      props.db.publishDraft = { active: false };
+    }
+    if (!(await props.persist())) throw Error("保存失败，当前输入已保留。");
+    visible.value = false;
+    await nextTick();
+    emit("created", { batch: record, tasks: [] });
+  } catch (error) {
+    if (record) {
+      if (previous) props.db.batches.splice(index, 1, previous);
+      else props.db.batches.splice(0, 1);
+      props.db.publishDraft = localDraft;
+    }
+    errors.value = [error.message];
+  } finally {
+    busy.value = false;
+  }
+}
 async function create() {
   if (busy.value || createdResult.value) return;
+  if (props.preparationOnly) return savePreparation();
   errors.value = [];
   if (!state.rows.length || issues.value.length) {
     errors.value = [
@@ -976,12 +1014,18 @@ defineExpose({
       />
       <template v-else-if="state.step === 3">
         <ResourceNotice v-if="issues.length" tone="warning" class="batch-review-notice">{{issues.length}} 条内容待处理<template #actions><t-button variant="text" theme="primary" size="small" @click="showReviewPending">查看待处理</t-button></template></ResourceNotice>
-        <ResourceCard class="detail-card batch-review-card"><ResourceSection title="创建检查">
+        <ResourceCard class="detail-card batch-review-card"><ResourceSection :title="preparationOnly ? '准备结果' : '创建检查'">
           <template #title-extra><span class="batch-review-ready">已就绪 {{ready}} / {{state.rows.length}} 条</span></template>
-          <div class="batch-review-summary"><label><span>批次名称 <em>*</em></span><t-input v-model="state.name" placeholder="请输入批次名称" :maxlength="60" /></label><div><span>发布平台</span><strong>{{platform}}</strong></div><div><span>本次创建</span><strong>{{state.rows.length}} 条</strong></div><div v-if="gap" class="batch-warning-text"><span>目标缺口</span><strong>{{gap}} 条</strong></div></div>
+          <div class="batch-review-summary"><label><span>批次名称 <em>*</em></span><t-input v-model="state.name" placeholder="请输入批次名称" :maxlength="60" /></label><div><span>发布平台</span><strong>{{platform}}</strong></div><div><span>{{ preparationOnly ? "候选配置" : "本次创建" }}</span><strong>{{state.rows.length}} 条</strong></div><div v-if="gap" class="batch-warning-text"><span>目标缺口</span><strong>{{gap}} 条</strong></div></div>
         </ResourceSection></ResourceCard>
         <ResourceCard class="detail-card batch-review-card"><ResourceSection title="发布设置">
-          <div class="batch-settings-grid"><label><span>发布方式</span><t-input :value="publishMethodLabel" disabled /></label><label><span>任务间隔</span><t-input-number v-model="state.taskIntervalSeconds" :min="0" :decimal-places="0" suffix="秒" aria-label="任务间隔" /></label></div>
+          <div v-if="preparationOnly" class="batch-settings-grid">
+            <label><span>并发数</span><t-input-number v-model="state.executionSettings.concurrency" :min="1" :decimal-places="0" aria-label="并发数" /></label>
+            <label><span>组间发布间隔</span><t-input-number v-model="state.executionSettings.groupInterval" :min="0" :decimal-places="0" suffix="秒" aria-label="组间发布间隔" /></label>
+            <label><span>组间处理</span><t-select v-model="state.executionSettings.groupPolicy" :options="previewGroupPolicies.map(label => ({ label, value: label }))" aria-label="组间处理" /></label>
+            <label><span>异常任务上限<ResourceFieldHelp label="异常任务上限" content="异常任务达到该数量时，暂停发布，人工决定继续或终止。" /></span><t-input-number v-model="state.executionSettings.exceptionLimit" :min="1" :decimal-places="0" aria-label="异常任务上限" /></label>
+          </div>
+          <div v-else class="batch-settings-grid"><label><span>发布方式</span><t-input :value="publishMethodLabel" disabled /></label><label><span>任务间隔</span><t-input-number v-model="state.taskIntervalSeconds" :min="0" :decimal-places="0" suffix="秒" aria-label="任务间隔" /></label></div>
         </ResourceSection></ResourceCard>
         <ResourceCard class="detail-card batch-review-card batch-review-table"><ResourceSection title="发布内容">
           <template #title-extra><span class="batch-review-ready">{{reviewRows.length}} 条</span><t-button v-if="reviewPending" variant="text" theme="primary" size="small" @click="reviewPending=false;reviewPage=1">查看全部</t-button></template>
@@ -999,9 +1043,10 @@ defineExpose({
         ><span class="batch-footer-note">{{
           state.step < 2
             ? `类目合计 ${target} · 已匹配 ${allocated.length} · 缺口 ${gap}`
-            : state.step === 3 ? "创建后待执行，不会立即发布" : `已就绪 ${ready} / ${state.rows.length} 条`
+            : state.step === 3 ? (preparationOnly ? "保存候选配置，不生成正式发布任务" : "创建后待执行，不会立即发布") : `已就绪 ${ready} / ${state.rows.length} 条`
         }}</span
         ><t-button
+          v-if="!preparationOnly || !state.batchId"
           variant="outline"
           :loading="busy"
           :disabled="contentBusy"
@@ -1009,30 +1054,30 @@ defineExpose({
           >{{ state.batchId ? "保存" : "保存草稿" }}</t-button
         ><t-button
           v-if="
-            state.step === 3
+            state.step === 3 || (preparationOnly && state.step === 2)
           "
           variant="outline"
           @click="back"
-          >返回内容配置</t-button
+          >{{ preparationOnly && state.step === 2 ? "返回资源配置" : "返回内容配置" }}</t-button
         ><t-button
           v-if="state.step < 3"
           :loading="busy || contentBusy"
           :disabled="
             contentBusy ||
-            (state.step === 0
+            (!preparationOnly && (state.step === 0
               ? !platform || !state.categories.length || !state.rows.length
-              : !state.rows.length)
+              : !state.rows.length))
           "
           @click="next"
           >{{
-            state.step < 2 ? "确认资源" : "预览检查"
+            preparationOnly ? "下一步" : state.step < 2 ? "确认资源" : "预览检查"
           }}</t-button
         ><t-button
           v-else
           :loading="busy || contentBusy"
-          :disabled="contentBusy || !state.rows.length || !!issues.length"
+          :disabled="contentBusy || (!preparationOnly && (!state.rows.length || !!issues.length))"
           @click="create"
-          >创建批次</t-button
+          >{{ preparationOnly ? (state.batchId ? "保存修改" : "保存批次") : "创建批次" }}</t-button
         ></template
       ></template
     >

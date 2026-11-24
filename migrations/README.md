@@ -88,3 +88,18 @@ Rollback requires removing the foreign key, index and generated column; it
 reopens the save/delete race, so do not roll back while task creation is active.
 Verified by both orderings of create/delete and fresh/full migration replay in
 isolated MySQL tests.
+
+## Migration 116 Safety
+
+`20261125_116_publication_batch.sql` adds the publication batch table and its
+current formal cover file references. The migration does not alter task or
+attempt tables. The file FK uses the signed `operations_files.id` type and the
+batch FK uses the unsigned `publication_batch.id` type. Apply the migration
+before deploying the batch API and its file deletion protection. Verify the
+two table definitions, request-key uniqueness and task/attempt counts on an
+isolated MySQL schema.
+
+For a rollback, stop batch writes, preserve both tables in a restorable backup,
+and roll back the application first. Dropping `publication_batch_file` before
+`publication_batch` removes saved batch data and its deletion protection. Resume
+deletion after restoring references or removing the batch data intentionally.

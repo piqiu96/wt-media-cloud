@@ -217,6 +217,7 @@ export function seed() {
       quality: i === 0 ? "优质" : i === 1 ? "普通" : "新号",
       categories: i === 2 ? categories.slice(0, 2) : [categories[i % 2]],
       enabled: i !== 2,
+      ownerId: i === 1 ? "lin" : "chen",
       window: 41 + p * 10 + i,
     })),
   );

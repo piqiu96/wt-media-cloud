@@ -18,6 +18,7 @@ import (
 	_ "image/jpeg"
 	_ "image/png"
 	"io"
+	"slices"
 	"strconv"
 	"strings"
 	"unicode/utf8"
@@ -45,6 +46,10 @@ type ArtworkReference struct {
 }
 
 type ArtworkInput struct {
+	CategoryID             int64  `json:"-"`
+	Platform               string `json:"-"`
+	SpecWidth              int    `json:"-"`
+	SpecHeight             int    `json:"-"`
 	BackgroundOutputID     int64  `json:"background_output_id,string"`
 	TemplateID             uint64 `json:"template_id,string"`
 	PublishedRevision      uint32 `json:"expected_published_revision"`
@@ -161,6 +166,16 @@ func (s *TemplateService) RenderCover(ctx context.Context, a identity.PublicUser
 	}
 	if in.RowKey == "" || len(in.RowKey) > 100 || in.InputRevision == "" || len(in.InputRevision) > 100 {
 		return Artwork{}, nil, ErrInvalid
+	}
+	if in.CategoryID > 0 {
+		category := strconv.FormatInt(in.CategoryID, 10)
+		if !canUseCategory(a, category) || len(v.CategoryIDs) > 0 && !slices.Contains(v.CategoryIDs, category) ||
+			len(v.PlatformCodes) > 0 && !slices.Contains(v.PlatformCodes, in.Platform) {
+			return Artwork{}, nil, ErrNotFound
+		}
+		if in.SpecWidth <= 0 || in.SpecHeight <= 0 || int64(v.CanvasWidth)*int64(in.SpecHeight) != int64(v.CanvasHeight)*int64(in.SpecWidth) {
+			return Artwork{}, nil, fmt.Errorf("%w: 模板与所选封面规格不匹配", ErrInvalid)
+		}
 	}
 	var d render.Document
 	if json.Unmarshal(v.PublishedConfig, &d) != nil {

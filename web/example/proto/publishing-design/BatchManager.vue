@@ -28,8 +28,9 @@ import {
   executionPreview,
   contentEditable,
 } from "./batchLifecycle.js";
+import { currentPrototypeUser } from "./prototypeSession.js";
 import { batchCommand } from "./batchApi.js";
-const props = defineProps({ db: Object, persist: Function, active: Boolean });
+const props = defineProps({ db: Object, persist: Function, active: Boolean, preparationOnly: Boolean });
 const emit = defineEmits(["configure", "recover", "copy-batch", "task", "edit-task", "preview", "detail-change", "navigate"]);
 const narrow = useMediaQuery("(max-width: 900px)");
 const query = ref(""),
@@ -66,21 +67,24 @@ const labels = {
   copy: "复制",
 };
 const progressHelp = "已公开发布数 / 发布目标数。";
-const states = ["待执行", "执行中", "待处理", "已结束", "已取消"];
+const states = computed(() => props.preparationOnly ? ["未开始"] : ["待执行", "执行中", "待处理", "已结束", "已取消"]);
 const batch = computed(() =>
   props.db.batches.find((b) => b.id === current.value),
 );
 const metrics = computed(() =>
   batch.value ? batchMetrics(props.db, batch.value) : {},
 );
+const actionsFor = row => row.preparationOnly && currentPrototypeUser().id !== row.ownerId
+  ? ["detail"] : batchActions(props.db, row);
 const detailActions = computed(() => batch.value
-  ? batchActions(props.db, batch.value).filter((a) => !["detail", "process", "copy", "cancel", "edit"].includes(a))
+  ? actionsFor(batch.value).filter((a) => !["detail", "process", "copy", "cancel", "edit"].includes(a))
   : []);
 const records = computed(() =>
   props.db.batches
     .filter(
       (b) =>
-        formalBatch(props.db, b) &&
+        formalBatch(props.db, b) && !!b.preparationOnly === props.preparationOnly &&
+        (!b.preparationOnly || currentPrototypeUser().role !== "运营" || b.ownerId === currentPrototypeUser().id) &&
         (!search.value ||
           `${b.name} B-${b.id}`
             .toLowerCase()
@@ -159,7 +163,7 @@ async function action(b, a) {
   current.value = b.id;
   error.value = "";
   if (a === "detail" || a === "process") return open(b, a === "process");
-  if (a === "configure") return emit("configure", b);
+  if (a === "configure" && actionsFor(b).includes(a)) return emit("configure", b);
   if (a === "edit") return edit(b);
   if (a === "copy") {
     if (!batchActions(props.db, b).includes("copy")) return;
@@ -375,7 +379,7 @@ defineExpose({ open, action, edit, directURL, operateTask });
       >
       <template #progress="{ row }">
         <span v-if="!batchMetrics(db, row).total">{{
-          batchState(db, row) === "草稿" ? "配置中" : "未创建任务"
+          row.preparationOnly ? `${row.candidates?.length || 0} 条候选 · 0 条任务` : batchState(db, row) === "草稿" ? "配置中" : "未创建任务"
         }}</span>
         <template v-else
           ><div class="batch-progress-title">
@@ -415,7 +419,7 @@ defineExpose({ open, action, edit, directURL, operateTask });
       <template #operation="{ row }"
         ><ResourceRowActions
           ><t-button
-            v-for="(a, i) in batchActions(db, row)"
+            v-for="(a, i) in actionsFor(row)"
             :key="a"
             variant="text"
             :class="{
@@ -423,14 +427,14 @@ defineExpose({ open, action, edit, directURL, operateTask });
               'is-danger': ['cancel', 'stop'].includes(a),
             }"
             @click="action(row, a)"
-            >{{ labels[a] }}</t-button
+            >{{ row.preparationOnly && a === "configure" ? "编辑配置" : labels[a] }}</t-button
           ></ResourceRowActions
         ></template
       >
       <template #empty
         ><ResourceEmptyState
           title="没有符合条件的批次"
-          description="调整搜索条件，或使用右上角“批量发布”创建批次。"
+          :description="preparationOnly ? '保存的批次配置将在这里显示。' : '调整搜索条件，或使用右上角“批量发布”创建批次。'"
       /></template>
     </t-table>
     <p v-if="narrow" class="batch-scroll-note">

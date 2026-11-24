@@ -46,7 +46,28 @@ type PublicationGenerationConfig struct {
 	Timeout Duration `toml:"timeout"`
 }
 
+// PublicationBatchConfig sets deployment input bounds, independently of execution capacity.
+type PublicationBatchConfig struct {
+	MaxCandidates           int `toml:"max_candidates"`
+	MaxConcurrency          int `toml:"max_concurrency"`
+	MaxGroupIntervalSeconds int `toml:"max_group_interval_seconds"`
+}
+
+func (c PublicationBatchConfig) WithDefaults() PublicationBatchConfig {
+	if c.MaxCandidates == 0 {
+		c.MaxCandidates = 1000
+	}
+	if c.MaxConcurrency == 0 {
+		c.MaxConcurrency = 20
+	}
+	if c.MaxGroupIntervalSeconds == 0 {
+		c.MaxGroupIntervalSeconds = 86400
+	}
+	return c
+}
+
 type AppConfig struct {
+	PublicationBatch      PublicationBatchConfig      `toml:"publication_batch"`
 	PublicationGeneration PublicationGenerationConfig `toml:"publication_generation"`
 	Name                  string                      `toml:"name"`
 	Server                ServerConfig                `toml:"server"`
@@ -425,6 +446,12 @@ func LoadFromDir(root string) (Config, error) {
 }
 
 func (c Config) Validate() error {
+	if limits := c.App.PublicationBatch; limits.MaxCandidates < 0 || limits.MaxCandidates > 10000 ||
+		limits.MaxConcurrency < 0 || limits.MaxConcurrency > 10000 || limits.MaxGroupIntervalSeconds < 0 ||
+		int64(limits.MaxGroupIntervalSeconds) > 4294967295 {
+		return errors.New("publication batch input bounds invalid")
+	}
+
 	if settings := c.App.PublicationGeneration; settings.Model != "" {
 		u, err := url.Parse(settings.BaseURL)
 		if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.Path != "" || u.RawQuery != "" || u.Fragment != "" || settings.Timeout.Duration <= 0 || settings.Timeout.Duration > 180*time.Second {

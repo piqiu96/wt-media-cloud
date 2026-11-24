@@ -24,6 +24,7 @@ export const desktopRoutes = [
       { path: "compose", name: "Compose", component: () => import("../../modules/compose/pages/ComposeTasksPage.vue") },
       { path: "finished-media", name: "FinishedMedia", component: () => import("../../modules/compose/pages/MyOutputsPage.vue") },
       { path: "work", name: "Work", component: () => import("../../modules/work/pages/WorkPage.vue") },
+      { path: "publish-batches", name: "PublishBatches", component: () => import("../../modules/publication/pages/PublishingBatchesPage.vue") },
       { path: "publish", name: "Publish", component: () => import("../../modules/publication/pages/PublishingPage.vue") },
       { path: "interact", name: "Interact", component: () => import("../../shared/ui/ComingSoon.vue") },
       { path: "comment-templates", name: "CommentTemplates", component: () => import("../../shared/ui/ComingSoon.vue") },

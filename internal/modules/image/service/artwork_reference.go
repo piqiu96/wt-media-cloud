@@ -8,6 +8,8 @@ import (
 	files "github.com/wt-media/wt-media-cloud/internal/modules/files/service"
 	identity "github.com/wt-media/wt-media-cloud/internal/modules/identity/service"
 	"github.com/wt-media/wt-media-cloud/internal/modules/image/render"
+	"slices"
+	"strconv"
 )
 
 // Resolve business input through its owning service; callers cannot substitute a file ID.
@@ -38,6 +40,9 @@ func (s *ArtworkService) backgroundFile(a identity.PublicUser, d render.Document
 			if e != nil {
 				return 0, 0, 0, e
 			}
+			if in.CategoryID > 0 && (int64(output.Output.CategoryID) != in.CategoryID || !slices.Contains(output.Output.Platforms, in.Platform)) {
+				return 0, 0, 0, ErrNotFound
+			}
 			if output.Output.ID != in.BackgroundOutputID || output.Output.Thumbnail == nil || output.Output.Thumbnail.FileID <= 0 {
 				return 0, 0, 0, fmt.Errorf("%w: 成片没有可用封面，请从图片库选择底图", ErrInvalid)
 			}
@@ -53,6 +58,9 @@ func (s *ArtworkService) backgroundFile(a identity.PublicUser, d render.Document
 	asset, e := s.Assets.GetImageAsset(a, assetID)
 	if e != nil {
 		return 0, 0, 0, e
+	}
+	if in.CategoryID > 0 && len(asset.CategoryIDs) > 0 && !slices.Contains(asset.CategoryIDs, strconv.FormatInt(in.CategoryID, 10)) {
+		return 0, 0, 0, ErrNotFound
 	}
 	if !asset.Enabled || !asset.AllowAsBackground {
 		return 0, 0, 0, fmt.Errorf("%w: 底图已停用或用途不匹配", ErrInvalid)

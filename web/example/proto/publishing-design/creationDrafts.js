@@ -14,7 +14,7 @@ export function batchCreationDraft(batch = null) {
 export function promoteBatchDraft(db) {
   if (db.publishDraft?.active) return;
   const consumed = db.migratedBatchDraftIds ||= [];
-  const legacy = db.batches.find(b => !b.planId && !b.firstStartedAt && b.control !== '已取消'
+  const legacy = db.batches.find(b => !b.preparationOnly && !b.planId && !b.firstStartedAt && b.control !== '已取消'
     && !db.tasks.some(t => t.batchId === b.id)
     && !db.plans?.some(p => p.items?.some(i => i.kind === 'batch' && i.id === b.id))
     && !consumed.includes(b.id));

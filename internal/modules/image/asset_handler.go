@@ -38,7 +38,7 @@ func fail(c *app.RequestContext, e error) {
 	case errors.Is(e, service.ErrNotFound), errors.Is(e, files.ErrNotFound), errors.Is(e, files.ErrForbidden):
 		api.FailureCode(c, consts.StatusNotFound, errcode.ImageNotFound, "图片不存在或没有访问权限", "image_not_found", nil, false, "none")
 	case errors.Is(e, files.ErrInUse):
-		api.FailureCode(c, consts.StatusConflict, errcode.ImageConflict, "图片被模板或正式任务引用，请先停用", "image_in_use", nil, false, "none")
+		api.FailureCode(c, consts.StatusConflict, errcode.ImageConflict, "图片被模板、批次或正式任务引用，请先停用", "image_in_use", nil, false, "none")
 	case errors.Is(e, service.ErrConflict):
 		api.FailureCode(c, consts.StatusConflict, errcode.ImageConflict, "图片已变化或该文件已登记，请重新加载", "image_conflict", nil, false, "reload")
 	default:

@@ -10,6 +10,7 @@ import ResourceNotice from '../../../src/shared/ui/resource/ResourceNotice.vue';
 import ResourceCard from '../../../src/shared/ui/resource/ResourceCard.vue';
 import ResourceFilterBar from '../../../src/shared/ui/resource/ResourceFilterBar.vue';
 import ResourceEmptyState from '../../../src/shared/ui/resource/ResourceEmptyState.vue';
+import BatchContentTable from "./BatchContentTable.vue";
 import TaskRowActions from './TaskRowActions.vue';
 import { taskActionItems } from './taskExperience.js';
 import { opColumnWidth } from '../../../src/shared/ui/resource/opColumnWidth.js';
@@ -83,7 +84,26 @@ const history = computed(() =>
         </ResourceDescriptions>
         <ResourceNotice v-if="batch.stoppedAt">已停止发布。未启动任务已取消，在途任务继续回传结果；不能重新启动。</ResourceNotice>
       </ResourceSection></ResourceCard>
-      <ResourceCard class="detail-card"><ResourceSection title="执行情况">
+      <ResourceCard v-if="batch.preparationOnly" class="detail-card">
+        <ResourceSection title="候选配置">
+          <ResourceDescriptions>
+            <Field label="发布目标">{{ metrics.target }} 条</Field>
+            <Field label="候选">{{ batch.candidates.length }} 条</Field>
+            <Field label="目标缺口">{{ Math.max(0, metrics.target - batch.candidates.length) }} 条</Field>
+            <Field label="正式发布任务">0 条</Field>
+          </ResourceDescriptions>
+          <BatchContentTable :rows="batch.candidates" :db="db" read-only />
+        </ResourceSection>
+        <ResourceSection title="执行设置">
+          <ResourceDescriptions>
+            <Field label="并发数">{{ batch.executionSettings.concurrency }}</Field>
+            <Field label="组间发布间隔">{{ batch.executionSettings.groupInterval }} 秒</Field>
+            <Field label="组间处理">{{ batch.executionSettings.groupPolicy }}</Field>
+            <Field label="异常任务上限">{{ batch.executionSettings.exceptionLimit }}</Field>
+          </ResourceDescriptions>
+        </ResourceSection>
+      </ResourceCard>
+      <ResourceCard v-else class="detail-card"><ResourceSection title="执行情况">
         <ResourceStatGrid :items="[
           { key: 'target', label: '发布目标', value: metrics.target },
           { key: 'published', label: '已发布', value: metrics.published, tone: 'success' },
@@ -94,7 +114,7 @@ const history = computed(() =>
           <ResourceProgress label="发布成功率" :percentage="metrics.achievement" :value-text="`${metrics.published} / ${metrics.target} ·`" :help="successHelp" />
         </div>
       </ResourceSection></ResourceCard>
-      <ResourceCard class="detail-card"><ResourceSection ref="taskSection" id="batch-tasks" title="批次任务">
+      <ResourceCard v-if="!batch.preparationOnly" class="detail-card"><ResourceSection ref="taskSection" id="batch-tasks" title="批次任务">
         <template #title-extra><span class="batch-section-count">{{ rows.length }} 条</span></template>
         <ResourceFilterBar
           ><label class="wt-filter-field wt-filter-field--wide"
@@ -208,7 +228,7 @@ const history = computed(() =>
           /></template>
         </t-table>
       </ResourceSection></ResourceCard>
-      <ResourceCard class="detail-card"><ResourceSection title="执行记录" description="按操作时间倒序">
+      <ResourceCard class="detail-card"><ResourceSection :title="batch.preparationOnly ? '操作记录' : '执行记录'" description="按操作时间倒序">
         <t-table
           class="resource-data-table resource-embedded-table"
           :key="`history-${batch.id}-${history.length > 10}`"

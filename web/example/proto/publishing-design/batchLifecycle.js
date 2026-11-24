@@ -3,7 +3,7 @@ import { batchCreationDraft, migrateBatchCreationDrafts } from "./creationDrafts
 import { validate, canRetry } from "./model.js";
 const copy = (x) => JSON.parse(JSON.stringify(x));
 export const rowsFor = (db, b) => db.tasks.filter((t) => t.batchId === b.id);
-export const formalBatch = (db, b) => rowsFor(db, b).length > 0;
+export const formalBatch = (db, b) => !!b.preparationOnly || rowsFor(db, b).length > 0;
 export const isDisposed = (t) =>
   ["已发布", "已取消", "已放弃"].includes(t.status);
 export const started = (b) => Boolean(b?.firstStartedAt);
@@ -43,6 +43,7 @@ export function batchMetrics(db, b) {
   };
 }
 export function batchState(db, b) {
+  if (b.preparationOnly) return "未开始";
   const rows = rowsFor(db, b);
   if (b.control === "已取消") return "已取消";
   if (rows.length && rows.every(isDisposed)) return "已结束";
@@ -67,6 +68,7 @@ export const stoppable = (db, b) =>
     (t) => ["待执行", "排队中"].includes(t.status) && !t.claimed,
   );
 export function batchActions(db, b) {
+  if (b.preparationOnly) return ["configure", "detail"];
   const s = batchState(db, b);
   if (s === "草稿") return ["configure", "detail", "cancel"];
   if (s === "待执行") return ["execute", "edit", "detail", "cancel"];
