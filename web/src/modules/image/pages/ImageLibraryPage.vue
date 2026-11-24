@@ -331,7 +331,7 @@ onMounted(() => {
             ]"
         /></label>
         <div class="wt-filter-actions">
-          <t-button @click="query">查询</t-button>
+          <t-button theme="primary" @click="query">查询</t-button>
           <t-button theme="default" variant="outline" @click="reset">重置</t-button>
         </div>
         <div class="image-advanced-section">
