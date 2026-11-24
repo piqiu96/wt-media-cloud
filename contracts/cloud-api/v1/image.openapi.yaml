@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: WT Media Image API
-  version: 2026.11.21.1
+  version: 2026.11.25.1
   description: CHG106 image registration and selection. Owner/team/category scope is enforced server-side. No publication
     state or action changes.
 paths:
@@ -19,7 +19,7 @@ paths:
       security: [{sessionCookie: []}]
       parameters:
       - {in: path, name: id, required: true, schema: {type: string}}
-      description: Authorized image reference identifiers. Returns kind and id only; no cross-owner task content is exposed.
+      description: Authorized image reference identifiers. Returns kind and id only, including publication_batch for current saved cover references; no cross-owner task content is exposed.
       responses:
         '200': {description: items containing kind and id.}
         '404': {description: Image outside scope or missing.}

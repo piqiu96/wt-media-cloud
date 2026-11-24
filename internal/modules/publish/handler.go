@@ -23,6 +23,7 @@ import (
 )
 
 func RegisterRoutes(h *server.Hertz) {
+	registerBatchRoutes(h)
 	h.GET("/api/v1/publication", List)
 	h.GET("/api/v1/publication/output", OutputCandidates)
 	h.GET("/api/v1/publication/request", FindByRequest)

@@ -33,22 +33,17 @@ func validGenerationRevision(raw string, zero bool) bool {
 	return e == nil && (zero || n > 0) && strconv.FormatUint(n, 10) == raw
 }
 
-// PreparePublicationGeneration authorizes the source before opening a stream or
-// disclosing its title. The returned operation owns copied input, not a task.
-func (s *Service) PreparePublicationGeneration(a identity.PublicUser, in GenerationInput) (func(context.Context) (GenerationResult, error), error) {
-	if a.ID <= 0 || a.Status != identity.UserStatusEnabled || a.Role != identity.RoleAdmin && a.Role != identity.RoleSeniorOperator && a.Role != identity.RoleOperator {
-		return nil, ErrNotFound
-	}
+func generationSelection(in GenerationInput) (map[string]string, map[string]string, error) {
 	if in.Platform != "baidu" || in.CategoryID <= 0 || in.CompositeOutputID <= 0 || in.RowKey == "" || len(in.RowKey) > 64 || !validGenerationRevision(in.InputRevision, false) || len(in.Fields) < 1 || len(in.Fields) > 3 || len(in.FieldRevisions) != len(in.Fields) || utf8.RuneCountInString(in.Instruction) > 500 {
-		return nil, ErrInvalid
+		return nil, nil, ErrInvalid
 	}
 	selected := map[string]string{}
 	for _, field := range in.Fields {
 		if generationFieldLimit[field] == 0 || !validGenerationRevision(in.FieldRevisions[field], true) {
-			return nil, ErrInvalid
+			return nil, nil, ErrInvalid
 		}
 		if _, exists := selected[field]; exists {
-			return nil, ErrInvalid
+			return nil, nil, ErrInvalid
 		}
 		selected[field] = in.FieldRevisions[field]
 	}
@@ -64,9 +59,30 @@ func (s *Service) PreparePublicationGeneration(a identity.PublicUser, in Generat
 			limit = 200
 		}
 		if limit == 0 || utf8.RuneCountInString(value) > limit {
-			return nil, ErrInvalid
+			return nil, nil, ErrInvalid
 		}
 		current[field] = value
+	}
+	return selected, current, nil
+}
+
+func ValidateBatchGeneration(a identity.PublicUser, in GenerationInput) error {
+	if !canPrepareBatch(a) {
+		return ErrNotFound
+	}
+	_, _, err := generationSelection(in)
+	return err
+}
+
+// PreparePublicationGeneration authorizes the source before opening a stream or
+// disclosing its title. The returned operation owns copied input, not a task.
+func (s *Service) PreparePublicationGeneration(a identity.PublicUser, in GenerationInput) (func(context.Context) (GenerationResult, error), error) {
+	if a.ID <= 0 || a.Status != identity.UserStatusEnabled || a.Role != identity.RoleAdmin && a.Role != identity.RoleSeniorOperator && a.Role != identity.RoleOperator {
+		return nil, ErrNotFound
+	}
+	selected, current, err := generationSelection(in)
+	if err != nil {
+		return nil, err
 	}
 	if s.Output == nil {
 		return nil, errors.New("output provider unavailable")

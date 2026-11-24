@@ -210,7 +210,10 @@ func FileReferenced(tx *gorm.DB, fileID int64) (bool, error) {
 		return count > 0, err
 	}
 	err = tx.Model(&model.Attempt{}).Where("JSON_UNQUOTE(JSON_EXTRACT(input_snapshot_json,'$.content.cover_file_id'))=? OR JSON_UNQUOTE(JSON_EXTRACT(input_snapshot_json,'$.content.portrait_cover_file_id'))=?", strconv.FormatInt(fileID, 10), strconv.FormatInt(fileID, 10)).Count(&count).Error
-	return count > 0, err
+	if err != nil || count > 0 {
+		return count > 0, err
+	}
+	return batchFileReferenced(tx, fileID)
 }
 
 // FileReference identifies references without exposing task or attempt content.
@@ -235,5 +238,6 @@ func ListFileReference(db *gorm.DB, a identity.PublicUser, id int64) ([]FileRefe
 	for _, id := range attemptIDs {
 		out = append(out, FileReference{Kind: "publication_attempt", ID: strconv.FormatUint(id, 10)})
 	}
-	return out, nil
+	batch, err := listBatchFileReferences(db, a, id)
+	return append(out, batch...), err
 }

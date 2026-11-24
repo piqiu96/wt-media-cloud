@@ -9,6 +9,7 @@ import (
 	"github.com/wt-media/wt-media-cloud/internal/modules/publish/service"
 	api "github.com/wt-media/wt-media-cloud/internal/shared/api"
 	"strconv"
+	"strings"
 )
 
 func parseOutputCandidateQuery(c *app.RequestContext) (production.ListComposeOutputsInput, error) {
@@ -28,6 +29,21 @@ func parseOutputCandidateQuery(c *app.RequestContext) (production.ListComposeOut
 			return in, service.ErrInvalid
 		}
 		in.CategoryID = identity.CategoryID(n)
+	}
+	if raw := c.Query("output_ids"); raw != "" {
+		ids := strings.Split(raw, ",")
+		if len(ids) > 1000 {
+			return in, service.ErrInvalid
+		}
+		seen := make(map[int64]bool, len(ids))
+		for _, value := range ids {
+			id, err := strconv.ParseInt(value, 10, 64)
+			if err != nil || id <= 0 || strconv.FormatInt(id, 10) != value || seen[id] {
+				return in, service.ErrInvalid
+			}
+			seen[id] = true
+			in.OutputIDs = append(in.OutputIDs, id)
+		}
 	}
 	return in, nil
 }

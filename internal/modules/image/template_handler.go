@@ -258,6 +258,14 @@ func RenderCover(_ context.Context, c *app.RequestContext) {
 	if !ok {
 		return
 	}
+	if len(c.Request.Body()) > 1<<20 {
+		failTemplate(c, service.ErrInvalid)
+		return
+	}
+	if isBatchCoverRequest(c) {
+		renderBatchCover(c, a)
+		return
+	}
 	var in service.ArtworkInput
 	if e := decodeInput(c, &in); e != nil {
 		failTemplate(c, e)

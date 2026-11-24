@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: WT Media Cover Template API
-  version: 2026.11.21.1
+  version: 2026.11.25.1
   description: Image-domain template drafts, publication, usage and actual artwork.
     Entity IDs and optimistic revisions are decimal strings; published_revision is
     an integer version counter. Session scope matches image assets.
@@ -182,16 +182,28 @@ paths:
         row_key and input_revision. Only an enabled published template and enabled
         permitted background may produce a formal result. Returns fixed actual file,
         input hash, full template/input snapshot and renderer version through start/progress/item_result|item_error/done
-        events. Business background requires exactly one source; output is resolved via the production service and must have an actual thumbnail. Fixed/solid backgrounds reject extra business sources. Snapshot includes background_file_id and background_output_id as decimal strings (zero when absent). Result is artwork and issues. No task or content confirmation is created.
+        events. Business background requires exactly one source; output is resolved via the production service and must have an actual thumbnail. Fixed/solid backgrounds reject extra business sources. Snapshot includes background_file_id and background_output_id as decimal strings (zero when absent). Result is artwork and issues. No task or content confirmation is created. Batch items use unique row keys and specify platform, category and one or both required aspect ratios. A successful row returns artworks with specification and input digests only after all its requested renders succeed. Terminal batch events echo row and field revisions. A failed row does not stop other rows.
       responses:
         '200':
-          description: text/event-stream; each item has exactly one terminal event.
+          description: text/event-stream; each completed row has exactly one terminal event. A deadline or interruption may terminate the stream early.
+          content:
+            text/event-stream: {schema: {type: string}}
+        '400': {description: Invalid render envelope or row versions.}
+        '401': {description: Authentication required.}
+        '429': {description: Generation concurrency limit reached before opening the stream.}
+        '503': {description: Storage unavailable before opening the stream.}
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/RenderCover'
+              oneOf:
+                - {$ref: '#/components/schemas/RenderCover'}
+                - type: object
+                  additionalProperties: false
+                  required: [items]
+                  properties:
+                    items: {type: array, minItems: 1, maxItems: 50, items: {$ref: '#/components/schemas/BatchRenderRow'}}
   /api/v1/image-font/{family}/{weight}:
     get:
       operationId: getImageFont
@@ -220,6 +232,31 @@ components:
       in: cookie
       name: session
   schemas:
+    BatchRenderRow:
+      type: object
+      additionalProperties: false
+      required: [row_key, input_revision, field_revisions, category_id, platform, specs]
+      properties:
+        row_key: {type: string, minLength: 1, maxLength: 64}
+        input_revision: {$ref: '#/components/schemas/EntityID'}
+        field_revisions: {type: object, minProperties: 1, maxProperties: 16, additionalProperties: {type: string, pattern: '^(0|[1-9][0-9]*)$'}}
+        category_id: {$ref: '#/components/schemas/EntityID'}
+        platform: {const: baidu}
+        specs:
+          type: array
+          minItems: 1
+          maxItems: 2
+          items:
+            type: object
+            additionalProperties: false
+            required: [specification, template_id, expected_published_revision, title]
+            properties:
+              specification: {enum: [landscape, portrait]}
+              template_id: {$ref: '#/components/schemas/EntityID'}
+              expected_published_revision: {type: integer, minimum: 1}
+              title: {type: string, minLength: 1, maxLength: 2000}
+              background_image_asset_id: {type: string, pattern: '^(0|[1-9][0-9]*)$'}
+              background_output_id: {type: string, pattern: '^(0|[1-9][0-9]*)$'}
     CreateCoverTemplate:
       type: object
       required:

@@ -7,13 +7,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/wt-media/wt-media-cloud/internal/config"
 	"github.com/wt-media/wt-media-cloud/internal/infra/client/deepseek"
 	"github.com/wt-media/wt-media-cloud/internal/infra/database"
 	filemodel "github.com/wt-media/wt-media-cloud/internal/modules/files/model"
 	files "github.com/wt-media/wt-media-cloud/internal/modules/files/service"
 	identity "github.com/wt-media/wt-media-cloud/internal/modules/identity/service"
 	accounts "github.com/wt-media/wt-media-cloud/internal/modules/mediaaccount/service"
-	productionmodel "github.com/wt-media/wt-media-cloud/internal/modules/production/model"
 	production "github.com/wt-media/wt-media-cloud/internal/modules/production/service"
 	"github.com/wt-media/wt-media-cloud/internal/modules/publish/model"
 	"github.com/wt-media/wt-media-cloud/internal/modules/publish/repository"
@@ -42,6 +42,11 @@ type Repository interface {
 	Edit(model.Task, uint64) (model.Task, error)
 }
 type Service struct {
+	BatchRepo     BatchRepository
+	BatchCategory func(identity.CategoryID) (identity.Category, bool, error)
+	BatchAccounts batchAccountPage
+	BatchLimits   config.PublicationBatchConfig
+
 	GenerateJSON func(context.Context, string, string) (string, error)
 	OutputPage   func(context.Context, identity.PublicUser, production.ListComposeOutputsInput) (OutputPage, error)
 	SavedFile    func(context.Context, int64) (filemodel.File, error)
@@ -52,18 +57,20 @@ type Service struct {
 }
 
 func Wired() *Service {
-	return &Service{GenerateJSON: func(ctx context.Context, system, user string) (string, error) {
-		return deepseek.Get().CompleteJSON(ctx, system, user)
-	}, OutputPage: func(ctx context.Context, a identity.PublicUser, in production.ListComposeOutputsInput) (OutputPage, error) {
-		page, err := production.ListComposeOutputPage(ctx, a, in)
-		return OutputPage{Items: page.Items, Total: page.Total, Page: page.Page, PageSize: page.PageSize}, err
-	}, SavedFile: func(ctx context.Context, id int64) (filemodel.File, error) {
-		s, e := files.Wired()
-		if e != nil {
-			return filemodel.File{}, e
-		}
-		return s.ReadSavedReference(ctx, id)
-	}, Repo: repository.Store{DB: database.DB(), LockFiles: files.LockAvailable}, Account: accounts.GetAccount, Output: production.GetComposeOutput, File: readCoverFile,
+	store := repository.Store{DB: database.DB(), LockFiles: files.LockAvailable}
+	return &Service{BatchRepo: store, BatchCategory: identity.ResolveCategory, BatchAccounts: accounts.ListAccountPage,
+		BatchLimits: config.Get().App.PublicationBatch, GenerateJSON: func(ctx context.Context, system, user string) (string, error) {
+			return deepseek.Get().CompleteJSON(ctx, system, user)
+		}, OutputPage: func(ctx context.Context, a identity.PublicUser, in production.ListComposeOutputsInput) (OutputPage, error) {
+			page, err := production.ListComposeOutputPage(ctx, a, in)
+			return OutputPage{Items: page.Items, Total: page.Total, Page: page.Page, PageSize: page.PageSize}, err
+		}, SavedFile: func(ctx context.Context, id int64) (filemodel.File, error) {
+			s, e := files.Wired()
+			if e != nil {
+				return filemodel.File{}, e
+			}
+			return s.ReadSavedReference(ctx, id)
+		}, Repo: store, Account: accounts.GetAccount, Output: production.GetComposeOutput, File: readCoverFile,
 	}
 }
 func CheckFileReferences(tx *gorm.DB, id int64) error {
@@ -185,36 +192,19 @@ func (s *Service) Create(ctx context.Context, a identity.PublicUser, in CreateIn
 	if err != nil {
 		return model.Task{}, err
 	}
-	if account.UserID != a.ID {
-		return model.Task{}, ErrNotFound
+	reason, err := accountQualification(a, account, in.Platform, in.CategoryID)
+	if err != nil {
+		return model.Task{}, err
 	}
-	if string(account.Platform) != in.Platform || !account.Enabled || account.IdentificationStatus != accounts.IdentificationIdentified || account.PlatformLoginStatus != accounts.PlatformLoginNormal || account.PlatformAccountID == "" || account.BrowserProfileID == "" || account.TeamID == nil {
+	if reason != "" {
 		return model.Task{}, ErrInvalid
-	}
-	category := false
-	for _, id := range account.CategoryIDs {
-		if int64(id) == in.CategoryID {
-			category = true
-		}
-	}
-	if !category || !a.CanAccess(account.UserID, account.TeamID, identity.CategoryID(in.CategoryID)) {
-		return model.Task{}, ErrNotFound
 	}
 	output, err := s.Output(a, in.CompositeOutputID)
 	if err != nil {
 		return model.Task{}, err
 	}
 	o := output.Output
-	platformOK := false
-	for _, p := range o.Platforms {
-		if p == in.Platform {
-			platformOK = true
-		}
-	}
-	if !platformOK {
-		return model.Task{}, ErrInvalid
-	}
-	if int64(o.CategoryID) != in.CategoryID || o.TeamID != int64(*account.TeamID) || o.PublishStatus == productionmodel.OutputPublishArchived || o.Video.Status != string(productionmodel.VideoReady) || o.FileSizeBytes <= 0 || len(o.SHA256) != 64 {
+	if !outputMatches(o, int64(*account.TeamID), in.CategoryID, in.Platform) || !outputReady(o) {
 		return model.Task{}, ErrInvalid
 	}
 	cover, err := s.File(ctx, a, in.Content.CoverFileID, in.CategoryID)

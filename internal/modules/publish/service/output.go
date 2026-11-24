@@ -16,7 +16,8 @@ type OutputPage struct {
 }
 type OutputCandidate struct {
 	outputmodel.CompositeOutput
-	Occupied bool `json:"occupied"`
+	CompositeOutputID int64 `json:"composite_output_id,string"`
+	Occupied          bool  `json:"occupied"`
 }
 type OutputCandidatePage struct {
 	Items    []OutputCandidate `json:"items"`
@@ -65,7 +66,7 @@ func (s *Service) OutputCandidates(ctx context.Context, a identity.PublicUser, i
 		used[id] = true
 	}
 	for _, item := range page.Items {
-		result.Items = append(result.Items, OutputCandidate{CompositeOutput: item, Occupied: used[item.ID]})
+		result.Items = append(result.Items, OutputCandidate{CompositeOutput: item, CompositeOutputID: item.ID, Occupied: used[item.ID]})
 	}
 	return result, nil
 }
