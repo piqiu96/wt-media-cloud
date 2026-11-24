@@ -15,6 +15,10 @@ import (
 // ErrInputChanged is a business rejection; infrastructure errors remain errors.
 var ErrInputChanged = fmt.Errorf("%w: execution input changed", ErrConflict)
 
+// Owner-wide exhaustion ends this claim round; a single batch or Profile
+// conflict only skips that candidate and must not hide later independent work.
+var errOwnerCapacityFull = fmt.Errorf("%w: owner automatic or window capacity full", ErrCapacityWait)
+
 type ExecutionStore struct {
 	Store
 	Capacity         model.ExecutionCapacity
@@ -165,16 +169,19 @@ func (s ExecutionStore) ClaimWithCapacity(user int64, key string, agent model.Ex
 				if e = admissionOpen(tx); e != nil {
 					return e
 				}
-				input, e := s.readInput(tx, candidate)
-				if e != nil {
-					return e
-				}
 				slot, e := freeAutomaticSlot(tx, user, cap.AutomaticSlots)
 				if e != nil {
 					return e
 				}
 				if slot == 0 {
-					return ErrCapacityWait
+					return errOwnerCapacityFull
+				}
+				window, e := freeWindowSlot(tx, user, cap.WindowSlots)
+				if e != nil {
+					return e
+				}
+				if window == 0 {
+					return errOwnerCapacityFull
 				}
 				available, e := batchAutomaticAvailable(tx, parent)
 				if e != nil {
@@ -183,7 +190,14 @@ func (s ExecutionStore) ClaimWithCapacity(user int64, key string, agent model.Ex
 				if !available {
 					return ErrCapacityWait
 				}
+				input, e := s.readInput(tx, candidate)
+				if e != nil {
+					return e
+				}
 				use, e := tryProfileUse(tx, user, candidate, input, "publish", cap.WindowSlots, now)
+				if errors.Is(e, ErrCapacityWait) {
+					return errOwnerCapacityFull
+				}
 				if e != nil {
 					return e
 				}
@@ -225,6 +239,11 @@ func (s ExecutionStore) ClaimWithCapacity(user int64, key string, agent model.Ex
 					return prior, err
 				}
 				continue
+			}
+			if errors.Is(e, errOwnerCapacityFull) {
+				// Another claimant may have committed this request key while this
+				// transaction was waiting; return its immutable original attempt.
+				return s.prior(user, key)
 			}
 			if errors.Is(e, ErrConflict) || errors.Is(e, ErrNotFound) || errors.Is(e, ErrProfileUse) || errors.Is(e, ErrCapacityWait) || errors.Is(e, ErrParentBlocked) {
 				continue
