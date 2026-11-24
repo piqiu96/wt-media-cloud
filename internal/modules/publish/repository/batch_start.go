@@ -25,11 +25,12 @@ var (
 
 type BatchExecutionConflict struct {
 	BatchConflictError
-	ExecutionStatus string                    `json:"execution_status"`
-	Pause           *model.BatchPause         `json:"pause,omitempty"`
-	Issues          []model.BatchIssue        `json:"issues,omitempty"`
-	Shortfalls      []model.CreationShortfall `json:"shortfalls,omitempty"`
-	Cause           error                     `json:"-"`
+	ExecutionStatus     string                    `json:"execution_status"`
+	StartRequestApplied *bool                     `json:"start_request_applied,omitempty"`
+	Pause               *model.BatchPause         `json:"pause,omitempty"`
+	Issues              []model.BatchIssue        `json:"issues,omitempty"`
+	Shortfalls          []model.CreationShortfall `json:"shortfalls,omitempty"`
+	Cause               error                     `json:"-"`
 }
 
 func (e *BatchExecutionConflict) Error() string { return e.Cause.Error() }
@@ -68,11 +69,47 @@ func stoppedParent(b *model.Batch) bool {
 	return b != nil && (b.StoppedAt != nil || b.ExecutionStatus == model.BatchStopping || b.ExecutionStatus == model.BatchCancelled || b.ExecutionStatus == model.BatchEnded)
 }
 
+// This validates only the immutable first-start receipt already in storage.
+// It cannot authorize work or expose the original request key to a caller.
+func validBatchStartReceipt(v model.Batch) bool {
+	r := v.StartReceipt
+	if v.StartRequestKey == nil || *v.StartRequestKey == "" || v.StartRequestHash == nil || *v.StartRequestHash == "" ||
+		r == nil || r.BatchID != v.ID || r.Revision < 2 || r.Revision > v.Revision || r.ExecutionStatus != model.BatchRunning ||
+		v.StartedAt == nil || r.FirstStartedAt.IsZero() || !r.FirstStartedAt.Equal(*v.StartedAt) ||
+		r.CreatedCount <= 0 || r.CreatedCount != int64(len(r.TaskIDs)) {
+		return false
+	}
+	var target int64
+	for _, row := range v.Targets {
+		target += row.TargetCount
+	}
+	if r.TargetCount != target || r.CreatedCount > target || r.CreationShortfall != target-r.CreatedCount {
+		return false
+	}
+	seen := make(map[string]bool, len(r.TaskIDs))
+	for _, value := range r.TaskIDs {
+		id, err := strconv.ParseUint(value, 10, 64)
+		if err != nil || id == 0 || strconv.FormatUint(id, 10) != value || seen[value] {
+			return false
+		}
+		seen[value] = true
+	}
+	return true
+}
+
 func ReplayBatchStart(v model.Batch, key, digest string) (*model.BatchStartResult, error) {
 	if v.StartRequestKey == nil {
 		return nil, nil
 	}
-	if *v.StartRequestKey != key || v.StartRequestHash == nil || *v.StartRequestHash != digest || v.StartReceipt == nil {
+	if *v.StartRequestKey != key {
+		conflict := BatchConflict(v, ErrConflict)
+		if validBatchStartReceipt(v) {
+			notApplied := false
+			conflict.StartRequestApplied = &notApplied
+		}
+		return nil, conflict
+	}
+	if v.StartRequestHash == nil || *v.StartRequestHash != digest || !validBatchStartReceipt(v) {
 		return nil, BatchConflict(v, ErrConflict)
 	}
 	return v.StartReceipt, nil

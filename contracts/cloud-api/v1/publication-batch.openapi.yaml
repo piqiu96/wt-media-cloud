@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: WT Media Publication Batch
-  version: 2026.11.25.2
+  version: 2026.11.25.3
   description: Session API using errcode/message/data/logid. Saves store candidate configuration and current file references atomically with audit. Incomplete content or candidate shortfalls may be saved. Account ownership, category scope and input structure are mandatory. Only first start creates formal tasks and output occupancy. Attempts are created by actual claim.
 security: [{sessionCookie: []}]
 paths:
@@ -276,7 +276,12 @@ paths:
         '401': {description: Authentication required.}
         '404': {description: Missing or outside allowed batch scope.}
         '409':
-          description: Changed revision, conflicting key, changed shortfall, row becoming unready, occupied output, or frozen/stopped parent.
+          description: >-
+            Changed revision, conflicting key, changed shortfall, row becoming unready, occupied output, or frozen/stopped parent.
+            Only when a persisted first-start key is explicitly different from this request key and a complete valid immutable
+            first-start receipt proves the other request won, publication_conflict includes error.details.start_request_applied=false.
+            This read-only proof permits discarding only this pending start request; it never authorizes or creates work and never
+            exposes the winning key or digest. Same-key digest conflicts, missing/invalid receipts and all other conflicts omit it.
           content: {application/json: {schema: {$ref: '#/components/schemas/BatchConflict'}}}
         '503': {description: Required resource or persistence unavailable.}
 
@@ -852,6 +857,10 @@ components:
                 batch_id: {$ref: '#/components/schemas/ID'}
                 current_revision: {$ref: '#/components/schemas/ID'}
                 execution_status: {$ref: '#/components/schemas/ExecutionStatus'}
+                start_request_applied:
+                  type: boolean
+                  const: false
+                  description: A02 start conflict only. Authoritative proof that this request key did not start the batch because another persisted first-start key has a complete valid immutable receipt. Absent for every other conflict; absence is not proof of non-application. Never contains the winning key or digest.
                 pause: {$ref: '#/components/schemas/BatchPause'}
                 issues: {type: array, items: {$ref: '#/components/schemas/ExecutionIssue'}}
                 shortfalls: {type: array, items: {$ref: '#/components/schemas/CreationShortfall'}}

@@ -22,3 +22,5 @@ Cloud-owned public HTTPS JSON API contracts for Web and Desktop consumers.
 
 - `v1/publication-batch.openapi.yaml` provides CHG107 batch resource reads, allocation, readiness, saved candidate configuration, revision-checked editing, conditional copy and operation records.
 - Publication batch revision `2026.11.25.2` adds first-start preview and atomic authorization, fixed-group control, revision-bound pause/resume/stop/finish, formal task pagination and verified public counts. The existing configuration save remains preparation.
+
+- Publication batch revision `2026.11.25.3` adds the optional A02 conflict detail `start_request_applied: false` only when a different durable first-start key and valid immutable receipt prove this pending request did not win. Other conflicts omit it; the original key/digest remain private. Cloud-Agent and publish error-code revisions remain `2026.11.25.2`.
