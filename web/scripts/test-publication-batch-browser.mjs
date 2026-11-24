@@ -18,6 +18,10 @@ const outputs = [
   { composite_output_id: "9007199254740997", id: 2, name: "合成测试成片 B" },
 ].map(item => ({ ...item, category_id: "12", team_id: "3", occupied: false, platforms: ["baidu"], video: { status: "ready" } }));
 const now = "2026-11-25T10:00:00Z";
+const template = { id: "903", name: "合成横版模板", canvas_width: 1280, canvas_height: 720,
+  enabled: true, published_revision: 2, published_config: { backgroundMode: "solid" } };
+const libraryCover = { id: "904", file_id: "905", name: "合成现成封面", metadata: { width: 1280, height: 720 },
+  resource_path: "/api/v1/file-resources/" + "c".repeat(64) };
 
 function readiness(input) {
   const included = input.config.candidates;
@@ -61,6 +65,20 @@ await page.route("**/api/v1/**", async route => {
         category_id: "12", media_account_id: account.id, composite_output_id: item.composite_output_id,
         row_key: `candidate-${index}`, input_revision: "1", field_revisions: {}, order: index, content: {},
       })) }, shortfalls: [] });
+    case "/api/v1/cover-template": return send({ items: [template], total: 1 });
+    case "/api/v1/cover-template/903": return send(template);
+    case "/api/v1/image-asset": return send({ items: [libraryCover], total: 1 });
+    case "/api/v1/cover/render": {
+      const { row_key, input_revision, template_id, expected_published_revision, title } = input;
+      const artwork = {
+        row_key, input_revision, preview: false, render_input_hash: "b".repeat(64),
+        snapshot: { template_id, published_revision: expected_published_revision, title },
+        file: { id: "906", metadata: { width: 1280, height: 720 },
+          resource_path: "/api/v1/file-resources/" + "d".repeat(64) },
+      };
+      const body = `event: item_result\ndata: ${JSON.stringify({ result: { artwork } })}\n\nevent: done\ndata: {"total":1,"success":1,"failed":0}\n\n`;
+      return route.fulfill({ status: 200, contentType: "text/event-stream", body });
+    }
     case "/api/v1/publication-batch/validate": return send(readiness(input));
     case "/api/v1/publication/generate": {
       const fields = input.items[0].field_revisions;
@@ -119,6 +137,27 @@ try {
   await page.keyboard.press("Escape");
   await firstRow.getByRole("button", { name: "编辑内容" }).click();
   await page.locator('[aria-label="发布文案"] textarea, textarea[aria-label="发布文案"]').fill("手动保留文案");
+  const horizontal = page.locator(".batch-cover-row").filter({ hasText: "横版封面 · 16:9" });
+  await input("封面短标题").fill("原生成标题");
+  await horizontal.getByText("模板合成", { exact: true }).click();
+  await horizontal.getByPlaceholder("搜索并选择封面模板").click();
+  await page.locator(".t-select-option").getByText(/合成横版模板/).click();
+  await horizontal.getByRole("button", { name: "生成封面", exact: true }).click();
+  const adopt = horizontal.getByRole("button", { name: "采用生成封面", exact: true });
+  await adopt.waitFor();
+  await input("封面短标题").fill("人工新标题");
+  await input("封面短标题").press("Tab");
+  assert.equal(await adopt.count(), 0, "修改短标题后不应继续提供旧封面的采用入口");
+  await horizontal.getByRole("button", { name: "生成封面", exact: true }).click();
+  await adopt.click();
+  await horizontal.getByAltText("已采用横版封面 · 16:9").waitFor();
+
+  await horizontal.getByText("使用现成封面", { exact: true }).click();
+  await horizontal.getByRole("button", { name: "选择图片", exact: true }).click();
+  const imagePicker = page.getByRole("dialog", { name: "选择发布封面", exact: true });
+  const assetRow = imagePicker.getByRole("row").filter({ hasText: libraryCover.name });
+  await assetRow.waitFor({ timeout: 3000 });
+  await assetRow.getByRole("button", { name: "选择", exact: true }).click();
   await button("完成").click();
   await next();
   await input("异常任务上限").fill("5");
@@ -132,6 +171,8 @@ try {
   await heading("浏览器批次").waitFor();
   await page.getByText("批次尚未开始，正式发布任务 0 条。", { exact: true }).waitFor();
   assert.equal(saved.config.candidates[0].content.description, "手动保留文案");
+  assert.equal(saved.config.candidates[0].cover_title, "人工新标题");
+  assert.equal(saved.config.candidates[0].content.cover_file_id, libraryCover.file_id);
   assert.equal(saved.targets[0].target_count, 2);
   const originalRowKey = saved.config.candidates[0].row_key;
   assert.equal(recordedCalls.filter(call => call.method === "POST" && call.resource === "/api/v1/publication-batch").length, 1);

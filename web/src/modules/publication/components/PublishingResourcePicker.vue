@@ -1,7 +1,7 @@
 <script setup>
 import { coverMatchesRatio } from "../coverPreparation.js";
 import { OutputVideoStatus } from "../../compose/outputStatus.js";
-import { computed, ref, watch } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import ResourceRowActions from "../../../shared/ui/resource/ResourceRowActions.vue";
 import ResourceOverlay from "../../../shared/ui/resource/ResourceOverlay.vue";
 import ResourceFilterBar from "../../../shared/ui/resource/ResourceFilterBar.vue";
@@ -106,19 +106,19 @@ function select(row) {
   emit("selected", props.kind === "image" ? { ...row, image_asset_id: row.id, id: row.file_id } : row);
   emit("update:visible", false);
 }
-watch(
-  () => [props.visible, props.kind, props.category],
-  () => {
-    if (props.visible) {
-      page.value = 1;
-      search.value = "";
-      rows.value = [];
-      total.value = 0;
-      load();
-    } else sequence++;
-  },
-  { immediate: !!props.batch },
-);
+function resetPicker() {
+  if (!props.visible) {
+    sequence++;
+    return;
+  }
+  page.value = 1;
+  search.value = "";
+  rows.value = [];
+  total.value = 0;
+  load();
+}
+watch(() => [props.visible, props.kind, props.category], resetPicker);
+onMounted(() => { if (props.visible) resetPicker(); });
 </script>
 <template>
   <ResourceOverlay

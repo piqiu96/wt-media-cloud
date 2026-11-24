@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref } from "vue";
+import { computed, ref, watch } from "vue";
 import ResourceOverlay from "../../../shared/ui/resource/ResourceOverlay.vue";
 import ResourceSection from "../../../shared/ui/resource/ResourceSection.vue";
 import FeedbackAlert from "../../../shared/ui/feedback/FeedbackAlert.vue";
@@ -7,7 +7,7 @@ import PublicationContentGenerator from "./PublicationContentGenerator.vue";
 import PublishingCoverEditor from "./PublishingCoverEditor.vue";
 import PublishingResourcePicker from "./PublishingResourcePicker.vue";
 import { createFilesClient } from "../../../shared/api/files.js";
-import { coverConfigFromReference, coverMatchesRatio, coverReference, emptyCoverConfig } from "../coverPreparation.js";
+import { coverConfigFromReference, coverMatchesRatio, coverReference, coverRenderInput, coverResultMatches, emptyCoverConfig } from "../coverPreparation.js";
 import { coverProfiles } from "../batchPreparation.js";
 import { contentIssue, publicationTextLength } from "../eligibility.js";
 
@@ -46,12 +46,30 @@ const configs = computed(() => Object.fromEntries(coverProfiles.map(profile => {
   const recipe = props.recipes[profile.key] || (saved ? coverConfigFromReference(saved) : emptyCoverConfig());
   return [profile.key, { ...recipe, title: props.row.cover_title || "" }];
 })));
+function renderBasis(profile) {
+  return JSON.stringify({
+    rowKey: props.row.row_key,
+    inputRevision: props.row.input_revision,
+    outputID: props.row.composite_output_id,
+    titleRevision: props.row.field_revisions.cover_title,
+    fileRevision: props.row.field_revisions[profile.file],
+    renderRevision: props.row.field_revisions[profile.render],
+    config: configs.value[profile.key],
+  });
+}
+const stagedArtworks = computed(() => Object.fromEntries(coverProfiles.map(profile => {
+  const entry = staged.value[profile.key];
+  return [profile.key, entry?.basis === renderBasis(profile) ? entry.result : null];
+})));
+watch(() => coverProfiles.map(renderBasis), (bases) => {
+  coverProfiles.forEach((profile, index) => {
+    const entry = staged.value[profile.key];
+    if (entry && entry.basis !== bases[index]) delete staged.value[profile.key];
+  });
+});
+
 function setRecipe(profile, config) {
-  delete staged.value[profile.key];
-  if (config.title !== (props.row.cover_title || "")) {
-    staged.value = {};
-    emit("edit", { cover_title: config.title });
-  }
+  if (config.title !== (props.row.cover_title || "")) emit("edit", { cover_title: config.title });
   emit("recipe", profile.key, config);
 }
 function useOutput(profile) {
@@ -65,17 +83,26 @@ function selectedImage(file) {
   emit("cover", selection.value, { ...file, file_id: file.id }, undefined);
   selection.value = null;
 }
+function matchesCurrentRender(profile, result) {
+  const config = configs.value[profile.key];
+  if (config.method !== "template" || !result || !coverMatchesRatio(result.file, ...profile.aspect)) return false;
+  try {
+    return coverResultMatches(result, coverRenderInput(config, props.output, result.row_key, result.input_revision));
+  } catch {
+    return false;
+  }
+}
 function stageArtwork(profile, result) {
-  if (!result?.file?.id || result.preview !== false || !coverMatchesRatio(result.file, ...profile.aspect)) {
+  if (!matchesCurrentRender(profile, result)) {
     error.value = "封面产物与当前规格不符，请重新生成";
     return;
   }
   error.value = "";
-  staged.value[profile.key] = result;
+  staged.value[profile.key] = { result, basis: renderBasis(profile) };
 }
 function applyArtwork(profile) {
-  const result = staged.value[profile.key];
-  if (!result) return;
+  const result = stagedArtworks.value[profile.key];
+  if (props.disabled || !matchesCurrentRender(profile, result)) return;
   emit("cover", profile, result.file, coverReference(result));
   delete staged.value[profile.key];
 }
@@ -114,8 +141,8 @@ function applyArtwork(profile) {
             <div class="batch-cover-figure">
               <img v-if="url(covers[profile.key])" :src="url(covers[profile.key])" :alt="`已采用${profile.label}`" />
               <p v-else class="batch-muted">{{ row.content[profile.file] && row.content[profile.file] !== "0" ? "已选择封面，预览暂不可用" : "未选择封面" }}</p>
-              <template v-if="staged[profile.key]">
-                <img v-if="url(staged[profile.key].file)" :src="url(staged[profile.key].file)" :alt="`生成的${profile.label}`" />
+              <template v-if="stagedArtworks[profile.key]">
+                <img v-if="url(stagedArtworks[profile.key].file)" :src="url(stagedArtworks[profile.key].file)" :alt="`生成的${profile.label}`" />
                 <t-button theme="primary" variant="outline" :disabled="disabled" @click="applyArtwork(profile)">采用生成封面</t-button>
               </template>
             </div>
