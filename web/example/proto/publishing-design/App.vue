@@ -287,6 +287,11 @@ const productionContext=shallowRef(null);
 const page=ref(readOperationRoute(new URL(location.href)).page), pageNo=ref(1), size=ref(10);
 const isProduction=computed(()=>productionPages.includes(page.value));
 const accountRef=ref(null),accountSceneKey=ref(location.search),accountAcceptedURL=ref(location.pathname+location.search+location.hash);
+const preparationPreview = new URLSearchParams(location.search).get("review") === "chg107";
+if (preparationPreview) {
+  const role = new URLSearchParams(location.search).get("role");
+  prototypeSession.actor = role === "admin" ? "周予宁" : role === "operator" ? "林予安" : "陈小雨";
+}
 const isAccountPage=computed(()=>['personal','settings'].includes(page.value));
 const localEnabled=computed(()=>currentPrototypeUser().role!=='管理员'&&new URLSearchParams(accountSceneKey.value).get('client')!=='web');
 function applyAccountSceneIdentity(){const params=new URLSearchParams(location.search);if(isAccountPage.value&&(params.get('review')==='account'||params.get('role')==='admin'))prototypeSession.actor=params.get('role')==='admin'?'周予宁':'陈小雨'}
@@ -803,7 +808,7 @@ async function onCreated({ batch, tasks }) {
   const fromPlan=new URL(location.href).searchParams.get('fromPlan');
   if(batch&&fromPlan&&String(batch.planId)===fromPlan)await navigateContext(operationURL('batches',{batchId:batch.id,fromPlan}));
   else{await navigate(batch ? 'batches' : 'tasks');view(batch || tasks[0]);}
-  if (saved) toast(`已保存 ${tasks.length} 条任务`);
+  if (saved) toast(batch?.preparationOnly ? "批次配置已保存" : `已保存 ${tasks.length} 条任务`);
 }
 const coverPreviewOpen = ref(false),
   coverPreviewReadOnly = ref(false),
@@ -1557,8 +1562,8 @@ function cloneTask(t) {
           ><template #actions
             ><t-button v-if="page === 'tasks'" @click="newPublish('快速发布')"
               >快速发布</t-button
-            ><t-button v-if="page === 'batches'" @click="newPublish('批量发布')"
-              >批量发布</t-button
+            ><t-button v-if="page === 'batches' && (!preparationPreview || currentPrototypeUser().role !== '管理员')" @click="newPublish('批量发布')"
+              >{{ preparationPreview ? "新建批次" : "批量发布" }}</t-button
             ><t-button v-if="page === 'plans'" @click="editPlan()"
               >新建发布计划</t-button
             ><t-button v-if="page === 'images'" @click="imageEdit()"
@@ -1583,6 +1588,7 @@ function cloneTask(t) {
         :db="db"
         :persist="persistNow"
         :active="page === 'batches'"
+        :preparation-only="preparationPreview"
         @detail-change="batchDetailOpen = $event"
         @navigate="navigateContext"
         @configure="configureBatch"
@@ -1996,6 +2002,7 @@ function cloneTask(t) {
     <PublishComposer
       ref="composerRef"
       :db="db"
+      :preparation-only="preparationPreview"
       :persist="persistNow"
       @edit="editRow"
       @preview="openPreview"

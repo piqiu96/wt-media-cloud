@@ -3,7 +3,7 @@ import { computed } from 'vue';
 import ResourceRowActions from '../../../src/shared/ui/resource/ResourceRowActions.vue';
 import { contentIssues, contentState, approvalIssue } from './batchContentActions.js';
 import '../../../src/shared/styles/resource-data-table.css';
-const props=defineProps({rows:{type:Array,required:true},db:{type:Object,required:true},selectable:Boolean,selected:{type:Array,default:()=>[]},pagination:{type:Object,default:undefined}});
+const props=defineProps({rows:{type:Array,required:true},db:{type:Object,required:true},selectable:Boolean,readOnly:Boolean,selected:{type:Array,default:()=>[]},pagination:{type:Object,default:undefined}});
 const emit=defineEmits(['edit','preview','select-change','page-change']);
 const columns=computed(()=>[
   ...(props.selectable?[{colKey:'row-select',type:'multiple',width:48,fixed:'left'}]:[]),
@@ -11,7 +11,7 @@ const columns=computed(()=>[
   {colKey:'account',title:'发布账号',width:140},
   {colKey:'asset',title:'发布成片',width:200},
   {colKey:'configuration',title:'配置状态',width:220},
-  {colKey:'operation',title:'操作',width:80,fixed:'right'}
+  ...(!props.readOnly ? [{colKey:'operation',title:'操作',width:80,fixed:'right'}] : [])
 ]);
 const asset=row=>props.db.assets.find(a=>a.id===row.assetId);
 const account=row=>props.db.accounts.find(a=>a.id===row.accountId);
@@ -25,7 +25,7 @@ const hasSuggestion=row=>Object.values(row.ai?.suggestions||{}).some(s=>s.status
     :selected-row-keys="selected" :reserve-selected-row-on-paginate="true" :pagination="pagination"
     @select-change="keys=>emit('select-change',keys)" @page-change="value=>emit('page-change',value)">
     <template #content="{row}">
-      <div class="content-identity"><button class="content-cover" type="button" :aria-label="`预览${title(row)||asset(row)?.title}封面`" @click="emit('preview',{kind:'cover',row})"><img :src="row.cover||asset(row)?.cover" alt="发布封面" /></button>
+      <div class="content-identity"><button v-if="!readOnly" class="content-cover" type="button" :aria-label="`预览${title(row)||asset(row)?.title}封面`" @click="emit('preview',{kind:'cover',row})"><img :src="row.cover||asset(row)?.cover" alt="发布封面" /></button>
         <div><span class="content-title" :title="title(row)">{{title(row)||'待填写发布文案'}}</span><span v-if="row.platform!=='百家号'&&row.description" class="content-summary">{{row.description}}</span>
           <div class="content-meta"><small>{{row.category}}</small><t-tag v-if="hasSuggestion(row)" size="small" theme="primary" variant="light">AI 建议</t-tag></div>
         </div>
