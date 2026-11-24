@@ -60,3 +60,24 @@ it('reads server-projected candidate occupancy with production pagination and pl
  expect(url.searchParams.get('platform')).toBe('baidu');expect(url.searchParams.get('page')).toBe('4');
  expect(page.items[0].occupied).toBe(true);
 });
+
+it('saves batch configuration without implicitly starting or creating publication tasks', async () => {
+  const publication = await import('./publication.js');
+  expect(typeof publication.createPublicationBatchClient).toBe('function');
+  const calls = [];
+  const client = publication.createPublicationBatchClient({ fetch: async (url, init = {}) => {
+    calls.push({ url, init }); return { json: async () => ({ errcode: 0, data: { id: '9007199254740993', revision: '1' } }) };
+  }});
+  const input = { request_key: 'original-batch-key', name: '本人批次', platform: 'baidu', targets: [{ category_id: '9', target_count: 60 }], config: { candidates: [] }, execution_setting: { concurrency_limit: 5, group_interval_seconds: 0, between_group_policy: 'auto_continue', exception_task_limit: 5 } };
+  await client.save(input);
+  expect(calls).toHaveLength(1);
+  expect(calls[0].url).toContain('/publication-batch');
+  expect(JSON.parse(calls[0].init.body)).toEqual(input);
+  await client.update('9007199254740993', { ...input, expected_revision: '7' });
+  expect(calls[1].url).toContain('/publication-batch/9007199254740993/configuration');
+  expect(calls[1].init.method).toBe('PUT');
+  await client.list({ request_key: 'original-batch-key' });
+  expect(calls[2].url).toContain('request_key=original-batch-key');
+  await client.copy('9007199254740993', '8');
+  expect(calls[3].url).toContain('expected_revision=8');
+});

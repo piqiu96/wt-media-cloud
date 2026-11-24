@@ -220,3 +220,10 @@ describe('every declared component exists', () => {
     expect(checked).toBeGreaterThan(30)
   })
 })
+
+it('exposes the same publication batch workbench on both ends', () => {
+  const cloud = loaderFile(cloudByPath.get('publish-batches') || {}, cloudBase)
+  const desktop = loaderFile(desktopByPath.get('publish-batches') || {}, desktopBase)
+  expect(cloud).toContain('/modules/publication/pages/PublishingBatchesPage.vue')
+  expect(desktop).toBe(cloud)
+})

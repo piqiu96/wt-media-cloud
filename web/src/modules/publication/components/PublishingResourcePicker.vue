@@ -7,9 +7,10 @@ import ResourceOverlay from "../../../shared/ui/resource/ResourceOverlay.vue";
 import ResourceFilterBar from "../../../shared/ui/resource/ResourceFilterBar.vue";
 import FeedbackAlert from "../../../shared/ui/feedback/FeedbackAlert.vue";
 import { createMediaAccountClient } from "../../../shared/api/mediaAccounts.js";
-import { createPublicationClient } from "../../../shared/api/publication.js";
+import { createPublicationClient, createPublicationBatchClient } from "../../../shared/api/publication.js";
 import { createImageClient } from "../../../shared/api/image.js";
 import { createFilesClient } from "../../../shared/api/files.js";
+import { batchOutputID, batchOutputProblem } from "../useBatchResourceCatalog.js";
 import { accountUnavailable, outputUnavailable } from "../eligibility.js";
 const props = defineProps({
   visible: Boolean,
@@ -19,6 +20,10 @@ const props = defineProps({
   category: String,
   account: Object,
   userId: String,
+  batch: Boolean,
+  platform: { type: String, default: "baidu" },
+  teamId: String,
+  excludedIds: { type: Array, default: () => [] },
 });
 const emit = defineEmits(["update:visible", "selected", "view-account"]);
 const accounts = createMediaAccountClient(),
@@ -57,13 +62,15 @@ async function load() {
   try {
     const params = { page: page.value, page_size: 10, search: search.value };
     let data;
-    if (props.kind === "account")
+    if (props.batch && props.kind === "account")
+      data = await createPublicationBatchClient().accounts({ ...params, platform: props.platform, category_id: props.category });
+    else if (props.kind === "account")
       data = await accounts.listPage({ ...params, platform: "baidu", user_id: props.userId });
     else if (props.kind === "output")
-      data = await publication.outputs({ ...params, platform: "baidu" });
+      data = await publication.outputs({ ...params, platform: props.platform || "baidu", ...(props.batch && { category_id: props.category }) });
     else data = await images.listImageAsset({ ...params, usage: props.usage, enabled: true, category_id: props.category });
     if (n !== sequence) return;
-    if (props.kind === "output" && (data.items || []).some(row => typeof row.occupied !== "boolean"))
+    if (!props.batch && props.kind === "output" && (data.items || []).some(row => typeof row.occupied !== "boolean"))
       throw new Error("暂时无法确认成片占用，请重新查询");
     rows.value = data.items || [];
     total.value = data.total || 0;
@@ -78,6 +85,14 @@ async function load() {
   }
 }
 function reason(row) {
+  if (props.batch && props.kind === "account") {
+    if (props.excludedIds.includes(String(row.id))) return "已选择该账号";
+    return row.eligible === true ? "" : row.reason || "账号资格未知";
+  }
+  if (props.batch && props.kind === "output") {
+    if (props.excludedIds.includes(batchOutputID(row))) return "已选择该成片";
+    return batchOutputProblem(row, props.category, props.teamId);
+  }
   return props.kind === "account"
     ? accountUnavailable(row, props.category, props.userId)
     : props.kind === "output"
@@ -92,7 +107,7 @@ function select(row) {
   emit("update:visible", false);
 }
 watch(
-  () => [props.visible, props.kind],
+  () => [props.visible, props.kind, props.category],
   () => {
     if (props.visible) {
       page.value = 1;
@@ -102,6 +117,7 @@ watch(
       load();
     } else sequence++;
   },
+  { immediate: !!props.batch },
 );
 </script>
 <template>
@@ -148,20 +164,21 @@ watch(
         class="wt-resource-table"
         :data="rows"
         :columns="columns"
-        row-key="id"
+        :row-key="batch && kind === 'output' ? 'composite_output_id' : 'id'"
         :loading="busy"
         empty="没有符合当前范围的资源"
         :scroll="{ x: '800px' }"
       >
         <template #name="{ row }">
-          <t-button v-if="kind === 'account'" theme="primary" variant="text" size="small" @click.stop="emit('view-account', String(row.id))">{{ row.platform_name || "未识别账号" }}</t-button>
+          <span v-if="batch && kind === 'account'">{{ row.name }}</span>
+          <t-button v-else-if="kind === 'account'" theme="primary" variant="text" size="small" @click.stop="emit('view-account', String(row.id))">{{ row.platform_name || "未识别账号" }}</t-button>
           <template v-else>{{ row.name || row.file_name || "未命名" }}</template>
         </template>
         <template #scope="{ row }"
-          ><span v-if="kind === 'account'"
+          ><span v-if="batch && kind === 'account'">本人账号</span><span v-else-if="kind === 'account'"
             >{{ row.user_name || "—" }} ·
             {{ row.platform_account_id || "未识别" }}</span><span v-else-if="kind === 'output'"
-            >类目 {{ row.category_id }} ·
+            ><template v-if="!batch">类目 {{ row.category_id }} · </template>
             {{
               row.video?.status === OutputVideoStatus.Ready ? "视频可读" : "视频不可用"
             }}</span><img

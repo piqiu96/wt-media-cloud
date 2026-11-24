@@ -175,7 +175,7 @@ export function createApiClient({ base = '/api/v1', fetchImpl = globalThis.fetch
       win.location.href = `/login?redirect=${returnUrl}${reason}`
     }
 
-    if (response.ok && stream && response.headers.get('content-type')?.includes('text/event-stream')) return readGenerationStream(response, onEvent)
+    if (response.ok && stream && response.headers.get('content-type')?.includes('text/event-stream')) return readGenerationStream(response, onEvent, Array.isArray(body?.items) ? body.items : undefined)
     if (response.ok && binary) return response.arrayBuffer()
     const result = await parseResponse(response)
 

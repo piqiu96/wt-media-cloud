@@ -7,7 +7,7 @@ const nativeDesktop = () =>
 const clone = (value) =>
   value == null ? value : JSON.parse(JSON.stringify(value));
 const identityChanged = () =>
-  Object.assign(new Error("登录身份已变化，请重新打开快速发布"), {
+  Object.assign(new Error("登录身份已变化，请重新打开发布配置"), {
     code: "draft_identity_required",
   });
 
@@ -22,13 +22,16 @@ export async function resetPublicationDraftSession({
 
 export function createPublicationDraftClient({
   userId,
+  draftType = "task",
   tauri = nativeDesktop(),
   invokeImpl = invoke,
 }) {
   const user = String(userId ?? "");
   if (!/^[1-9][0-9]*$/.test(user)) throw identityChanged();
+  if (!["task", "batch"].includes(draftType)) throw new Error("不支持的续编类型");
+  const typeArgs = draftType === "task" ? {} : { draft_type: draftType };
   const generation = sessionGeneration;
-  const key = `${tauri ? "desktop" : "web"}:${user}`;
+  const key = `${tauri ? "desktop" : "web"}:${user}:${draftType}`;
   if (!inputCache.has(key))
     inputCache.set(key, {
       loaded: false,
@@ -66,7 +69,7 @@ export function createPublicationDraftClient({
       return accept(
         tauri
           ? await invokeImpl("local_publication_draft_get", {
-              args: { user_id: user },
+              args: { user_id: user, ...typeArgs },
             })
           : entry.value,
       );
@@ -85,6 +88,7 @@ export function createPublicationDraftClient({
           ? await invokeImpl("local_publication_draft_save", {
               args: {
                 user_id: user,
+                ...typeArgs,
                 expected_revision: entry.value.revision,
                 payload: clone(payload),
               },
@@ -102,7 +106,7 @@ export function createPublicationDraftClient({
       return accept(
         tauri
           ? await invokeImpl("local_publication_draft_clear", {
-              args: { user_id: user, expected_revision: entry.value.revision },
+              args: { user_id: user, ...typeArgs, expected_revision: entry.value.revision },
             })
           : {
               ...entry.value,
