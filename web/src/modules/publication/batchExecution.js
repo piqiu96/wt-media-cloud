@@ -10,10 +10,25 @@ export const batchControlLabels = {
 
 const taskRef = ({ id, revision }) => ({ task_id: id, revision });
 const pauseRef = ({ task_id, revision }) => ({ task_id, revision });
-const conflictAfterReplay = error => error?.status === 409 &&
-  ["publication_conflict", "publication_batch_parent_blocked", "publication_batch_shortfall_changed",
-    "publication_batch_pause_changed", "publication_output_occupied"].includes(error.code) &&
-  typeof error.details?.current_revision === "string" && /^[1-9][0-9]*$/.test(error.details.current_revision);
+function conflictAfterReplay(error, id, operation, latest) {
+  const { status, code, details } = error || {};
+  if (status !== 409 || !details || (details.batch_id != null && details.batch_id !== id)) return false;
+  if (["publication_conflict", "publication_batch_parent_blocked", "publication_batch_shortfall_changed",
+    "publication_batch_pause_changed", "publication_output_occupied"].includes(code) &&
+    typeof details.current_revision === "string" && /^[1-9][0-9]*$/.test(details.current_revision)) return true;
+
+  // A02 looks up the same-key receipt before reporting row or shortfall
+  // conflicts. A replay can therefore prove rejection without a revision.
+  const { action, input } = operation;
+  if (action !== "start" || latest?.id !== id || latest.execution_status !== "not_started" ||
+    latest.execution?.first_started_at) return false;
+  if (["publication_conflict", "publication_output_occupied"].includes(code) && Array.isArray(details.issues))
+    return details.issues.some(issue => input.included_row_keys.includes(issue?.row_key) &&
+      typeof issue.message === "string" && issue.message.trim());
+  return code === "publication_batch_shortfall_changed" && Array.isArray(details.shortfalls) &&
+    details.shortfalls.some(gap => input.expected_shortfalls.some(expected => expected.category_id === gap?.category_id) &&
+      [gap.target_count, gap.created_count, gap.shortfall].every(value => Number.isSafeInteger(value) && value >= 0));
+}
 
 const knownRejection = error => [400, 403, 404, 409, 422].includes(error?.status) || [
   "publication_conflict", "publication_invalid", "publication_not_found", "publication_platform_closed",
@@ -138,7 +153,7 @@ export async function sendBatchCommand(api, id, operation, { retry = false } = {
     return result;
   } catch (error) {
     // A retry can fail before reaching Cloud's original receipt lookup.
-    if (retry ? conflictAfterReplay(error) : knownRejection(error)) {
+    if (retry ? conflictAfterReplay(error, id, operation, latest) : knownRejection(error)) {
       error.batchRejection = true;
       throw error;
     }

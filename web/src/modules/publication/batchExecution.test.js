@@ -114,6 +114,32 @@ it("only clears a replay conflict when Cloud reports its current revision", asyn
   await expect(execution.sendBatchCommand(api, batch.id, command, { retry: true })).rejects.toMatchObject({ batchRejection: true });
 });
 
+it.each([
+  ["publication_conflict", { issues: [{ row_key: "a", message: "检查后原成片已占用" }] }],
+  ["publication_output_occupied", { issues: [{ row_key: "a", code: "output_occupied", message: "成片已占用" }] }],
+  ["publication_batch_shortfall_changed", { shortfalls: [{ category_id: "9", target_count: 3, created_count: 0, shortfall: 3 }] }],
+])("allows a new check after the unstarted batch rejects the original start with %s", async (code, details) => {
+  const input = execution.buildBatchStart(batch, preview, "original", true);
+  const current = { id: batch.id, revision: batch.revision, execution_status: "not_started", execution: { first_started_at: null } };
+  const response = Object.assign(new Error("发布条件已变化"), { status: 409, code, details });
+  const api = { get: vi.fn().mockResolvedValue(current),
+    start: vi.fn().mockRejectedValueOnce(new TypeError("请求未到达")).mockRejectedValueOnce(response) };
+  const command = { action: "start", input };
+  await expect(execution.sendBatchCommand(api, batch.id, command)).rejects.toMatchObject({ outcomeUnknown: true });
+  await expect(execution.sendBatchCommand(api, batch.id, command, { retry: true })).rejects.toMatchObject({ batchRejection: true });
+  expect(api.start.mock.calls).toEqual([[batch.id, input], [batch.id, input]]);
+});
+
+it("keeps an unresolved start when a replay conflict only names another row", async () => {
+  const input = execution.buildBatchStart(batch, preview, "original", true);
+  const current = { id: batch.id, execution_status: "not_started", execution: { first_started_at: null } };
+  const response = Object.assign(new Error("发布条件已变化"), { status: 409, code: "publication_conflict",
+    details: { issues: [{ row_key: "b", message: "其他成片已占用" }] } });
+  const api = { get: vi.fn().mockResolvedValue(current), start: vi.fn().mockRejectedValue(response) };
+  await expect(execution.sendBatchCommand(api, batch.id, { action: "start", input }, { retry: true }))
+    .rejects.toMatchObject({ outcomeUnknown: true });
+});
+
 it("recovers only its own persisted command across journal recreation", async () => {
   const data = new Map();
   const storage = {

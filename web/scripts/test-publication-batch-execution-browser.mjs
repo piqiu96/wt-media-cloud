@@ -56,6 +56,7 @@ const review = process.env.WT_MEDIA_BATCH_REVIEW;
 let hydrateGate, stoppingGate, stoppingReadStarted;
 let freshReread = false;
 let reviewPreviews = 0;
+let replayInput;
 const isNavigationReview = ["changed-revision", "abandoned-navigation"].includes(review);
 const calls = [];
 
@@ -111,7 +112,7 @@ async function routeCloud(route) {
         reviewPreviews++;
         assert.equal(input.expected_revision, current.revision);
         const rows = input.row_keys.map(row_key => {
-          const ready = isNavigationReview || row_key !== "row-2";
+          const ready = isNavigationReview || (row_key !== "row-2" && !(replayInput && row_key === "row-0"));
           return { row_key, ready, issues: ready ? [] : [{ message: "原成片已占用" }] };
         });
         const count = rows.filter(row => row.ready).length;
@@ -120,6 +121,19 @@ async function routeCloud(route) {
           shortfalls: [{ category_id: "12", target_count: target, created_count: count, shortfall: target - count }] });
       }
       case "start": {
+        if (review === "rejected-replay") {
+          if (!replayInput) {
+            replayInput = input;
+            return route.abort("failed");
+          }
+          assert.deepEqual(input, replayInput);
+          return route.fulfill({ status: 409, json: {
+            errcode: 18003, message: "发布条件已变化", data: null,
+            error: { code: "publication_conflict", details: {
+              issues: [{ row_key: "row-0", message: "检查后原成片已占用" }],
+            } },
+          } });
+        }
         if (current === fresh || isNavigationReview) return route.fulfill({ status: 409, json: {
           errcode: 18003, message: "检查后原成片已占用", data: null,
           error: { code: "publication_conflict", details: { issues: [{ row_key: "row-0", message: "检查后原成片已占用" }] } },
@@ -272,6 +286,20 @@ const regressions = {
     await requestSettled();
     assert.equal(startPosts(), 0, "opening an ordinary detail must not reuse the abandoned start action");
     assert.equal(reviewPreviews, 0);
+  },
+  async "rejected-replay"() {
+    await page.goto(detailURL);
+    await button("开始发布").click();
+    await dialog().getByText("确认按所选范围发布并保留目标缺口", { exact: true }).click();
+    await button("确认开始发布", dialog()).click();
+    await dialog().getByText("操作结果待确认，请核对原请求后继续", { exact: true }).waitFor();
+    await button("核对原启动请求", dialog()).click();
+    await dialog().getByText(/检查后原成片已占用/).waitFor({ timeout: 3000 });
+    assert.equal(startPosts(), 2);
+    await button("刷新批次", dialog()).click();
+    await button("开始发布").click();
+    await dialog().getByText(/视频甲.*原成片已占用/).waitFor();
+    assert.equal(startPosts(), 2);
   },
   async "cross-tab"() {
     await page.goto(detailURL);
