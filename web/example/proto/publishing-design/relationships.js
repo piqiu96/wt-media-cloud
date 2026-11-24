@@ -1,4 +1,4 @@
-import { taskInterval, batchTaskCanStart } from "./batchExecutionSettings.js";
+import { taskInterval, batchTaskCanStart, profileOf, uidOf } from "./batchExecutionSettings.js";
 import { publishMethod } from "./publishingSettings.js";
 import { freezeBatch, isDisposed } from "./batchLifecycle.js";
 // Offline prototype business rules. No runtime API or external platform calls.
@@ -328,7 +328,7 @@ export function createPublication(
 }
 export function queueTask(db, t, { retry = false } = {}) {
   const batch = db.batches.find((b) => b.id === t.batchId);
-  if (batch?.stoppedAt || t.batchStopped || batch?.control === "已取消")
+  if (batch?.stoppedAt || t.batchStopped || batch?.control === "已取消" || batch?.endedAt || (batch?.executionReview && batch.control === "已暂停"))
     throw Error("批次已停止或取消，不允许新执行");
   if (t.claimed || !(t.status === "待执行" || (retry && canRetry(t))))
     return false;
@@ -339,6 +339,10 @@ export function queueTask(db, t, { retry = false } = {}) {
   t.result = "未提交";
   t.claimed = false;
   t.verifiedAt = null;
+  if (batch?.executionReview) {
+    delete t.executionGroup;
+    return true;
+  }
   t.attempts++;
   t.attemptHistory ||= [];
   t.attemptHistory.push({
@@ -582,7 +586,19 @@ export function claimTask(db, t, now = Date.now()) {
     setResult(t, "等待人工", { evidence: "演示账号登录失效；原会话待处理" });
     return false;
   }
-  if (db.tasks.filter((x) => x.status === "执行中").length >= 3) return false;
+  if (b?.executionReview) {
+    if (db.tasks.some(x => {
+      if (x.id === t.id || !["执行中", "等待人工", "结果待确认"].includes(x.status)) return false;
+      const other = db.accounts.find(a => a.id === x.accountId);
+      return profileOf(other) === profileOf(account) || uidOf(other) === uidOf(account);
+    })) return false;
+    t.attempts = (t.attempts || 0) + 1;
+    t.attemptHistory ||= [];
+    t.attemptHistory.push({
+      number: t.attempts, started: new Date(now).toISOString(), executionGroup: b.executionGroup.number,
+      status: "执行中", snapshot: clone(t.snapshot || t), version: t.version || 1,
+    });
+  } else if (db.tasks.filter((x) => x.status === "执行中").length >= 3) return false;
   t.claimed = true;
   setResult(t, "执行中");
   return true;

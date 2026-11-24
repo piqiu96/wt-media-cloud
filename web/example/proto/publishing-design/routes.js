@@ -45,8 +45,9 @@ export function updateOperationURL(page,options={},replace=false) {
   const current=new URL(location.href);
  if(page==='batches'&&options.batchId&&!options.fromPlan&&current.searchParams.get('fromPlan'))options={...options,fromPlan:current.searchParams.get('fromPlan')};
  const next = new URL(operationURL(page,options), current.origin);
- if (current.searchParams.get('review') === 'chg107' && page === 'batches') {
-   next.searchParams.set('review', 'chg107');
+ const review = current.searchParams.get('review');
+ if ((review === 'chg107' && page === 'batches') || (review === 'chg108' && ['batches', 'tasks'].includes(page))) {
+   next.searchParams.set('review', review);
    const role = current.searchParams.get('role');
    if (role) next.searchParams.set('role', role);
  }

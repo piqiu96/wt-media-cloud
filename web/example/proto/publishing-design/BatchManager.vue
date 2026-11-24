@@ -27,10 +27,12 @@ import {
   rowsFor,
   executionPreview,
   contentEditable,
+  startReviewScope,
 } from "./batchLifecycle.js";
+import { executionExceptions } from "./batchExecutionSettings.js";
 import { currentPrototypeUser } from "./prototypeSession.js";
 import { batchCommand } from "./batchApi.js";
-const props = defineProps({ db: Object, persist: Function, active: Boolean, preparationOnly: Boolean });
+const props = defineProps({ db: Object, persist: Function, active: Boolean, preparationOnly: Boolean, executionReview: Boolean });
 const emit = defineEmits(["configure", "recover", "copy-batch", "task", "edit-task", "preview", "detail-change", "navigate"]);
 const narrow = useMediaQuery("(max-width: 900px)");
 const query = ref(""),
@@ -55,10 +57,16 @@ const query = ref(""),
   working = ref(false),
   taskAction = ref(null),
   version = ref(0),
-  requestKey = ref("");
+  requestKey = ref(""),
+  included = ref([]),
+  checkedScope = ref(null),
+  checkedPause = ref(null);
 const labels = {
   configure: "继续配置",
   execute: "执行",
+  pause: "暂停发布",
+  resume: "继续发布",
+  finish: "结束批次",
   edit: "编辑",
   detail: "详情",
   process: "去处理",
@@ -67,7 +75,7 @@ const labels = {
   copy: "复制",
 };
 const progressHelp = "已公开发布数 / 发布目标数。";
-const states = computed(() => props.preparationOnly ? ["未开始"] : ["待执行", "执行中", "待处理", "已结束", "已取消"]);
+const states = computed(() => props.executionReview ? ["未开始", "执行中", "已暂停", "待处理", "已结束", "已取消"] : props.preparationOnly ? ["未开始"] : ["待执行", "执行中", "待处理", "已结束", "已取消"]);
 const batch = computed(() =>
   props.db.batches.find((b) => b.id === current.value),
 );
@@ -77,13 +85,13 @@ const metrics = computed(() =>
 const actionsFor = row => row.preparationOnly && currentPrototypeUser().id !== row.ownerId
   ? ["detail"] : batchActions(props.db, row);
 const detailActions = computed(() => batch.value
-  ? actionsFor(batch.value).filter((a) => !["detail", "process", "copy", "cancel", "edit"].includes(a))
+  ? actionsFor(batch.value).filter(a => batch.value.executionReview ? !["detail", "process", "copy"].includes(a) : !["detail", "process", "copy", "cancel", "edit"].includes(a))
   : []);
 const records = computed(() =>
   props.db.batches
     .filter(
       (b) =>
-        formalBatch(props.db, b) && !!b.preparationOnly === props.preparationOnly &&
+        formalBatch(props.db, b) && !!b.preparationOnly === props.preparationOnly && !!b.executionReview === props.executionReview &&
         (!b.preparationOnly || currentPrototypeUser().role !== "运营" || b.ownerId === currentPrototypeUser().id) &&
         (!search.value ||
           `${b.name} B-${b.id}`
@@ -105,6 +113,11 @@ const rows = computed(() =>
 const preview = computed(() =>
   batch.value ? executionPreview(props.db, batch.value) : [],
 );
+const startReview = computed(() => batch.value?.executionReview && batchState(props.db, batch.value) === "未开始"
+  ? startReviewScope(props.db, batch.value, included.value) : null);
+const needsScopeConfirmation = computed(() => !!startReview.value &&
+  (startReview.value.shortfalls.some(item => item.shortfall > 0) || startReview.value.ready.length !== startReview.value.preview.length));
+const reviewedExceptions = computed(() => batch.value?.executionReview ? executionExceptions(props.db, batch.value) : []);
 const usable = computed(() => preview.value.filter((x) => !x.errors.length));
 const blocked = computed(() => preview.value.filter((x) => x.errors.length));
 const plan = (b) => props.db.plans.find((p) => p.id === b.planId);
@@ -130,6 +143,7 @@ const columns = computed(() => [
   },
 ]);
 function open(b, process = false, updateURL = true, restore = false) {
+  if (b.executionReview && currentPrototypeUser().role === "运营" && currentPrototypeUser().id !== b.ownerId) return;
   if (!formalBatch(props.db, b)) {
     detailOpen.value = false;
     const skeleton = b.planId || props.db.plans.some(p => p.items?.some(i => i.kind === 'batch' && i.id === b.id));
@@ -159,7 +173,20 @@ watch(detailOpen, (visible) => emit("detail-change", visible), { flush: "sync" }
 watch(() => props.active, (active) => {
   if (!active) detailOpen.value = false;
 });
+function actionLabel(action, row) {
+  if (row?.executionReview) {
+    if (action === "execute") return "开始发布";
+    if (action === "stop") return "终止发布";
+  }
+  return row.preparationOnly && action === "configure" ? "编辑配置" : labels[action];
+}
+function setIncluded(keys) {
+  included.value = keys;
+  checkedScope.value = startReview.value?.signature;
+  partial.value = false;
+}
 async function action(b, a) {
+  if (b.executionReview && !actionsFor(b).includes(a)) return;
   current.value = b.id;
   error.value = "";
   if (a === "detail" || a === "process") return open(b, a === "process");
@@ -176,6 +203,13 @@ async function action(b, a) {
   reason.value = "";
   version.value = b.version || 0;
   requestKey.value = crypto.randomUUID();
+  if (b.executionReview && a === "execute") {
+    setIncluded(executionPreview(props.db, b).filter(item => !item.errors.length).map(item => item.task.key));
+    if (startReview.value?.ready.length && !needsScopeConfirmation.value) return submit();
+  }
+  if (b.executionReview && a === "resume") {
+    checkedPause.value = { pauseId: b.pause?.id, exceptionKeys: reviewedExceptions.value.map(item => item.key) };
+  }
   opOpen.value = true;
 }
 async function command(a, input = {}) {
@@ -201,11 +235,16 @@ async function submit() {
       name: name.value,
       reason: reason.value,
       taskId: pendingTask.value?.id,
+      ...(batch.value.executionReview && op.value === "execute" ? { included: included.value, scope: checkedScope.value } : {}),
+      ...(batch.value.executionReview && op.value === "resume" ? checkedPause.value : {}),
     });
     opOpen.value = false;
     feedback.toast.success(
       {
-        execute: "批次执行请求已接受，结构与资源映射已锁定",
+        execute: batch.value.executionReview ? "已开始发布，正式任务与执行设置已锁定" : "批次执行请求已接受，结构与资源映射已锁定",
+        pause: "已暂停后续派发，已开始任务继续收尾",
+        resume: "已继续发布，异常待办与记录已保留",
+        finish: "批次已结束，失败记录与成片占用已保留",
         stop: "已停止未启动任务；在途任务继续回传结果",
         cancel: "批次已终止",
         copy: "已生成新草稿，请重新匹配账号与成片",
@@ -215,6 +254,10 @@ async function submit() {
     );
   } catch (e) {
     error.value = e.message;
+    if (batch.value?.executionReview && op.value === "execute") {
+      error.value = `批次已保存，尚未开始发布。 ${error.value}`;
+      opOpen.value = true;
+    }
   } finally {
     busy.value = false;
   }
@@ -379,7 +422,7 @@ defineExpose({ open, action, edit, directURL, operateTask });
       >
       <template #progress="{ row }">
         <span v-if="!batchMetrics(db, row).total">{{
-          row.preparationOnly ? `${row.candidates?.length || 0} 条候选 · 0 条任务` : batchState(db, row) === "草稿" ? "配置中" : "未创建任务"
+          row.preparationOnly && (!row.executionReview || !row.firstStartedAt) ? `${row.candidates?.length || 0} 条候选 · 0 条任务` : batchState(db, row) === "草稿" ? "配置中" : "未创建任务"
         }}</span>
         <template v-else
           ><div class="batch-progress-title">
@@ -427,7 +470,7 @@ defineExpose({ open, action, edit, directURL, operateTask });
               'is-danger': ['cancel', 'stop'].includes(a),
             }"
             @click="action(row, a)"
-            >{{ row.preparationOnly && a === "configure" ? "编辑配置" : labels[a] }}</t-button
+            >{{ actionLabel(a, row) }}</t-button
           ></ResourceRowActions
         ></template
       >
@@ -447,7 +490,7 @@ defineExpose({ open, action, edit, directURL, operateTask });
     back-label="返回发布批次列表"
     @back="returnToList"
   >
-    <BatchDetailContent :db="db" :batch="batch" v-model:search="taskSearch" v-model:filter="taskFilter" @task="emit('task',$event)" @task-action="taskOp" />
+    <BatchDetailContent :db="db" :batch="batch" :read-only="batch.executionReview && currentPrototypeUser().id !== batch.ownerId" v-model:search="taskSearch" v-model:filter="taskFilter" @task="emit('task',$event)" @task-action="taskOp" />
     <template v-if="detailActions.length" #footer>
       <t-button
         v-for="a in [...detailActions].reverse()"
@@ -456,7 +499,7 @@ defineExpose({ open, action, edit, directURL, operateTask });
         :theme="a === detailActions[0] && !['cancel', 'stop'].includes(a) ? 'primary' : 'default'"
         :variant="['cancel', 'stop'].includes(a) ? 'text' : a === detailActions[0] ? 'base' : 'outline'"
         @click="action(batch, a)"
-      >{{ labels[a] }}</t-button>
+      >{{ actionLabel(a, batch) }}</t-button>
     </template>
   </ResourceDetailPage>
   <Overlay
@@ -467,8 +510,8 @@ defineExpose({ open, action, edit, directURL, operateTask });
         : op === 'repair'
           ? '恢复原资源'
           : op === 'stop'
-            ? '停止发布'
-            : labels[op] + '批次'
+            ? actionLabel(op, batch)
+            : batch?.executionReview && ['execute','pause','resume','finish'].includes(op) ? actionLabel(op, batch) : labels[op] + '批次'
     "
     :width="640"
     :busy="busy"
@@ -479,7 +522,37 @@ defineExpose({ open, action, edit, directURL, operateTask });
         <small>{{ batch.id }} · {{ batch.platform }}</small>
       </div>
       <t-alert v-if="error" theme="warning" :message="error" />
-      <template v-if="op === 'execute'"
+      <template v-if="op === 'execute' && batch.executionReview && startReview">
+        <div class="batch-dialog-counts">
+          <div><strong>{{ metrics.target }}</strong><small>原目标</small></div>
+          <div><strong>{{ startReview.ready.length }}</strong><small>本次发布</small></div>
+          <div><strong>{{ startReview.shortfalls.reduce((sum, item) => sum + item.shortfall, 0) }}</strong><small>目标缺口</small></div>
+        </div>
+        <p>开始后按所选范围一次建立正式任务。原目标保持不变。</p>
+        <t-checkbox-group :value="included" :options="preview.filter(item => !item.errors.length).map(({ task }) => ({
+          label: db.assets.find(asset => asset.id === task.assetId)?.title || '原成片', value: task.key,
+        }))" @change="setIncluded" />
+        <ul v-if="blocked.length" class="batch-blocked">
+          <li v-for="item in blocked" :key="item.task.key">{{ db.assets.find(asset => asset.id === item.task.assetId)?.title }}：{{ item.errors.join("；") }}</li>
+        </ul>
+        <t-checkbox v-if="needsScopeConfirmation && startReview.ready.length" v-model="partial">确认按所选范围发布并保留缺口</t-checkbox>
+        <t-alert v-if="!startReview.ready.length" theme="warning" message="暂无可发布候选。批次已保存，可返回完善配置。" />
+      </template>
+      <template v-else-if="op === 'pause'">
+        <p>暂停后续派发。已开始的任务继续安全收尾。</p>
+        <label class="batch-form-field">暂停原因<t-textarea v-model="reason" :maxlength="500" /></label>
+      </template>
+      <template v-else-if="op === 'resume'">
+        <p>{{ batch.pause?.reason }}</p>
+        <p>确认已查看以下问题并继续后续发布。失败、人工及未知待办仍保留。</p>
+        <ul v-if="reviewedExceptions.length" class="batch-blocked">
+          <li v-for="{ task } in reviewedExceptions" :key="task.id">{{ account(task.accountId) }} · {{ task.status }} · {{ task.evidence }}</li>
+        </ul>
+      </template>
+      <template v-else-if="op === 'finish'">
+        <p>保留 {{ metrics.failed }} 条明确失败及成片占用，结束后本批不能再重试。</p>
+      </template>
+      <template v-else-if="op === 'execute'"
         ><div class="batch-dialog-counts">
           <div>
             <strong>{{ rows.length }}</strong><small>任务总数</small>
@@ -518,11 +591,13 @@ defineExpose({ open, action, edit, directURL, operateTask });
         <p>
           <b>停止后不可重新启动，也不能创建新的重试执行。</b
           >在途和结果不明确的任务仍需完成核实或处置。
-        </p></template
-      >
+        </p>
+        <label v-if="batch.executionReview" class="batch-form-field">终止原因<t-textarea v-model="reason" :maxlength="500" /></label>
+      </template>
       <template v-else-if="op === 'cancel'"
         ><p>
-          批次尚未执行。终止后原批次不可恢复，已配置的任务一并取消；可从终态批次复制新建。
+          {{ batch.executionReview ? "批次尚未开始，终止后不可恢复。当前没有正式任务或成片占用。" :
+            "批次尚未执行。终止后原批次不可恢复，已配置的任务一并取消；可从终态批次复制新建。" }}
         </p>
         <label class="batch-form-field"
           >终止原因<t-textarea
@@ -564,13 +639,16 @@ defineExpose({ open, action, edit, directURL, operateTask });
         "
         :loading="busy"
         :disabled="
-          op === 'execute' &&
-          (!usable.length ||
+          op === 'execute' && (batch.executionReview
+            ? (!startReview?.ready.length || (needsScopeConfirmation && !partial))
+            : (!usable.length ||
             (blocked.length && !partial) ||
-            (plan(batch) && !batch.sourcePlanId && !takeover))
+            (plan(batch) && !batch.sourcePlanId && !takeover)))
         "
         @click="submit"
         >{{
+          batch?.executionReview && op === "execute" ? "确认开始发布" :
+          batch?.executionReview && ["pause", "resume", "finish", "stop"].includes(op) ? "确认" + actionLabel(op, batch) :
           op === "execute"
             ? blocked.length
               ? "仅执行可用任务"

@@ -15,6 +15,7 @@ import TaskRowActions from './TaskRowActions.vue';
 import { taskActionItems } from './taskExperience.js';
 import { opColumnWidth } from '../../../src/shared/ui/resource/opColumnWidth.js';
 import { formatDateTime } from '../../../src/shared/utils/datetime.js';
+import { groupCandidates } from './batchExecutionSettings.js';
 import { batchState, batchMetrics, rowsFor, isPendingTask, executionChecks } from './batchLifecycle.js';
 import '../../../src/shared/styles/resource-data-table.css';
 const props=defineProps({db:Object,batch:Object,readOnly:Boolean,search:{type:String,default:''},filter:{type:String,default:''}});
@@ -32,11 +33,24 @@ const stateLabel=computed(()=>{const state=batchState(props.db,props.batch);retu
 const successHelp='已确认发布成功的任务数 / 发布目标数。取消、放弃和结果待确认的任务不计入发布成功数。';
 const tasks=computed(()=>rows.value.filter(t=>(!taskSearch.value||`${t.id} ${t.title} ${account(t.accountId)}`.includes(taskSearch.value))&&(!taskFilter.value||(taskFilter.value==='待处理'?isPendingTask(t,batch.value):t.status===taskFilter.value))));
 const taskSection=ref(null);
+const candidateOnly = computed(() => batch.value.preparationOnly && !batch.value.firstStartedAt);
+const groupSummary = computed(() => {
+  const row = batch.value;
+  if (!row.executionReview || candidateOnly.value || row.endedAt || row.stoppedAt) return "";
+  const group = row.executionGroup;
+  if (group?.endedAt && rows.value.some(task => task.status === "排队中")) {
+    if (group.nextAt > Date.now()) return `本组自动处理已结束。最早下一组：${date(new Date(group.nextAt).toISOString())}`;
+    return groupCandidates(props.db, row, Date.now()).reason || "组间间隔已到，等待下一组派发";
+  }
+  if (group && !group.endedAt) return `本组已安排 ${group.taskIds.length} 个独立账号，按可用 Profile 数成组执行`;
+  return groupCandidates(props.db, row, Date.now()).reason;
+});
 function showPending(){taskFilter.value='待处理';nextTick(()=>taskSection.value?.$el?.scrollIntoView({block:'start'}));}
 const taskColumns = computed(() => [
   { colKey: "identity", title: "任务 / 发布内容", minWidth: 220 },
   { colKey: "resource", title: "账号 / 成片", minWidth: 175 },
   { colKey: "status", title: "任务状态", width: 115 },
+  ...(batch.value.executionReview ? [{ colKey: "group", title: "执行组", width: 88 }] : []),
   { colKey: "issue", title: "异常原因", minWidth: 200 },
   ...(!props.readOnly ? [{ colKey: "operation", title: "操作", fixed: "right", width: Math.max(100, ...rows.value.map(t => {
     const a = taskActionItems(t, props.db);
@@ -82,9 +96,14 @@ const history = computed(() =>
           <Field label="最近更新">{{ date(batch.updatedAt || batch.created) }}</Field>
           <Field v-if="batchState(db, batch) === '已结束'" label="发布结果">{{ metrics.result }}</Field>
         </ResourceDescriptions>
-        <ResourceNotice v-if="batch.stoppedAt">已停止发布。未启动任务已取消，在途任务继续回传结果；不能重新启动。</ResourceNotice>
+        <ResourceNotice v-if="batch.stoppedAt">{{ batch.executionReview
+          ? "已终止后续派发。未领取任务已取消并保留成片占用，在途任务等待原尝试结果。"
+          : "已停止发布。未启动任务已取消，在途任务继续回传结果；不能重新启动。" }}</ResourceNotice>
+        <ResourceNotice v-if="batch.executionReview && batch.control === '已暂停'" tone="warning">
+          {{ batch.pause?.reason }}。后续派发已暂停，已开始任务继续安全收尾。
+        </ResourceNotice>
       </ResourceSection></ResourceCard>
-      <ResourceCard v-if="batch.preparationOnly" class="detail-card">
+      <ResourceCard v-if="candidateOnly" class="detail-card">
         <ResourceSection title="候选配置">
           <ResourceDescriptions>
             <Field label="发布目标">{{ metrics.target }} 条</Field>
@@ -104,6 +123,17 @@ const history = computed(() =>
         </ResourceSection>
       </ResourceCard>
       <ResourceCard v-else class="detail-card"><ResourceSection title="执行情况">
+        <ResourceDescriptions v-if="batch.executionReview">
+          <Field v-if="batch.executionGroup" label="执行组">第 {{ batch.executionGroup.number }} 组</Field>
+          <Field label="正式发布任务">{{ metrics.total }} 条</Field>
+          <Field label="目标缺口">{{ metrics.shortfall }} 条</Field>
+          <Field label="待平台公开">{{ metrics.reviewing }} 条</Field>
+          <Field label="并发数">{{ batch.executionSettings.concurrency }}</Field>
+          <Field label="组间发布间隔">{{ batch.executionSettings.groupInterval }} 秒</Field>
+          <Field label="组间处理">{{ batch.executionSettings.groupPolicy }}</Field>
+          <Field label="异常任务上限">{{ batch.executionSettings.exceptionLimit }}</Field>
+        </ResourceDescriptions>
+        <ResourceNotice v-if="groupSummary">{{ groupSummary }}</ResourceNotice>
         <ResourceStatGrid :items="[
           { key: 'target', label: '发布目标', value: metrics.target },
           { key: 'published', label: '已发布', value: metrics.published, tone: 'success' },
@@ -114,7 +144,7 @@ const history = computed(() =>
           <ResourceProgress label="发布成功率" :percentage="metrics.achievement" :value-text="`${metrics.published} / ${metrics.target} ·`" :help="successHelp" />
         </div>
       </ResourceSection></ResourceCard>
-      <ResourceCard v-if="!batch.preparationOnly" class="detail-card"><ResourceSection ref="taskSection" id="batch-tasks" title="批次任务">
+      <ResourceCard v-if="!candidateOnly" class="detail-card"><ResourceSection ref="taskSection" id="batch-tasks" title="批次任务">
         <template #title-extra><span class="batch-section-count">{{ rows.length }} 条</span></template>
         <ResourceFilterBar
           ><label class="wt-filter-field wt-filter-field--wide"
@@ -201,6 +231,7 @@ const history = computed(() =>
               >{{ row.status === "执行失败" ? "发布失败" : row.status }}</t-tag
             ></template
           >
+          <template #group="{ row }">{{ row.executionGroup ? `第 ${row.executionGroup} 组` : "—" }}</template>
           <template #issue="{ row }"
             ><span>{{
               ["执行失败", "结果待确认", "等待人工"].includes(row.status)
@@ -228,7 +259,7 @@ const history = computed(() =>
           /></template>
         </t-table>
       </ResourceSection></ResourceCard>
-      <ResourceCard class="detail-card"><ResourceSection :title="batch.preparationOnly ? '操作记录' : '执行记录'" description="按操作时间倒序">
+      <ResourceCard class="detail-card"><ResourceSection :title="candidateOnly ? '操作记录' : '执行记录'" description="按操作时间倒序">
         <t-table
           class="resource-data-table resource-embedded-table"
           :key="`history-${batch.id}-${history.length > 10}`"

@@ -4,7 +4,12 @@ import {
   confirmPlan,
   createPublication,
   clone,
+  claimTask,
+  setResult,
 } from "./relationships.js";
+import { rowsFor, runBatchCommand, startReviewScope } from "./batchLifecycle.js";
+import { reconcileExecutionGroup } from "./batchExecutionSettings.js";
+import { preparationRecord } from "./preparationPreview.js";
 import { initCandidate } from "./content.js";
 import { defaults, declarationOptions, backgroundPicture } from "./model.js";
 export function addScenario(db, kind) {
@@ -237,4 +242,92 @@ export function addTaskReviewScenario(db) {
   });
   db.tasks.push(...tasks);
   return tasks;
+}
+
+// CHG108 review rows are fictional and exercise the same batch commands as the preview.
+export function addExecutionReviewScenarios(db) {
+  const platform = "百家号";
+  const category = "三角洲行动";
+  const sourceAsset = db.assets.find(asset => asset.category === category && asset.cover);
+  if (!sourceAsset) return;
+  const definitions = [
+    { key: "start", name: "启动检查 · 保留目标缺口", target: 4, count: 3 },
+    { key: "operator", name: "普通运营 · 已保存未开始", owner: "lin", count: 1 },
+    { key: "running", name: "分组执行 · 并发 5、可用 Profile 1", count: 3 },
+    { key: "interval", name: "组间等待 · 审核尚未公开", count: 3 },
+    { key: "paused", name: "异常暂停 · 保留人工现场", count: 3, groupPolicy: "异常暂停" },
+    { key: "finish", name: "明确失败 · 可结束批次", count: 1 },
+    { key: "stopped", name: "终止收尾 · 原结果尚未知", count: 3 },
+    { key: "public", name: "可信公开 · 30 目标／28 任务／24 公开", count: 28, target: 30 },
+  ];
+  let next = nextId(db);
+  for (const scenario of definitions) {
+    if (db.batches.some(batch => batch.executionReview === true && batch.previewSample === scenario.key)) continue;
+    const actor = scenario.owner === "lin" ? { id: "lin", name: "林予安" } : { id: "chen", name: "陈小雨" };
+    const batchId = next++;
+    const accounts = Array.from({ length: 2 }, (_, index) => ({
+      id: next++, name: `演示发布账号 ${index + 1}`, platform, categories: [category],
+      ownerId: actor.id, enabled: true, loginValid: true, platformUid: `uid-${batchId}-${index}`,
+      profileId: `profile-${batchId}-${scenario.key === "running" ? 0 : index}`,
+    }));
+    db.accounts.push(...accounts);
+    const rows = Array.from({ length: scenario.count }, (_, index) => {
+      const asset = { ...sourceAsset, id: next++, title: `演示成片 ${index + 1}`, category, ready: true,
+        fileAvailable: !(scenario.key === "start" && index === 2) };
+      db.assets.push(asset);
+      return initCandidate({
+        ...defaults(platform, asset), key: `preview-${batchId}-${index + 1}`,
+        accountId: accounts[(scenario.key === "paused" ? 0 : index) % accounts.length].id,
+        assetId: asset.id, category, platform, description: `演示发布文案 ${index + 1}`,
+        declaration: declarationOptions(platform)[0].value,
+        contentApproved: true, coverApproved: true,
+      });
+    });
+    const batch = preparationRecord({
+      name: scenario.name, platforms: [platform], categories: [category],
+      targets: [{ category, count: scenario.target || scenario.count }], rows, step: 3,
+      executionSettings: { concurrency: 5, groupInterval: 120, groupPolicy: scenario.groupPolicy || "自动继续", exceptionLimit: 3 },
+    }, { id: batchId, actor, executionReview: true });
+    batch.previewSample = scenario.key;
+    db.batches.push(batch);
+    if (["start", "operator"].includes(scenario.key)) continue;
+    const scope = startReviewScope(db, batch);
+    runBatchCommand(db, batch, "execute", { scope: scope.signature, partial: !!scenario.target });
+    next = nextId(db);
+    const tasks = rowsFor(db, batch);
+    const first = tasks[0];
+    claimTask(db, first);
+    if (scenario.key === "running") continue;
+    if (scenario.key === "interval") {
+      setResult(first, "平台审核中", { evidence: "演示平台已接收，尚未公开" });
+      claimTask(db, tasks[1]);
+      setResult(tasks[1], "平台审核中", { evidence: "演示平台已接收，尚未公开" });
+    } else if (scenario.key === "paused") {
+      setResult(first, "等待人工", { evidence: "演示原账号验证，保留原浏览器现场" });
+      first.suspendedAt = new Date().toISOString();
+    } else if (scenario.key === "stopped") {
+      setResult(first, "结果待确认", { evidence: "演示提交响应丢失，须核实原稿件" });
+      runBatchCommand(db, batch, "stop", { reason: "演示人工终止后续发布" });
+    } else if (scenario.key === "finish") {
+      setResult(first, "执行失败", { evidence: "演示已明确拒绝，原尝试安全结束且未发布" });
+    } else {
+      // Fixed evidence fixtures demonstrate the read-back projection only.
+      for (const [index, task] of tasks.entries()) {
+        task.executionGroup = Math.floor(index / 2) + 1;
+        if (!task.attemptHistory.length)
+          task.attemptHistory.push({ number: 1, started: new Date().toISOString(), snapshot: task.snapshot });
+        task.attempts = 1;
+        if (index < 24) {
+          const workId = next++;
+          db.works ||= [];
+          db.works.push({ id: workId, platform, platformId: `demo-${workId}`, sourceTaskIds: [task.id] });
+          Object.assign(task, { workId, platformId: `demo-${workId}` });
+          setResult(task, "已发布", { evidence: "演示原尝试已关联匿名可播放作品" });
+        } else setResult(task, "平台审核中", { evidence: "演示平台已接收，尚未公开" });
+      }
+      batch.executionGroup = null;
+      batch.endedAt = new Date().toISOString();
+    }
+    reconcileExecutionGroup(db, batch, Date.now(), { dispatch: false });
+  }
 }
