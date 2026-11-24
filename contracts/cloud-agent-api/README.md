@@ -34,9 +34,16 @@ barrier before requesting a browser and durable closure evidence before sending
 settlement. Recovery keeps the original key and settlement after Desktop
 session replacement. A replay of a released key retrieves only its original acknowledgement. If the
 response is lost before a reservation is persisted locally, the original
-session uses ReportSafe with `settle_unreceived: true` and the durable exact
-request key. An admitted key settles only its original reservation. An
-unadmitted key records a cancellation fence and blocks a racing late claim.
+Agent sends `settle_unreceived: true` with the durable exact request key.
+For this operation and known-reservation release, it uses a current Strict
+credential for the same owner, including a replacement session, or a valid
+non-current ReportSafe credential matching the original owner and admitted
+session. An admitted key settles only its original reservation. An unadmitted
+key records a cancellation fence and blocks a racing late claim. The Agent
+durably chooses between accepting the active reply for work and settling the
+unreceived request with a compare-and-set on the original key and phase.
+Once it chooses settlement, a late active reply can only recover the original
+acknowledgement.
 Both outcomes return acknowledgement only. A current observation still
 requires strict authentication and explicit, consistent closure evidence.
 The separate release-only payload settles only the exact original reservation

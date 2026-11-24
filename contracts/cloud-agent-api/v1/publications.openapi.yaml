@@ -136,9 +136,13 @@ paths:
         journal proves the possible-open barrier was never crossed. If crossed or unknown, reconcile the exact
         old scene before settlement. A released replay returns only its original acknowledgement and never
         returns a snapshot or creates a new generation.
-        The settle_unreceived branch is ReportSafe for the original requesting session and owner. It
-        accepts only the durable original key when the Agent has never persisted a reservation reply or
-        begun work and still proves it never opened the original scene. It returns no work snapshot.
+        The settle_unreceived branch accepts a current Strict credential for the same owner, including
+        a replacement session, or a valid non-current ReportSafe credential matching both the original owner
+        and admitted session. It accepts only the durable original key when the Agent has never persisted
+        a reservation reply or begun work and still proves it never opened the original scene. The Agent
+        atomically chooses one durable state for that key, accepting an active reply for work or electing
+        settlement. A late active response after settlement was elected only triggers acknowledgement
+        recovery and cannot start a read or open a window. Settlement returns no work snapshot.
         An already admitted key releases only that original reservation and returns its acknowledgement.
         A key with no reservation is atomically tombstoned so a later in-flight claim cannot allocate it.
       requestBody:
@@ -164,7 +168,7 @@ paths:
                           - {$ref: '#/components/schemas/PublicCheckClaim'}
                           - {$ref: '#/components/schemas/ReleasedPublicCheckClaim'}
                           - {$ref: '#/components/schemas/CancelledPublicCheckClaim'}
-        '401': {description: Claim requires a current Desktop session. Unreceived settlement requires the valid original-session ReportSafe token.}
+        '401': {description: Claim requires a current Desktop session. Unreceived settlement requires a current same-owner Strict token or a valid original-owner and original-session ReportSafe token.}
         '409': {description: Request key reused with different input, a newer Agent contract is required, or legacy cutover still closes new admission.}
   /api/v1/cloud-agent/publication-task/{id}/check:
     post:
@@ -175,8 +179,10 @@ paths:
         The observation branch requires the current Desktop session and matches the original task, attempt,
         generation, Profile reservation and current task revision. It records only unknown/received/public
         observations and releases the original Profile use once verified safe. Credible public evidence records
-        the work, task projection, observation and audit atomically. The explicit release-only branch uses
-        ReportSafe authentication and verifies the original operation and trustworthy no-open/closed disposition.
+        the work, task projection, observation and audit atomically. The explicit release-only branch
+        accepts a current Strict credential for the same owner or a valid non-current ReportSafe credential
+        matching both the original owner and admitted session. It verifies the original operation and
+        trustworthy no-open/closed disposition.
         It only settles that Profile use, even if task revision changed or an observation became stale. Exact
         acknowledgement replay cannot release a successor or apply an observation again.
       requestBody:
@@ -203,7 +209,7 @@ paths:
                               - {$ref: '#/components/schemas/PublicCheckReleaseAcknowledgement'}
                               - not: {required: [observation_hash]}
         '400': {description: Invalid observation, release evidence or unsupported conclusion.}
-        '401': {description: Observation requires a current Desktop session. Release-only requires a valid original-owner report-safe token.}
+        '401': {description: Observation requires a current Desktop session. Release-only accepts a current same-owner Strict token or an original-owner and original-session ReportSafe token.}
         '409': {description: Original revision, attempt, generation, input or reservation changed, or evidence conflicts. A stale observation can be followed by original release-only closure.}
 components:
   securitySchemes:
