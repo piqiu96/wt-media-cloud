@@ -144,73 +144,94 @@ func (s ExecutionStore) ClaimPublicCheckV2(actor model.CheckActor, in model.Chec
 			return err
 		}
 		capacity := s.localCapacity(in.Capacity)
-		rows := []model.Task{}
-		if err = tx.Where("operator_id=? AND status=? AND platform='baidu' AND next_check_at<=? AND check_stopped_at IS NULL AND accepted_at>?",
-			actor.UserID, model.StatusReviewing, now, now.Add(-publicCheckLifetime)).Where(`
-			NOT EXISTS (
-				SELECT 1 FROM publication_attempt a
-				JOIN publication_profile_use p
-				ON p.active_main_id=JSON_UNQUOTE(JSON_EXTRACT(a.input_snapshot_json,'$.bit_main_user_id'))
-				AND p.active_profile_id=JSON_UNQUOTE(JSON_EXTRACT(a.input_snapshot_json,'$.bit_profile_id'))
-				WHERE a.id=publication_task.current_attempt_id
-			)`).Order("next_check_at,id").Limit(20).Find(&rows).Error; err != nil {
-			return err
-		}
-		// The actual Profile unique key resolves contention with claims made
-		// after this read. Hold at most one batch lock per transaction.
-		for _, row := range rows {
-			v, a, e := s.checkCandidate(tx, row, actor.UserID, now)
-			if errors.Is(e, ErrInputChanged) || errors.Is(e, ErrNotFound) || errors.Is(e, ErrConflict) {
-				continue
-			}
+		var afterTime *time.Time
+		var afterID uint64
+		for {
+			// The request intent was locked and any original winner replayed
+			// above. A full owner window must not scan the remaining backlog.
+			window, e := freeWindowSlot(tx, actor.UserID, capacity.WindowSlots)
 			if e != nil {
 				return e
 			}
-			// Reviewing work remains eligible after its parent stops or finishes.
-			if _, e = lockTaskBatch(tx, v); e != nil {
-				return e
-			}
-			use, e := tryProfileUse(tx, actor.UserID, v, a.Input, "check", capacity.WindowSlots, now)
-			if errors.Is(e, ErrProfileUse) || errors.Is(e, ErrCapacityWait) {
+			if window == 0 {
 				return errNoCheck
 			}
-			if e != nil {
-				return e
+			rows := []model.Task{}
+			query := tx.Where("operator_id=? AND status=? AND platform='baidu' AND next_check_at<=? AND check_stopped_at IS NULL AND accepted_at>?",
+				actor.UserID, model.StatusReviewing, now, now.Add(-publicCheckLifetime)).Where(`
+				NOT EXISTS (
+					SELECT 1 FROM publication_attempt a
+					JOIN publication_profile_use p
+					ON p.active_main_id=JSON_UNQUOTE(JSON_EXTRACT(a.input_snapshot_json,'$.bit_main_user_id'))
+					AND p.active_profile_id=JSON_UNQUOTE(JSON_EXTRACT(a.input_snapshot_json,'$.bit_profile_id'))
+					WHERE a.id=publication_task.current_attempt_id
+				)`)
+			if afterTime != nil {
+				query = query.Where("next_check_at>? OR (next_check_at=? AND id>?)", *afterTime, *afterTime, afterID)
 			}
-			current, e := taskSnapshot(tx.Clauses(clause.Locking{Strength: "UPDATE"}), v.ID)
-			if e != nil {
-				return e
+			if err = query.Order("next_check_at,id").Limit(20).Find(&rows).Error; err != nil {
+				return err
 			}
-			if !sameCandidate(v, current) || !eligibleCheck(current, actor.UserID, now) ||
-				current.CheckGeneration != v.CheckGeneration || *current.CurrentAttemptID != a.ID {
+			// The actual Profile unique key resolves contention with claims made
+			// after this read. Hold at most one batch lock per transaction.
+			for _, row := range rows {
+				v, a, e := s.checkCandidate(tx, row, actor.UserID, now)
+				if errors.Is(e, ErrInputChanged) || errors.Is(e, ErrNotFound) || errors.Is(e, ErrConflict) {
+					continue
+				}
+				if e != nil {
+					return e
+				}
+				// Reviewing work remains eligible after its parent stops or finishes.
+				if _, e = lockTaskBatch(tx, v); e != nil {
+					return e
+				}
+				use, e := tryProfileUse(tx, actor.UserID, v, a.Input, "check", capacity.WindowSlots, now)
+				if errors.Is(e, ErrProfileUse) || errors.Is(e, ErrCapacityWait) {
+					return errNoCheck
+				}
+				if e != nil {
+					return e
+				}
+				current, e := taskSnapshot(tx.Clauses(clause.Locking{Strength: "UPDATE"}), v.ID)
+				if e != nil {
+					return e
+				}
+				if !sameCandidate(v, current) || !eligibleCheck(current, actor.UserID, now) ||
+					current.CheckGeneration != v.CheckGeneration || *current.CurrentAttemptID != a.ID {
+					return errNoCheck
+				}
+				generation := v.CheckGeneration + 1
+				next := now.Add(publicCheckDelay(now.Sub(*v.AcceptedAt)))
+				if deadline := v.AcceptedAt.Add(publicCheckLifetime); next.After(deadline) {
+					next = deadline
+				}
+				if e = tx.Model(&model.Task{}).Where("id=?", v.ID).UpdateColumns(map[string]any{
+					"check_generation": generation, "next_check_at": next,
+				}).Error; e != nil {
+					return e
+				}
+				use.AttemptID, use.CheckGeneration, use.CheckRevision = &a.ID, &generation, &v.Revision
+				use.CheckBrowserFallbackAllowed = v.CheckBrowserUsedAt == nil
+				if e = tx.Model(&model.ProfileUse{}).Where("id=?", use.ID).Updates(map[string]any{
+					"attempt_id": a.ID, "check_generation": generation, "check_revision": v.Revision, "check_browser_fallback_allowed": use.CheckBrowserFallbackAllowed,
+				}).Error; e != nil {
+					return e
+				}
+				if e = tx.Model(&model.PublicCheckRequest{}).Where("owner_id=? AND request_key=?", actor.UserID, in.RequestKey).Updates(map[string]any{
+					"request_hash": digest, "reservation_id": use.ID,
+				}).Error; e != nil {
+					return e
+				}
+				result = checkClaim(v, a, use, false)
+				return nil
+			}
+			if len(rows) < 20 {
 				return errNoCheck
 			}
-			generation := v.CheckGeneration + 1
-			next := now.Add(publicCheckDelay(now.Sub(*v.AcceptedAt)))
-			if deadline := v.AcceptedAt.Add(publicCheckLifetime); next.After(deadline) {
-				next = deadline
-			}
-			if e = tx.Model(&model.Task{}).Where("id=?", v.ID).UpdateColumns(map[string]any{
-				"check_generation": generation, "next_check_at": next,
-			}).Error; e != nil {
-				return e
-			}
-			use.AttemptID, use.CheckGeneration, use.CheckRevision = &a.ID, &generation, &v.Revision
-			use.CheckBrowserFallbackAllowed = v.CheckBrowserUsedAt == nil
-			if e = tx.Model(&model.ProfileUse{}).Where("id=?", use.ID).Updates(map[string]any{
-				"attempt_id": a.ID, "check_generation": generation, "check_revision": v.Revision, "check_browser_fallback_allowed": use.CheckBrowserFallbackAllowed,
-			}).Error; e != nil {
-				return e
-			}
-			if e = tx.Model(&model.PublicCheckRequest{}).Where("owner_id=? AND request_key=?", actor.UserID, in.RequestKey).Updates(map[string]any{
-				"request_hash": digest, "reservation_id": use.ID,
-			}).Error; e != nil {
-				return e
-			}
-			result = checkClaim(v, a, use, false)
-			return nil
+			last := rows[len(rows)-1]
+			afterTime, afterID = last.NextCheckAt, last.ID
 		}
-		return errNoCheck
 	})
 	if errors.Is(err, errNoCheck) {
 		return nil, nil
