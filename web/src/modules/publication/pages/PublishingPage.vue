@@ -19,7 +19,8 @@ import MediaPreview from "../../../shared/ui/media/MediaPreview.vue";
 import { platformLabel } from "../../../shared/utils/platforms.js";
 import ResourceEditorPage from "../../../shared/ui/resource/ResourceEditorPage.vue";
 import ResourceDetailPage from "../../../shared/ui/resource/ResourceDetailPage.vue";
-import ResourceRowActions from "../../../shared/ui/resource/ResourceRowActions.vue";
+import PublicationTaskActions from "../components/PublicationTaskActions.vue";
+import { batchTaskReturn } from "../batchExecution.js";
 import { opColumnWidth } from "../../../shared/ui/resource/opColumnWidth.js";
 import BusinessStatus from "../../../shared/ui/BusinessStatus.vue";
 import FormError from "../../../shared/ui/feedback/FormError.vue";
@@ -502,6 +503,8 @@ async function openDetail(row) {
   try {
     const [task, history] = await Promise.all([client.get(row.id), client.attempt(row.id)]);
     detail.value = task;
+    const batchReturn = batchTaskReturn(route.query);
+    if (task.batch_id && batchReturn?.query.id === task.batch_id) detailReturn.value = "batch";
     attempts.value = history;
     view.value = "detail";
   } catch (e) {
@@ -515,6 +518,50 @@ const retryable = (task) => task.status === PublicationStatus.Failed && !task.ca
 const cancellable = (task) => task.can_cancel === true && !task.cancel_requested_at;
 const abandonable = (task) => task.status === PublicationStatus.Failed && !!task.current_attempt_id;
 const copyable = (task) => [PublicationStatus.Failed, PublicationStatus.Published, PublicationStatus.Cancelled, PublicationStatus.Abandoned].includes(task.status);
+function taskCan(task, action, legacy) {
+  return Array.isArray(task.allowed_actions) ? task.allowed_actions.includes(action) : legacy;
+}
+function taskActions(task, linkedDetail = false) {
+  const actions = [];
+  function add(key, label, show, { reason = "", primary = false, danger = false } = {}) {
+    if (show) actions.push({ key, label, reason, primary, danger, disabled: busy.value || !!reason });
+  }
+  add("start", "执行", canPublish.value && taskCan(task, "start", editable(task)), { reason: ownerReason(task), primary: true });
+  add("resume", "去处理", canPublish.value && taskCan(task, "resume", task.status === PublicationStatus.AwaitingHuman), {
+    reason: humanReason(task), primary: true,
+  });
+  add("resolve", task.status === PublicationStatus.Reviewing ? "补录结果" : "核实结果",
+    taskCan(task, "resolve", [PublicationStatus.Uncertain, PublicationStatus.Reviewing].includes(task.status)),
+    { reason: verificationReason(task), primary: true });
+  add("retry", "重试", canPublish.value && taskCan(task, "retry", retryable(task)), { reason: ownerReason(task), primary: true });
+  add("edit", "编辑", taskCan(task, "edit", editable(task)));
+  add("cancel", "终止", taskCan(task, "cancel", cancellable(task)), { reason: cancelReason(task), danger: true });
+  add("abandon", "放弃", taskCan(task, "abandon", abandonable(task)), { danger: true });
+  if (!linkedDetail) {
+    add("work", "查看作品", !!task.work_id);
+    add("copy", "复制", canPublish.value && taskCan(task, "copy", copyable(task)), { reason: ownerReason(task) });
+    add("detail", "详情", true);
+  }
+  return actions;
+}
+function runTaskAction(key, task) {
+  switch (key) {
+    case "start": return startExecution(task);
+    case "resume": return openHumanScene(task);
+    case "resolve": return openVerification(task);
+    case "retry": return retryExecution(task);
+    case "edit": return edit(task);
+    case "cancel": return openTermination(task, "cancel");
+    case "abandon": return openTermination(task, "abandon");
+    case "work": return router.push({ path: "/work", query: { work_id: task.work_id } });
+    case "copy": return copyTask(task);
+    case "detail": detailReturn.value = "list"; return openDetail(task);
+  }
+}
+async function refreshActionResult() {
+  if (view.value === "detail" && detail.value?.id) return openDetail(detail.value);
+  return load();
+}
 async function copyTask(row) {
   if (busy.value) return;
   busy.value = true; error.value = '';
@@ -543,7 +590,7 @@ async function openTermination(row, action) {
       terminationEvidence.value = recordedPublicationEvidence(task, await client.attempt(task.id));
       if (!terminationEvidence.value?.no_publishable_work) throw new Error('原尝试缺少安全结束且未投稿的记录，请由任务所属运营先核实');
     }
-    if (task.revision !== row.revision || !(action === 'cancel' ? cancellable(task) : action === 'abandon' && abandonable(task))) throw new Error('任务内容或状态已变化，请核对更新后的列表再操作');
+    if (task.revision !== row.revision || !(action === 'cancel' ? taskCan(task, 'cancel', cancellable(task)) : action === 'abandon' && taskCan(task, 'abandon', abandonable(task)))) throw new Error('任务内容或状态已变化，请核对更新后的列表再操作');
     terminationTask.value = JSON.parse(JSON.stringify(task));
     terminationAction.value = action; terminationError.value = ''; terminationSubmitted.value = false; terminationVisible.value = true;
   } catch (e) { await load(); feedback.toast.error(e.message); }
@@ -556,7 +603,7 @@ async function saveTermination(input) {
     const action = terminationAction.value;
     const result = await client[action](terminationTask.value.id, input);
     terminationVisible.value = false;
-    await load();
+    await refreshActionResult();
     feedback.toast.success(action === 'abandon' ? '已安全放弃，成片占用已释放' : result.status === PublicationStatus.Cancelled ? '已终止任务，保留成片占用' : '已请求安全停止，等待执行端确认；请查看任务结果');
   } catch (e) {
     await load();
@@ -571,10 +618,10 @@ async function startExecution(row) {
     await publicationUser();
     const task = await client.get(row.id);
     requireOwner(task);
-    if (!editable(task) || task.revision !== row.revision) throw new Error("任务内容或状态已变化，请核对更新后的列表再操作");
+    if (!taskCan(task, "start", editable(task)) || task.revision !== row.revision) throw new Error("任务内容或状态已变化，请核对更新后的列表再操作");
     if (!(await feedback.confirmWarning({title:"确认执行发布",message:`将使用账号「${task.resources.account_name}」自动发布此任务。请确认文案、封面和声明；执行后不能再编辑。`,confirmText:"确认执行"}))) return;
     await client.start(task.id, {expected_revision: task.revision});
-    await load();
+    await refreshActionResult();
     feedback.toast.success("已授权执行，等待所属用户的 Agent 领取");
   } catch (e) {
     const message = e.message;
@@ -591,7 +638,7 @@ async function openHumanScene(row) {
     if (disposed) return;
     requireOwner(task);
     if (humanReason(task)) throw new Error(humanReason(task));
-    if (task.status!==PublicationStatus.AwaitingHuman || !task.current_attempt_id) throw new Error('任务状态已变化，请刷新后核对');
+    if (!taskCan(task, "resume", task.status===PublicationStatus.AwaitingHuman) || !task.current_attempt_id) throw new Error('任务状态已变化，请刷新后核对');
     await handlePublicationHuman({task,userId:String(user.id)});
     if (disposed) return;
     humanTask.value=task;humanUserId.value=String(user.id);humanError.value='';humanVisible.value=true;
@@ -629,7 +676,7 @@ async function openVerification(row) {
       recoveryEvidence.value = recordedPublicationEvidence(task, await client.attempt(task.id));
       if (!recoveryEvidence.value?.scene_closed) throw new Error("原尝试缺少安全结束记录，请由任务所属运营先核实");
     }
-    if (![PublicationStatus.Uncertain,PublicationStatus.Reviewing].includes(task.status)) throw new Error("任务状态已变化，请核对列表后操作");
+    if (!taskCan(task, "resolve", [PublicationStatus.Uncertain,PublicationStatus.Reviewing].includes(task.status))) throw new Error("任务状态已变化，请核对列表后操作");
     recoveryTask.value = JSON.parse(JSON.stringify(task));
     recoveryError.value = "";
     recoveryVisible.value = true;
@@ -646,7 +693,7 @@ async function saveVerification(input) {
   try {
     await client.resolve(task.id,input);
     recoveryVisible.value=false;
-    await load();
+    await refreshActionResult();
     feedback.toast.success('已保存核实结果，原尝试与资源占用保留');
   } catch(e) {
     // Preserve the form. A missing response is not a reason to resend a write.
@@ -661,10 +708,10 @@ async function retryExecution(row) {
     await publicationUser();
     const task = await client.get(row.id);
     requireOwner(task);
-    if (!retryable(task) || task.revision !== row.revision) throw new Error("任务内容或状态已变化，请核对更新后的列表再操作");
+    if (!taskCan(task, "retry", retryable(task)) || task.revision !== row.revision) throw new Error("任务内容或状态已变化，请核对更新后的列表再操作");
     if (!(await feedback.confirmWarning({title:"重试任务",message:"确认原尝试无可发布稿件、执行现场已结束。将复查原账号、成片、封面与内容，沿用本任务重新执行；历史尝试与占用保留。",confirmText:"确认重试"}))) return;
     await client.retry(task.id, {expected_revision: task.revision});
-    await load();
+    await refreshActionResult();
     feedback.toast.success("原任务已重新排队，等待所属用户的 Agent 领取");
   } catch (e) {
     const message = e.message;
@@ -677,7 +724,7 @@ async function edit(row) {
   error.value = "";
   try {
     const v = await client.get(row.id);
-    if (!editable(v))
+    if (!taskCan(v, "edit", editable(v)))
       throw Error("当前任务已不能编辑，请刷新列表");
     const [a, o] = await Promise.all([
       accounts.get(v.media_account_id),
@@ -913,7 +960,7 @@ async function submit() {
     attempts.value = [];
     detail.value = saved;
     view.value = "detail";
-    detailReturn.value = source.value ? "source" : "list";
+    detailReturn.value = source.value ? "source" : saved.batch_id && batchTaskReturn(route.query)?.query.id === saved.batch_id ? "batch" : "list";
     feedback.toast.success(
       editing.value ? "发布内容已保存" : "任务已创建，尚未执行",
     );
@@ -954,6 +1001,11 @@ async function canLeave() {
 async function back() {
   if (busy.value) return;
   if (view.value === "form" && !(await canLeave())) return;
+  if (detailReturn.value === "batch") {
+    if (view.value === "form" && editing.value) return openDetail(editing.value);
+    const destination = batchTaskReturn(route.query);
+    if (destination) return router.push(destination);
+  }
   if (source.value || detailReturn.value === "source") {
     view.value = "list";
     await router.push("/finished-media");
@@ -1133,18 +1185,7 @@ onMounted(async () => {
               formatDateTime(row.created_at)
             }}</template>
             <template #op="{ row }">
-              <ResourceRowActions>
-                <t-button v-if="canPublish && editable(row)" class="is-primary" variant="text" size="small" :disabled="busy || !!ownerReason(row)" :title="ownerReason(row)" @click="startExecution(row)">执行</t-button>
-                <t-button v-if="canPublish && row.status===PublicationStatus.AwaitingHuman" class="is-primary" variant="text" size="small" :disabled="busy || !!humanReason(row)" :title="humanReason(row)" @click="openHumanScene(row)">去处理</t-button>
-                <t-button v-if="[PublicationStatus.Uncertain,PublicationStatus.Reviewing].includes(row.status)" class="is-primary" variant="text" size="small" :disabled="busy || !!verificationReason(row)" :title="verificationReason(row)" @click="openVerification(row)">{{row.status===PublicationStatus.Reviewing?'补录结果':'核实结果'}}</t-button>
-                <t-button v-if="canPublish && retryable(row)" class="is-primary" variant="text" size="small" :disabled="busy || !!ownerReason(row)" :title="ownerReason(row)" @click="retryExecution(row)">重试</t-button>
-                <t-button v-if="editable(row)" variant="text" size="small" :disabled="busy" @click="edit(row)">编辑</t-button>
-                <t-button v-if="cancellable(row)" theme="danger" variant="text" size="small" :disabled="busy || !!cancelReason(row)" :title="cancelReason(row)" @click="openTermination(row, 'cancel')">终止</t-button>
-                <t-button v-if="abandonable(row)" theme="danger" variant="text" size="small" :disabled="busy" @click="openTermination(row, 'abandon')">放弃</t-button>
-                <t-button v-if="row.work_id" variant="text" size="small" @click="router.push({path:'/work',query:{work_id:row.work_id}})">查看作品</t-button>
-                <t-button v-if="canPublish && copyable(row)" variant="text" size="small" :disabled="busy || !!ownerReason(row)" :title="ownerReason(row)" @click="copyTask(row)">复制</t-button>
-                <t-button variant="text" size="small" :disabled="busy" @click="detailReturn = 'list'; openDetail(row)">详情</t-button>
-              </ResourceRowActions>
+              <PublicationTaskActions :actions="taskActions(row)" @action="runTaskAction($event, row)" />
             </template>
           </t-table>
         <div class="pagination-bar">
@@ -1307,16 +1348,18 @@ onMounted(async () => {
       title="发布任务详情"
       :busy="busy"
       :back-label="
-        detailReturn === 'source' ? '返回成片管理' : '返回发布任务列表'
+        detailReturn === 'batch' ? '返回发布批次' : detailReturn === 'source' ? '返回成片管理' : '返回发布任务列表'
       "
       @back="back"
     >
       <FeedbackAlert v-if="error" theme="error" :message="error" />
+      <FeedbackAlert v-if="detail.execution_block?.message" theme="info" :message="detail.execution_block.message" />
       <ResourceCard class="detail-card"><ResourceSection title="任务信息">
         <ResourceDescriptions>
           <t-descriptions-item label="任务 ID">{{ detail.id }}</t-descriptions-item>
           <t-descriptions-item label="任务状态"><BusinessStatus :status="detail.status" :label="statusLabel(detail.status)" /><small v-if="detail.cancel_requested_at && detail.status === PublicationStatus.Running" class="publication-sub">已请求安全停止，等待确认</small></t-descriptions-item>
           <t-descriptions-item label="发布平台">{{ platformLabel(detail.platform) }}</t-descriptions-item>
+          <t-descriptions-item v-if="detail.execution_group_no" label="执行组">第 {{ detail.execution_group_no }} 组</t-descriptions-item>
           <t-descriptions-item label="内容类目">{{ categoryName(detail.category_id) }}</t-descriptions-item>
           <t-descriptions-item label="发布账号"><t-button v-if="detail.media_account_id" theme="primary" variant="text" size="small" @click="viewAccount(detail.media_account_id)">{{ detail.resources.account_name || "查看账号" }}</t-button><span v-else>—</span></t-descriptions-item>
           <t-descriptions-item label="账号所属用户">{{ detail.resources.account_owner || detail.operator_id }}</t-descriptions-item>
@@ -1354,6 +1397,9 @@ onMounted(async () => {
       <ResourceCard class="detail-card"><ResourceSection title="执行历史">
         <PublishingExecutionHistory :task="detail" :attempts="attempts" />
       </ResourceSection></ResourceCard>
+      <template v-if="detailReturn === 'batch'" #footer>
+        <PublicationTaskActions :actions="taskActions(detail, true)" @action="runTaskAction($event, detail)" />
+      </template>
     </ResourceDetailPage>
     <ResourceOverlay :visible="videoVisible" title="成片预览" :width="960" :footer="!!videoError" form-actions @update:visible="closeVideo">
       <t-loading :loading="videoLoading"><video v-if="videoURL" class="publication-video" :src="videoURL" controls preload="metadata" @error="videoFailed" /><FeedbackAlert v-if="videoError" theme="error" :message="videoError" /></t-loading>

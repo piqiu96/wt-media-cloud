@@ -166,3 +166,12 @@
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+.batch-execution-progress {
+  margin-block-start: var(--wt-space-block, 16px);
+}
+.batch-execution-progress .batch-muted,
+.batch-task-block {
+  display: block;
+  margin-block-start: 4px;
+}

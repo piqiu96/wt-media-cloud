@@ -22,8 +22,7 @@ export function createPublicationClient({
   };
 }
 
-// Batch configuration has its own lifecycle. Saving never calls task creation
-// or execution; CHG108 adds the separately authorized start command.
+// Batch configuration saves and explicit execution commands have separate endpoints.
 export function createPublicationBatchClient({
   base = "/api/v1",
   fetch = globalThis.fetch,
@@ -40,6 +39,13 @@ export function createPublicationBatchClient({
     save: (input) => api.post("/publication-batch", input),
     update: (id, input) => api.put(`/publication-batch/${id}/configuration`, input),
     records: (id, params) => api.get(`/publication-batch/${id}/record`, params),
+    tasks: (id, params) => api.get(`/publication-batch/${id}/task`, params),
+    executionPreview: (id, input) => api.post(`/publication-batch/${id}/execution-preview`, input),
+    start: (id, input) => api.post(`/publication-batch/${id}/start`, input),
+    pause: (id, input) => api.post(`/publication-batch/${id}/pause`, input),
+    resume: (id, input) => api.post(`/publication-batch/${id}/resume`, input),
+    stop: (id, input) => api.post(`/publication-batch/${id}/stop`, input),
+    finish: (id, input) => api.post(`/publication-batch/${id}/finish`, input),
     generate: (input, options) => api.stream("/publication/generate", input, options),
   };
 }
