@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   emptyPlan,
   planProblem,
+  planProgressLabels,
   splitBatch,
   mergeBatch,
   planReturn,
@@ -306,4 +307,9 @@ it("rejects a batch without a goal and duplicate batch cells", () => {
     },
   ];
   expect(planProblem(p)).not.toBe("");
+});
+
+it("names platform-review wait and a paused current batch without implying finish permission", () => {
+  expect(planProgressLabels.awaiting_finish).toBe("等待平台公开结果");
+  expect(planProgressLabels.batch_paused).toBe("当前批次已暂停");
 });

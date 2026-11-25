@@ -86,7 +86,7 @@ try {
       batch_count: 1,
       processed_batch_count: 1,
       status: "running",
-      progress: count === 1 ? "waiting_verification" : "waiting_tasks",
+      progress: count === 1 ? "waiting_verification" : "awaiting_finish",
       current_batch_id: "2",
       started_at: time,
       allowed_actions: [],
@@ -160,6 +160,13 @@ try {
         .count(),
       count ? 1 : 0,
     );
+    if (["normal_reviewing", "manual_reviewing"].includes(scene)) {
+      await page.getByText("等待平台公开结果", { exact: true }).waitFor();
+      const published = page.locator(".resource-stat-card").filter({
+        has: page.getByText("发布成功", { exact: true }),
+      });
+      assert.match(await published.locator("strong").textContent(), /^0\s*条$/);
+    }
     assert.equal(
       await page.getByRole("button", { name: "结束计划", exact: true }).count(),
       0,

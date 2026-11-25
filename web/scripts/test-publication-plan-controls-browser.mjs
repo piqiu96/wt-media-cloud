@@ -13,7 +13,9 @@ const cases = [
   ["waiting_verification", ["pause", "cancel"], null],
   ["waiting_resources", ["pause", "cancel"], null],
   ["running", ["takeover", "pause", "cancel"], "takeover"],
-  ["awaiting_finish", ["finish", "cancel"], "finish"],
+  ["awaiting_finish", ["cancel"], null],
+  ["batch_paused", ["pause", "cancel"], null],
+  ["ready_to_finish", ["finish", "cancel"], "finish"],
 ];
 for (const [progress, actions, action] of cases) {
   const page = await browser.newPage({
@@ -84,7 +86,7 @@ for (const [progress, actions, action] of cases) {
               name: "当前批次",
               platform: "baidu",
               targets: [{ category_id: "1", target_count: 10 }],
-              execution_status: "running",
+              execution_status: progress === "batch_paused" ? "paused" : "running",
               allowed_actions: [],
             },
             allowed_actions: [],
@@ -142,6 +144,10 @@ for (const [progress, actions, action] of cases) {
   });
   await page.goto(base + "/publish-plans?view=detail&id=3");
   await page.getByRole("heading", { name: "发布计划详情" }).waitFor();
+  if (progress === "batch_paused")
+    await page.getByText("当前批次已暂停", { exact: true }).waitFor();
+  if (progress === "awaiting_finish")
+    await page.getByText("等待平台公开结果", { exact: true }).waitFor();
   if (!action) {
     assert.equal(
       await page
