@@ -169,6 +169,14 @@ class PublicationPlanContractTest(unittest.TestCase):
         self.assertIn("reviewing", field["description"])
         self.assertIn("ExceptionLimit", field["description"])
 
+    def test_final_review_progress_waits_for_public_results_without_new_status(self):
+        plan = self.plan["components"]["schemas"]["Plan"]
+        progress = plan["properties"]["progress"]
+        Draft202012Validator(progress).validate("awaiting_finish")
+        self.assertIn("reviewing", progress["description"])
+        self.assertIn("not a persisted status", progress["description"])
+        self.assertNotIn("awaiting_finish", plan["properties"]["status"]["enum"])
+
     def test_handoff_into_cancelled_position_is_explicitly_not_a_start_receipt(self):
         value = {"plan_id": "1", "revision": "3", "previous_batch_id": "2", "current_batch_id": "3",
                  "decision": "automatic", "advanced_at": "2026-11-25T00:00:00Z",

@@ -1581,6 +1581,11 @@ components:
         status: *id017
         progress:
           type: string
+          description: Read-only runtime progress, not a persisted status. awaiting_finish
+            means no next batch remains but at least one started-prefix task is still
+            reviewing (including a valid manual reviewing conclusion); wait for platform
+            public results or final verification, not permission to finish. Verification,
+            unresolved tasks, manual pause and stopping retain their existing priority.
           enum:
           - preparing
           - running
@@ -1591,6 +1596,7 @@ components:
           - waiting_resources
           - waiting_continue
           - waiting_skip
+          - awaiting_finish
           - ready_to_finish
           - stopping
           - ended
