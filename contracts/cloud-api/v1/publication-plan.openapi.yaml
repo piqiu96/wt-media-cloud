@@ -1965,6 +1965,15 @@ components:
           type: object
           additionalProperties: false
           properties:
+            type:
+              type: string
+              maxLength: 100
+            retryable:
+              type: boolean
+            recovery_action:
+              type: string
+              maxLength: 100
+            field_errors: {}
             code:
               type: string
               maxLength: 100
@@ -1976,8 +1985,9 @@ components:
                 additionalProperties: true
                 not:
                   required: [command_applied]
-          required:
-          - code
+          anyOf:
+          - required: [code]
+          - required: [type]
       required:
       - errcode
       - message

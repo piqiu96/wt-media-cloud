@@ -2,6 +2,10 @@
 from __future__ import annotations
 
 import copy
+import json
+import os
+import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -188,6 +192,25 @@ class PublicationPlanContractTest(unittest.TestCase):
             bad = copy.deepcopy(resolve)
             bad["evidence"][field] = False
             self.assertFalse(validator.is_valid(bad), field)
+
+    def test_actual_hertz_command_error_envelopes_validate(self):
+        with tempfile.TemporaryDirectory(prefix="chg109-plan-error-") as directory:
+            fixture = Path(directory) / "actual-errors.json"
+            env = dict(os.environ, WT_MEDIA_PLAN_ERROR_FIXTURE=str(fixture))
+            result = subprocess.run(["go", "test", "./internal/modules/publish", "-run",
+                                     "^TestPlanNonApplicationUsesBoundActualHTTPEnvelopeAndLeavesOrdinaryConflictsUnknown$", "-count=1"],
+                                    cwd=ROOT, env=env, capture_output=True, text=True, timeout=180)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            bodies = json.loads(fixture.read_text())
+            self.assertEqual(len(bodies), 4)
+            for body in bodies:
+                self.schema("Error").validate(body)
+            proof = bodies[0]["error"]["details"]
+            self.schema("CommandNotApplied").validate(proof)
+            self.assertFalse(proof["command_applied"])
+            self.assertEqual(proof["request_key"], "original")
+            for body in bodies[1:]:
+                self.assertNotIn("command_applied", body["error"].get("details", {}))
 
     def test_non_application_receipt_is_strict_and_request_bound(self):
         details = {"command_applied": False, "command": "start", "request_key": "original",
