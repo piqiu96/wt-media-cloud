@@ -2,7 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from "vue-router";
 import ResourcePageHeader from "../../../shared/ui/resource/ResourcePageHeader.vue";
-import { batchStatus, batchListActions, batchActionLabel } from "../batchPresentation.js";
+import { batchStatus, batchListActions, batchActionLabel, batchRecordLabel } from "../batchPresentation.js";
 import { presentBatchIssues } from "../batchIssuePresentation.js";
 import ResourceCard from "../../../shared/ui/resource/ResourceCard.vue";
 import ResourceDetailPage from "../../../shared/ui/resource/ResourceDetailPage.vue";
@@ -117,11 +117,6 @@ const recordColumns = [
   { colKey: "event", title: "事件", width: 250 },
   { colKey: "actor", title: "操作人", width: 160 },
 ];
-const eventNames = { "publication_batch.create": "保存批次", "publication_batch.configure": "保存配置修改", created: "保存批次", configuration_updated: "保存配置修改",
-  publication_batch_created: "保存批次", publication_batch_configuration_updated: "保存配置修改",
-  "publication_batch.start": "开始发布", "publication_batch.pause": "暂停发布",
-  "publication_batch.resume": "继续发布", "publication_batch.stop": "终止发布",
-  "publication_batch.finish": "结束批次", };
 const platformOptions = ["baidu", "bilibili", "xiaohongshu"].map(value => ({ value, label: platformLabel(value) }));
 const options = labels => Object.entries(labels).map(([value, label]) => ({ value, label }));
 const categoryOptions = computed(() => categories.value.filter(item => item.enabled !== false).map(item => ({ label: item.name, value: String(item.id) })));
@@ -726,7 +721,7 @@ onBeforeUnmount(() => {
               <t-table class="wt-resource-table" :columns="recordColumns" :data="records.items || []" row-key="id"
                 :loading="recordsLoading" :scroll="{ x: '600px' }" :empty="recordsError ? '读取失败' : '暂无操作记录'">
                 <template #created_at="{ row }">{{ formatPublicationTime(row.created_at) }}</template>
-                <template #event="{ row }">{{ eventNames[row.event] || row.event }}</template>
+                <template #event="{ row }">{{ batchRecordLabel(row.event) }}</template>
                 <template #actor="{ row }">{{ row.actor_name || (row.actor_id === String(actor?.id) ? '本人' : row.actor_id ? '操作用户' : '系统') }}</template>
               </t-table>
             </div>

@@ -1,21 +1,23 @@
 <script setup>
-import { ref, onMounted, onBeforeUnmount, useSlots } from "vue";
+import { computed, ref, onMounted, onBeforeUnmount, useSlots } from "vue";
 import ResourceCard from "../../../shared/ui/resource/ResourceCard.vue";
 import ResourceSection from "../../../shared/ui/resource/ResourceSection.vue";
 import ResourceDescriptions from "../../../shared/ui/resource/ResourceDescriptions.vue";
 import ResourceNotice from "../../../shared/ui/resource/ResourceNotice.vue";
 import ResourceStatusBadge from "../../../shared/ui/resource/ResourceStatusBadge.vue";
-import { batchStatus } from "../batchPresentation.js";
+import { batchStatus, batchRecordLabel } from "../batchPresentation.js";
 import { configurationLabels } from "../batchPreparation.js";
 import BatchExecutionDetail from "./BatchExecutionDetail.vue";
 import BatchFormalTasks from "./BatchFormalTasks.vue";
+import BatchReadonlyCandidates from "./BatchReadonlyCandidates.vue";
+import ResourceEmptyState from "../../../shared/ui/resource/ResourceEmptyState.vue";
+import { candidateShortfalls } from "../batchPreparation.js";
 import { createPublicationBatchClient } from "../../../shared/api/publication.js";
 import {
   useBatchResourceCatalog,
   batchAccountName,
   batchOutputName,
 } from "../useBatchResourceCatalog.js";
-import { createFilesClient } from "../../../shared/api/files.js";
 import { platformLabel } from "../../../shared/utils/platforms.js";
 import { formatPublicationTime } from "../dateTime.js";
 const props = defineProps({
@@ -27,39 +29,20 @@ const props = defineProps({
 });
 const emit = defineEmits(["tasks"]);
 const slots = useSlots();
-const catalog = props.resourceCatalog || useBatchResourceCatalog(),
-  files = createFilesClient();
-function cover(row, key) {
-  if (props.coverURL) return props.coverURL(row, key);
-  const r = props.batch.readiness?.cover_resources?.find(
-    (r) => r.row_key === row.row_key,
-  );
-  try {
-    return r?.[key] ? files.resourceURL({ resource_path: r[key] }) : null;
-  } catch {
-    return null;
-  }
-}
+const catalog = props.resourceCatalog || useBatchResourceCatalog();
+const started = computed(() => !!props.batch.execution?.first_started_at);
+const cancelledBeforeStart = computed(() => !started.value && props.batch.execution_status === 'cancelled');
+const configurationKnown = computed(() => Array.isArray(props.batch.config?.candidates) &&
+  (props.batch.candidate_count == null || props.batch.candidate_count === props.batch.config.candidates.length));
+const candidateCount = computed(() => configurationKnown.value ? props.batch.config.candidates.length : null);
+const target = computed(() => props.batch.targets.reduce((total,row)=>total+row.target_count,0));
+const shortfalls = computed(() => configurationKnown.value ? candidateShortfalls(props.batch) : []);
 const scope = ref({ page: 1, page_size: 10 }),
   recordPage = ref(1),
   recordTotal = ref(0),
   records = ref([]),
   error = ref("");
 let recordSequence = 0;
-const recordLabels = {
-  "publication_batch.create": "保存批次",
-  "publication_batch.configure": "保存配置修改",
-  "publication_batch.start": "开始发布",
-  "publication_batch.pause": "暂停发布",
-  "publication_batch.resume": "继续发布",
-  "publication_batch.stop": "终止发布",
-  "publication_batch.finish": "结束批次",
-  "publication_batch.plan_skeleton": "创建计划批次",
-  created: "保存批次",
-  configuration_updated: "保存配置修改",
-  publication_batch_created: "保存批次",
-  publication_batch_configuration_updated: "保存配置修改",
-};
 async function loadRecords(page = 1) {
   const run = ++recordSequence,
     id = props.batch.id;
@@ -117,6 +100,7 @@ onMounted(async () => {
               value: batchStatus(batch),
             },
             { label: '发布平台', value: batch.platform === 'baidu' ? '百家号' : platformLabel(batch.platform) },
+            { label: '发布类目', value: batch.targets.map(row=>categoryName(row.category_id)).join('、') || '未选择' },
             { label: '所属计划', value: batch.plan_name || '独立批次' },
             { label: '创建人 ID', value: batch.created_by || '历史记录未提供' },
             {
@@ -131,116 +115,39 @@ onMounted(async () => {
           :key="item.label"
           :label="item.label"
           ><ResourceStatusBadge v-if="['配置状态','执行状态'].includes(item.label)" :label="item.value"/><template v-else>{{ item.value }}</template></t-descriptions-item
-        ></ResourceDescriptions
-      ></ResourceSection
+        ></ResourceDescriptions>
+      <ResourceNotice v-if="cancelledBeforeStart"><span>此批次在开始发布前已取消。</span><p v-if="batch.execution?.stop_reason">{{batch.execution.stop_reason}}</p></ResourceNotice>
+      </ResourceSection
     ></ResourceCard
   ><BatchExecutionDetail
-    v-if="batch.execution?.first_started_at || batch.execution?.stopped_at"
+    v-if="started"
     :batch="batch"
     @tasks="emit('tasks', $event)"
-  /><ResourceCard v-if="!batch.execution?.first_started_at"
+  /><ResourceCard v-if="!started"
     ><ResourceSection title="候选配置"
       ><p v-if="batch.execution_status === 'not_started'" class="batch-muted">
         批次尚未开始，正式发布任务 0 条。
       </p>
-      <ResourceDescriptions
-        ><t-descriptions-item label="发布目标"
-          >{{
-            batch.targets.reduce((n, t) => n + t.target_count, 0)
-          }}
-          条</t-descriptions-item
-        ><t-descriptions-item label="候选"
-          >{{ batch.config?.candidates?.length || 0 }} 条</t-descriptions-item
-        ><t-descriptions-item label="目标缺口"
-          >{{
-            Math.max(
-              0,
-              batch.targets.reduce((n, t) => n + t.target_count, 0) -
-                (batch.config?.candidates?.length || 0),
-            )
-          }}
-          条</t-descriptions-item
-        ><t-descriptions-item label="正式发布任务"
-          >0 条</t-descriptions-item
-        ></ResourceDescriptions
-      >
-      <slot name="candidates"
-        ><div
-          class="plan-detail-table resource-data-table resource-embedded-table is-summary batch-readonly-candidates"
-          role="region" aria-label="批次候选配置，可横向滚动" tabindex="0"
-        >
-          <table>
-            <colgroup><col style="width:76px"/><col style="width:22%"/><col style="width:100px"/><col style="width:26%"/><col style="width:168px"/><col style="width:76px"/></colgroup>
-            <thead>
-              <tr>
-                <th>类目</th>
-                <th>发布文案</th>
-                <th>发布账号</th>
-                <th>成片</th>
-                <th>封面</th>
-                <th>确认</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="r in batch.config?.candidates || []" :key="r.row_key">
-                <td>{{ categoryName(r.category_id) }}</td>
-                <td><span class="batch-readonly-text" :title="r.content.description">{{ r.content.description || "待完善" }}</span></td>
-                <td>
-                  {{
-                    catalog.accounts.has(r.media_account_id)
-                      ? batchAccountName(
-                          catalog.accounts.get(r.media_account_id),
-                        )
-                      : "账号ID：" + r.media_account_id
-                  }}
-                </td>
-                <td><span class="batch-readonly-text" :title="batchOutputName(catalog.outputs.get(r.composite_output_id))">
-                  {{
-                    catalog.outputs.has(r.composite_output_id)
-                      ? batchOutputName(
-                          catalog.outputs.get(r.composite_output_id),
-                        )
-                      : "成片ID：" + r.composite_output_id
-                  }}
-                </span></td>
-                <td>
-                  <img
-                    v-if="cover(r, 'cover_resource_path')"
-                    :src="cover(r, 'cover_resource_path')"
-                    alt="横版封面"
-                    width="96"
-                  /><img
-                    v-if="cover(r, 'portrait_cover_resource_path')"
-                    :src="cover(r, 'portrait_cover_resource_path')"
-                    alt="竖版封面"
-                    width="48"
-                  />
-                </td>
-                <td>{{ r.content.confirmed ? "已确认" : "待确认" }}</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
+      <ResourceDescriptions>
+        <t-descriptions-item label="发布目标">{{target}} 条</t-descriptions-item>
+        <t-descriptions-item label="候选">{{candidateCount === null ? '待刷新' : candidateCount+' 条'}}</t-descriptions-item>
+        <t-descriptions-item label="目标缺口">{{candidateCount === null ? '待刷新' : Math.max(0,target-candidateCount)+' 条'}}</t-descriptions-item>
+        <t-descriptions-item label="正式发布任务">0 条</t-descriptions-item>
+      </ResourceDescriptions>
+      <div v-if="configurationKnown && batch.targets.length>1" class="resource-data-table resource-embedded-table is-summary">
+        <t-table row-key="category_id" :data="shortfalls" :columns="[{colKey:'category',title:'内容类目'},{colKey:'target_count',title:'目标'},{colKey:'candidate_count',title:'候选'},{colKey:'shortfall',title:'缺口'}]">
+          <template #category="{row}">{{categoryName(row.category_id)}}</template>
+        </t-table>
+      </div>
+      <slot name="candidates">
+        <ResourceEmptyState v-if="!configurationKnown" title="内容配置暂时无法读取" description="请重新读取批次详情，当前未将缺失内容视为零条。"/>
+        <ResourceEmptyState v-else-if="!candidateCount" title="尚未配置发布内容" :description="cancelledBeforeStart ? '批次已取消，不会生成发布任务。' : '该批次尚未保存发布内容；开始发布前需完成资源匹配及内容准备。'"/>
+        <BatchReadonlyCandidates v-else :batch="batch" :catalog="catalog" :category-name="categoryName"/>
       </slot>
     </ResourceSection>
-    <ResourceSection
-      v-if="batch.readiness?.shortfalls?.length"
-      title="目标与缺口"
-      ><ul class="batch-categories">
-        <li
-          v-for="entry in batch.readiness.shortfalls"
-          :key="entry.category_id"
-        >
-          <strong>{{ categoryName(entry.category_id) }}</strong><span
-            >目标 {{ entry.target_count }} · 候选 {{ entry.candidate_count }} ·
-            缺口 {{ entry.shortfall }}</span
-          >
-        </li>
-      </ul></ResourceSection
-    >
-    <ResourceSection v-if="batch.readiness?.issues?.length" title="配置问题"
+    <ResourceSection v-if="!cancelledBeforeStart && candidateCount && batch.readiness?.issues?.some(issue=>!issue.row_key)" title="配置问题"
       ><ul class="batch-issues">
-        <li v-for="(issue, i) in batch.readiness.issues" :key="i">
+        <li v-for="(issue, i) in batch.readiness.issues.filter(issue=>!issue.row_key)" :key="i">
           {{ issue.message }}
         </li>
       </ul></ResourceSection
@@ -296,7 +203,7 @@ onMounted(async () => {
         ><p v-if="error" role="alert">{{ error }}</p>
         <div v-for="r in records" :key="r.id" class="plan-record">
           {{ formatPublicationTime(r.created_at) }} ·
-          {{ recordLabels[r.event] || "批次业务记录" }}
+          {{ batchRecordLabel(r.event) }}
         </div>
         <ResourceNotice v-if="!records.length && !error"
           >暂无操作记录</ResourceNotice
@@ -311,10 +218,3 @@ onMounted(async () => {
         /> </slot></ResourceSection
   ></ResourceCard>
 </template>
-
-<style scoped>
-.batch-readonly-candidates table { min-width: 880px; table-layout: fixed; }
-.batch-readonly-text { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; white-space: normal; overflow-wrap: anywhere; }
-.batch-readonly-candidates img { max-height: 72px; object-fit: contain; vertical-align: middle; }
-.batch-readonly-candidates img + img { margin-left: 8px; }
-</style>
