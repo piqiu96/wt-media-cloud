@@ -145,6 +145,17 @@ class PublicationPlanContractTest(unittest.TestCase):
         self.schema("BatchSummary", filename).validate(dict(value, **fields))
         self.schema("BatchSummary", filename).validate(value)
 
+    def test_handoff_into_cancelled_position_is_explicitly_not_a_start_receipt(self):
+        value = {"plan_id": "1", "revision": "3", "previous_batch_id": "2", "current_batch_id": "3",
+                 "decision": "automatic", "advanced_at": "2026-11-25T00:00:00Z",
+                 "current_batch_status": "cancelled", "batch_receipt": None}
+        self.schema("AdvanceResult").validate(value)
+        value["current_batch_status"] = "running"
+        self.assertFalse(self.schema("AdvanceResult").is_valid(value))
+        value["current_batch_status"] = "cancelled"
+        value["batch_receipt"] = {}
+        self.assertFalse(self.schema("AdvanceResult").is_valid(value))
+
     def test_manual_failure_requires_closed_scene_and_no_publishable_work(self):
         resolve = {"attempt_id": "5", "expected_revision": "6", "conclusion": "failed",
                    "evidence": {"platform_uid": "uid", "reason": "原稿被平台明确拒发", "basis": "核实原账号与指定原稿，平台已明确拒发且浏览器现场已经关闭", "scene_closed": True, "no_publishable_work": True}}

@@ -1704,7 +1704,18 @@ components:
           - continue
           - skip
         advanced_at: *id019
-        batch_receipt: *id020
+        batch_receipt:
+          oneOf:
+          - *id020
+          - type: 'null'
+          description: Null only when advancing into an already legally cancelled
+            position without creating tasks. Preserve that original terminal result;
+            the zero-denominator skip gate still applies before leaving it. Normal
+            starts always return a real immutable receipt.
+        current_batch_status:
+          enum:
+          - running
+          - cancelled
       required:
       - plan_id
       - revision
@@ -1713,6 +1724,19 @@ components:
       - decision
       - advanced_at
       - batch_receipt
+      - current_batch_status
+      allOf:
+      - if:
+          properties:
+            current_batch_status:
+              const: cancelled
+        then:
+          properties:
+            batch_receipt:
+              type: 'null'
+        else:
+          properties:
+            batch_receipt: *id020
     CancelResult:
       type: object
       additionalProperties: false
