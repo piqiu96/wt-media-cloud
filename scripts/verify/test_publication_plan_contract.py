@@ -158,6 +158,10 @@ class PublicationPlanContractTest(unittest.TestCase):
     def test_recommendation_has_typed_terminal_and_adoption_events(self):
         events = self.plan["paths"]["/api/v1/publication-plan/recommend"]["post"]["responses"]["200"]["content"]["text/event-stream"]["x-sse-events"]
         self.assertEqual(set(events), {"start", "progress", "item_result", "item_error", "done", "error"})
+        self.assertIn("row_key", events["start"]["schema"]["required"])
+        self.assertIn("input_revision", events["item_result"]["schema"]["required"])
+        self.assertIn("logid", events["start"]["schema"]["required"])
+        self.assertEqual(set(events["done"]["schema"]["required"]), {"total", "success", "failed"})
         self.schema("RecommendationResult").validate({"batches": [self.skeleton()], "resource_as_of": "2026-11-25T00:00:00Z", "issues": []})
 
 

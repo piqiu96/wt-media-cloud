@@ -75,7 +75,7 @@ paths:
           minLength: 0
       - in: query
         name: status
-        schema: &id015
+        schema: &id017
           type: string
           enum:
           - not_started
@@ -925,92 +925,81 @@ paths:
                 start:
                   schema:
                     type: object
-                    additionalProperties: false
                     required:
-                    - request_id
-                    - message
+                    - row_key
+                    - input_revision
+                    - total
+                    - logid
                     properties:
-                      request_id:
+                      row_key: &id003
                         type: string
-                        minLength: 1
-                      message:
-                        type: string
+                      input_revision: *id003
+                      total: &id004
+                        type: integer
+                        minimum: 0
+                      logid: *id003
                 progress:
                   schema:
                     type: object
-                    additionalProperties: false
                     required:
-                    - request_id
-                    - message
+                    - row_key
+                    - input_revision
+                    - stage
+                    - completed
+                    - total
                     properties:
-                      request_id:
-                        type: string
-                        minLength: 1
-                      message:
-                        type: string
+                      row_key: *id003
+                      input_revision: *id003
+                      stage: *id003
+                      completed: *id004
+                      total: *id004
                 item_result:
                   schema:
                     type: object
-                    additionalProperties: false
                     required:
-                    - request_id
+                    - row_key
+                    - input_revision
                     - result
                     properties:
-                      request_id:
-                        type: string
-                        minLength: 1
+                      row_key: *id003
+                      input_revision: *id003
                       result:
                         $ref: '#/components/schemas/RecommendationResult'
                 item_error:
                   schema:
                     type: object
-                    additionalProperties: false
                     required:
-                    - request_id
-                    - code
+                    - row_key
+                    - input_revision
                     - message
+                    - details
+                    - logid
                     properties:
-                      request_id:
-                        type: string
-                        minLength: 1
-                      code:
-                        type: string
-                      message:
-                        type: string
+                      row_key: *id003
+                      input_revision: *id003
+                      message: *id003
+                      details: {}
+                      logid: *id003
                 done:
                   schema:
                     type: object
-                    additionalProperties: false
                     required:
-                    - request_id
-                    - completed
+                    - total
+                    - success
                     - failed
                     properties:
-                      request_id:
-                        type: string
-                        minLength: 1
-                      completed:
-                        type: integer
-                        minimum: 0
-                      failed:
-                        type: integer
-                        minimum: 0
+                      total: *id004
+                      success: *id004
+                      failed: *id004
                 error:
                   schema:
                     type: object
-                    additionalProperties: false
                     required:
-                    - request_id
-                    - code
                     - message
+                    - logid
                     properties:
-                      request_id:
-                        type: string
-                        minLength: 1
-                      code:
-                        type: string
-                      message:
-                        type: string
+                      message: *id003
+                      logid: *id003
         '400':
           description: 'publication_invalid: invalid structure or exact selection.'
         '401':
@@ -1071,21 +1060,21 @@ components:
       type: object
       additionalProperties: false
       properties:
-        row_key: &id003
+        row_key: &id005
           type: string
           maxLength: 64
           minLength: 1
-        name: &id004
+        name: &id006
           type: string
           maxLength: 100
           minLength: 1
-        platform: &id005
+        platform: &id007
           type: string
           enum:
           - baidu
         group_order: *id002
         batch_order: *id002
-        targets: &id006
+        targets: &id008
           type: array
           items:
             $ref: '#/components/schemas/Target'
@@ -1102,12 +1091,12 @@ components:
       type: object
       additionalProperties: false
       properties:
-        row_key: *id003
-        name: *id004
-        platform: *id005
+        row_key: *id005
+        name: *id006
+        platform: *id007
         group_order: *id002
         batch_order: *id002
-        targets: *id006
+        targets: *id008
         batch_id: *id001
       required:
       - row_key
@@ -1120,25 +1109,25 @@ components:
       type: object
       additionalProperties: false
       properties:
-        name: &id008
+        name: &id010
           type: string
           maxLength: 100
           minLength: 1
-        date_start: &id007
+        date_start: &id009
           type: string
           format: date
-        date_end: *id007
-        note: &id009
+        date_end: *id009
+        note: &id011
           type: string
           maxLength: 2000
           minLength: 0
-        goals: &id010
+        goals: &id012
           type: array
           items:
             $ref: '#/components/schemas/Goal'
           minItems: 1
           maxItems: 1000
-        batches: &id011
+        batches: &id013
           type: array
           items:
             $ref: '#/components/schemas/Skeleton'
@@ -1158,11 +1147,11 @@ components:
       type: object
       additionalProperties: false
       properties:
-        name: *id008
-        date_start: *id007
-        date_end: *id007
-        note: *id009
-        goals: *id010
+        name: *id010
+        date_start: *id009
+        date_end: *id009
+        note: *id011
+        goals: *id012
         batches:
           type: array
           items:
@@ -1182,12 +1171,12 @@ components:
       type: object
       additionalProperties: false
       properties:
-        name: *id008
-        date_start: *id007
-        date_end: *id007
-        note: *id009
-        goals: *id010
-        batches: *id011
+        name: *id010
+        date_start: *id009
+        date_end: *id009
+        note: *id011
+        goals: *id012
+        batches: *id013
         plan_id: *id001
         expected_revision: *id001
       required:
@@ -1235,7 +1224,7 @@ components:
       type: object
       additionalProperties: false
       properties:
-        valid: &id013
+        valid: &id015
           type: boolean
         issues:
           type: array
@@ -1275,7 +1264,7 @@ components:
           enum:
           - baidu
         category_id: *id001
-        shortfall: &id012
+        shortfall: &id014
           type: integer
           minimum: 0
       required:
@@ -1292,8 +1281,8 @@ components:
           minLength: 1
         category_id: *id001
         target_count: *id002
-        published_count: *id012
-        shortfall: *id012
+        published_count: *id014
+        shortfall: *id014
       required:
       - platform
       - category_id
@@ -1324,7 +1313,7 @@ components:
           minItems: 0
           maxItems: 1000
           uniqueItems: true
-        allow_shortfall: *id013
+        allow_shortfall: *id015
         expected_shortfalls:
           type: array
           items:
@@ -1332,7 +1321,7 @@ components:
             additionalProperties: false
             properties:
               category_id: *id001
-              shortfall: *id012
+              shortfall: *id014
             required:
             - category_id
             - shortfall
@@ -1467,16 +1456,16 @@ components:
       type: object
       additionalProperties: false
       properties:
-        current_batch_id: &id014
+        current_batch_id: &id016
           type:
           - string
           - 'null'
           pattern: ^[1-9][0-9]*$
-        next_batch_id: *id014
-        current_batch_revision: *id014
-        next_batch_revision: *id014
-        explicit_count: *id012
-        failed_count: *id012
+        next_batch_id: *id016
+        current_batch_revision: *id016
+        next_batch_revision: *id016
+        explicit_count: *id014
+        failed_count: *id014
         fingerprint:
           $ref: '#/components/schemas/Fingerprint'
       required:
@@ -1500,8 +1489,8 @@ components:
         batch_order: *id002
         batch:
           $ref: publication-batch.openapi.yaml#/components/schemas/BatchDetail
-        configured: *id013
-        handed_off_at: &id016
+        configured: *id015
+        handed_off_at: &id018
           type:
           - string
           - 'null'
@@ -1548,8 +1537,8 @@ components:
           type: string
           maxLength: 100
           minLength: 1
-        date_start: *id007
-        date_end: *id007
+        date_start: *id009
+        date_end: *id009
         note:
           type: string
           maxLength: 2000
@@ -1560,7 +1549,7 @@ components:
             $ref: '#/components/schemas/Goal'
           minItems: 1
           maxItems: 1000
-        status: *id015
+        status: *id017
         progress:
           type: string
           enum:
@@ -1576,11 +1565,11 @@ components:
           - ready_to_finish
           - stopping
           - ended
-        current_batch_id: *id014
+        current_batch_id: *id016
         revision: *id001
-        started_at: *id016
-        stopped_at: *id016
-        ended_at: *id016
+        started_at: *id018
+        stopped_at: *id018
+        ended_at: *id018
         end_reason:
           type: string
           enum:
@@ -1592,21 +1581,21 @@ components:
           type: string
           maxLength: 2000
           minLength: 0
-        created_at: &id017
+        created_at: &id019
           type: string
           format: date-time
-        updated_at: *id017
+        updated_at: *id019
         goal_results:
           type: array
           items:
             $ref: '#/components/schemas/GoalResult'
           minItems: 0
           maxItems: 1000
-        batch_count: *id012
-        processed_batch_count: *id012
-        published_count: *id012
-        pending_count: *id012
-        verification_required_count: *id012
+        batch_count: *id014
+        processed_batch_count: *id014
+        published_count: *id014
+        pending_count: *id014
+        verification_required_count: *id014
         allowed_actions:
           type: array
           items:
@@ -1683,7 +1672,7 @@ components:
       properties:
         plan_id: *id001
         revision: *id001
-        first_started_at: *id017
+        first_started_at: *id019
         current_batch_id: *id001
         batch_confirmations:
           type: array
@@ -1691,7 +1680,7 @@ components:
             $ref: '#/components/schemas/BatchConfirmation'
           minItems: 1
           maxItems: 1000
-        first_batch_receipt: &id018
+        first_batch_receipt: &id020
           $ref: publication-batch.openapi.yaml#/components/schemas/BatchStartResult
       required:
       - plan_id
@@ -1714,8 +1703,8 @@ components:
           - automatic
           - continue
           - skip
-        advanced_at: *id017
-        batch_receipt: *id018
+        advanced_at: *id019
+        batch_receipt: *id020
       required:
       - plan_id
       - revision
@@ -1748,10 +1737,10 @@ components:
       type: object
       additionalProperties: false
       properties:
-        name: *id008
-        note: *id009
-        goals: *id010
-        batches: *id011
+        name: *id010
+        note: *id011
+        goals: *id012
+        batches: *id013
       required:
       - name
       - note
@@ -1794,7 +1783,7 @@ components:
             $ref: '#/components/schemas/Skeleton'
           minItems: 1
           maxItems: 1000
-        resource_as_of: *id017
+        resource_as_of: *id019
         issues:
           type: array
           items:
@@ -1810,12 +1799,12 @@ components:
       additionalProperties: false
       properties:
         id: *id001
-        actor_id: *id014
+        actor_id: *id016
         event:
           type: string
           maxLength: 100
           minLength: 1
-        created_at: *id017
+        created_at: *id019
         details:
           type: object
           additionalProperties: true
@@ -1835,7 +1824,7 @@ components:
             $ref: '#/components/schemas/Plan'
           minItems: 0
           maxItems: 1000
-        total: *id012
+        total: *id014
         page: *id002
         page_size: *id002
       required:
@@ -1853,7 +1842,7 @@ components:
             $ref: '#/components/schemas/PlanBatch'
           minItems: 0
           maxItems: 1000
-        total: *id012
+        total: *id014
         page: *id002
         page_size: *id002
       required:
@@ -1871,7 +1860,7 @@ components:
             $ref: '#/components/schemas/Record'
           minItems: 0
           maxItems: 1000
-        total: *id012
+        total: *id014
         page: *id002
         page_size: *id002
       required:
