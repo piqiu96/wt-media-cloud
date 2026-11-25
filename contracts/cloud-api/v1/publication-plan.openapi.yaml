@@ -506,6 +506,11 @@ paths:
       description: Only self current position in an already first-started plan. Atomically
         pause plan future progression and permit current batch legal control using
         frozen selection. Cannot bypass full-plan first start or start a future batch.
+        Only a running plan with its already-started current running/paused batch,
+        complete frozen selection and no stop/end/handoff is eligible. It pauses subsequent
+        plan advancement and takes over existing execution; it does not create tasks/attempts,
+        rerun batch start or issue duplicate authorization. Already manually paused
+        plans use original batch controls without another takeover.
       responses:
         '200':
           description: PlanDetail

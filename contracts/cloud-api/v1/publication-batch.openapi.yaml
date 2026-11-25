@@ -552,7 +552,7 @@ components:
         configuration_status: {enum: [incomplete, ready]}
         execution_status: {$ref: '#/components/schemas/ExecutionStatus'}
         execution: {$ref: '#/components/schemas/BatchExecution'}
-        allowed_actions: {type: array, items: {enum: [edit, copy, start, pause, resume, stop, finish]}}
+        allowed_actions: {type: array, items: {enum: [edit, copy, start, pause, resume, stop, finish, takeover]}}
         created_at: {type: string, format: date-time}
         updated_at: {type: string, format: date-time}
     BatchDetail:

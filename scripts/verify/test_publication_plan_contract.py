@@ -174,6 +174,11 @@ class PublicationPlanContractTest(unittest.TestCase):
         record["id"] = ""
         self.assertFalse(self.schema("Record").is_valid(record))
 
+    def test_batch_readonly_action_enum_includes_existing_plan_takeover(self):
+        actions = self.docs["publication-batch.openapi.yaml"]["components"]["schemas"]["BatchSummary"]["properties"]["allowed_actions"]
+        Draft202012Validator(actions).validate(["pause", "stop", "takeover"])
+        self.assertFalse(Draft202012Validator(actions).is_valid(["authorize_other_user"]))
+
     def test_manual_failure_requires_closed_scene_and_no_publishable_work(self):
         resolve = {"attempt_id": "5", "expected_revision": "6", "conclusion": "failed",
                    "evidence": {"platform_uid": "uid", "reason": "原稿被平台明确拒发", "basis": "核实原账号与指定原稿，平台已明确拒发且浏览器现场已经关闭", "scene_closed": True, "no_publishable_work": True}}
