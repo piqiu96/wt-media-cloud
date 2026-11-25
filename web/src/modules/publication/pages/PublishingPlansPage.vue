@@ -257,6 +257,7 @@ async function back() {
   return router.push({ name: "PublishPlans", query: listQuery() });
 }
 async function reload(background = false) {
+  if (!background) creationReview.value = null;
   const run = ++seq;
   if (!background) loading.value = true;
   error.value = "";
