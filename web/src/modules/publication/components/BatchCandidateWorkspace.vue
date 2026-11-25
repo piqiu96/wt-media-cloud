@@ -1,5 +1,6 @@
 <script setup>
 import { computed, ref } from "vue";
+import { formatDurationMs } from "../../../shared/utils/units.js";
 import ResourceFilterBar from "../../../shared/ui/resource/ResourceFilterBar.vue";
 import ResourceCard from "../../../shared/ui/resource/ResourceCard.vue";
 import ResourceSection from "../../../shared/ui/resource/ResourceSection.vue";
@@ -316,7 +317,7 @@ function applyBulk(key, patch, covers) {
               <div>
                 <ResourceNameLink v-if="outputFor(row)" :title="outputName(row)" @click="showVideo(row)"><span :class="{'batch-content-asset':!resourceOnly}" :title="outputName(row)">{{ outputName(row) }}</span></ResourceNameLink>
                 <span v-else :class="{'batch-content-asset':!resourceOnly}" :title="outputName(row)">{{ outputName(row) }}</span>
-                <small v-if="!resourceOnly" class="batch-muted batch-task-block">成片 ID：{{row.composite_output_id}} · 时长：—</small>
+                <small v-if="!resourceOnly" class="batch-muted batch-task-block">成片 ID：{{row.composite_output_id}} · 时长：{{ formatDurationMs(outputFor(row)?.media?.duration_ms) }}</small>
                 <small v-if="isManual(row)" class="batch-muted">人工配对</small>
               </div>
             </div>

@@ -17,9 +17,9 @@
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 20px 24px;
 }
-.batch-form-grid label,
-.batch-stack > label,
-.batch-inline > label,
+.batch-form-grid label:not(.t-checkbox):not(.t-radio),
+.batch-stack > label:not(.t-checkbox):not(.t-radio),
+.batch-inline > label:not(.t-checkbox):not(.t-radio),
 .batch-result-field {
   display: flex;
   flex-direction: column;

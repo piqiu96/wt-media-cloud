@@ -17,7 +17,7 @@ const alternateAccount={...account,id:"9007199254741001",name:"由我发布备�
 const outputs = [
   { composite_output_id: "9007199254740995", id: 1, name: "合成测试成片 A" },
   { composite_output_id: "9007199254740997", id: 2, name: "合成测试成片 B" },
-].map(item => ({ ...item, category_id: "12", team_id: "3", occupied: false, platforms: ["baidu"], video: { status: "ready" } }));
+].map(item => ({ ...item, category_id: "12", team_id: "3", occupied: false, platforms: ["baidu"], video: { status: "ready" }, media: {duration_ms:30000} }));
 const now = "2026-11-25T10:00:00Z";
 const template = { id: "903", name: "合成横版模板", canvas_width: 1280, canvas_height: 720,
   enabled: true, published_revision: 2, published_config: { backgroundMode: "solid" } };
@@ -156,6 +156,7 @@ try {
   await next();
 
   const contentTable = page.getByRole("region", { name: "内容配置" });
+  await contentTable.getByText("成片 ID：9007199254740995 · 时长：30.0 秒",{exact:true}).waitFor();
   for (const title of ["发布内容", "发布账号", "发布成片", "配置状态"])
     await contentTable
       .getByRole("columnheader", { name: title, exact: true })
