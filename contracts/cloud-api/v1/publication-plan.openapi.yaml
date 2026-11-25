@@ -75,6 +75,10 @@ paths:
           minLength: 0
       - in: query
         name: status
+        description: User-facing running includes running and paused before scoped
+          count and pagination; manual pause remains progress manual_paused without
+          changing persisted status or resume behavior. Legacy paused remains an exact
+          filter; other statuses remain exact. Exact request_key ignores this filter.
         schema: &id017
           type: string
           enum:

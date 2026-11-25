@@ -29,7 +29,9 @@ func planScope(q *gorm.DB, a identity.PublicUser) *gorm.DB {
 	if len(a.CategoryIDs) == 0 {
 		return q.Where("1=0")
 	}
-	return q.Where(`NOT EXISTS(SELECT 1 FROM JSON_TABLE(publication_plan.goals_json,'$[*]' COLUMNS(category_id BIGINT PATH '$.category_id')) goal WHERE goal.category_id NOT IN ?)`, a.CategoryIDs)
+	// Keep JSON_TABLE evaluation correlated to each plan. Live regressions cover
+	// count and pagination across different goal scopes.
+	return q.Where(`JSON_TYPE(publication_plan.goals_json)='ARRAY' AND JSON_LENGTH(publication_plan.goals_json)>0 AND 0=(SELECT COUNT(*) FROM JSON_TABLE(publication_plan.goals_json,'$[*]' COLUMNS(category_id BIGINT PATH '$.category_id' NULL ON EMPTY NULL ON ERROR)) goal WHERE goal.category_id IS NULL OR goal.category_id<=0 OR goal.category_id NOT IN ?)`, a.CategoryIDs)
 }
 func (s Store) ListPlans(f PlanFilter) ([]model.Plan, int64, error) {
 	q := planScope(s.DB.Model(&model.Plan{}), f.Actor)
@@ -40,18 +42,20 @@ func (s Store) ListPlans(f PlanFilter) ([]model.Plan, int64, error) {
 			escaped := strings.NewReplacer("!", "!!", "%", "!%", "_", "!_").Replace(f.Search)
 			q = q.Where("CAST(id AS CHAR)=? OR name LIKE ? ESCAPE '!'", f.Search, "%"+escaped+"%")
 		}
-		if f.Status != "" {
+		if f.Status == "running" {
+			q = q.Where("status IN ?", []string{"running", "paused"})
+		} else if f.Status != "" {
 			q = q.Where("status=?", f.Status)
 		}
 		if f.Platform != "" || f.CategoryID > 0 {
-			clause := `EXISTS(SELECT 1 FROM JSON_TABLE(goals_json,'$[*]' COLUMNS(platform VARCHAR(32) PATH '$.platform',category_id BIGINT PATH '$.category_id')) goal WHERE 1=1`
+			clause := `0<(SELECT COUNT(*) FROM JSON_TABLE(publication_plan.goals_json,'$[*]' COLUMNS(platform VARCHAR(32) PATH '$.platform',category_id BIGINT PATH '$.category_id' NULL ON EMPTY NULL ON ERROR)) matched_goal WHERE 1=1`
 			args := []any{}
 			if f.Platform != "" {
-				clause += " AND goal.platform=?"
+				clause += " AND matched_goal.platform=?"
 				args = append(args, f.Platform)
 			}
 			if f.CategoryID > 0 {
-				clause += " AND goal.category_id=?"
+				clause += " AND matched_goal.category_id=?"
 				args = append(args, f.CategoryID)
 			}
 			q = q.Where(clause+")", args...)

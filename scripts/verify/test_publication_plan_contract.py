@@ -42,6 +42,13 @@ class PublicationPlanContractTest(unittest.TestCase):
                 OpenAPIV31SpecValidator(SchemaPath.from_dict(self.docs[name], base_uri=(API / name).as_uri())).validate()
                 self.assertEqual(self.docs[name]["info"]["version"], "2026.11.25.4")
 
+    def test_running_list_filter_includes_manual_paused_without_changing_stored_states(self):
+        parameters = self.plan["paths"]["/api/v1/publication-plan"]["get"]["parameters"]
+        status = next(item for item in parameters if item["name"] == "status")
+        self.assertIn("running includes running and paused", status["description"])
+        self.assertIn("paused remains an exact", status["description"])
+        self.assertEqual(status["schema"]["enum"], ["not_started", "running", "paused", "stopping", "ended"])
+
     def test_complete_surface_has_no_makeup_or_owner_mutation(self):
         operations = [op["operationId"] for path in self.plan["paths"].values()
                       for method, op in path.items() if method in {"get", "post", "put", "delete"}]
