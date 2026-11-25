@@ -97,7 +97,7 @@ try {
     await button('保存草稿').click();await page.getByText('已保存草稿，可在本机继续编辑',{exact:true}).waitFor();
     await page.reload();await s.verifyLocked();
     assert.equal(await s.content().getByText('原有人工文案',{exact:true}).count(),1);
-    await button('预览检查').click();await field('异常任务上限').fill('3');
+    await button('下一步').click();await field('异常任务上限').fill('3');
     await button('返回内容配置').click();await s.verifyLocked();
     await page.setViewportSize({width:390,height:844});
     assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
@@ -114,7 +114,7 @@ try {
     await s.button('采用系统推荐').click();await s.page.getByText('资源盘点尚未核实完整，请重新盘点后再推荐。原目标和候选保持不变。',{exact:true}).waitFor();
     assert.equal(await s.field(category.name+'发布目标').inputValue(),'2');
     await s.confirm();await s.page.getByText('暂无候选，可先保存批次，再从继续配置补充资源',{exact:true}).waitFor();
-    await s.button('预览检查').click();
+    await s.button('下一步').click();
     await s.page.getByRole('region',{name:'发布内容',exact:true}).getByText('暂无候选，可先保存批次，再从继续配置补充资源',{exact:true}).waitFor();
     await s.button('保存批次').click();
     await s.page.getByRole('heading',{name:f.name,exact:true}).waitFor();
@@ -133,7 +133,7 @@ try {
   {
     const s=await scene({conflict:true});await s.page.goto(base+'/publish-batches?view=edit&id=5');
     await s.field('批次名称').fill('冲突前的人工修改');await s.confirm();
-    await s.button('预览检查').click();await s.button('保存修改').click();
+    await s.button('下一步').click();await s.button('保存修改').click();
     await s.page.getByText('批次已被修改，请重新读取',{exact:true}).waitFor();
     assert.equal(await s.field('复查批次名称').inputValue(),'冲突前的人工修改');
     await s.button('返回内容配置').click();await s.verifyLocked();await s.close();
@@ -142,7 +142,7 @@ try {
   {
     const s=await scene({draft:{form:form(),step:1}});await s.page.goto(base+'/publish-batches?view=create');await s.verifyLocked();
     const release=s.validationDelay(), requested=s.page.waitForRequest(r=>r.url().endsWith('/publication-batch/validate'));
-    await s.button('预览检查').click();await requested;
+    await s.button('下一步').click();await requested;
     await s.field('并发数').fill('4');await s.field('并发数').press('Tab');release();
     await s.page.waitForLoadState('networkidle');
     assert.equal(await s.page.getByText('迟到的校验结果',{exact:true}).count(),0,'changed input must discard obsolete review');

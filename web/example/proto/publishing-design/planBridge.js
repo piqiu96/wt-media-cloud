@@ -93,27 +93,13 @@ export function planAction(db,id,action,reason){
  else if(action==='continue')advance(db,p,true);
  else if(action==='pause')pausePlan(p);
  else if(action==='cancel'){if(!reason?.trim())throw Error('请填写终止原因');cancelPlan(p,db);p.cancelReason=reason.trim();p.log.at(-1).reason=p.cancelReason;}
- else if(action==='makeup'||action==='finish'){
-  if(p.planReview&&action==='makeup')throw Error('已启动计划不能新增批次');
+ else if(action==='makeup')throw Error('已启动计划不能新增批次');
+ else if(action==='finish'){
   if(!planViews(db).find(view=>view.id===String(id))?.canSettle)throw Error('请等待全部批次执行完并处理未决结果后再结束');
   const actual=(platform,category)=>planTasks(db,p).filter(t=>(p.planReview?trustedPublicTask(db,t):t.status==='已发布')&&t.platform===platform&&t.category===category).length;
-  if(action==='finish'){
-   const gap=p.targets.some(t=>actual(t.platform,t.category)<t.count);
-   if(gap&&!reason?.trim())throw Error('请填写未达成原因');
-   p.endedAt=new Date().toISOString();p.endReason=gap?'unachieved':'achieved';p.endNote=reason?.trim()||'';
-   p.log.push({type:'确认结束计划',reason:p.endNote,time:p.endedAt});
-  }else{
-   const input=reason||{},targets=[];
-   if(!input.name?.trim()||!p.platformOrder.includes(input.platform))throw Error('请填写补量名称并选择计划内的平台');
-   for(const [category,count] of Object.entries(input.cats||{})){
-    const target=p.targets.find(t=>t.platform===input.platform&&t.category===category);
-    if(!Number.isSafeInteger(count)||count<0||count>Math.max(0,(target?.count||0)-actual(input.platform,category)))throw Error('补量数量超过目标缺口');
-    if(count)targets.push({category,count});
-   }
-   if(!targets.length)throw Error('请填写补量数量');
-   const id=nextId(db);db.batches.push({id,name:input.name.trim(),planId:p.id,platform:input.platform,targets,categories:targets.map(t=>t.category),type:'makeup',phase:'待资源配置',control:'待配置',candidates:[]});
-   p.items.push({kind:'batch',id});p.position=p.items.length-1;p.control='已暂停';
-   p.log.push({type:'创建补量批次',batchId:id,time:new Date().toISOString()});
-  }
+  const gap=p.targets.some(t=>actual(t.platform,t.category)<t.count);
+  if(gap&&!reason?.trim())throw Error('请填写未达成原因');
+  p.endedAt=new Date().toISOString();p.endReason=gap?'unachieved':'achieved';p.endNote=reason?.trim()||'';
+  p.log.push({type:'确认结束计划',reason:p.endNote,time:p.endedAt});
  }else throw Error('不支持的计划操作');
 }

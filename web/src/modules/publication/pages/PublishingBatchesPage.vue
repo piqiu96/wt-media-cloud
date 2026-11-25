@@ -802,7 +802,7 @@ onBeforeUnmount(() => {
       <span v-if="isCreating" class="batch-footer-note batch-muted">{{ persisted ? "草稿仅保存在本机，保存批次后进入批次列表。" : "未保存的输入仅在当前页面会话保留。" }}</span>
       <t-button v-if="isCreating && persisted && !pending" theme="default" variant="outline" :disabled="freeze" @click="saveDraft">保存草稿</t-button>
       <t-button v-if="step === 2 && !pending" theme="default" variant="outline" :disabled="freeze" @click="goStep(1)">返回内容配置</t-button>
-      <t-button v-if="step < 2" theme="primary" :disabled="freeze || !!resourceReview" @click="goStep(step + 1)">{{step === 0 ? '确认资源' : '预览检查'}}</t-button>
+      <t-button v-if="step < 2" theme="primary" :disabled="freeze || !!resourceReview" @click="goStep(step + 1)">{{step === 0 ? '确认资源' : '下一步'}}</t-button>
       <t-button v-else :theme="pending ? 'primary' : 'default'" :variant="pending ? 'base' : 'outline'"
         :loading="saving" :disabled="preparing" @click="save()">
         {{ pending ? "查询或重试原请求" : detail?.plan_id ? "保存并返回计划" : detail ? "保存修改" : "保存批次" }}

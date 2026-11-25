@@ -400,7 +400,7 @@ try {
     );
     await button("确认资源").click();
     await button("进入内容配置").click();
-    await button("预览检查").click();
+    await button("下一步").click();
     assert.equal(
       await button("开始发布").count(),
       0,

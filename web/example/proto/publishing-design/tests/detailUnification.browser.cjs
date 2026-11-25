@@ -103,6 +103,18 @@ test('pending, failed, ended and long-content details stay readable at 390px', a
   }
 });
 
+test('a plan skeleton drawer shows candidate preparation before the first start', async t => {
+  const page = await pageFor(t, { width: 1440, height: 1000 }, planFixture);
+  await page.goto(base + '/example/operations/publishing/plans/PL-202611-002');
+  await page.getByRole('region', { name: '批次推进', exact: true }).getByRole('button', { name: '详情', exact: true }).click();
+  const drawer = page.getByRole('dialog', { name: '发布批次详情', exact: true });
+  await drawer.getByRole('heading', { name: '尚未配置发布内容', exact: true }).waitFor();
+  assert.equal(await drawer.getByRole('region', { name: '执行情况', exact: true }).count(), 0);
+  assert.equal(await drawer.getByRole('region', { name: '批次任务', exact: true }).count(), 0);
+  await drawer.getByRole('button', { name: '关闭发布批次详情' }).click();
+  assert.match(page.url(), /PL-202611-002$/);
+});
+
 test('plan footer keeps decisions while the list owns cancellation and pre-start editing', async t => {
   const page = await pageFor(t, {width:1440,height:1000}, planFixture);
   const detail = page.locator('.resource-detail-page');
@@ -124,9 +136,7 @@ test('plan footer keeps decisions while the list owns cancellation and pre-start
   await detail.getByRole('button',{name:'查看待处理批次',exact:true}).click();
   await page.getByRole('heading',{name:'发布批次详情',exact:true}).waitFor();await shot(page,'11-plan-workbench.png');
   await go('PL-202611-003');
-  await detail.locator('footer').getByRole('button',{name:'创建补量批次',exact:true}).click();
-  await page.locator('dialog.plan-drawer[open]').waitFor();assert.match(await page.locator('dialog.plan-drawer').innerText(),/创建补量批次/);
-  await page.locator('dialog.plan-drawer [data-act="close-drawer"]').first().click();
+  assert.equal(await detail.locator('footer').getByRole('button',{name:'创建补量批次',exact:true}).count(),0);
   await detail.locator('footer').getByRole('button',{name:'确认结束',exact:true}).click();
   await page.locator('dialog.plan-modal[open]').waitFor();await page.locator('dialog.plan-modal [data-act="close-modal"]').first().click();
   await go('PL-202611-004');

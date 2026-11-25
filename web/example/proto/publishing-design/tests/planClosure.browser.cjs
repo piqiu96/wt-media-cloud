@@ -73,18 +73,14 @@ test('运行中无编辑与补量，终止计划覆盖所有批次并保留核�
  assert.ok(await page.getByRole('button',{name:'去处理',exact:true}).count());
  await page.reload();await detail(page);assert.equal((await snapshot(store)).tasks[0].status,'结果待确认');
 });
-test('全部执行及结果处置完成后，补量持久保存且原目标不变',async t=>{
+test('全部执行及结果处置完成后只允许确认结束，刷新保留原批次',async t=>{
  const {page,store,id}=await scenario(t,'makeup');
  await page.goto(base+'/example/operations/publishing/plans/'+id);await detail(page);
- await page.getByRole('button',{name:'创建补量批次',exact:true}).click();
- await page.locator('[data-makeup=name]').fill('目标补量');
- await page.getByRole('button',{name:'确认新增补量批次',exact:true}).click();
- await page.waitForFunction(()=>document.body.innerText.includes('补量批次待执行'));
- let saved=await snapshot(store);assert.equal(saved.plans[0].targets[0].count,2);assert.equal(saved.plans[0].items.length,3);
- assert.equal(saved.batches.at(-1).type,'makeup');assert.equal(saved.batches.at(-1).name,'目标补量');
- await page.reload();await detail(page);saved=await snapshot(store);
- assert.equal(saved.plans[0].items.length,3);assert.equal(saved.plans[0].targets[0].count,2);
+ await page.getByRole('button',{name:'确认结束',exact:true}).waitFor();
  assert.equal(await page.getByRole('button',{name:'创建补量批次',exact:true}).count(),0);
+ await page.reload();await detail(page);
+ const saved=await snapshot(store);
+ assert.equal(saved.plans[0].items.length,2);assert.equal(saved.plans[0].targets[0].count,2);
 });
 test('全部执行结束后可说明缺口并确认结束，刷新仍保持只读',async t=>{
  const {page,store,id}=await scenario(t,'finish');

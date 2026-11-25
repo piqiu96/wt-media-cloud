@@ -45,15 +45,11 @@ describe('计划执行锁定与目标收尾',()=>{
     expect(()=>savePlanViews(db,views)).toThrow(/开始|锁定|编辑/);
     expect(p.name).toBe('计划收尾');
   });
-  it('执行期间拒绝补量，全部完成后生成补量且保留原目标',()=>{
-    const {db,p}=setup();dispatchPlan(db,p);
+  it('全部批次执行结束后依然拒绝追加，保留原目标和批次',()=>{
+    const {db,p}=setup();dispatchPlan(db,p);completed(db,p);
     const input={platform:'百家号',name:'补量',cats:{'三角洲行动':2}};
-    expect(()=>planAction(db,p.id,'makeup',input)).toThrow();
-    completed(db,p);expect(planViews(db)[0].status).toBe('running');
-    planAction(db,p.id,'makeup',input);
-    expect(p.targets[0].count).toBe(2);expect(p.items).toHaveLength(3);
-    expect(db.batches.at(-1).type).toBe('makeup');
-    expect(()=>planAction(db,p.id,'makeup',input)).toThrow();
+    expect(()=>planAction(db,p.id,'makeup',input)).toThrow(/不能新增/);
+    expect(p.targets[0].count).toBe(2);expect(p.items).toHaveLength(2);
   });
   it('确认结束后只读，不再补量，审核中不允许提前补量',()=>{
     const {db,p}=setup();dispatchPlan(db,p);completed(db,p);
