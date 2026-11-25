@@ -133,7 +133,7 @@ for (const role of process.env.WT_PLAN_CREATE_ONLY
       return send({
         items: [
           { composite_output_id: "41", name: "原成片一" },
-          { composite_output_id: "42", name: "原成片二" },
+          { composite_output_id: "42", name: "原成片二".repeat(30) },
         ],
         total: 2,
       });
@@ -264,6 +264,9 @@ for (const role of process.env.WT_PLAN_CREATE_ONLY
       .locator(".t-drawer__body")
       .evaluate((e) => (e.scrollTop = 0));
     await page.getByRole("button", { name: "关闭发布批次详情" }).waitFor();
+    const candidateRegion=page.getByRole('region',{name:'批次候选配置，可横向滚动'});
+    const candidateGeometry=await candidateRegion.evaluate(node=>({region:node.clientWidth,table:node.querySelector('table').getBoundingClientRect().width}));
+    assert.ok(candidateGeometry.table<=Math.max(candidateGeometry.region,880)+2,'long output names must not expand the readonly table beyond its bounded columns');
     const bounds = await page.getByRole("dialog").boundingBox();
     assert.ok(bounds.y >= 45 && bounds.y < 100);
     assert.ok(bounds.height <= 1000);
@@ -401,7 +404,7 @@ for (const role of process.env.WT_PLAN_CREATE_ONLY
       return send({
         items: [
           { composite_output_id: "41", name: "原成片一" },
-          { composite_output_id: "42", name: "原成片二" },
+          { composite_output_id: "42", name: "原成片二".repeat(30) },
         ],
         total: 2,
       });

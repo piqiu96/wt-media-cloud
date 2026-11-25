@@ -18,6 +18,7 @@ const outputs = [
   { composite_output_id: "9007199254740995", id: 1, name: "合成测试成片 A" },
   { composite_output_id: "9007199254740997", id: 2, name: "合成测试成片 B" },
 ].map(item => ({ ...item, category_id: "12", team_id: "3", occupied: false, platforms: ["baidu"], video: { status: "ready" }, media: {duration_ms:30000} }));
+const spareOutput={...outputs[1],id:3,composite_output_id:"9007199254741011",name:"替换后的测试成片 C"};
 const now = "2026-11-25T10:00:00Z";
 const template = { id: "903", name: "合成横版模板", canvas_width: 1280, canvas_height: 720,
   enabled: true, published_revision: 2, published_config: { backgroundMode: "solid" } };
@@ -56,7 +57,7 @@ await page.route("**/api/v1/**", async route => {
       eligible_account_count: 2, account_count: 2, unknown_output_count: 0, as_of: now });
     case "/api/v1/publication/output": {
       const selected = params.get("output_ids")?.split(",");
-      const items = selected ? outputs.filter(row => selected.includes(row.composite_output_id)) : outputs;
+      const items = selected ? [...outputs,spareOutput].filter(row => selected.includes(row.composite_output_id)) : [...outputs,spareOutput];
       return send({ items, total: items.length });
     }
     case "/api/v1/publication-batch/allocate":
@@ -362,15 +363,17 @@ try {
   await button("查询").click();
   await button("编辑配置").click();
   await heading("编辑批次 · 浏览器批次").waitFor();
-  await next();
-  await tableRows().filter({ hasText: outputs[1].name }).locator(".batch-content-more summary").click();
-  await tableRows().filter({ hasText: outputs[1].name }).getByRole("button", { name: "移除" }).click();
+  await tableRows().filter({hasText:outputs[1].name}).getByRole("button",{name:"更换成片",exact:true}).click();
+  await page.getByRole('dialog',{name:'选择成片',exact:true}).getByRole('row').filter({hasText:spareOutput.name}).getByRole('button',{name:'选择',exact:true}).click();
+  await tableRows().filter({hasText:spareOutput.name}).getByRole('button',{name:'移出',exact:true}).click();
   await page.locator(".resource-feedback-dialog").getByRole("button", { name: "移除" }).click();
+  await next();
   await next();
   await page.getByText("目标 2 · 候选 1 · 缺口 1", { exact: true }).waitFor();
   await button("保存修改").click();
   await heading("浏览器批次").waitFor();
   assert.equal(saved.config.candidates.length, 1);
+  assert.equal(saved.config.manual_pairs.some(pair=>pair.composite_output_id===spareOutput.composite_output_id),false,"removing a replaced row must clear its current manual pair");
   assert.equal(saved.config.candidates[0].row_key, originalRowKey);
   assert.equal(saved.targets[0].target_count, 2);
   assert.equal(saved.revision, "2");

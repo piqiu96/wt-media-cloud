@@ -165,9 +165,11 @@ onMounted(async () => {
       >
       <slot name="candidates"
         ><div
-          class="plan-detail-table resource-data-table resource-embedded-table is-summary"
+          class="plan-detail-table resource-data-table resource-embedded-table is-summary batch-readonly-candidates"
+          role="region" aria-label="批次候选配置，可横向滚动" tabindex="0"
         >
           <table>
+            <colgroup><col style="width:76px"/><col style="width:22%"/><col style="width:100px"/><col style="width:26%"/><col style="width:168px"/><col style="width:76px"/></colgroup>
             <thead>
               <tr>
                 <th>类目</th>
@@ -181,7 +183,7 @@ onMounted(async () => {
             <tbody>
               <tr v-for="r in batch.config?.candidates || []" :key="r.row_key">
                 <td>{{ categoryName(r.category_id) }}</td>
-                <td>{{ r.content.description || "待完善" }}</td>
+                <td><span class="batch-readonly-text" :title="r.content.description">{{ r.content.description || "待完善" }}</span></td>
                 <td>
                   {{
                     catalog.accounts.has(r.media_account_id)
@@ -191,7 +193,7 @@ onMounted(async () => {
                       : "账号ID：" + r.media_account_id
                   }}
                 </td>
-                <td>
+                <td><span class="batch-readonly-text" :title="batchOutputName(catalog.outputs.get(r.composite_output_id))">
                   {{
                     catalog.outputs.has(r.composite_output_id)
                       ? batchOutputName(
@@ -199,7 +201,7 @@ onMounted(async () => {
                         )
                       : "成片ID：" + r.composite_output_id
                   }}
-                </td>
+                </span></td>
                 <td>
                   <img
                     v-if="cover(r, 'cover_resource_path')"
@@ -308,3 +310,10 @@ onMounted(async () => {
         /> </slot></ResourceSection
   ></ResourceCard>
 </template>
+
+<style scoped>
+.batch-readonly-candidates table { min-width: 880px; table-layout: fixed; }
+.batch-readonly-text { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; white-space: normal; overflow-wrap: anywhere; }
+.batch-readonly-candidates img { max-height: 72px; object-fit: contain; vertical-align: middle; }
+.batch-readonly-candidates img + img { margin-left: 8px; }
+</style>
