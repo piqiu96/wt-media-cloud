@@ -131,7 +131,9 @@ it("isolates batch input from task input and clears only its own module", async 
   expect((await batch.get()).payload.request_key).toBe("original-batch");
   await batch.clear();
   expect((await task.get()).payload.description).toBe("独立任务");
-  expect(() => createPublicationDraftClient({ userId: "9", draftType: "plan", tauri: false })).toThrow();
+  const plan = createPublicationDraftClient({ userId: "9", draftType: "plan", tauri: false });
+  await plan.get();plan.remember({name:"计划输入"});await batch.clear();
+  expect((await plan.get()).payload).toEqual({name:"计划输入"});
 });
 
 it("passes batch type through the controlled native bridge", async () => {

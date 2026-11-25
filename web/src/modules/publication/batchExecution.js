@@ -5,7 +5,7 @@ export const batchPhases = {
 };
 
 export const batchControlLabels = {
-  start: "开始发布", pause: "暂停发布", resume: "继续发布", stop: "终止发布", finish: "结束批次",
+  start: "开始发布", pause: "暂停发布", resume: "继续发布", stop: "终止发布", finish: "结束批次", takeover: "接管当前批次",
 };
 
 const taskRef = ({ id, revision }) => ({ task_id: id, revision });
@@ -226,6 +226,10 @@ export function batchTaskLocation(batchID, taskID, listFilters, taskScope) {
   ]) {
     for (const key of keys) if (values[key]) query[prefix + key] = String(values[key]);
   }
+  if (/^[1-9][0-9]*$/.test(listFilters.from_plan || "")) {
+    query.from_plan = listFilters.from_plan;
+    for (const key of ["search","status","platform","category_id","page","page_size","scroll"]) if (typeof listFilters["plan_"+key] === "string") query["plan_"+key] = listFilters["plan_"+key];
+  }
   return { name: "Publish", query };
 }
 
@@ -239,6 +243,10 @@ export function batchTaskReturn(query) {
   for (const key of taskFilterKeys) {
     const value = query["task_" + key];
     if (typeof value === "string") back["task_" + key] = value;
+  }
+  if (/^[1-9][0-9]*$/.test(query.from_plan || "")) {
+    back.from_plan = query.from_plan;
+    for (const key of ["search","status","platform","category_id","page","page_size","scroll"]) if (typeof query["plan_"+key] === "string") back["plan_"+key] = query["plan_"+key];
   }
   return { name: "PublishBatches", query: back };
 }

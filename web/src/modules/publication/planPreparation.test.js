@@ -1,0 +1,185 @@
+import { describe, it, expect } from "vitest";
+import {
+  emptyPlan,
+  planProblem,
+  splitBatch,
+  mergeBatch,
+  planReturn,
+  sendPlanCommand,
+} from "./planPreparation.js";
+describe("plan preparation", () => {
+  it("conserves target when splitting and merging stable batches", () => {
+    let p = emptyPlan();
+    p.name = "周期";
+    p.date_start = "2026-11-25";
+    p.date_end = "2026-11-26";
+    p.goals = [{ platform: "baidu", category_id: "1", target_count: 5 }];
+    p.batches = [
+      {
+        row_key: "a",
+        name: "首批",
+        platform: "baidu",
+        group_order: 1,
+        batch_order: 1,
+        targets: [{ category_id: "1", target_count: 5 }],
+      },
+    ];
+    splitBatch(p, 0);
+    expect(p.batches.map((b) => b.targets[0].target_count)).toEqual([3, 2]);
+    expect(planProblem(p)).toBe("");
+    mergeBatch(p, 0);
+    expect(p.batches[0].targets[0].target_count).toBe(5);
+  });
+  it("keeps return paths restricted to plans", () => {
+    expect(planReturn({ from_plan: "2", plan_page: "3", evil: "x" })).toEqual({
+      name: "PublishPlans",
+      query: { view: "detail", id: "2", page: "3" },
+    });
+    expect(planReturn({ from_plan: "https://evil.test" })).toBe(null);
+  });
+  it("cannot recover another start from current rows or position", async () => {
+    const api = {
+      get: async () => ({ plan: { id: "1", current_batch_id: "2" } }),
+      start: async () => {
+        throw Object.assign(Error("conflict"), { status: 409 });
+      },
+    };
+    await expect(
+      sendPlanCommand(api, "1", {
+        action: "start",
+        input: {
+          request_key: "original",
+          expected_revision: "1",
+          first_batch_id: "2",
+          batch_confirmations: [],
+        },
+      }),
+    ).rejects.toMatchObject({ outcomeUnknown: true });
+  });
+});
+import { batchTaskLocation, batchTaskReturn } from "./batchExecution.js";
+it("preserves plan context through original task without accepting arbitrary return URL", () => {
+  const task = batchTaskLocation(
+    "8",
+    "9",
+    { from_plan: "2", plan_page: "4", evil: "https://evil" },
+    {},
+  );
+  expect(batchTaskReturn(task.query).query).toMatchObject({
+    from_plan: "2",
+    plan_page: "4",
+    id: "8",
+  });
+  expect(task.query.evil).toBeUndefined();
+});
+it("requires complete original first batch receipt and immutable confirmation", async () => {
+  const c = {
+      batch_id: "2",
+      expected_revision: "4",
+      included_row_keys: ["r"],
+      excluded_row_keys: [],
+      allow_shortfall: false,
+      expected_shortfalls: [{ category_id: "1", shortfall: 0 }],
+    },
+    op = {
+      action: "start",
+      input: {
+        request_key: "key",
+        expected_revision: "3",
+        first_batch_id: "2",
+        batch_confirmations: [c],
+      },
+    },
+    t = "2026-11-25T04:00:00Z";
+  const result = {
+    plan_id: "1",
+    revision: "4",
+    first_started_at: t,
+    current_batch_id: "2",
+    batch_confirmations: [c],
+    first_batch_receipt: {
+      batch_id: "2",
+      revision: "5",
+      execution_status: "running",
+      first_started_at: t,
+      task_ids: ["7"],
+      created_count: 1,
+      target_count: 1,
+      creation_shortfall: 0,
+    },
+  };
+  await expect(
+    sendPlanCommand({ start: async () => result }, "1", op),
+  ).resolves.toEqual(result);
+  for (const bad of [
+    { ...result, first_batch_receipt: { task_ids: ["7"] } },
+    { ...result, batch_confirmations: [{ ...c, expected_revision: "5" }] },
+    {
+      ...result,
+      first_batch_receipt: { ...result.first_batch_receipt, batch_id: "9" },
+    },
+  ])
+    await expect(
+      sendPlanCommand({ start: async () => bad }, "1", op),
+    ).rejects.toMatchObject({ outcomeUnknown: true });
+});
+import { planJournal } from "./planPreparation.js";
+it("keeps original command across tabs and only clears the exact owner command", async () => {
+  const data = new Map(),
+    storage = {
+      getItem: (k) => data.get(k),
+      setItem: (k, v) => data.set(k, v),
+      removeItem: (k) => data.delete(k),
+    },
+    locks = { request: async (k, f) => f() },
+    a = planJournal("cloud", "web", "9", "2", storage, locks),
+    b = planJournal("cloud", "web", "9", "2", storage, locks),
+    op = {
+      action: "start",
+      input: { request_key: "first", expected_revision: "1" },
+    };
+  await a.save(op);
+  await expect(
+    b.save({ action: "start", input: { request_key: "second" } }),
+  ).rejects.toThrow("已有");
+  await b.clear({ action: "start", input: { request_key: "second" } });
+  expect(a.read()).toEqual(op);
+  await b.clear(op);
+  expect(a.read()).toBeNull();
+  expect(
+    planJournal("cloud", "web", "10", "2", storage, locks).read(),
+  ).toBeNull();
+});
+it("cannot replay the original start when its current plan cannot be read", async () => {
+  let writes = 0;
+  await expect(
+    sendPlanCommand(
+      {
+        get: async () => {
+          throw Error("offline");
+        },
+        start: async () => {
+          writes++;
+        },
+      },
+      "2",
+      { action: "start", input: { request_key: "key" } },
+      { recover: true },
+    ),
+  ).rejects.toMatchObject({ outcomeUnknown: true });
+  expect(writes).toBe(0);
+});
+it("preserves unknown original command when recovery authentication expires", async () => {
+  await expect(
+    sendPlanCommand(
+      {
+        get: async () => {
+          throw Object.assign(Error("expired"), { status: 401 });
+        },
+      },
+      "2",
+      { action: "start", input: { request_key: "original" } },
+      { recover: true },
+    ),
+  ).rejects.toMatchObject({ outcomeUnknown: true });
+});
