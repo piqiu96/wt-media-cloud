@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from "vue-router";
 import ResourcePageHeader from "../../../shared/ui/resource/ResourcePageHeader.vue";
+import { batchStatus, batchListActions, batchActionLabel } from "../batchPresentation.js";
 import { presentBatchIssues } from "../batchIssuePresentation.js";
 import ResourceCard from "../../../shared/ui/resource/ResourceCard.vue";
 import ResourceDetailPage from "../../../shared/ui/resource/ResourceDetailPage.vue";
@@ -133,7 +134,6 @@ const dirty = computed(() => !!form.value && JSON.stringify(dirtyInput()) !== fo
 const freeze = computed(() => saving.value || preparing.value || !!pending.value);
 const canEdit = item => canPrepare.value && item?.allowed_actions?.includes("edit");
 const canCopy = item => canPrepare.value && item?.allowed_actions?.includes("copy");
-const canStart = item => canPrepare.value && item?.operator_id === String(actor.value?.id) && item?.allowed_actions?.includes("start");
 const formalTasks = computed(() => !!detail.value?.execution?.first_started_at);
 const taskAccountOptions = computed(() => [...new Set(detail.value?.config?.candidates?.map(row => row.media_account_id) || [])]
   .filter(id => catalog.accounts.has(id)).map(value => ({ value, label: batchAccountName(catalog.accounts.get(value)) })));
@@ -149,7 +149,13 @@ const accountName = row => batchAccountName(catalog.accounts.get(row.media_accou
 const outputName = row => batchOutputName(catalog.outputs.get(row.composite_output_id));
 const rowLabel = row => `${outputName(row)} · ${accountName(row)}`;
 const configState = item => configurationLabels[item.configuration_status] || "配置状态未知";
-const executionState = item => executionLabels[item.execution_status] || "执行状态未知";
+const executionState = batchStatus;
+const rowActions = item => batchListActions(item, canPrepare.value && item.operator_id === String(actor.value?.id));
+function rowAction(item, action) {
+  if (["edit", "copy", "detail"].includes(action)) return open(action, item);
+  if (action === "process") return open("detail", item);
+  return open("detail", item, { start: action });
+}
 const groupLabel = setting => groupPolicies.find(option => option.value === setting.between_group_policy)?.label || "未知";
 const currentStage = computed(() => detail.value ? `编辑批次 · ${detail.value.name}` : "新建发布批次");
 const readiness = computed(() => review.value?.readiness || null);
@@ -189,7 +195,7 @@ async function open(mode, item, { replace = false, start = false } = {}) {
   const query = { ...listLocation(), view: mode };
   if (item) query.id = item.id;
   const launch = start && item?.revision ? {
-    id: item.id, revision: item.revision, epoch: epoch + 1, path: router.resolve({ query }).fullPath,
+    action: start === true ? "start" : start, id: item.id, revision: item.revision, epoch: epoch + 1, path: router.resolve({ query }).fullPath,
   } : null;
   launchAfterNavigation = launch;
   try {
@@ -197,9 +203,6 @@ async function open(mode, item, { replace = false, start = false } = {}) {
   } finally {
     if (launchAfterNavigation === launch) launchAfterNavigation = null;
   }
-}
-function openToStart(item) {
-  return open("detail", item, { start: true });
 }
 function back() {
   const parent = planReturn(route.query);
@@ -413,10 +416,10 @@ async function refresh() {
       ]);
       if (run === epoch && launch?.epoch === run && launch.path === route.fullPath && launch.id === id) {
         if (detail.value.revision !== launch.revision) {
-          feedback.toast.info("批次配置已变化，请核对当前详情后重新开始");
+          feedback.toast.info("批次配置已变化，请核对当前详情后重新操作");
         } else if (!resourceError.value) {
           await nextTick();
-          if (run === epoch && detail.value?.revision === launch.revision) executionControls.value?.open("start");
+          if (run === epoch && detail.value?.revision === launch.revision) executionControls.value?.open(launch.action);
         }
       }
       return;
@@ -500,7 +503,7 @@ async function saveDraft() {
     await checkIdentity();
     await newDraft.value.save(snapshot(payload()));
     formBaseline.value = JSON.stringify(dirtyInput());
-    feedback.toast.success(persisted.value ? "已保存本机续编" : "已暂存当前填写");
+    feedback.toast.success(persisted.value ? "已保存草稿，可在本机继续编辑" : "已暂存当前填写");
   } catch (error) {
     draftError.value = problem(error, "续编保存失败，当前输入已保留");
   } finally {
@@ -661,14 +664,13 @@ onBeforeUnmount(() => {
           <template #plan="{row}"><span class="batch-cell-text">{{row.plan_name||'独立批次'}}</span></template>
           <template #coverage="{ row }"><strong class="batch-target-value">{{targetSum(row.targets)}} <span>条</span></strong><small class="batch-muted batch-task-block">{{row.targets.map(t=>categoryName(t.category_id)+' '+t.target_count).join(' · ')}}</small></template>
           <template #progress="{row}"><span v-if="!row.execution?.first_started_at">{{row.candidate_count||0}} 条候选 · 0 条任务</span><template v-else><div class="batch-progress-title"><span>{{row.execution.published_count}} / {{targetSum(row.targets)}}</span><span>{{batchRate(row)}}%</span></div><t-progress color="var(--wt-primary)" :percentage="Math.min(batchRate(row),100)" :label="false" :stroke-width="6"/></template></template>
-          <template #state="{row}"><ResourceStatusBadge :label="row.execution_status==='not_started'?(row.configuration_status==='ready'?'待执行':'待配置'):executionState(row)" :tone="batchPending(row)?'warning':row.execution_status==='running'?'info':'neutral'"/><small v-if="row.execution?.phase && row.execution.phase!==row.execution_status" class="batch-muted batch-task-block">{{batchPhases[row.execution.phase]}}</small><small v-if="row.execution?.stopped_at" class="batch-muted batch-task-block">已终止后续派发</small></template>
+          <template #state="{row}"><ResourceStatusBadge :label="executionState(row)" :tone="batchPending(row)?'warning':row.execution_status==='running'?'info':'neutral'"/><small v-if="row.execution_status==='not_started'" class="batch-muted batch-task-block">{{configState(row)}}</small><small v-if="['running','paused','stopping'].includes(row.execution_status) && row.execution?.phase && row.execution.phase!==row.execution_status && batchPhases[row.execution.phase]!==executionState(row)" class="batch-muted batch-task-block">{{batchPhases[row.execution.phase]}}</small><small v-if="row.execution?.stopped_at && !['ended','cancelled'].includes(row.execution_status)" class="batch-muted batch-task-block">已终止后续派发</small></template>
           <template #pending="{row}"><span v-if="batchPending(row) === null" class="batch-muted">待刷新</span><t-button v-else-if="batchPending(row)>0" theme="warning" variant="text" @click="open('detail',row)">{{batchPending(row)}} 项</t-button><span v-else>—</span></template>
           <template #updated_at="{ row }">{{ formatPublicationTime(row.updated_at) }}</template>
           <template #op="{ row }"><ResourceRowActions>
-            <t-button v-if="canStart(row)" variant="text" size="small" @click="openToStart(row)">开始发布</t-button>
-            <t-button v-if="canEdit(row)" variant="text" size="small" @click="open('edit', row)">编辑配置</t-button>
-            <t-button v-if="canCopy(row)" variant="text" size="small" @click="open('copy', row)">复制批次</t-button>
-            <t-button v-if="!canEdit(row) && !canCopy(row) && !canStart(row)" variant="text" size="small" @click="open('detail', row)">查看</t-button>
+            <t-button v-for="(action,index) in rowActions(row)" :key="action" variant="text" size="small"
+              :class="{ 'is-primary': index === 0, 'is-danger': action === 'stop' }"
+              @click="rowAction(row,action)">{{batchActionLabel(action,row)}}</t-button>
           </ResourceRowActions></template>
         </t-table>
       </div>
@@ -708,8 +710,7 @@ onBeforeUnmount(() => {
       <span v-if="!canPrepare || detail.operator_id !== String(actor?.id)" class="resource-footer-status batch-muted">
         {{ !canPrepare ? '当前角色可查看批次' : detail.operator_id !== String(actor?.id) ? '批次配置由所属运营处理' : '当前状态不允许编辑或复制' }}
       </span>
-      <t-button v-if="canCopy(detail) && !pendingExecution" theme="default" variant="outline" :disabled="executionBusy" @click="open('copy', detail)">复制批次</t-button>
-      <t-button v-if="canEdit(detail) && !pendingExecution" theme="default" variant="outline" :disabled="executionBusy" @click="open('edit', detail)">编辑配置</t-button>
+      <t-button v-if="canEdit(detail) && !pendingExecution" theme="default" variant="outline" :disabled="executionBusy" @click="open('edit', detail)">继续配置</t-button>
       <BatchExecutionControls ref="executionControls" :batch="detail" :actor="actor" :row-label="rowLabel" :category-name="categoryName"
         :task-link="taskLink" @updated="syncExecutionDetail" @busy="executionBusy = $event" @pending="pendingExecution = $event" />
     </template>
@@ -772,8 +773,8 @@ onBeforeUnmount(() => {
       </template>
     </div>
     <template #footer>
-      <span v-if="isCreating" class="batch-footer-note batch-muted">{{ persisted ? "续编保存在本机，保存批次后进入批次列表。" : "未保存的输入仅在当前页面会话保留。" }}</span>
-      <t-button v-if="isCreating && persisted && !pending" theme="default" variant="outline" :disabled="freeze" @click="saveDraft">保存续编</t-button>
+      <span v-if="isCreating" class="batch-footer-note batch-muted">{{ persisted ? "草稿仅保存在本机，保存批次后进入批次列表。" : "未保存的输入仅在当前页面会话保留。" }}</span>
+      <t-button v-if="isCreating && persisted && !pending" theme="default" variant="outline" :disabled="freeze" @click="saveDraft">保存草稿</t-button>
       <t-button v-if="step > 0 && !pending" theme="default" variant="outline" :disabled="freeze" @click="goStep(step - 1)">上一步</t-button>
       <t-button v-if="step < 2" theme="primary" :disabled="freeze" @click="goStep(step + 1)">下一步</t-button>
       <t-button v-else :theme="pending ? 'primary' : 'default'" :variant="pending ? 'base' : 'outline'"

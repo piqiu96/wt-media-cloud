@@ -301,6 +301,40 @@ async function requestSettled() {
   await page.waitForLoadState("networkidle");
 }
 const regressions = {
+  async "list-actions"() {
+    for (const [state, phase, actions, label, expected] of [
+      ['not_started','not_started',['start','edit','stop'],'未开始',['开始发布','继续配置','详情','终止']],
+      ['running','running',['pause','stop'],'执行中',['详情','暂停发布','终止发布']],
+      ['running','awaiting_processing',['pause','stop'],'待处理',['去处理','详情','暂停发布','终止发布']],
+      ['paused','paused',['resume','stop'],'已暂停',['详情','继续发布','终止发布']],
+      ['stopping','stopping',[],'停止中',['详情']],
+      ['ended','ended',['copy'],'已结束',['详情','复制']],
+      ['cancelled','ended',['copy'],'已取消',['详情','复制']],
+    ]) {
+      batch=prepared(id,'受控批次',{execution_status:state,allowed_actions:actions,
+        execution:{...newExecution(),phase,first_started_at:state==='not_started'?null:now,
+          task_counts:phase==='awaiting_processing'?{uncertain:1}:{}, stopped_at:state==='cancelled'?now:null}});
+      await page.goto(new URL('/publish-batches',base).href);
+      const row=page.getByRole('row').filter({hasText:'受控批次'});
+      await row.getByText(label,{exact:true}).waitFor();
+      if (state === 'cancelled') assert.equal(await row.getByText('已结束',{exact:true}).count(),0);
+      assert.deepEqual(await row.locator('.resource-row-actions').getByRole('button').allTextContents(),expected);
+      if (state==='running' && phase==='running') {
+        await row.getByRole('button',{name:'暂停发布',exact:true}).click();
+        await page.getByRole('dialog',{name:'暂停发布',exact:true}).waitFor();
+        assert.equal(calls.some(c=>c.method==='POST' && c.endpoint.endsWith('/pause')),false);
+      }
+    }
+    actor={...owner,id:'72',role:'senior_operator'};
+    await page.goto(new URL('/publish-batches',base).href);
+    const readonly=page.getByRole('row').filter({hasText:'受控批次'});
+    await readonly.getByRole('button',{name:'详情',exact:true}).waitFor();
+    assert.deepEqual(await readonly.locator('.resource-row-actions').getByRole('button').allTextContents(),['详情']);
+    await readonly.getByRole('button',{name:'详情',exact:true}).click();
+    await heading('受控批次').waitFor();
+    assert.equal(await page.getByText('执行阶段',{exact:true}).count(),0);
+    assert.equal(await button('复制').count(),0);
+  },
   async "changed-revision"() {
     await createAndStart("启动前配置已变更");
     await requestSettled();

@@ -273,5 +273,7 @@ it('counts only explicit exceptions and the provider verification subset, keepin
  expect(execution.batchPendingCount({execution_status:'not_started'})).toBe(0);
  expect(execution.batchPendingCount({execution_status:'ended'})).toBe(null);
  const mixed=value(12,2);Object.assign(mixed.execution.task_counts,{failed:1,awaiting_human:3,uncertain:4});
+ expect(execution.batchPendingCount(mixed)).toBe(9);
+ mixed.execution_status="running";
  expect(execution.batchPendingCount(mixed)).toBe(10);
 });

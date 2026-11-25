@@ -366,7 +366,7 @@ try {
   await heading("发布批次").waitFor();
   await input("搜索批次").fill("浏览器");
   await button("查询").click();
-  await button("编辑配置").click();
+  await button("继续配置").click();
   await heading("编辑批次 · 浏览器批次").waitFor();
   await tableRows().filter({hasText:outputs[1].name}).getByRole("button",{name:"更换成片",exact:true}).click();
   await page.getByRole('dialog',{name:'选择成片',exact:true}).getByRole('row').filter({hasText:spareOutput.name}).getByRole('button',{name:'选择',exact:true}).click();

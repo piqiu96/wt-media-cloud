@@ -1,4 +1,5 @@
 <script setup>
+import { batchStatus } from "../batchPresentation.js";
 import { computed, ref, watch, onBeforeUnmount, nextTick } from "vue";
 import {
   useRoute,
@@ -147,7 +148,7 @@ const pendingBatchCount = batchPendingCount;
 const endedLabel = (p) =>
   ({
     achieved: "目标达成",
-    unmet: "保留目标缺口",
+    unmet: "未达成结束",
     cancelled: "已终止",
     terminated: "已终止",
   })[p.end_reason] || "—";
@@ -256,6 +257,7 @@ async function back() {
   return router.push({ name: "PublishPlans", query: listQuery() });
 }
 async function reload(background = false) {
+  if (!background) creationReview.value = null;
   const run = ++seq;
   if (!background) loading.value = true;
   error.value = "";
@@ -418,10 +420,28 @@ async function saveDraft() {
       pending: pendingCreate.value,
     });
     draftError.value = "";
-    feedback.toast.success("已保存本机新建续编");
+    feedback.toast.success("已保存草稿，可在本机继续编辑");
   } catch (e) {
     draftError.value = humanError(e);
   }
+}
+const creationReview = ref(null);
+async function reviewSave() {
+  if (busy.value) return;
+  if (mode.value === 'edit' || pendingCreate.value) return save();
+  const issue = planProblem(form.value);
+  if (issue) { error.value = issue; return; }
+  const basis = JSON.stringify(form.value), run = seq;
+  if (!await validate() || disposed || run !== seq || basis !== JSON.stringify(form.value)) return;
+  creationReview.value = { basis, name: form.value.name,
+    target: form.value.goals.reduce((n,g)=>n+g.target_count,0), batches: form.value.batches.length };
+}
+function confirmCreate() {
+  if (!creationReview.value || busy.value) return;
+  const basis = creationReview.value.basis;
+  creationReview.value = null;
+  if (basis !== JSON.stringify(form.value)) { error.value = '计划安排已变化，请重新检查后创建'; return; }
+  return save();
 }
 async function save() {
   if (busy.value) return;
@@ -518,7 +538,7 @@ async function validate() {
         : {}),
     });
     error.value = r.valid ? "" : r.issues.map((i) => i.message).join("；");
-    if (r.valid) feedback.toast.success("目标与批次安排检查通过");
+    return r.valid;
   } catch (e) {
     error.value = humanError(e);
   } finally {
@@ -899,17 +919,12 @@ onBeforeUnmount(() => {
           variant="outline"
           :disabled="busy || !!pendingCreate"
           @click="saveDraft"
-          >保存本机续编</t-button
-        ><t-button
-          variant="outline"
-          :disabled="busy || !!pendingCreate"
-          @click="validate"
-          >检查安排</t-button
-        ><t-button :loading="busy" @click="save">{{
+          >保存草稿</t-button
+        ><t-button :loading="busy" @click="reviewSave">{{
           pendingCreate
             ? "核对原创建请求"
             : mode === "edit"
-              ? "保存修改"
+              ? "保存"
               : "创建计划"
         }}</t-button></template
       ></ResourceEditorPage
@@ -1142,17 +1157,7 @@ onBeforeUnmount(() => {
                   </td>
                   <td>
                     {{
-                      r.batch.execution_status === "not_started"
-                        ? "未开始"
-                        : batchPhases[r.batch.execution?.phase] ||
-                          {
-                            running: "执行中",
-                            paused: "已暂停",
-                            stopping: "停止中",
-                            ended: "已结束",
-                            cancelled: "已取消",
-                          }[r.batch.execution_status] ||
-                          "等待状态更新"
+                      batchStatus(r.batch)
                     }}
                   </td>
                   <td class="resource-table-number">
@@ -1189,8 +1194,8 @@ onBeforeUnmount(() => {
                         v-if="r.allowed_actions.includes('edit')"
                         variant="text"
                         @click="router.push(batchRoute(r, 'edit'))"
-                        >编辑配置</t-button
-                      ><BatchExecutionControls
+                        >{{r.configured ? "继续配置" : "去配置"}}</t-button
+                      ><BatchExecutionControls inline
                         :batch="r.batch"
                         :actor="actor"
                         :category-name="categoryName"
@@ -1365,5 +1370,18 @@ onBeforeUnmount(() => {
         >
       </div></ResourceOverlay
     >
+    <ResourceOverlay :visible="!!creationReview" title="确认创建发布计划" form-actions :width="640" :busy="busy"
+      @update:visible="value=>{if(!value)creationReview=null}">
+      <template v-if="creationReview">
+        <p class="plan-muted">确认后只保存计划与待配置批次，不创建正式发布任务，不占用账号或成片，也不会自动发布。</p>
+        <ResourceDescriptions>
+          <t-descriptions-item label="计划名称">{{creationReview.name}}</t-descriptions-item>
+          <t-descriptions-item label="计划目标">{{creationReview.target}} 条</t-descriptions-item>
+          <t-descriptions-item label="规划批次">{{creationReview.batches}} 批</t-descriptions-item>
+        </ResourceDescriptions>
+      </template>
+      <template #footer><t-button variant="outline" :disabled="busy" @click="creationReview=null">取消</t-button>
+        <t-button theme="primary" :loading="busy" @click="confirmCreate">确认创建</t-button></template>
+    </ResourceOverlay>
   </div>
 </template>
