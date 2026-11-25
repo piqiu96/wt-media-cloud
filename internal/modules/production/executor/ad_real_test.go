@@ -2,9 +2,11 @@ package executor
 
 import (
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -75,6 +77,23 @@ func TestAdRealRender(t *testing.T) {
 			expected := float64(result.DurationMS) / 1000
 			if !info.HasAudio || info.VideoDuration < expected-.11 || info.VideoDuration > expected+.11 {
 				t.Fatalf("output %+v expected %g", info, expected)
+			}
+			if !audible {
+				var timeline DynamicTimeline
+				if e := json.Unmarshal(result.Timeline, &timeline); e != nil {
+					t.Fatal(e)
+				}
+				offset := strconv.FormatFloat(timeline.AdStart+.5, 'f', 6, 64)
+				pcm, e := exec.CommandContext(ctx, ffmpeg, "-v", "error", "-ss", offset, "-i", output, "-t", "0.5", "-vn", "-ar", "8000", "-ac", "1", "-f", "s16le", "-").Output()
+				if e != nil || len(pcm) == 0 {
+					t.Fatalf("silent ad audio probe: %v", e)
+				}
+				for i := 0; i+1 < len(pcm); i += 2 {
+					sample := int16(binary.LittleEndian.Uint16(pcm[i : i+2]))
+					if sample < -2 || sample > 2 {
+						t.Fatalf("source audio leaked into silent advertisement: %d", sample)
+					}
+				}
 			}
 			if out, e := exec.CommandContext(ctx, ffmpeg, "-v", "error", "-xerror", "-i", output, "-f", "null", "-").CombinedOutput(); e != nil {
 				t.Fatalf("decode %v %s", e, out)
