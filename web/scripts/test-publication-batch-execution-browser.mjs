@@ -317,6 +317,7 @@ const regressions = {
       await page.goto(new URL('/publish-batches',base).href);
       const row=page.getByRole('row').filter({hasText:'受控批次'});
       await row.getByText(label,{exact:true}).waitFor();
+      if (state === 'cancelled') assert.equal(await row.getByText('已结束',{exact:true}).count(),0);
       assert.deepEqual(await row.locator('.resource-row-actions').getByRole('button').allTextContents(),expected);
       if (state==='running' && phase==='running') {
         await row.getByRole('button',{name:'暂停发布',exact:true}).click();
