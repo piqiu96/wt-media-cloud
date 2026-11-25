@@ -325,3 +325,15 @@ export const planRecordLabels = {
   "publication_plan.cancel": "终止计划",
   "publication_plan.finish": "结束计划",
 };
+
+export async function readPlanDraftChoice(client, choose) {
+  const local = await client.get({ reload: true });
+  if (!local.payload) return local;
+  const choice = await choose(local.saved_at);
+  if (choice === "continue") return local;
+  if (choice === "restart") {
+    await client.clear();
+    return client.get();
+  }
+  return null;
+}

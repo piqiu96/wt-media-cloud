@@ -24,6 +24,7 @@ import { createSessionClient } from "../../../shared/api/session.js";
 import { createComposeClient } from "../../../shared/api/compose.js";
 import { cloudResourceURL } from "../../../shared/api/http.js";
 import { canRunLocalAgent } from "../../../utils.js";
+import { choosePublicationDraft } from "../draftRecovery.js";
 import PlanWorkbench from "../components/PlanWorkbench.vue";
 import BatchReadonlyBody from "../components/BatchReadonlyBody.vue";
 import BatchExecutionControls from "../components/BatchExecutionControls.vue";
@@ -37,6 +38,7 @@ import {
   planProgressLabels,
   planJournal,
   sendPlanCommand,
+  readPlanDraftChoice,
 } from "../planPreparation.js";
 import {
   batchPhases,
@@ -73,6 +75,7 @@ const drawerBounds = ref({}),
   baseline = ref(""),
   pendingCreate = ref(null),
   recordPage = ref(1);
+let preparedDraft = null;
 let requestedAction = null;
 let recordSequence = 0;
 let drawerLocked = false;
@@ -102,7 +105,7 @@ const plan = computed(() => detail.value?.plan),
     () => canRunLocalAgent(actor.value) && !!actor.value?.team_id,
   ),
   dirty = computed(
-    () => form.value && JSON.stringify(form.value) !== baseline.value,
+    () => !["list", "detail"].includes(mode.value) && form.value && JSON.stringify(form.value) !== baseline.value,
   );
 const count = computed(
   () => plan.value?.goals.reduce((n, g) => n + g.target_count, 0) || 0,
@@ -169,6 +172,23 @@ function setBaseline() {
   baseline.value = JSON.stringify(form.value);
 }
 async function open(view, id) {
+  if (view === "create" && mode.value !== "create") {
+    try {
+      await identity();
+      const client = createPublicationDraftClient({
+        userId: localActor,
+        draftType: "plan",
+      });
+      const local = await readPlanDraftChoice(client, (savedAt) =>
+        choosePublicationDraft(savedAt, { subject: "发布计划" }),
+      );
+      if (!local) return;
+      preparedDraft = { userId: localActor, client, local };
+    } catch (e) {
+      error.value = humanError(e);
+      return;
+    }
+  }
   savedScroll =
     document.querySelector(".content-area")?.scrollTop || window.scrollY;
   return router.push({
@@ -246,12 +266,31 @@ async function reload(background = false) {
           })),
         });
       } else {
-        draft.value = createPublicationDraftClient({
-          userId: localActor,
-          draftType: "plan",
-        });
-        const local = await draft.value.get();
+        const prepared =
+          mode.value === "create" && preparedDraft?.userId === localActor
+            ? preparedDraft
+            : null;
+        preparedDraft = null;
+        draft.value =
+          prepared?.client ||
+          createPublicationDraftClient({
+            userId: localActor,
+            draftType: "plan",
+          });
+        let local =
+          prepared?.local || (await draft.value.get({ reload: true }));
         if (run !== seq) return;
+        if (mode.value === "create" && local.payload && !prepared) {
+          local = await readPlanDraftChoice(draft.value, (savedAt) =>
+            choosePublicationDraft(savedAt, { subject: "发布计划" }),
+          );
+          if (run !== seq) return;
+          if (!local) {
+            allowLeave = true;
+            await router.replace({ name: "PublishPlans", query: listQuery() });
+            return;
+          }
+        }
         if (mode.value === "copy") {
           if (local.payload) {
             const replace = await feedback.confirmWarning({
@@ -269,19 +308,8 @@ async function reload(background = false) {
           if (run !== seq) return;
           form.value = emptyPlan(c);
         } else if (local.payload) {
-          const yes = await feedback.confirmWarning({
-            title: "发现未完成的发布计划",
-            message: "继续上次填写，或取消后重新开始。",
-            confirmText: "继续编辑",
-          });
-          if (run !== seq) return;
-          if (yes) {
-            form.value = emptyPlan(local.payload.form);
-            pendingCreate.value = local.payload.pending || null;
-          } else {
-            await draft.value.clear();
-            form.value = emptyPlan();
-          }
+          form.value = emptyPlan(local.payload.form);
+          pendingCreate.value = local.payload.pending || null;
         } else form.value = emptyPlan();
       }
       setBaseline();

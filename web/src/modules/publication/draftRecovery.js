@@ -1,7 +1,7 @@
 import { emptyCoverConfig } from "./coverPreparation.js";
 import { DialogPlugin } from "tdesign-vue-next";
 
-export function choosePublicationDraft(savedAt) {
+export function choosePublicationDraft(savedAt, { subject = "发布任务" } = {}) {
   const date = new Date(savedAt);
   const message =
     savedAt && !Number.isNaN(date.getTime())
@@ -17,12 +17,13 @@ export function choosePublicationDraft(savedAt) {
       resolve(choice);
     };
     dialog = DialogPlugin.confirm({
-      header: "发现未完成的发布任务配置",
+      header: `发现未完成的${subject}配置`,
       body: message,
       dialogClassName: "resource-feedback-dialog",
       width: "min(calc(100vw - 32px), 560px)",
       confirmBtn: { content: "继续编辑", theme: "primary" },
       cancelBtn: { content: "重新开始", theme: "default", variant: "outline" },
+      closeBtn: true,
       closeOnOverlayClick: false,
       onConfirm: () => finish("continue"),
       onCancel: () => finish("restart"),

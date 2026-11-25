@@ -226,3 +226,33 @@ it("only accepts a fully bound provider non-application proof", async () => {
       sendPlanCommand(api(bad), "2", op, { recover: true }),
     ).rejects.toMatchObject({ outcomeUnknown: true });
 });
+import { readPlanDraftChoice } from "./planPreparation.js";
+it("distinguishes continuation, explicit restart and dismiss without clearing newer input", async () => {
+  let clears = 0;
+  const local = {
+      payload: {
+        form: { name: "保留计划" },
+        pending: { request_key: "unknown" },
+      },
+      revision: "3",
+    },
+    client = {
+      get: async () => local,
+      clear: async () => {
+        clears++;
+        throw Error("draft_revision_conflict");
+      },
+    };
+  expect(await readPlanDraftChoice(client, async () => null)).toBe(null);
+  expect(clears).toBe(0);
+  expect(await readPlanDraftChoice(client, async () => "continue")).toEqual(
+    local,
+  );
+  expect(clears).toBe(0);
+  await expect(
+    readPlanDraftChoice(client, async () => "restart"),
+  ).rejects.toThrow("draft_revision_conflict");
+  expect(clears).toBe(1);
+  expect(local.payload.pending.request_key).toBe("unknown");
+});
+
