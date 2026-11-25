@@ -114,6 +114,11 @@ const plan = computed(() => detail.value?.plan),
       form.value &&
       JSON.stringify(form.value) !== baseline.value,
   );
+const planOwnerName = computed(() =>
+  String(actor.value?.id) === String(plan.value?.owner_id)
+    ? actor.value?.nickname?.trim() || actor.value?.username?.trim() || ""
+    : "",
+);
 const count = computed(
   () => plan.value?.goals.reduce((n, g) => n + g.target_count, 0) || 0,
 );
@@ -825,7 +830,7 @@ onBeforeUnmount(() => {
 });
 </script>
 <template>
-  <div ref="overlayHost" class="plan-page">
+  <div ref="overlayHost" class="plan-page" :class="{ 'resource-list-page': mode === 'list' }">
     <FeedbackAlert v-if="error" theme="error" :message="error" />
     <t-button
       v-if="error && !form && !plan && mode !== 'list'"
@@ -935,7 +940,7 @@ onBeforeUnmount(() => {
             ? "计划按批次顺序推进；需要处理时可使用当前批次的原操作入口。"
             : "完成所有批次配置后，统一检查并执行计划。")
         }}
-        <template v-if="plan.current_batch_id" #actions
+        <template v-if="plan.current_batch_id && plan.status !== 'ended'" #actions
           ><t-button
             theme="primary"
             variant="text"
@@ -963,7 +968,7 @@ onBeforeUnmount(() => {
                 ...(plan.status === 'ended'
                   ? [{ label: '结束结果', value: endedLabel(plan) }]
                   : []),
-                { label: '负责人 ID', value: plan.owner_id },
+                { label: planOwnerName ? '负责人' : '负责人 ID', value: planOwnerName || plan.owner_id },
                 {
                   label: '执行周期',
                   value: plan.date_start + ' ~ ' + plan.date_end,

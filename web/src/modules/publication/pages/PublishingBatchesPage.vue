@@ -622,11 +622,11 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div v-if="view === 'list'" ref="listRoot" class="publication-batches">
+  <div v-if="view === 'list'" ref="listRoot" class="publication-batches resource-list-page">
     <ResourcePageHeader title="发布批次">
       <template #actions><t-button v-if="canPrepare" theme="primary" @click="open('create')">新建批次</t-button></template>
     </ResourcePageHeader>
-    <ResourceCard class="resource-list-card">
+    <ResourceCard class="resource-list-card resource-list-panel">
       <ResourceFilterBar>
         <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">搜索批次</span>
           <t-input v-model="listFilters.search" aria-label="搜索批次" placeholder="输入批次名称或批次 ID" :maxlength="100" clearable @enter="updateFilters()" />

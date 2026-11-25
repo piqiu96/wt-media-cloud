@@ -222,3 +222,6 @@
 .plan-editor-section {
   padding: 24px;
 }
+
+/* List panels use the shared opt-in geometry; the page header already owns its gap. */
+.plan-page.resource-list-page { gap: 0; }

@@ -7,6 +7,8 @@ const browser = await chromium.launch({
 });
 const base = process.env.WT_MEDIA_BROWSER_BASE_URL || "http://127.0.0.1:5173";
 const time = "2026-11-25T04:00:00Z";
+const longOutputName = "原型长名称呈现验证成片标题".repeat(6) + ".mp4";
+const longAccountName = "长名称发布账号".repeat(9);
 try {
   for (const [scene, count] of [
     ["normal_reviewing", 0],
@@ -14,6 +16,10 @@ try {
     ["stopped_verification", 1],
     ["expired_verification", 1],
     ["missing_statistics", undefined],
+    ["ended", 0],
+    ["stopping", 0],
+    ["batch_paused", 0],
+    ["other_owner", 0],
   ]) {
     const page = await browser.newPage({
         viewport: { width: 1440, height: 1000 },
@@ -29,7 +35,7 @@ try {
       status: "reviewing",
       content: { description: scene },
       allowed_actions: count === 1 ? ["resolve"] : [],
-      resources: { account_name: "本人账号", output_name: "本人素材" },
+      resources: { account_name: longAccountName, output_name: longOutputName },
     };
     const batch = {
       id: "2",
@@ -91,6 +97,34 @@ try {
       started_at: time,
       allowed_actions: [],
     };
+    if (scene === "ended") {
+      Object.assign(plan, {
+        status: "ended",
+        progress: "ended",
+        end_reason: "achieved",
+        ended_at: time,
+        published_count: 1,
+      });
+      Object.assign(plan.goal_results[0], { published_count: 1, shortfall: 0 });
+      Object.assign(batch.execution, {
+        published_count: 1,
+        target_shortfall: 0,
+        task_counts: { published: 1 },
+      });
+      Object.assign(task, {
+        status: "published",
+        platform_work_id: "70001",
+        allowed_actions: [],
+      });
+    }
+    if (["stopping", "batch_paused"].includes(scene)) {
+      Object.assign(plan, {
+        status: scene === "stopping" ? "stopping" : "running",
+        progress: scene,
+      });
+      batch.execution_status = scene === "stopping" ? "stopping" : "paused";
+      batch.execution.phase = batch.execution_status;
+    }
     await page.route("**/api/v1/**", async (route) => {
       const r = route.request(),
         p = new URL(r.url()).pathname;
@@ -101,11 +135,12 @@ try {
         });
       if (p === "/api/v1/auth/me")
         return send({
-          id: "9",
-          role: "operator",
+          id: scene === "other_owner" ? "99" : "9",
+          role: scene === "other_owner" ? "admin" : "operator",
           team_id: "7",
           status: "enabled",
           username: "operator",
+          nickname: scene === "manual_reviewing" ? "运营昵称" : "",
           category_ids: ["1"],
         });
       if (p === "/api/v1/categories")
@@ -168,6 +203,25 @@ try {
       assert.match(await published.locator("strong").textContent(), /^0\s*条$/);
     }
     assert.equal(
+      await page
+        .getByRole("button", { name: "去当前批次处理", exact: true })
+        .count(),
+      scene === "ended" ? 0 : 1,
+    );
+    if (scene === "other_owner") {
+      assert.equal(
+        await page.getByText("负责人 ID", { exact: true }).count(),
+        1,
+      );
+    } else {
+      assert.equal(await page.getByText("负责人", { exact: true }).count(), 1);
+      const description = page.getByRole("region", { name: "计划信息" });
+      assert.match(
+        await description.innerText(),
+        scene === "manual_reviewing" ? /运营昵称/ : /operator/,
+      );
+    }
+    assert.equal(
       await page.getByRole("button", { name: "结束计划", exact: true }).count(),
       0,
     );
@@ -183,18 +237,40 @@ try {
     );
     const desc = await page.locator(".resource-descriptions").allInnerTexts();
     assert.ok(
-      desc.some((text) => text.includes("待平台公开") && text.includes("1 条")),
+      desc.some(
+        (text) =>
+          text.includes("待平台公开") &&
+          text.includes(scene === "ended" ? "0 条" : "1 条"),
+      ),
       scene + " keeps total reviewing",
     );
     assert.equal(
       await page.getByRole("button", { name: "结束批次", exact: true }).count(),
       0,
     );
+    const taskRow = page.getByRole("row").filter({ hasText: scene });
+    await taskRow.waitFor();
+    for (const fullName of [longOutputName, longAccountName]) {
+      const name = taskRow.getByTitle(fullName, { exact: true });
+      assert.equal(await name.count(), 1);
+      assert.equal(await name.textContent(), fullName);
+      await name.hover();
+      const dimensions = await name.evaluate((element) => ({
+        height: element.getBoundingClientRect().height,
+        lineHeight: parseFloat(getComputedStyle(element).lineHeight),
+        weight: getComputedStyle(element).fontWeight,
+      }));
+      assert.ok(
+        dimensions.height <= dimensions.lineHeight * 2 + 1,
+        `${scene}: resource title must fit two visible lines`,
+      );
+      assert.equal(dimensions.weight, "400");
+    }
     assert.deepEqual(errors, []);
     await page.close();
   }
   console.log(
-    "Review pending UI: ordinary/manual reviewing zero; stopped/expired verification one; missing counts unknown; all three views consistent PASS",
+    "Review pending/presentation UI: reviewing zero, verification subset, unknown counts; long resource names fit two lines with full titles; ended/stop/pause notice actions and owner name/ID fallback PASS",
   );
 } finally {
   await browser.close();
