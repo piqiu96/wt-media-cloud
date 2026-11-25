@@ -398,8 +398,9 @@ try {
       await number((i === 0 ? "游戏" : "资讯") + "发布目标").isDisabled(),
       true,
     );
-    await button("下一步").click();
-    await button("下一步").click();
+    await button("确认资源").click();
+    await button("进入内容配置").click();
+    await button("预览检查").click();
     assert.equal(
       await button("开始发布").count(),
       0,

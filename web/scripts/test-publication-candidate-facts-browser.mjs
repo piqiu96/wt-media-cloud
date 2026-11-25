@@ -12,7 +12,7 @@ const coverPath = "/api/v1/file-resources/" + "a".repeat(64),
 try {
   for (const [scene, message] of [
     ["disabled", "账号当前不可用"],
-    ["occupied", "该成片已被当前平台的任务占用"],
+    ["occupied", "成片已被当前平台任务占用"],
     ["unknown", "视频文件不可用"],
     ["missing", "资源待核实"],
     ["wrong-category", "成片类目不匹配"],
@@ -147,7 +147,8 @@ try {
       return send({ items: [], total: 0 });
     });
     await page.goto(base + "/publish-batches?view=edit&id=2");
-    await page.getByRole("button", { name: "下一步", exact: true }).click();
+    await page.getByRole("button", { name: "确认资源", exact: true }).click();
+    await page.getByRole("button", { name: "进入内容配置", exact: true }).click();
     for (const sectionName of ["内容配置", "发布内容"]) {
       const section = page.getByRole("region", {
         name: sectionName,
@@ -185,7 +186,7 @@ try {
         assert.notEqual(await image.getAttribute("src"), thumbPath);
       }
       if (sectionName === "内容配置")
-        await page.getByRole("button", { name: "下一步", exact: true }).click();
+        await page.getByRole("button", { name: "预览检查", exact: true }).click();
     }
     assert.deepEqual(errors, []);
     await page.close();

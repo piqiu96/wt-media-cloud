@@ -16,6 +16,7 @@ import ResourceStatusBadge from "../../../shared/ui/resource/ResourceStatusBadge
 import ResourceWizardSteps from "../../../shared/ui/resource/ResourceWizardSteps.vue";
 import ResourceDescriptions from "../../../shared/ui/resource/ResourceDescriptions.vue";
 import ResourceFieldHelp from "../../../shared/ui/resource/ResourceFieldHelp.vue";
+import ResourceOverlay from "../../../shared/ui/resource/ResourceOverlay.vue";
 import FeedbackAlert from "../../../shared/ui/feedback/FeedbackAlert.vue";
 import { feedback } from "../../../shared/ui/feedback/index.js";
 import { createComposeClient } from "../../../shared/api/compose.js";
@@ -28,7 +29,7 @@ import { platformLabel } from "../../../shared/utils/platforms.js";
 import { formatPublicationTime } from "../dateTime.js";
 import { batchAccountName, batchOutputName, useBatchResourceCatalog } from "../useBatchResourceCatalog.js";
 import {
-  batchFormProblem, batchInput, candidateShortfalls, configurationLabels, coverProfiles, emptyBatch, executionLabels, groupPolicies,
+  batchFormProblem, batchResourceProblem, batchInput, candidateShortfalls, configurationLabels, coverProfiles, emptyBatch, executionLabels, groupPolicies,
   savedBatchForRequest, sendNewBatch, snapshot,
 } from "../batchPreparation.js";
 import BatchResourceSetup from "../components/BatchResourceSetup.vue";
@@ -62,6 +63,8 @@ const recordPage = ref(1);
 const recordTab = ref("candidates");
 const formBaseline = ref("");
 const step = ref(0);
+const resourcesConfirmed = ref(false);
+const resourceReview = ref(null);
 const pending = ref(null);
 const recipes = ref({});
 const coverFiles = ref({});
@@ -252,7 +255,7 @@ function showRecords() {
 }
 
 function payload() {
-  return { form: form.value, recipes: recipes.value, step: step.value, pending: pending.value };
+  return { form: form.value, recipes: recipes.value, step: step.value, resources_confirmed: resourcesConfirmed.value, pending: pending.value };
 }
 function dirtyInput() {
   return view.value === "edit" ? { form: form.value, recipes: recipes.value } : payload();
@@ -282,8 +285,11 @@ function restore(value) {
   form.value = emptyBatch(value.form);
   recipes.value = value.recipes || {};
   step.value = Math.max(0, Math.min(2, value.step || 0));
+  // Older drafts already beyond resources inherit the same one-way boundary.
+  resourcesConfirmed.value = value.resources_confirmed === true || step.value > 0;
+  if (resourcesConfirmed.value && step.value === 0) step.value = 1;
   pending.value = value.pending || null;
-  if (pending.value) step.value = 2;
+  if (pending.value) { step.value = 2; resourcesConfirmed.value = true; }
 }
 async function savedDetail(saved, startAfterSave = false) {
   allowLeave = true;
@@ -379,6 +385,8 @@ async function refresh() {
   coverFiles.value = {};
   persisted.value = false;
   step.value = 0;
+  resourcesConfirmed.value = false;
+  resourceReview.value = null;
   routeDraftReady = false;
   try {
     const user = await session.me();
@@ -518,7 +526,7 @@ async function save(startAfterSave = false) {
   const localProblem = batchFormProblem(form.value);
   if (!pending.value && localProblem) {
     formError.value = localProblem;
-    if (!form.value.name.trim() || !form.value.targets.length) step.value = 0;
+    if (!resourcesConfirmed.value && (!form.value.name.trim() || !form.value.targets.length)) step.value = 0;
     return;
   }
   saving.value = true;
@@ -578,14 +586,33 @@ async function validate() {
   }
 }
 function goStep(next) {
-  if (freeze.value) return;
-  if (next === 1 && !form.value.targets.length) {
-    formError.value = "请先添加目标类目";
+  if (freeze.value || resourceReview.value) return;
+  if (resourcesConfirmed.value && next < 1) return;
+  if (step.value === 0 && next === 1) {
+    formError.value = batchResourceProblem(form.value);
+    if (formError.value) {
+      nextTick(() => stageHost.value?.querySelector(!form.value.name.trim() ? '[aria-label="批次名称"] input' : '.t-input-number input')?.focus());
+      return;
+    }
+    resourceReview.value = snapshot(form.value);
     return;
   }
   formError.value = "";
   step.value = next;
   if (next === 2) validate();
+  nextTick(() => stageHost.value?.focus({ preventScroll: true }));
+}
+function confirmResources() {
+  if (!resourceReview.value || freeze.value || step.value !== 0) return;
+  if (JSON.stringify(form.value) !== JSON.stringify(resourceReview.value)) {
+    resourceReview.value = null;
+    formError.value = "资源配置已变化，请重新确认";
+    return;
+  }
+  resourcesConfirmed.value = true;
+  resourceReview.value = null;
+  step.value = 1;
+  formError.value = "";
   nextTick(() => stageHost.value?.focus({ preventScroll: true }));
 }
 async function guardNavigation(to, from) {
@@ -728,9 +755,9 @@ onBeforeUnmount(() => {
       </p>
       <ResourceCard><ResourceWizardSteps :steps="steps" :current="step" /></ResourceCard>
       <BatchResourceSetup v-if="step === 0" :form="form" :catalog="catalog" :categories="categoryOptions"
-         :actor="actor" :recipes="recipes" :cover-files="coverFiles" :validation-context="validationContext" :inherited-targets="!!detail?.plan_id" :disabled="freeze" @work="preparing = $event" />
+         :actor="actor" :recipes="recipes" :cover-files="coverFiles" :validation-context="validationContext" :inherited-targets="!!detail?.plan_id" :disabled="freeze || !!resourceReview" @work="preparing = $event" />
       <BatchCandidateWorkspace v-if="step === 1" :form="form" :catalog="catalog" :categories="categoryOptions"
-        :actor="actor" :recipes="recipes" :cover-files="coverFiles" :disabled="freeze" :focus-key="issueRowKey"
+        :actor="actor" :recipes="recipes" :cover-files="coverFiles" :disabled="freeze" :resources-locked="resourcesConfirmed" :focus-key="issueRowKey"
         :validation-context="validationContext" :validation-issues="readiness?.issues || []" @changed="review = null" @work="preparing = $event" />
       <template v-if="step === 2">
         <ResourceCard>
@@ -776,8 +803,8 @@ onBeforeUnmount(() => {
     <template #footer>
       <span v-if="isCreating" class="batch-footer-note batch-muted">{{ persisted ? "草稿仅保存在本机，保存批次后进入批次列表。" : "未保存的输入仅在当前页面会话保留。" }}</span>
       <t-button v-if="isCreating && persisted && !pending" theme="default" variant="outline" :disabled="freeze" @click="saveDraft">保存草稿</t-button>
-      <t-button v-if="step > 0 && !pending" theme="default" variant="outline" :disabled="freeze" @click="goStep(step - 1)">上一步</t-button>
-      <t-button v-if="step < 2" theme="primary" :disabled="freeze" @click="goStep(step + 1)">下一步</t-button>
+      <t-button v-if="step === 2 && !pending" theme="default" variant="outline" :disabled="freeze" @click="goStep(1)">返回内容配置</t-button>
+      <t-button v-if="step < 2" theme="primary" :disabled="freeze || !!resourceReview" @click="goStep(step + 1)">{{step === 0 ? '确认资源' : '预览检查'}}</t-button>
       <t-button v-else :theme="pending ? 'primary' : 'default'" :variant="pending ? 'base' : 'outline'"
         :loading="saving" :disabled="preparing" @click="save()">
         {{ pending ? "查询或重试原请求" : detail?.plan_id ? "保存并返回计划" : detail ? "保存修改" : "保存批次" }}
@@ -793,4 +820,13 @@ onBeforeUnmount(() => {
     <FeedbackAlert v-if="pageError || draftError" theme="error" :message="pageError || draftError" />
     <t-button v-if="pageError || draftError" theme="default" variant="outline" @click="refresh">重新读取</t-button>
   </ResourceDetailPage>
+  <ResourceOverlay :visible="!!resourceReview" title="确认资源" :width="560" @update:visible="!$event && (resourceReview = null)">
+    <div v-if="resourceReview" class="batch-stack">
+      <strong>已匹配 {{resourceReview.config.candidates.length}} 条候选</strong>
+      <p>确认后，本次配置及草稿续编不再返回资源配置；文案和封面仍可编辑。</p>
+      <p v-if="candidateShortfalls(resourceReview).some(row=>row.shortfall)" class="batch-muted">目标缺口 {{candidateShortfalls(resourceReview).reduce((sum,row)=>sum+row.shortfall,0)}} 条；可先保存待完善配置。</p>
+      <p class="batch-muted">此操作不创建正式任务、不占用成片。保存批次后，首次启动前仍可从“继续配置”重新调整资源。</p>
+    </div>
+    <template #footer><t-button theme="default" variant="outline" @click="resourceReview = null">继续调整</t-button><t-button theme="primary" @click="confirmResources">进入内容配置</t-button></template>
+  </ResourceOverlay>
 </template>

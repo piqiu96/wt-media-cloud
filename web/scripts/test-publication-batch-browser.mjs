@@ -114,7 +114,13 @@ const button = (name) => page.getByRole("button", { name, exact: true });
 const heading = name => page.getByRole("heading", { name, exact: true });
 const input = label => page.locator(`[aria-label="${label}"] input, input[aria-label="${label}"]`).first();
 const tableRows = () => page.locator("tbody tr");
-const next = () => button("下一步").click();
+const next = async () => {
+  if (await button("确认资源").count()) {
+    await button("确认资源").click();
+    await page.getByRole("dialog",{name:"确认资源",exact:true}).waitFor();
+    await button("进入内容配置").click();
+  } else await button("预览检查").click();
+};
 try {
   await page.goto(new URL("/publish-batches", base).href);
   await heading("发布批次").waitFor();
@@ -239,32 +245,7 @@ try {
     ).trim(),
     "2",
   );
-  const filteredSecond = contentTable.locator("tbody tr").first();
-  await filteredSecond.locator(".batch-content-more summary").click();
-  assert.equal(
-    await filteredSecond
-      .getByRole("button", { name: "上移", exact: true })
-      .isDisabled(),
-    false,
-  );
-  assert.equal(
-    await filteredSecond
-      .getByRole("button", { name: "下移", exact: true })
-      .isDisabled(),
-    true,
-  );
-  await filteredSecond
-    .getByRole("button", { name: "上移", exact: true })
-    .click();
-  assert.equal(
-    await filteredSecond
-      .getByRole("button", { name: "上移", exact: true })
-      .isDisabled(),
-    true,
-  );
-  await filteredSecond
-    .getByRole("button", { name: "下移", exact: true })
-    .click();
+  assert.equal(await contentTable.locator('.batch-content-more').count(),0,'confirmed resource mapping has no content-stage mutation actions');
   await button("重置").click();
   await page
     .getByRole("region", { name: "批量操作" })
@@ -305,7 +286,7 @@ try {
   await button("完成").click();
   await next();
   await input("异常任务上限").fill("5");
-  await button("上一步").click();
+  await button("返回内容配置").click();
   await firstRow.locator(".t-checkbox").click();
   await button("确认内容").click();
   await button("确认已核对内容").click();
@@ -317,13 +298,12 @@ try {
     .last()
     .waitFor();
   await input("复查批次名称").fill("复查一致性名称");
-  await button("上一步").click();
-  await button("上一步").click();
-  assert.equal(await input("批次名称").inputValue(), "复查一致性名称");
-  await input("批次名称").fill("浏览器批次");
+  await button("返回内容配置").click();
+  assert.equal(await button("返回内容配置").count(),0,'content stage cannot return to confirmed resources');
+  assert.equal(await button("确认资源").count(),0);
   await next();
-  await next();
-  assert.equal(await input("复查批次名称").inputValue(), "浏览器批次");
+  assert.equal(await input("复查批次名称").inputValue(),"复查一致性名称");
+  await input("复查批次名称").fill("浏览器批次");
   const settings = page.locator(".batch-settings-grid .t-input-number").first();
   const settingsBox = await settings.boundingBox();
   assert.ok(Math.abs(settingsBox.width - 240) < 2);
