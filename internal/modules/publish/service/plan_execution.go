@@ -9,9 +9,12 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 type PlanExecutionRepository interface {
+	FinishPlan(uint64, int64, model.FinishPlanInput, time.Time) (model.Plan, error)
+	ReconcileStoppedPlan(uint64, time.Time) error
 	StartPlan(uint64, int64, model.StartPlanInput, string, []model.Task, time.Time) (model.StartPlanResult, error)
 	AdvancePlan(uint64, int64, model.PlanAdvanceInput, string, []model.Task, bool, time.Time) (model.PlanAdvanceResult, error)
 	ControlPlan(uint64, int64, uint64, string, string, uint64, uint64, time.Time) (model.PlanCancelResult, error)
@@ -218,6 +221,12 @@ func (s *Service) AdvanceRunningPlans(ctx context.Context) error {
 				return e
 			}
 			after = p.ID
+			if p.Status == "stopping" {
+				if e = s.PlanExecutionRepo.ReconcileStoppedPlan(p.ID, time.Now().UTC()); e != nil {
+					lastErr = e
+				}
+				continue
+			}
 			if p.Status != "running" {
 				continue
 			}
@@ -241,4 +250,17 @@ func (s *Service) AdvanceRunningPlans(ctx context.Context) error {
 			}
 		}
 	}
+}
+
+func (s *Service) FinishPlan(a identity.PublicUser, id uint64, in model.FinishPlanInput) (PlanDetail, error) {
+	if in.ExpectedRevision == 0 || in.ExpectedShortfalls == nil || in.EndReason != "achieved" && in.EndReason != "unmet" || in.EndReason == "unmet" && strings.TrimSpace(in.EndNote) == "" || utf8.RuneCountInString(in.EndNote) > 2000 {
+		return PlanDetail{}, ErrInvalid
+	}
+	if _, _, e := s.planOwner(a, id); e != nil {
+		return PlanDetail{}, e
+	}
+	if _, e := s.PlanExecutionRepo.FinishPlan(id, int64(a.ID), in, time.Now().UTC()); e != nil {
+		return PlanDetail{}, e
+	}
+	return s.GetPlan(a, id)
 }

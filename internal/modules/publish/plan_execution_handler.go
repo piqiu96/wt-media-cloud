@@ -93,3 +93,25 @@ func ConfirmPlanNext(ctx context.Context, c *app.RequestContext) {
 	out, e := service.Wired().AdvancePlan(ctx, a, id, in, false)
 	respondBatch(c, out, e)
 }
+
+func FinishPlan(_ context.Context, c *app.RequestContext) {
+	a, id, ok := authorizeBatchID(c)
+	if !ok {
+		return
+	}
+	var in model.FinishPlanInput
+	if e := decodePlanCommand(c, &in, "expected_revision", "expected_shortfalls", "end_reason", "end_note"); e != nil {
+		failBatch(c, e)
+		return
+	}
+	var raw struct {
+		Shortfalls json.RawMessage `json:"expected_shortfalls"`
+	}
+	json.Unmarshal(c.Request.Body(), &raw)
+	if requireBatchObjects(raw.Shortfalls, "platform", "category_id", "shortfall") != nil {
+		failBatch(c, service.ErrInvalid)
+		return
+	}
+	out, e := service.Wired().FinishPlan(a, id, in)
+	respondBatch(c, out, e)
+}

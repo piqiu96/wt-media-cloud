@@ -212,8 +212,7 @@ func (s *Service) GetPlan(a identity.PublicUser, id uint64) (PlanDetail, error) 
 }
 func (s *Service) planDetail(a identity.PublicUser, p model.Plan, b []model.Batch) (PlanDetail, error) {
 	v := PlanView{Plan: p, Progress: "preparing", BatchCount: len(b), GoalResults: []PlanGoalResult{}, AllowedActions: []string{}, ActionBlockers: []any{}}
-	// Execution projections are filled by the shared execution/summary service in T05/06.
-	// Do not offer an unimplemented start or pretend an executed plan is preparing.
+	// The same original task/work facts feed detail, list and control projections.
 	if p.StartedAt != nil {
 		v.Progress = "running"
 	}
@@ -249,7 +248,7 @@ func (s *Service) planDetail(a identity.PublicUser, p model.Plan, b []model.Batc
 		v.HandoffBasis = state.Basis
 		for i := range v.GoalResults {
 			for _, t := range state.Tasks {
-				if t.Platform == v.GoalResults[i].Platform && t.CategoryID == v.GoalResults[i].CategoryID && t.Status == model.StatusPublished && t.WorkID != nil {
+				if t.Platform == v.GoalResults[i].Platform && t.CategoryID == v.GoalResults[i].CategoryID && t.Status == model.StatusPublished && t.WorkID != nil && !t.VerificationRequired {
 					v.GoalResults[i].PublishedCount++
 				}
 			}
@@ -268,6 +267,27 @@ func (s *Service) planDetail(a identity.PublicUser, p model.Plan, b []model.Batc
 		for _, b := range state.Batches {
 			if b.HandedOffAt != nil || b.ExecutionStatus == model.BatchEnded || b.ExecutionStatus == model.BatchCancelled {
 				v.ProcessedBatchCount++
+			}
+		}
+	}
+	if planOwn(a, p) && p.StartedAt != nil && p.StoppedAt == nil && p.EndedAt == nil && v.PendingCount == 0 && v.VerificationRequiredCount == 0 {
+		reader, ok := s.PlanRepo.(PlanExecutionReadRepository)
+		if ok {
+			state, e := reader.PlanProgress(p.ID, time.Now().UTC())
+			if e != nil {
+				return PlanDetail{}, e
+			}
+			reviewing := false
+			for _, batch := range state.Batches {
+				if batch.ExecutionStatus != model.BatchCancelled && (batch.StartedAt == nil || batch.HandedOffAt == nil && (state.Plan.CurrentBatchID == nil || batch.ID != *state.Plan.CurrentBatchID) && batch.ExecutionStatus != model.BatchEnded) {
+					reviewing = true
+				}
+			}
+			for _, t := range state.Tasks {
+				reviewing = reviewing || t.Status == model.StatusReviewing
+			}
+			if !reviewing {
+				v.AllowedActions = append(v.AllowedActions, "finish")
 			}
 		}
 	}
@@ -296,6 +316,15 @@ func (s *Service) planDetail(a identity.PublicUser, p model.Plan, b []model.Batc
 			}
 		}
 	}
+	if v.Progress == "waiting_resources" {
+		v.ActionBlockers = append(v.ActionBlockers, map[string]string{"action": "confirm-next", "code": "original_resources_unavailable", "message": "下一批原资源暂不可用，等待恢复后重检，不替换资源或下调目标"})
+	}
+	if v.Progress == "waiting_tasks" || v.Progress == "waiting_verification" {
+		v.ActionBlockers = append(v.ActionBlockers, map[string]string{"action": "confirm-next", "code": "unresolved_original_tasks", "message": "请先通过原批次处理人工、未知或待核实结果"})
+	}
+	if v.PendingCount > 0 || v.VerificationRequiredCount > 0 {
+		v.ActionBlockers = append(v.ActionBlockers, map[string]string{"action": "finish", "code": "unresolved_original_tasks", "message": "仍有未决执行或未核实结果，暂不能结束计划"})
+	}
 	return PlanDetail{Plan: v, Batches: rows, Issues: []PlanIssue{}}, nil
 }
 func planBatchView(a identity.PublicUser, b model.Batch) PlanBatchView {
@@ -310,6 +339,9 @@ func planBatchView(a identity.PublicUser, b model.Batch) PlanBatchView {
 		b.AllowedActions = filtered
 	}
 	r := PlanBatchView{BatchID: b.ID, Batch: model.BatchDetail{Batch: b, Config: b.Config, Readiness: b.Readiness}, Configured: b.PlanConfiguredAt != nil, HandedOffAt: b.HandedOffAt, AllowedActions: b.AllowedActions, ActionBlockers: []any{}, FrozenConfirmation: b.FrozenConfirmation}
+	for _, blocker := range b.ActionBlockers {
+		r.ActionBlockers = append(r.ActionBlockers, blocker)
+	}
 	if b.PlanRowKey != nil {
 		r.RowKey = *b.PlanRowKey
 	}

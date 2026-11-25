@@ -53,7 +53,7 @@ type PlanCancelResult struct {
 // VerificationRequired is a projection of original facts, not a new task state.
 func (t Task) VerificationRequiredAt(now time.Time) bool {
 	if t.Status == StatusPublished {
-		return t.WorkID == nil
+		return t.WorkID == nil || t.VerificationRequired
 	}
 	if t.Status != StatusReviewing {
 		return false
@@ -86,4 +86,16 @@ type PlanResourceWait struct {
 	Basis            string    `json:"basis"`
 	Code             string    `json:"code"`
 	CheckedAt        time.Time `json:"checked_at"`
+}
+
+type PlanGoalShortfall struct {
+	Platform   string `json:"platform"`
+	CategoryID int64  `json:"category_id,string"`
+	Shortfall  int64  `json:"shortfall"`
+}
+type FinishPlanInput struct {
+	ExpectedRevision   uint64              `json:"expected_revision,string"`
+	ExpectedShortfalls []PlanGoalShortfall `json:"expected_shortfalls"`
+	EndReason          string              `json:"end_reason"`
+	EndNote            string              `json:"end_note"`
 }

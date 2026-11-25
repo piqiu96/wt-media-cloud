@@ -284,7 +284,7 @@ func decorateBatchTask(a identity.PublicUser, b model.Batch, v *model.Task) {
 	actions := []string{}
 	v.AllowedActions = &actions
 	owner := ownsBatch(a, b)
-	stopped := b.StoppedAt != nil || b.ExecutionStatus == model.BatchEnded || b.ExecutionStatus == model.BatchCancelled || b.ExecutionStatus == model.BatchStopping
+	stopped := b.PlanPermanentStopped || b.PlanPositionBlocked || b.HandedOffAt != nil || b.StoppedAt != nil || b.ExecutionStatus == model.BatchEnded || b.ExecutionStatus == model.BatchCancelled || b.ExecutionStatus == model.BatchStopping
 	if stopped {
 		v.CanCancel = false
 	}
@@ -293,7 +293,7 @@ func decorateBatchTask(a identity.PublicUser, b model.Batch, v *model.Task) {
 	}
 	switch v.Status {
 	case model.StatusPending:
-		if v.AuthorizedAt == nil && v.CurrentAttemptID == nil && !stopped {
+		if v.AuthorizedAt == nil && v.CurrentAttemptID == nil && !stopped && !b.PlanConfigurationFrozen {
 			*v.AllowedActions = append(*v.AllowedActions, "edit")
 		}
 	case model.StatusFailed:

@@ -116,6 +116,7 @@ func batchCopyAllowed(v model.Batch) bool {
 	return v.ExecutionStatus == model.BatchEnded || v.ExecutionStatus == model.BatchCancelled
 }
 func projectBatch(a identity.PublicUser, v model.Batch) model.Batch {
+	v.ActionBlockers = []model.BatchActionBlocker{}
 	v.AllowedActions = []string{}
 	if ownsBatch(a, v) {
 		if v.ExecutionStatus == model.BatchNotStarted && v.StartedAt == nil {

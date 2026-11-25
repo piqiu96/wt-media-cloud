@@ -188,6 +188,15 @@ func planProgress(tx *gorm.DB, p model.Plan, rows []model.Batch, now time.Time) 
 			return out, e
 		}
 	}
+	public, e := verifiedPlanWorks(tx, ids)
+	if e != nil {
+		return out, e
+	}
+	for i, t := range out.Tasks {
+		if t.Status == model.StatusPublished && !public[t.ID] {
+			out.Tasks[i].VerificationRequired = true
+		}
+	}
 	out.Basis.CurrentBatchID = p.CurrentBatchID
 	if out.Current != nil {
 		rev := out.Current.Revision
@@ -435,6 +444,20 @@ func (s ExecutionStore) ControlPlan(id uint64, actor int64, revision uint64, act
 			settling := false
 			for _, b := range rows {
 				if b.ExecutionStatus == model.BatchEnded || b.ExecutionStatus == model.BatchCancelled {
+					oldTasks, readErr := batchTasks(tx, b.ID)
+					if readErr != nil {
+						return readErr
+					}
+					oldUnresolved := false
+					for _, task := range oldTasks {
+						if pendingSettlement(task.Status) || task.Status == model.StatusPending || task.Status == model.StatusQueued {
+							oldUnresolved = true
+						}
+					}
+					if oldUnresolved {
+						settling = true
+						out.SettlingBatchIDs = append(out.SettlingBatchIDs, strconv.FormatUint(b.ID, 10))
+					}
 					continue
 				}
 				out.AffectedBatchIDs = append(out.AffectedBatchIDs, strconv.FormatUint(b.ID, 10))

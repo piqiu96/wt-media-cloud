@@ -28,6 +28,7 @@ func registerPlanRoutes(h *server.Hertz) {
 	h.POST("/api/v1/publication-plan/:id/confirm-next", ConfirmPlanNext)
 	h.POST("/api/v1/publication-plan/:id/takeover", TakeoverPlan)
 	h.POST("/api/v1/publication-plan/:id/cancel", CancelPlan)
+	h.POST("/api/v1/publication-plan/:id/finish", FinishPlan)
 	h.GET("/api/v1/publication-plan/:id", GetPlan)
 	h.PUT("/api/v1/publication-plan/:id/structure", EditPlan)
 	h.GET("/api/v1/publication-plan/:id/batch", ListPlanBatches)

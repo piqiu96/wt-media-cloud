@@ -446,5 +446,9 @@ func (s Store) BatchTaskPage(id uint64, f BatchTaskFilter) ([]model.Task, int64,
 	if err != nil {
 		return nil, 0, err
 	}
+	now := s.planNow(time.Now().UTC())
+	for i := range rows {
+		rows[i].VerificationRequired = rows[i].VerificationRequiredAt(now)
+	}
 	return rows, total, nil
 }
