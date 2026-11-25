@@ -64,6 +64,66 @@ func completePlanReceipt(raw json.RawMessage, nullable string, keys ...string) b
 	}
 	return true
 }
+
+// Decode required storage fields before Go can replace missing/null false or zero
+// with defaults. The parsed model still validates semantic ranges afterwards.
+func completePlanStartReceipt(raw json.RawMessage) bool {
+	if !completePlanReceipt(raw, "", "plan_id", "revision", "first_started_at", "current_batch_id", "batch_confirmations", "first_batch_receipt") {
+		return false
+	}
+	var root struct {
+		Confirmations []json.RawMessage `json:"batch_confirmations"`
+	}
+	if json.Unmarshal(raw, &root) != nil {
+		return false
+	}
+	for _, confirmation := range root.Confirmations {
+		if !completePlanReceipt(confirmation, "", "batch_id", "expected_revision", "included_row_keys", "excluded_row_keys", "allow_shortfall", "expected_shortfalls") {
+			return false
+		}
+		var parsed struct {
+			Shortfalls []json.RawMessage `json:"expected_shortfalls"`
+		}
+		if json.Unmarshal(confirmation, &parsed) != nil {
+			return false
+		}
+		for _, shortfall := range parsed.Shortfalls {
+			if !completePlanReceipt(shortfall, "", "category_id", "shortfall") {
+				return false
+			}
+		}
+	}
+	var value any
+	return json.Unmarshal(raw, &value) == nil && canonicalStoredPlanIDs(value)
+}
+func canonicalStoredPlanIDs(value any) bool {
+	switch v := value.(type) {
+	case map[string]any:
+		for key, item := range v {
+			switch key {
+			case "plan_id", "revision", "expected_revision", "first_batch_id", "batch_id", "current_batch_id", "previous_batch_id", "next_batch_id", "category_id":
+				text, ok := item.(string)
+				if !ok {
+					return false
+				}
+				id, e := strconv.ParseUint(text, 10, 64)
+				if e != nil || id == 0 || strconv.FormatUint(id, 10) != text {
+					return false
+				}
+			}
+			if !canonicalStoredPlanIDs(item) {
+				return false
+			}
+		}
+	case []any:
+		for _, item := range v {
+			if !canonicalStoredPlanIDs(item) {
+				return false
+			}
+		}
+	}
+	return true
+}
 func validPlanBatchReceipt(r model.BatchStartResult) bool {
 	if !r.HasCompleteJSON() || r.BatchID == 0 || r.Revision < 2 || r.ExecutionStatus != model.BatchRunning || r.FirstStartedAt.IsZero() || r.CreatedCount <= 0 || r.CreatedCount != int64(len(r.TaskIDs)) || r.TargetCount < r.CreatedCount || r.CreationShortfall != r.TargetCount-r.CreatedCount {
 		return false

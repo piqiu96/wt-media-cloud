@@ -508,7 +508,7 @@ func ReplayPlanStart(p model.Plan, key, digest string) (*model.StartPlanResult, 
 	if *p.StartRequestKey != key || p.StartRequestHash == nil || *p.StartRequestHash == "" || *p.StartRequestHash != digest {
 		return nil, ErrConflict
 	}
-	if !completePlanReceipt(p.StartReceipt, "", "plan_id", "revision", "first_started_at", "current_batch_id", "batch_confirmations", "first_batch_receipt") {
+	if !completePlanStartReceipt(p.StartReceipt) {
 		return nil, ErrConflict
 	}
 	var r model.StartPlanResult

@@ -211,3 +211,56 @@ func TestPlanOriginalCorruptStartReceiptCannotReplayOrProveAnotherKey(t *testing
 		}
 	}
 }
+
+func TestPlanOriginalReceiptConfirmationDefaultsNeverHideStorageDamage(t *testing.T) {
+	s, p, bs, in, tasks := preparedPlan(t)
+	if _, e := s.StartPlan(p.ID, 9, in, "original", tasks[bs[0].ID], time.Now()); e != nil {
+		t.Fatal(e)
+	}
+	p, _, e := s.GetPlan(p.ID)
+	if e != nil {
+		t.Fatal(e)
+	}
+	original := append(json.RawMessage(nil), p.StartReceipt...)
+	mutations := []struct {
+		name   string
+		mutate func(map[string]any)
+	}{
+		{"missing false", func(c map[string]any) { delete(c, "allow_shortfall") }},
+		{"null false", func(c map[string]any) { c["allow_shortfall"] = nil }},
+		{"wrong false type", func(c map[string]any) { c["allow_shortfall"] = "false" }},
+		{"missing zero", func(c map[string]any) { delete(c["expected_shortfalls"].([]any)[0].(map[string]any), "shortfall") }},
+		{"null zero", func(c map[string]any) { c["expected_shortfalls"].([]any)[0].(map[string]any)["shortfall"] = nil }},
+		{"wrong zero type", func(c map[string]any) { c["expected_shortfalls"].([]any)[0].(map[string]any)["shortfall"] = "0" }},
+		{"bad batch id", func(c map[string]any) { c["batch_id"] = "0" + c["batch_id"].(string) }},
+		{"bad expected revision", func(c map[string]any) { c["expected_revision"] = "01" }},
+		{"bad category id", func(c map[string]any) { c["expected_shortfalls"].([]any)[0].(map[string]any)["category_id"] = "01" }},
+	}
+	for _, tc := range mutations {
+		t.Run(tc.name, func(t *testing.T) {
+			var decoded map[string]any
+			if e := json.Unmarshal(original, &decoded); e != nil {
+				t.Fatal(e)
+			}
+			tc.mutate(decoded["batch_confirmations"].([]any)[0].(map[string]any))
+			damaged, _ := json.Marshal(decoded)
+			if e := s.DB.Model(&model.Plan{}).Where("id=?", p.ID).Update("start_receipt_json", damaged).Error; e != nil {
+				t.Fatal(e)
+			}
+			for _, key := range []string{in.RequestKey, "other-tab"} {
+				old := in
+				old.RequestKey = key
+				var proof *repo.PlanCommandNotApplied
+				if replay, e := s.ProbePlanStart(p.ID, 9, old, "original"); replay != nil || errors.As(e, &proof) || !errors.Is(e, repo.ErrConflict) {
+					t.Fatalf("damaged receipt accepted key=%s replay=%v error=%v", key, replay, e)
+				}
+			}
+		})
+	}
+	if e := s.DB.Model(&model.Plan{}).Where("id=?", p.ID).Update("start_receipt_json", original).Error; e != nil {
+		t.Fatal(e)
+	}
+	if replay, e := s.ProbePlanStart(p.ID, 9, in, "original"); e != nil || replay == nil || replay.BatchConfirmations[0].AllowShortfall || replay.BatchConfirmations[0].ExpectedShortfalls[0].Shortfall != 0 {
+		t.Fatalf("complete false/zero no longer replays %v %v", replay, e)
+	}
+}
