@@ -149,7 +149,7 @@ func TestLiveWorkIdentityDeduplicationAndScope(t *testing.T) {
 func TestLiveWorkMigrationPreservesExternalReceipt(t *testing.T) {
 	db := isolatedDB(t, true)
 	v := task("receipt-cutover", 42, 1)
-	if err := db.Omit("BatchID", "TaskOrder", "RowKey", "ExecutionGroupNo", "PlatformSubmissionID", "TargetURL", "WorkID", "CheckBrowserUsedAt", "CheckNotFoundCount", "CheckStoppedAt", "NextCheckAt", "CheckGeneration", "LastCheckedAt", "LastCheckMessage").Create(&v).Error; err != nil {
+	if err := db.Omit("LatestManualVerification", "BatchID", "TaskOrder", "RowKey", "ExecutionGroupNo", "PlatformSubmissionID", "TargetURL", "WorkID", "CheckBrowserUsedAt", "CheckNotFoundCount", "CheckStoppedAt", "NextCheckAt", "CheckGeneration", "LastCheckedAt", "LastCheckMessage").Create(&v).Error; err != nil {
 		t.Fatal(err)
 	}
 	receipt := "1882371730190912814"

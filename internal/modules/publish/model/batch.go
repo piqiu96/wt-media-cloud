@@ -86,6 +86,16 @@ const (
 )
 
 type Batch struct {
+	PlanID                  *uint64                `json:"plan_id,string"`
+	PlanRowKey              *string                `json:"-"`
+	PlanGroupOrder          *uint32                `json:"-"`
+	PlanBatchOrder          *uint32                `json:"-"`
+	PlanConfiguredAt        *time.Time             `json:"-"`
+	PlanFrozenAt            *time.Time             `json:"-"`
+	FrozenConfirmation      *PlanBatchConfirmation `json:"-" gorm:"column:frozen_confirmation_json;serializer:json"`
+	HandedOffAt             *time.Time             `json:"handed_off_at"`
+	HandoffBasisFingerprint *string                `json:"-"`
+
 	ID                  uint64                `json:"id,string"`
 	TeamID              int64                 `json:"team_id,string"`
 	OperatorID          int64                 `json:"operator_id,string"`

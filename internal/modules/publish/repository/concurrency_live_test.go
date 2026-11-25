@@ -257,7 +257,7 @@ func TestLiveAttemptRevisionMigrationPreservesExistingReport(t *testing.T) {
 	s := repo.ExecutionStore{Store: store(db)}
 	// No file locking is needed to seed a pre-migration task.
 	v := task("migration-revision", 42, 1)
-	if e := db.Omit("BatchID", "TaskOrder", "RowKey", "ExecutionGroupNo", "PlatformSubmissionID", "TargetURL", "WorkID", "CheckBrowserUsedAt", "CheckNotFoundCount", "CheckStoppedAt", "NextCheckAt", "CheckGeneration", "LastCheckedAt", "LastCheckMessage").Create(&v).Error; e != nil {
+	if e := db.Omit("LatestManualVerification", "BatchID", "TaskOrder", "RowKey", "ExecutionGroupNo", "PlatformSubmissionID", "TargetURL", "WorkID", "CheckBrowserUsedAt", "CheckNotFoundCount", "CheckStoppedAt", "NextCheckAt", "CheckGeneration", "LastCheckedAt", "LastCheckMessage").Create(&v).Error; e != nil {
 		t.Fatal(e)
 	}
 	if e := db.Exec("INSERT INTO browser_profiles VALUES(37)").Error; e != nil {

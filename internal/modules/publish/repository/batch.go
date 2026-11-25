@@ -3,6 +3,7 @@ package repository
 import (
 	"errors"
 	"fmt"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -74,7 +75,7 @@ func batchScope(q *gorm.DB, a identity.PublicUser) *gorm.DB {
 }
 
 func (s Store) ListBatches(f BatchFilter) ([]model.Batch, int64, error) {
-	q := batchScope(s.DB.Model(&model.Batch{}), f.Actor)
+	q := batchScope(s.DB.Model(&model.Batch{}), f.Actor).Where("plan_id IS NULL OR plan_configured_at IS NOT NULL")
 	if f.RequestKey != "" {
 		q = q.Where("created_by=? AND request_key=?", f.Actor.ID, f.RequestKey)
 	} else {
@@ -111,6 +112,9 @@ func (s Store) ListBatches(f BatchFilter) ([]model.Batch, int64, error) {
 }
 
 func (s Store) CreateBatch(v model.Batch) (model.Batch, error) {
+	if v.PlanID != nil {
+		return model.Batch{}, ErrConflict
+	}
 	err := s.DB.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(&v).Error; err != nil {
 			return err
@@ -141,6 +145,13 @@ func (s Store) CreateBatch(v model.Batch) (model.Batch, error) {
 
 func (s Store) EditBatch(v model.Batch, revision uint64) (model.Batch, error) {
 	err := s.DB.Transaction(func(tx *gorm.DB) error {
+		parent, err := lockBatchPlan(tx, v.ID)
+		if err != nil {
+			return err
+		}
+		if parent != nil && (parent.StartedAt != nil || parent.StoppedAt != nil || parent.Status != "not_started") {
+			return ErrParentBlocked
+		}
 		var prior model.Batch
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&prior, v.ID).Error; err != nil {
 			return missing(err)
@@ -151,31 +162,43 @@ func (s Store) EditBatch(v model.Batch, revision uint64) (model.Batch, error) {
 		if prior.Revision != revision || prior.StartedAt != nil || prior.ExecutionStatus != model.BatchNotStarted {
 			return &BatchConflictError{prior.ID, prior.Revision}
 		}
+		if prior.PlanID != nil && (prior.Platform != v.Platform || !reflect.DeepEqual(prior.Targets, v.Targets)) {
+			return ErrConflict
+		}
 		if err := s.replaceBatchFiles(tx, v); err != nil {
 			return err
 		}
 		v.Revision = revision + 1
 		v.UpdatedAt = time.Now().UTC()
-		result := tx.Model(&model.Batch{}).Where("id=? AND revision=?", v.ID, revision).Updates(map[string]any{
+		changes := map[string]any{
 			"name": v.Name, "targets_json": mustJSON(v.Targets), "config_json": mustJSON(v.Config),
 			"readiness_json": mustJSON(v.Readiness), "candidates_count": v.CandidatesCount,
 			"configuration_status": v.ConfigurationStatus, "revision": v.Revision,
 			"concurrency_limit": v.ExecutionSetting.ConcurrencyLimit, "group_interval_seconds": v.ExecutionSetting.GroupIntervalSeconds,
 			"between_group_policy": v.ExecutionSetting.BetweenGroupPolicy, "exception_task_limit": v.ExecutionSetting.ExceptionTaskLimit,
 			"updated_at": v.UpdatedAt,
-		})
+		}
+		if prior.PlanID != nil {
+			changes["plan_configured_at"] = v.UpdatedAt
+		}
+		result := tx.Model(&model.Batch{}).Where("id=? AND revision=?", v.ID, revision).Updates(changes)
 		if result.Error != nil {
 			return result.Error
 		}
 		if result.RowsAffected != 1 {
 			return &BatchConflictError{prior.ID, prior.Revision}
 		}
+		if parent != nil {
+			if err := tx.Model(&model.Plan{}).Where("id=?", parent.ID).Updates(map[string]any{"revision": parent.Revision + 1, "updated_at": v.UpdatedAt}).Error; err != nil {
+				return err
+			}
+		}
 		return auditBatch(tx, v, "publication_batch.configure")
 	})
 	if err != nil {
 		return v, err
 	}
-	return s.enrichBatch(v)
+	return s.GetBatch(v.ID)
 }
 
 func (s Store) replaceBatchFiles(tx *gorm.DB, v model.Batch) error {
