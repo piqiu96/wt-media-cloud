@@ -130,6 +130,34 @@ async function checkedArrangement() {
 }
 try {
   await page.goto(base + "/publish-plans?view=create");
+  await page.locator(".plan-editor-section").last().waitFor();
+  const sections = await page
+    .locator(".plan-editor-section")
+    .evaluateAll(async (elements) => {
+      await new Promise((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(resolve)),
+      );
+      return elements.map((element) => {
+        const bounds = element.getBoundingClientRect(),
+          style = getComputedStyle(element);
+        return {
+          top: bounds.top,
+          bottom: bounds.bottom,
+          marginTop: style.marginTop,
+          marginBottom: style.marginBottom,
+        };
+      });
+    });
+  assert.equal(sections.length, 4);
+  for (let index = 1; index < sections.length; index++) {
+    const gap = sections[index].top - sections[index - 1].bottom;
+    assert.ok(
+      Math.abs(gap - 18) < 1,
+      `Editor card gap must be the prototype's 18px, without collapsed or doubled spacing (${gap})`,
+    );
+    assert.equal(sections[index].marginTop, "0px");
+    assert.equal(sections[index - 1].marginBottom, "0px");
+  }
   await page
     .getByLabel("计划名称", { exact: true })
     .last()

@@ -213,6 +213,7 @@ function remove(i) {
 }
 </script>
 <template>
+  <div class="plan-stack plan-workbench-stack">
   <ResourceCard class="plan-editor-section"
     ><ResourceSection title="基础信息" variant="form"
       ><div class="plan-basic-grid">
@@ -533,8 +534,13 @@ function remove(i) {
       >
     </ResourceSection></ResourceCard
   >
+  </div>
 </template>
 <style scoped>
+/* plan/style.css section spacing; avoid inherited card margins adding a second gap. */
+.plan-workbench-stack { gap:18px; padding:0; min-width:0; }
+.plan-workbench-stack > :deep(.resource-card) { margin:0; }
+
 .plan-order-actions {
   margin: 0;
 }
