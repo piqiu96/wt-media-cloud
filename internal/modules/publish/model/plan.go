@@ -20,32 +20,33 @@ type PlanStructureBatch struct {
 	Targets    []BatchTarget `json:"targets"`
 }
 type Plan struct {
-	ID               uint64          `json:"id,string"`
-	TeamID           int64           `json:"team_id,string"`
-	OwnerID          int64           `json:"owner_id,string"`
-	CreatedBy        int64           `json:"created_by,string"`
-	Name             string          `json:"name"`
-	DateStart        string          `json:"date_start"`
-	DateEnd          string          `json:"date_end"`
-	Note             string          `json:"note"`
-	Goals            []PlanGoal      `json:"goals" gorm:"column:goals_json;serializer:json"`
-	Status           string          `json:"status"`
-	PauseReason      string          `json:"pause_reason"`
-	CurrentBatchID   *uint64         `json:"current_batch_id,string"`
-	StartedAt        *time.Time      `json:"started_at"`
-	StoppedAt        *time.Time      `json:"stopped_at"`
-	EndedAt          *time.Time      `json:"ended_at"`
-	EndReason        string          `json:"end_reason"`
-	EndNote          string          `json:"end_note"`
-	Revision         uint64          `json:"revision,string"`
-	RequestKey       string          `json:"-"`
-	RequestHash      string          `json:"-"`
-	StartRequestKey  *string         `json:"-"`
-	StartRequestHash *string         `json:"-"`
-	StartReceipt     json.RawMessage `json:"-" gorm:"column:start_receipt_json"`
-	HandoffReceipts  json.RawMessage `json:"-" gorm:"column:handoff_receipts_json"`
-	CreatedAt        time.Time       `json:"created_at"`
-	UpdatedAt        time.Time       `json:"updated_at"`
+	ResourceWait     *PlanResourceWait `json:"-" gorm:"column:resource_wait_json;serializer:json"`
+	ID               uint64            `json:"id,string"`
+	TeamID           int64             `json:"team_id,string"`
+	OwnerID          int64             `json:"owner_id,string"`
+	CreatedBy        int64             `json:"created_by,string"`
+	Name             string            `json:"name"`
+	DateStart        string            `json:"date_start"`
+	DateEnd          string            `json:"date_end"`
+	Note             string            `json:"note"`
+	Goals            []PlanGoal        `json:"goals" gorm:"column:goals_json;serializer:json"`
+	Status           string            `json:"status"`
+	PauseReason      string            `json:"-"`
+	CurrentBatchID   *uint64           `json:"current_batch_id,string"`
+	StartedAt        *time.Time        `json:"started_at"`
+	StoppedAt        *time.Time        `json:"stopped_at"`
+	EndedAt          *time.Time        `json:"ended_at"`
+	EndReason        string            `json:"end_reason"`
+	EndNote          string            `json:"end_note"`
+	Revision         uint64            `json:"revision,string"`
+	RequestKey       string            `json:"-"`
+	RequestHash      string            `json:"-"`
+	StartRequestKey  *string           `json:"-"`
+	StartRequestHash *string           `json:"-"`
+	StartReceipt     json.RawMessage   `json:"-" gorm:"column:start_receipt_json"`
+	HandoffReceipts  json.RawMessage   `json:"-" gorm:"column:handoff_receipts_json"`
+	CreatedAt        time.Time         `json:"created_at"`
+	UpdatedAt        time.Time         `json:"updated_at"`
 }
 
 func (Plan) TableName() string { return "publication_plan" }

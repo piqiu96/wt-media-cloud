@@ -32,7 +32,7 @@ func (s ExecutionStore) prepareBatchGroups(user int64, cap model.ExecutionCapaci
 				if err != nil {
 					return err
 				}
-				if b.OperatorID != user || b.ExecutionStatus != model.BatchRunning || b.StartedAt == nil || b.StoppedAt != nil ||
+				if stoppedParent(&b) || b.OperatorID != user || b.ExecutionStatus != model.BatchRunning || b.StartedAt == nil || b.StoppedAt != nil ||
 					b.ExecutionGroupNo != nil && (b.GroupEndedAt == nil || b.NextGroupAt == nil || now.Before(*b.NextGroupAt)) {
 					return nil
 				}

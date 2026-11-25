@@ -42,6 +42,7 @@ type Repository interface {
 	Edit(model.Task, uint64) (model.Task, error)
 }
 type Service struct {
+	PlanExecutionRepo  PlanExecutionRepository
 	PlanRepo           PlanRepository
 	PlanResourceCounts func(context.Context, identity.PublicUser, string, int64) (BatchResource, error)
 	BatchExecutionRepo BatchExecutionRepository
@@ -61,7 +62,7 @@ type Service struct {
 
 func Wired() *Service {
 	store := repository.Store{DB: database.DB(), LockFiles: files.LockAvailable}
-	return &Service{PlanRepo: store, BatchRepo: store, BatchExecutionRepo: ExecutionStore(), BatchCategory: identity.ResolveCategory, BatchAccounts: accounts.ListAccountPage,
+	return &Service{PlanExecutionRepo: ExecutionStore(), PlanRepo: store, BatchRepo: store, BatchExecutionRepo: ExecutionStore(), BatchCategory: identity.ResolveCategory, BatchAccounts: accounts.ListAccountPage,
 		BatchLimits: config.Get().App.PublicationBatch, GenerateJSON: func(ctx context.Context, system, user string) (string, error) {
 			return deepseek.Get().CompleteJSON(ctx, system, user)
 		}, OutputPage: func(ctx context.Context, a identity.PublicUser, in production.ListComposeOutputsInput) (OutputPage, error) {

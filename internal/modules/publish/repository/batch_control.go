@@ -107,6 +107,13 @@ func projectBatchExecution(tx *gorm.DB, v model.Batch, rows []model.Task, now ti
 }
 
 func (s Store) enrichBatch(v model.Batch) (model.Batch, error) {
+	if v.PlanID != nil {
+		var p model.Plan
+		if e := s.DB.First(&p, *v.PlanID).Error; e != nil {
+			return v, e
+		}
+		v = model.ProjectPlanBatch(p, v)
+	}
 	rows, err := batchTasks(s.DB, v.ID)
 	if err != nil {
 		return v, err
@@ -215,7 +222,7 @@ func (s ExecutionStore) ControlBatch(id uint64, actor int64, cmd BatchCommand, n
 			v.ExecutionStatus, v.Pause, v.ExceptionAck = model.BatchRunning, nil, basis
 			patch["pause_json"], patch["exception_ack_json"] = nil, mustJSON(basis)
 		case "stop":
-			if stoppedParent(&v) {
+			if v.PlanPermanentStopped || v.StoppedAt != nil || v.ExecutionStatus == model.BatchStopping || v.ExecutionStatus == model.BatchCancelled || v.ExecutionStatus == model.BatchEnded {
 				return BatchConflict(v, ErrParentBlocked)
 			}
 			v.StoppedAt, v.StopReason = &now, cmd.Reason

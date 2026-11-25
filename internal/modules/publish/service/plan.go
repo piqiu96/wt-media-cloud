@@ -234,10 +234,67 @@ func (s *Service) planDetail(a identity.PublicUser, p model.Plan, b []model.Batc
 	}
 	rows := []PlanBatchView{}
 	for _, batch := range b {
-		rows = append(rows, planBatchView(a, batch))
+		rows = append(rows, planBatchView(a, model.ProjectPlanBatch(p, batch)))
 	}
 	for _, g := range p.Goals {
 		v.GoalResults = append(v.GoalResults, PlanGoalResult{PlanGoal: g, Shortfall: g.TargetCount})
+	}
+
+	if reader, ok := s.PlanRepo.(PlanExecutionReadRepository); ok && p.StartedAt != nil {
+		state, e := reader.PlanProgress(p.ID, time.Now().UTC())
+		if e != nil {
+			return PlanDetail{}, e
+		}
+		v.Progress = state.Progress
+		v.HandoffBasis = state.Basis
+		for i := range v.GoalResults {
+			for _, t := range state.Tasks {
+				if t.Platform == v.GoalResults[i].Platform && t.CategoryID == v.GoalResults[i].CategoryID && t.Status == model.StatusPublished && t.WorkID != nil {
+					v.GoalResults[i].PublishedCount++
+				}
+			}
+			v.GoalResults[i].Shortfall = max(0, v.GoalResults[i].TargetCount-v.GoalResults[i].PublishedCount)
+			v.PublishedCount += v.GoalResults[i].PublishedCount
+		}
+		for _, t := range state.Tasks {
+			if t.VerificationRequiredAt(time.Now().UTC()) {
+				v.VerificationRequiredCount++
+			}
+			switch t.Status {
+			case model.StatusPending, model.StatusQueued, model.StatusRunning, model.StatusAwaitingHuman, model.StatusUncertain:
+				v.PendingCount++
+			}
+		}
+		for _, b := range state.Batches {
+			if b.HandedOffAt != nil || b.ExecutionStatus == model.BatchEnded || b.ExecutionStatus == model.BatchCancelled {
+				v.ProcessedBatchCount++
+			}
+		}
+	}
+	if planOwn(a, p) {
+		if p.StoppedAt == nil && p.EndedAt == nil {
+			v.AllowedActions = append(v.AllowedActions, "cancel")
+			if p.StartedAt != nil {
+				if p.Status == "paused" {
+					v.AllowedActions = append(v.AllowedActions, "resume")
+				} else if p.Status == "running" {
+					v.AllowedActions = append(v.AllowedActions, "pause")
+					if v.Progress == "waiting_skip" || v.Progress == "waiting_continue" {
+						v.AllowedActions = append(v.AllowedActions, "confirm-next")
+					}
+				}
+			} else {
+				ready := len(b) > 0
+				for _, batch := range b {
+					if batch.ExecutionStatus != model.BatchCancelled && (batch.PlanConfiguredAt == nil || !batch.Readiness.Ready || batch.ConfigurationStatus != model.BatchReady) {
+						ready = false
+					}
+				}
+				if ready {
+					v.AllowedActions = append(v.AllowedActions, "start")
+				}
+			}
+		}
 	}
 	return PlanDetail{Plan: v, Batches: rows, Issues: []PlanIssue{}}, nil
 }

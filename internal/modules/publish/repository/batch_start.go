@@ -42,8 +42,16 @@ func BatchConflict(v model.Batch, cause error) *BatchExecutionConflict {
 }
 
 func lockBatch(tx *gorm.DB, id uint64) (model.Batch, error) {
+	parent, e := lockBatchPlan(tx, id)
+	if e != nil {
+		return model.Batch{}, e
+	}
 	var v model.Batch
 	err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&v, id).Error
+	if parent != nil {
+		v.PlanPermanentStopped = parent.StoppedAt != nil || parent.EndedAt != nil
+		v.PlanPositionBlocked = parent.StartedAt != nil && (parent.CurrentBatchID == nil || *parent.CurrentBatchID != v.ID) || v.HandedOffAt != nil
+	}
 	return v, missing(err)
 }
 
@@ -61,12 +69,12 @@ func lockTaskBatch(tx *gorm.DB, task model.Task) (*model.Batch, error) {
 }
 
 func canDispatch(b *model.Batch, t model.Task) bool {
-	return b == nil || b.ExecutionStatus == model.BatchRunning && b.StoppedAt == nil && b.StartedAt != nil &&
+	return b == nil || !b.PlanPermanentStopped && !b.PlanPositionBlocked && b.ExecutionStatus == model.BatchRunning && b.StoppedAt == nil && b.StartedAt != nil &&
 		b.ExecutionGroupNo != nil && t.ExecutionGroupNo != nil && *t.ExecutionGroupNo == *b.ExecutionGroupNo && b.GroupEndedAt == nil
 }
 
 func stoppedParent(b *model.Batch) bool {
-	return b != nil && (b.StoppedAt != nil || b.ExecutionStatus == model.BatchStopping || b.ExecutionStatus == model.BatchCancelled || b.ExecutionStatus == model.BatchEnded)
+	return b != nil && (b.PlanPermanentStopped || b.PlanPositionBlocked || b.HandedOffAt != nil || b.StoppedAt != nil || b.ExecutionStatus == model.BatchStopping || b.ExecutionStatus == model.BatchCancelled || b.ExecutionStatus == model.BatchEnded)
 }
 
 // This validates only the immutable first-start receipt already in storage.
@@ -123,6 +131,28 @@ func (s ExecutionStore) StartBatch(id uint64, actor int64, in model.BatchStartIn
 		if err != nil {
 			return err
 		}
+		if prior, e := ReplayBatchStart(v, in.RequestKey, digest); e == nil && prior != nil {
+			out = *prior
+			return nil
+		}
+		if v.PlanID != nil {
+			return ErrParentBlocked
+		}
+		out, err = s.startBatchTx(tx, v, actor, in, digest, prepared, now)
+		return err
+	})
+	if err != nil {
+		return model.BatchStartResult{}, err
+	}
+	return out, nil
+}
+
+// startBatchTx is the single atomic task/occupancy/authorization writer shared
+// by standalone starts and the parent plan transaction. It never opens a transaction.
+func (s ExecutionStore) startBatchTx(tx *gorm.DB, v model.Batch, actor int64, in model.BatchStartInput, digest string, prepared []model.Task, now time.Time) (model.BatchStartResult, error) {
+	id := v.ID
+	var out model.BatchStartResult
+	err := func() error {
 		if v.OperatorID != actor {
 			return ErrNotFound
 		}
@@ -207,7 +237,7 @@ func (s ExecutionStore) StartBatch(id uint64, actor int64, in model.BatchStartIn
 			return err
 		}
 		return auditBatchDetails(tx, v, actor, "publication_batch.start", out)
-	})
+	}()
 	if err != nil {
 		return model.BatchStartResult{}, err
 	}

@@ -124,8 +124,12 @@ func (s Store) PlanByRequest(actor int64, key string) (model.Plan, []model.Batch
 	return s.GetPlan(p.ID)
 }
 func auditPlan(tx *gorm.DB, p model.Plan, actor int64, event string) error {
-	return tx.Exec("INSERT INTO audit_logs(id,actor_user_id,action,target_type,target_id,summary_json,created_at) VALUES(?,?,?,'publication_plan',?,?,?)", id.NewID("audit"), actor, event, fmt.Sprint(p.ID), mustJSON(map[string]any{"revision": p.Revision}), time.Now().UTC()).Error
+	return auditPlanDetails(tx, p, actor, event, map[string]any{"revision": p.Revision})
 }
+func auditPlanDetails(tx *gorm.DB, p model.Plan, actor int64, event string, details any) error {
+	return tx.Exec("INSERT INTO audit_logs(id,actor_user_id,action,target_type,target_id,summary_json,created_at) VALUES(?,?,?,'publication_plan',?,?,?)", id.NewID("audit"), actor, event, fmt.Sprint(p.ID), mustJSON(details), time.Now().UTC()).Error
+}
+
 func (s Store) CreatePlan(p model.Plan, rows []model.PlanStructureBatch) (model.Plan, []model.Batch, error) {
 	if prior, b, e := s.PlanByRequest(p.CreatedBy, p.RequestKey); e == nil {
 		if prior.RequestHash != p.RequestHash {

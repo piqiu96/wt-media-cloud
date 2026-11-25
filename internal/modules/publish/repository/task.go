@@ -109,7 +109,7 @@ func (s Store) Edit(v model.Task, revision uint64) (model.Task, error) {
 		if err != nil {
 			return err
 		}
-		if stoppedParent(parent) {
+		if stoppedParent(parent) || parent != nil && parent.PlanFrozenAt != nil {
 			return ErrParentBlocked
 		}
 		var old model.Task

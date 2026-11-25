@@ -8,7 +8,7 @@ CREATE TABLE publication_plan (
  revision BIGINT UNSIGNED NOT NULL DEFAULT 1, request_key VARCHAR(128) COLLATE utf8mb4_bin NOT NULL,
  request_hash CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
  start_request_key VARCHAR(128) COLLATE utf8mb4_bin NULL, start_request_hash CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NULL,
- start_receipt_json JSON NULL, handoff_receipts_json JSON NULL,
+ start_receipt_json JSON NULL, handoff_receipts_json JSON NULL, resource_wait_json JSON NULL,
  created_at DATETIME(6) NOT NULL, updated_at DATETIME(6) NOT NULL,
  UNIQUE KEY uq_publication_plan_request(created_by,request_key),
  KEY idx_publication_plan_owner(owner_id,created_at,id), KEY idx_publication_plan_team(team_id,created_at,id), KEY idx_publication_plan_status(status,id),
