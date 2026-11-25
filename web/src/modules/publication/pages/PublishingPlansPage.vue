@@ -656,7 +656,15 @@ async function command(recover = false) {
         (!recover && [400, 401, 403, 404, 422].includes(e.status)))
     ) {
       await journal.clear(pending.value);
-      pending.value = null;
+      pending.value = journal.read();
+      if (!pending.value && e.planRejection) {
+        const message = humanError(e);
+        operation.value = "";
+        ack.value = false;
+        startPreview.value = [];
+        await reload(true);
+        error.value = message;
+      }
     }
   } finally {
     busy.value = false;

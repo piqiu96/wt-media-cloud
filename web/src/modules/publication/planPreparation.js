@@ -217,6 +217,24 @@ function receipt(r, id, started, c) {
     return false;
   return true;
 }
+export function planCommandNotApplied(error, operation) {
+  const d = error?.details,
+    input = operation?.input;
+  return (
+    error?.status === 409 &&
+    error.code === "publication_conflict" &&
+    ["start", "confirm-next"].includes(operation.action) &&
+    d?.command_applied === false &&
+    d.command === operation.action &&
+    typeof d.request_key === "string" &&
+    d.request_key.length > 0 &&
+    d.request_key === input.request_key &&
+    d.expected_revision === input.expected_revision &&
+    validID(d.current_revision) &&
+    validID(input.expected_revision) &&
+    BigInt(d.current_revision) > BigInt(input.expected_revision)
+  );
+}
 export async function sendPlanCommand(api, id, op, { recover = false } = {}) {
   try {
     if (recover) {
@@ -266,6 +284,12 @@ export async function sendPlanCommand(api, id, op, { recover = false } = {}) {
     }
     return r;
   } catch (e) {
+    if (planCommandNotApplied(e, op)) {
+      e.planRejection = true;
+      e.definitiveNotApplied = true;
+      e.message = "原计划请求未生效，请按最新配置重新检查";
+      throw e;
+    }
     if (
       e.status === 409 &&
       e.details?.plan_id === id &&

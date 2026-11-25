@@ -183,3 +183,46 @@ it("preserves unknown original command when recovery authentication expires", as
     ),
   ).rejects.toMatchObject({ outcomeUnknown: true });
 });
+it("only accepts a fully bound provider non-application proof", async () => {
+  const op = {
+      action: "start",
+      input: { request_key: "original", expected_revision: "5" },
+    },
+    proof = {
+      command_applied: false,
+      command: "start",
+      request_key: "original",
+      expected_revision: "5",
+      current_revision: "6",
+    };
+  const failure = (details) =>
+    Object.assign(Error("conflict"), {
+      status: 409,
+      code: "publication_conflict",
+      details,
+    });
+  const api = (details) => ({
+    get: async () => ({ plan: { id: "2" } }),
+    start: async () => {
+      throw failure(details);
+    },
+  });
+  await expect(
+    sendPlanCommand(api(proof), "2", op, { recover: true }),
+  ).rejects.toMatchObject({ planRejection: true, definitiveNotApplied: true });
+  for (const bad of [
+    { ...proof, command: "confirm-next" },
+    { ...proof, request_key: "other" },
+    { ...proof, expected_revision: "4" },
+    { ...proof, current_revision: "5" },
+    { ...proof, current_revision: "05" },
+    { ...proof, current_revision: 6 },
+    { ...proof, command_applied: null },
+    Object.fromEntries(
+      Object.entries(proof).filter(([k]) => k !== "request_key"),
+    ),
+  ])
+    await expect(
+      sendPlanCommand(api(bad), "2", op, { recover: true }),
+    ).rejects.toMatchObject({ outcomeUnknown: true });
+});
