@@ -6,6 +6,7 @@ import (
 	"github.com/wt-media/wt-media-cloud/internal/modules/publish/model"
 	repo "github.com/wt-media/wt-media-cloud/internal/modules/publish/repository"
 	service "github.com/wt-media/wt-media-cloud/internal/modules/publish/service"
+	"strings"
 	"testing"
 )
 
@@ -23,6 +24,17 @@ func TestPlanReadScopeAcrossCountDetailsRecordsAndExactRequest(t *testing.T) {
 		t.Fatal(e)
 	}
 	id := created.Plan.ID
+	bad := in
+	bad.RequestKey = "oversized"
+	bad.Batches = append([]model.PlanStructureBatch(nil), in.Batches...)
+	bad.Batches[0].Name = strings.Repeat("长", 101)
+	if _, e = s.CreatePlan(owner, bad); !errors.Is(e, service.ErrInvalid) {
+		t.Fatalf("create oversized batch %v", e)
+	}
+	if _, e = s.EditPlan(owner, id, service.StructurePlanInput{PlanInput: bad.PlanInput, ExpectedRevision: 1}); !errors.Is(e, service.ErrInvalid) {
+		t.Fatalf("edit oversized batch %v", e)
+	}
+
 	restricted := owner
 	restricted.CategoryIDs = []identity.CategoryID{1}
 	for _, a := range []identity.PublicUser{restricted, {ID: 10, Role: identity.RoleOperator, Status: identity.UserStatusEnabled, TeamID: &team, CategoryIDs: owner.CategoryIDs}} {
@@ -63,6 +75,40 @@ func TestPlanReadScopeAcrossCountDetailsRecordsAndExactRequest(t *testing.T) {
 	}
 	if e = db.Model(&model.Plan{}).Where("id=?", id).Update("status", "ended").Error; e != nil {
 		t.Fatal(e)
+	}
+	adminDetail, e := s.GetPlan(admin, id)
+	if e != nil {
+		t.Fatal(e)
+	}
+	for _, act := range adminDetail.Plan.AllowedActions {
+		if act == "copy" {
+			t.Fatal("admin detail offers impossible copy")
+		}
+	}
+	adminPage, e := s.ListPlans(admin, repo.PlanFilter{Page: 1, PageSize: 10})
+	if e != nil {
+		t.Fatal(e)
+	}
+	for _, row := range adminPage.Items {
+		for _, act := range row.AllowedActions {
+			if act == "copy" {
+				t.Fatal("admin list offers impossible copy")
+			}
+		}
+	}
+	seniorDetail, e := s.GetPlan(senior, id)
+	if e != nil {
+		t.Fatal(e)
+	}
+	hasCopy := false
+	for _, act := range seniorDetail.Plan.AllowedActions {
+		hasCopy = hasCopy || act == "copy"
+	}
+	if !hasCopy {
+		t.Fatal("senior missing legal copy")
+	}
+	if _, e = s.CopyPlan(senior, id, 1); e != nil {
+		t.Fatalf("senior copy %v", e)
 	}
 	copied, e := s.CopyPlan(owner, id, 1)
 	if e != nil {

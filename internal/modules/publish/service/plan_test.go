@@ -19,6 +19,11 @@ func TestPlanOwnScopeAndStrictConservation(t *testing.T) {
 	if e := s.validatePlan(a, in); e != nil {
 		t.Fatal(e)
 	}
+	in.Batches[0].Name = strings.Repeat("长", 101)
+	if e := s.validatePlan(a, in); !errors.Is(e, ErrInvalid) {
+		t.Fatalf("oversized batch name accepted %v", e)
+	}
+	in.Batches[0].Name = "first"
 	a.Role = identity.RoleAdmin
 	if e := s.validatePlan(a, in); !errors.Is(e, ErrNotFound) {
 		t.Fatalf("admin writes %v", e)
@@ -62,6 +67,11 @@ func TestPlanRecommendationPromptIsBoundAndNeverAdoptsInvalidOutput(t *testing.T
 		prompt = user
 		return current, nil
 	}}
+	invalid := in
+	invalid.Batches = []model.PlanStructureBatch{{RowKey: "r", Name: strings.Repeat("长", 101), Platform: "baidu", GroupOrder: 1, BatchOrder: 1, Targets: []model.BatchTarget{{CategoryID: 1, TargetCount: 2}}}}
+	if _, e := s.PreparePlanRecommendation(context.Background(), a, invalid); !errors.Is(e, ErrInvalid) {
+		t.Fatalf("oversized AI input %v", e)
+	}
 	run, e := s.PreparePlanRecommendation(context.Background(), a, in)
 	if e != nil {
 		t.Fatal(e)
@@ -75,7 +85,7 @@ func TestPlanRecommendationPromptIsBoundAndNeverAdoptsInvalidOutput(t *testing.T
 	if strings.Contains(prompt, "900") || strings.Contains(prompt, "owner") || strings.Contains(prompt, "profile") || strings.Contains(prompt, "account_id") {
 		t.Fatalf("invalid prompt %s", prompt)
 	}
-	for _, raw := range []string{"not JSON", `{"batches":[]}`, strings.Replace(current, `"target_count":2`, `"target_count":1`, 1), strings.Replace(current, `"category_id":"1"`, `"category_id":"2"`, 1), current + `{}`, strings.Replace(current, `"row_key":"one"`, `"row_key":"one","batch_id":"8"`, 1)} {
+	for _, raw := range []string{"not JSON", strings.Replace(current, `"name":"一"`, `"name":"`+strings.Repeat("长", 101)+`"`, 1), `{"batches":[]}`, strings.Replace(current, `"target_count":2`, `"target_count":1`, 1), strings.Replace(current, `"category_id":"1"`, `"category_id":"2"`, 1), current + `{}`, strings.Replace(current, `"row_key":"one"`, `"row_key":"one","batch_id":"8"`, 1)} {
 		current = raw
 		if _, e = run(context.Background()); e == nil {
 			t.Fatalf("adopted invalid %s", raw)

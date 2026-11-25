@@ -229,7 +229,7 @@ func (s *Service) planDetail(a identity.PublicUser, p model.Plan, b []model.Batc
 	if planOwn(a, p) && p.StartedAt == nil && p.Status == "not_started" {
 		v.AllowedActions = []string{"edit"}
 	}
-	if p.Status == "ended" {
+	if p.Status == "ended" && canPrepareBatch(a) {
 		v.AllowedActions = append(v.AllowedActions, "copy")
 	}
 	rows := []PlanBatchView{}

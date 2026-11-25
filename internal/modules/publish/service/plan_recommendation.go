@@ -73,7 +73,7 @@ func (s *Service) PreparePlanRecommendation(ctx context.Context, a identity.Publ
 	var lastGroup, lastOrder uint32
 	usedPlatforms := map[string]bool{}
 	for _, b := range in.Batches {
-		if b.BatchID != nil || b.RowKey == "" || len(b.RowKey) > 64 || rowKeys[b.RowKey] || b.GroupOrder == 0 || b.BatchOrder == 0 || len(b.Targets) == 0 {
+		if !validBatchName(b.Name) || b.BatchID != nil || b.RowKey == "" || len(b.RowKey) > 64 || rowKeys[b.RowKey] || b.GroupOrder == 0 || b.BatchOrder == 0 || len(b.Targets) == 0 {
 			return nil, ErrInvalid
 		}
 		if b.Platform != lastPlatform {

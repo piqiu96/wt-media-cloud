@@ -12,6 +12,7 @@ import (
 	"reflect"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // ValidatePlanStructure checks per-cell conservation and canonical platform groups.
@@ -44,7 +45,7 @@ func ValidatePlanStructure(p model.Plan, rows []model.PlanStructureBatch) error 
 	var group, order uint32
 	platform := ""
 	for _, r := range rows {
-		if r.RowKey == "" || len(r.RowKey) > 64 || keys[r.RowKey] || strings.TrimSpace(r.Name) == "" || len(r.Targets) == 0 {
+		if r.RowKey == "" || len(r.RowKey) > 64 || keys[r.RowKey] || strings.TrimSpace(r.Name) == "" || utf8.RuneCountInString(r.Name) > 100 || len(r.Targets) == 0 {
 			return ErrConflict
 		}
 		keys[r.RowKey] = true
