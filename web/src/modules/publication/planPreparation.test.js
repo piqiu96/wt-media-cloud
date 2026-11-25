@@ -256,3 +256,54 @@ it("distinguishes continuation, explicit restart and dismiss without clearing ne
   expect(local.payload.pending.request_key).toBe("unknown");
 });
 
+it("splits different one-item goal cells without losing stable original row identity", () => {
+  const p = {
+    batches: [
+      {
+        row_key: "stable",
+        name: "混合",
+        platform: "baidu",
+        targets: [
+          { category_id: "1", target_count: 1 },
+          { category_id: "2", target_count: 1 },
+        ],
+      },
+    ],
+  };
+  splitBatch(p, 0);
+  expect(p.batches[0].row_key).toBe("stable");
+  expect(p.batches.map((b) => b.targets)).toEqual([
+    [{ category_id: "1", target_count: 1 }],
+    [{ category_id: "2", target_count: 1 }],
+  ]);
+});
+it("rejects a batch without a goal and duplicate batch cells", () => {
+  const p = {
+    name: "计划",
+    date_start: "2026-11-25",
+    date_end: "2026-11-26",
+    goals: [{ platform: "baidu", category_id: "1", target_count: 2 }],
+    batches: [
+      { row_key: "x", name: "x", platform: "baidu", targets: [] },
+      {
+        row_key: "y",
+        name: "y",
+        platform: "baidu",
+        targets: [{ category_id: "1", target_count: 2 }],
+      },
+    ],
+  };
+  expect(planProblem(p)).not.toBe("");
+  p.batches = [
+    {
+      row_key: "x",
+      name: "x",
+      platform: "baidu",
+      targets: [
+        { category_id: "1", target_count: 1 },
+        { category_id: "1", target_count: 1 },
+      ],
+    },
+  ];
+  expect(planProblem(p)).not.toBe("");
+});

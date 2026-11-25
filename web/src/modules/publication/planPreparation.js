@@ -79,11 +79,18 @@ export function planProblem(p) {
       return "目标数量或目标范围无效";
     totals[k] = g.target_count;
   }
+  const rowKeys = new Set();
   for (const b of p.batches) {
+    if (!b.row_key || rowKeys.has(b.row_key)) return "批次标识重复或缺失";
+    rowKeys.add(b.row_key);
+    if (!b.targets.length) return "每个批次至少分配一项目标";
+    const categoryKeys = new Set();
     if (!b.name.trim() || [...b.name].length > 100)
       return "请填写每批名称（最多100字）";
     for (const t of b.targets) {
       const k = b.platform + ":" + t.category_id;
+      if (categoryKeys.has(k)) return "批次内类目不能重复";
+      categoryKeys.add(k);
       if (
         !Number.isSafeInteger(t.target_count) ||
         t.target_count < 1 ||
@@ -99,7 +106,7 @@ export function planProblem(p) {
 }
 export function splitBatch(p, i) {
   const b = p.batches[i];
-  if (!b || b.targets.every((t) => t.target_count < 2))
+  if (!b || b.targets.reduce((n, t) => n + t.target_count, 0) < 2)
     throw Error("本批数量不足，无法再拆分");
   const n = {
     ...clone(b),
@@ -108,6 +115,9 @@ export function splitBatch(p, i) {
     targets: [],
   };
   delete n.batch_id;
+  if (b.targets.every((t) => t.target_count === 1)) {
+    n.targets = b.targets.splice(Math.ceil(b.targets.length / 2));
+  }
   for (const t of b.targets) {
     const count = Math.floor(t.target_count / 2);
     if (count) {
