@@ -64,3 +64,11 @@ type LatestManualVerification struct {
 	AttemptID    uint64    `json:"attempt_id,string"`
 	TaskRevision uint64    `json:"task_revision,string"`
 }
+
+type PlanRecord struct {
+	ID        string          `json:"id"`
+	ActorID   *int64          `json:"actor_id,string"`
+	Event     string          `json:"event"`
+	CreatedAt time.Time       `json:"created_at"`
+	Details   json.RawMessage `json:"details" gorm:"column:details"`
+}
