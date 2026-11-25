@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import {writeFile} from "node:fs/promises";
 import { chromium } from "playwright";
 const base = process.env.WT_MEDIA_BROWSER_BASE_URL || "http://127.0.0.1:5173";
 const browser = await chromium.launch({
@@ -124,7 +125,9 @@ for (const [progress, actions, action] of cases) {
         assert.equal(input.expected_batch_revision, "7");
       }
       if (action === "finish") {
-        assert.equal(input.end_reason, "unachieved");
+        assert.equal(input.end_reason, "unmet");
+        assert.deepEqual(Object.keys(input).sort(),["end_note","end_reason","expected_revision","expected_shortfalls"]);
+        await writeFile("/private/tmp/chg109-finish-client-request.json",JSON.stringify(input));
         assert.deepEqual(input.expected_shortfalls, [
           { platform: "baidu", category_id: "1", shortfall: 2 },
         ]);

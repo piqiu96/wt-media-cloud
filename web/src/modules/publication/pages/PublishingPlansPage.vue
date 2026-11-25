@@ -596,7 +596,7 @@ async function command(recover = false) {
             shortfall: g.shortfall,
           })),
           end_reason: p.goal_results.some((g) => g.shortfall > 0)
-            ? "unachieved"
+            ? "unmet"
             : "achieved",
           end_note: reason.value.trim(),
         };
@@ -915,7 +915,7 @@ onBeforeUnmount(() => {
         :message="
           {
             achieved: '目标达成，计划已结束',
-            unachieved: '保留目标缺口，计划已结束',
+            unmet: '保留目标缺口，计划已结束',
             cancelled: '计划已终止',
             terminated: '计划已终止',
           }[plan.end_reason] || '计划已结束'
