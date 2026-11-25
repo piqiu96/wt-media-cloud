@@ -328,6 +328,9 @@ func (s *Service) planDetail(a identity.PublicUser, p model.Plan, b []model.Batc
 	if v.Progress == "waiting_tasks" || v.Progress == "waiting_verification" {
 		v.ActionBlockers = append(v.ActionBlockers, map[string]string{"action": "confirm-next", "code": "unresolved_original_tasks", "message": "请先通过原批次处理人工、未知或待核实结果"})
 	}
+	if v.Progress == "awaiting_finish" {
+		v.ActionBlockers = append(v.ActionBlockers, map[string]string{"action": "finish", "code": "awaiting_public_results", "message": "仍有稿件等待平台公开或最终核实，当前不能结束计划"})
+	}
 	if v.PendingCount > 0 || v.VerificationRequiredCount > 0 {
 		v.ActionBlockers = append(v.ActionBlockers, map[string]string{"action": "finish", "code": "unresolved_original_tasks", "message": "仍有未决执行或未核实结果，暂不能结束计划"})
 	}

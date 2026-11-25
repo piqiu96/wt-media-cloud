@@ -206,8 +206,10 @@ func planProgress(tx *gorm.DB, p model.Plan, rows []model.Batch, now time.Time) 
 	}
 	unresolved := false
 	verification := false
+	reviewing := false
 	for _, t := range out.Tasks {
 		requires := t.VerificationRequiredAt(now)
+		reviewing = reviewing || t.Status == model.StatusReviewing
 		fingerprint = append(fingerprint, []any{t.ID, t.Revision, t.Status, t.CurrentAttemptID, t.CheckStoppedAt, t.AcceptedAt, t.LatestManualVerification, requires})
 		if planTaskUnresolved(t, now) {
 			unresolved = true
@@ -243,6 +245,8 @@ func planProgress(tx *gorm.DB, p model.Plan, rows []model.Batch, now time.Time) 
 		out.Progress = "waiting_tasks"
 	case out.Current != nil && out.Current.ExecutionStatus == model.BatchPaused:
 		out.Progress = "batch_paused"
+	case out.Next == nil && reviewing:
+		out.Progress = "awaiting_finish"
 	case out.Next == nil:
 		out.Progress = "ready_to_finish"
 	case out.Basis.ExplicitCount == 0:
