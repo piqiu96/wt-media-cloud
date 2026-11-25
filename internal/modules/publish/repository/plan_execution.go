@@ -422,7 +422,7 @@ func (s ExecutionStore) ControlPlan(id uint64, actor int64, revision uint64, act
 					}
 					found := false
 					for _, b := range rows {
-						if b.ID == expectedBatch && b.Revision == batchRevision && b.StartedAt != nil && b.HandedOffAt == nil {
+						if b.ID == expectedBatch && b.Revision == batchRevision && model.CanTakeoverPlanBatch(p, b) {
 							found = true
 						}
 					}

@@ -161,6 +161,9 @@ func projectBatch(a identity.PublicUser, v model.Batch) model.Batch {
 			}
 		}
 		v.AllowedActions = filtered
+		if ownsBatch(a, v) && v.PlanTakeoverAvailable {
+			v.AllowedActions = append(v.AllowedActions, "takeover")
+		}
 	}
 
 	return v

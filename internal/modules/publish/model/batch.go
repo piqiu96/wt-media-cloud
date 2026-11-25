@@ -86,6 +86,7 @@ const (
 )
 
 type Batch struct {
+	PlanTakeoverAvailable   bool                 `json:"-" gorm:"-"`
 	PlanName                *string              `json:"plan_name" gorm:"-"`
 	PlanConfigurationFrozen bool                 `json:"plan_configuration_frozen" gorm:"-"`
 	PlanCurrentPosition     bool                 `json:"plan_current_position" gorm:"-"`
@@ -161,6 +162,7 @@ type BatchActionBlocker struct {
 }
 
 func ProjectPlanBatch(p Plan, b Batch) Batch {
+	b.PlanTakeoverAvailable = CanTakeoverPlanBatch(p, b)
 	b.PlanName = &p.Name
 	b.PlanConfigurationFrozen = p.StartedAt != nil
 	b.PlanCurrentPosition = p.CurrentBatchID != nil && *p.CurrentBatchID == b.ID && b.HandedOffAt == nil

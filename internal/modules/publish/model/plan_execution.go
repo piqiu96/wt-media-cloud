@@ -99,3 +99,13 @@ type FinishPlanInput struct {
 	EndReason          string              `json:"end_reason"`
 	EndNote            string              `json:"end_note"`
 }
+
+// Takeover only pauses later plan advancement around the current, already
+// authorized execution. It cannot start a future batch or grant a new attempt.
+func CanTakeoverPlanBatch(p Plan, b Batch) bool {
+	if p.Status != "running" || p.StartedAt == nil || p.StoppedAt != nil || p.EndedAt != nil || p.CurrentBatchID == nil || *p.CurrentBatchID != b.ID || b.PlanID == nil || *b.PlanID != p.ID || b.StartedAt == nil || b.StoppedAt != nil || b.EndedAt != nil || b.HandedOffAt != nil || b.Revision == 0 || b.PlanFrozenAt == nil || b.FrozenConfirmation == nil {
+		return false
+	}
+	c := b.FrozenConfirmation
+	return (b.ExecutionStatus == BatchRunning || b.ExecutionStatus == BatchPaused) && c.BatchID == b.ID && c.ExpectedRevision > 0 && len(c.IncludedRowKeys) > 0 && c.ExcludedRowKeys != nil && len(c.ExpectedShortfalls) > 0
+}

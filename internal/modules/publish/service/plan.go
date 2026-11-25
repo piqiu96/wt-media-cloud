@@ -292,6 +292,12 @@ func (s *Service) planDetail(a identity.PublicUser, p model.Plan, b []model.Batc
 		}
 	}
 	if planOwn(a, p) {
+		for _, batch := range b {
+			if model.CanTakeoverPlanBatch(p, batch) {
+				v.AllowedActions = append(v.AllowedActions, "takeover")
+				break
+			}
+		}
 		if p.StoppedAt == nil && p.EndedAt == nil {
 			v.AllowedActions = append(v.AllowedActions, "cancel")
 			if p.StartedAt != nil {

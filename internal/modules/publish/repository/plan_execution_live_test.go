@@ -3,9 +3,12 @@ package repository_test
 import (
 	"errors"
 	"fmt"
+	identity "github.com/wt-media/wt-media-cloud/internal/modules/identity/service"
 	"github.com/wt-media/wt-media-cloud/internal/modules/publish/model"
 	repo "github.com/wt-media/wt-media-cloud/internal/modules/publish/repository"
+	service "github.com/wt-media/wt-media-cloud/internal/modules/publish/service"
 	"reflect"
+	"slices"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -450,5 +453,77 @@ func TestPlanAdmissionClockRechecksReviewExpiryAfterBlockedParentLock(t *testing
 	p, _, _ = s.GetPlan(p.ID)
 	if p.ResourceWait != nil {
 		t.Fatal("old resource probe crossed review deadline")
+	}
+}
+
+func TestPlanTakeoverActionsMatchGuardAndNeverReauthorizeCurrentExecution(t *testing.T) {
+	s, p, bs, in, prepared := preparedPlan(t)
+	now := time.Now().UTC()
+	if _, e := s.StartPlan(p.ID, 9, in, "takeover-start", prepared[bs[0].ID], now); e != nil {
+		t.Fatal(e)
+	}
+	p, bs, _ = s.GetPlan(p.ID)
+	team := identity.TeamID(7)
+	owner := identity.PublicUser{ID: 9, Role: identity.RoleOperator, Status: identity.UserStatusEnabled, TeamID: &team, CategoryIDs: []identity.CategoryID{1}}
+	svc := service.Service{PlanRepo: s.Store, BatchRepo: s.Store, PlanExecutionRepo: s}
+	detail, e := svc.GetPlan(owner, p.ID)
+	if e != nil {
+		t.Fatal(e)
+	}
+	if !slices.Contains(detail.Plan.AllowedActions, "takeover") || !slices.Contains(detail.Batches[0].AllowedActions, "takeover") || slices.Contains(detail.Batches[1].AllowedActions, "takeover") {
+		t.Fatalf("plan actions don't match current execution %+v", detail)
+	}
+	independent, e := svc.GetBatch(owner, bs[0].ID)
+	if e != nil || !slices.Contains(independent.AllowedActions, "takeover") {
+		t.Fatalf("batch projection missing takeover %+v %v", independent.AllowedActions, e)
+	}
+	for _, role := range []identity.Role{identity.RoleAdmin, identity.RoleSeniorOperator} {
+		manager := owner
+		manager.ID = 11
+		manager.Role = role
+		read, e := svc.GetPlan(manager, p.ID)
+		if e != nil {
+			t.Fatal(e)
+		}
+		if slices.Contains(read.Plan.AllowedActions, "takeover") || slices.Contains(read.Batches[0].AllowedActions, "takeover") {
+			t.Fatal("manager takeover action offered")
+		}
+	}
+	if _, e = s.ControlPlan(p.ID, 9, p.Revision, "takeover", "不得接管未来位置", bs[1].ID, bs[1].Revision, now); !errors.Is(e, repo.ErrConflict) {
+		t.Fatalf("future takeover %v", e)
+	}
+	if e = s.DB.Model(&model.Batch{}).Where("id=?", bs[0].ID).Update("execution_status", model.BatchEnded).Error; e != nil {
+		t.Fatal(e)
+	}
+	if _, e = s.ControlPlan(p.ID, 9, p.Revision, "takeover", "不得接管已结束批", bs[0].ID, bs[0].Revision, now); !errors.Is(e, repo.ErrConflict) {
+		t.Fatalf("ended takeover %v", e)
+	}
+	if e = s.DB.Model(&model.Batch{}).Where("id=?", bs[0].ID).Update("execution_status", model.BatchRunning).Error; e != nil {
+		t.Fatal(e)
+	}
+	var before []model.Task
+	if e = s.DB.Where("batch_id=?", bs[0].ID).Find(&before).Error; e != nil {
+		t.Fatal(e)
+	}
+	var attemptsBefore int64
+	s.DB.Model(&model.Attempt{}).Count(&attemptsBefore)
+	out, e := s.ControlPlan(p.ID, 9, p.Revision, "takeover", "运营接管当前已有执行", bs[0].ID, bs[0].Revision, now)
+	if e != nil || out.Plan.Status != "paused" {
+		t.Fatalf("takeover %+v %v", out, e)
+	}
+	var after []model.Task
+	s.DB.Where("batch_id=?", bs[0].ID).Find(&after)
+	var attemptsAfter int64
+	s.DB.Model(&model.Attempt{}).Count(&attemptsAfter)
+	if !reflect.DeepEqual(before, after) || attemptsAfter != attemptsBefore {
+		t.Fatal("takeover created or reauthorized task/attempt")
+	}
+	p, _, _ = s.GetPlan(p.ID)
+	paused, e := svc.GetPlan(owner, p.ID)
+	if e != nil || slices.Contains(paused.Plan.AllowedActions, "takeover") {
+		t.Fatal("already paused takeover still offered")
+	}
+	if _, e = s.ControlPlan(p.ID, 9, p.Revision, "takeover", "重复接管", bs[0].ID, bs[0].Revision, now); !errors.Is(e, repo.ErrConflict) {
+		t.Fatalf("paused repeated takeover %v", e)
 	}
 }
