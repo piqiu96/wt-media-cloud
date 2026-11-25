@@ -6,6 +6,7 @@ const browser = await chromium.launch({
   headless: true,
 });
 const base = process.env.WT_MEDIA_BROWSER_BASE_URL || "http://127.0.0.1:5173";
+const longName="复制成片长名称用于验证安装版发布内容列在真实文件名下仍保持两行展示".repeat(3);
 const coverPath = "/api/v1/file-resources/" + "a".repeat(64),
   thumbPath = "/api/v1/file-resources/" + "c".repeat(64);
 try {
@@ -20,7 +21,7 @@ try {
     ["cover-known", null],
   ]) {
     const page = await browser.newPage({
-        viewport: { width: 1440, height: 1000 },
+        viewport: { width: Number(process.env.WT_MEDIA_VIEWPORT_WIDTH)||1440, height: 1000 },
       }),
       errors = [];
     page.on("pageerror", (e) => errors.push(e.message));
@@ -49,7 +50,7 @@ try {
     };
     const output = {
       composite_output_id: "41",
-      name: "本人视频",
+      name: longName,
       category_id: scene === "wrong-category" ? "5" : "4",
       team_id: scene === "wrong-team" ? "8" : "7",
       occupied: scene === "occupied",
@@ -154,6 +155,14 @@ try {
       });
       const candidate = section.locator("tbody tr");
       await candidate.waitFor();
+      if(scene!=="missing"){
+        const title=candidate.locator('button.resource-name-link > span.batch-content-asset');
+        assert.equal(await title.count(),1,"clamp must be applied to the inner span, not the native button");
+        assert.equal(await title.textContent(),longName);assert.equal(await title.getAttribute('title'),longName);
+        const geometry=await title.evaluate(element=>({height:element.getBoundingClientRect().height,line:parseFloat(getComputedStyle(element).lineHeight)}));
+        assert.ok(geometry.height<=2*geometry.line+1,"inner resource title must remain within two visible lines");
+      }
+
       if (message) {
         assert.equal(
           await candidate.getByText("已就绪", { exact: true }).count(),

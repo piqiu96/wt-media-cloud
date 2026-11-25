@@ -282,7 +282,7 @@ function applyBulk(key, patch, covers) {
             <div class="batch-video-cell">
               <img v-if="resourceOnly && thumb(row)" :src="thumb(row)" alt="" />
               <div>
-                <ResourceNameLink v-if="outputFor(row)" :class="{'batch-content-asset':!resourceOnly}" :title="outputName(row)" @click="showVideo(row)">{{ outputName(row) }}</ResourceNameLink>
+                <ResourceNameLink v-if="outputFor(row)" :title="outputName(row)" @click="showVideo(row)"><span :class="{'batch-content-asset':!resourceOnly}" :title="outputName(row)">{{ outputName(row) }}</span></ResourceNameLink>
                 <span v-else :class="{'batch-content-asset':!resourceOnly}" :title="outputName(row)">{{ outputName(row) }}</span>
                 <small v-if="!resourceOnly" class="batch-muted batch-task-block">成片 ID：{{row.composite_output_id}} · 时长：—</small>
                 <small v-if="isManual(row)" class="batch-muted">人工配对</small>
