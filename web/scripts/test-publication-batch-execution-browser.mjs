@@ -288,8 +288,9 @@ async function createAndStart(name) {
   assert.equal(await page.getByRole("checkbox", {name:category.name,exact:true}).isChecked(),true);
   await button("重新自动匹配").click();
   await text("已配对 1 条候选").waitFor();
-  await button("下一步").click();
-  await button("下一步").click();
+  await button("确认资源").click();
+  await button("进入内容配置").click();
+  await button("预览检查").click();
   await field("异常任务上限").fill("3");
   await button("创建并发布").click();
   await heading(name).waitFor();

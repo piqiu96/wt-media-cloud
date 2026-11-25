@@ -203,11 +203,18 @@ export function publicContentPatch(row, values, overwrite = false) {
     value?.trim() && (overwrite || !(field === "cover_title" ? row.cover_title : row.content[field])?.trim())));
 }
 
-export function batchFormProblem(form, { requireName = true } = {}) {
+export function batchResourceProblem(form, { requireName = true } = {}) {
   if (requireName && !form.name.trim()) return "请填写批次名称";
+  if (!form.platform) return "请选择发布平台";
   if (!form.targets.length) return "请至少添加一个目标类目";
-  const positive = (n) => Number.isSafeInteger(n) && n > 0;
   if (form.targets.some(target => !Number.isSafeInteger(target.target_count) || target.target_count < 0)) return "发布目标须为非负整数";
+  return "";
+}
+
+export function batchFormProblem(form, options) {
+  const resourceProblem = batchResourceProblem(form, options);
+  if (resourceProblem) return resourceProblem;
+  const positive = (n) => Number.isSafeInteger(n) && n > 0;
   const settings = form.execution_setting;
   if (!positive(settings.concurrency_limit)) return "请填写并发数（正整数）";
   if (!Number.isSafeInteger(settings.group_interval_seconds) || settings.group_interval_seconds < 0) return "请填写组间发布间隔";

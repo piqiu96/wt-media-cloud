@@ -24,7 +24,7 @@ import { coverConfigFromReference, emptyCoverConfig } from "../coverPreparation.
 import { presentBatchIssues, localContentIssue } from "../batchIssuePresentation.js";
 import { contentIssue, contentIssues } from "../eligibility.js";
 
-const props = defineProps({ form: Object, catalog: Object, categories: Array, actor: Object, recipes: Object, coverFiles: Object, focusKey: String, validationContext: Object, disabled: Boolean, resourceOnly: Boolean, embedded:Boolean, reviewOnly: Boolean, validationIssues: {type:Array,default:()=>[]} });
+const props = defineProps({ form: Object, catalog: Object, categories: Array, actor: Object, recipes: Object, coverFiles: Object, focusKey: String, validationContext: Object, disabled: Boolean, resourcesLocked: Boolean, resourceOnly: Boolean, embedded:Boolean, reviewOnly: Boolean, validationIssues: {type:Array,default:()=>[]} });
 const emit = defineEmits(["work", "changed"]);
 const compose = createComposeClient();
 const batch = createPublicationBatchClient();
@@ -117,6 +117,7 @@ function closePreview() {
   preview.value = null;
 }
 function openPair(row = null) {
+  if (props.resourcesLocked || props.disabled) return;
   pairError.value = "";
   pairing.value = row ? { row_key: row.row_key, ...pairOf(row) } : {
     row_key: "", category_id: props.form.targets.length === 1 ? props.form.targets[0].category_id : "",
@@ -161,6 +162,7 @@ function replaceVideo(output) {
   replacingKey.value='';
 }
 function acceptPair() {
+  if (props.resourcesLocked || props.disabled) return;
   if (!pairing.value?.category_id || !pairing.value.media_account_id || !pairing.value.composite_output_id) return;
   if (blockedOutputIds.value.includes(pairing.value.composite_output_id)) {
     pairError.value = "该成片已在此批次候选中";
@@ -202,6 +204,7 @@ function acceptPair() {
 }
 
 async function remove(row) {
+  if (props.resourcesLocked || props.disabled) return;
   const accepted = await feedback.confirmWarning({ title: "移除候选", message: `移除「${outputName(row)}」后，发布目标仍保留。`, confirmText: "移除", danger: true });
   if (!accepted || props.disabled) return;
   const index = rows.value.findIndex(item => item.row_key === row.row_key);
@@ -286,6 +289,7 @@ function applyBulk(key, patch, covers) {
 <template>
   <component :is="embedded?'div':ResourceCard" :class="{'batch-content-card': !resourceOnly}">
     <component :is="embedded?'div':ResourceSection" :variant="resourceOnly?'detail':'form'" :title="resourceOnly ? '账号与成片匹配' : reviewOnly ? '发布内容' : '内容配置'">
+      <p v-if="resourcesLocked && !reviewOnly" class="batch-muted">资源已确认，本次仅配置文案与封面。需要调整资源时，可先保存批次，再从“继续配置”重新编辑。</p>
       <div v-if="resourceOnly" class="batch-inline batch-section-actions">
         <t-button theme="default" variant="outline" :disabled="disabled || !form.targets.length" @click="openPair()">添加候选</t-button>
         <ResourceStatusBadge :label="'已匹配 '+rows.length+' / '+form.targets.reduce((n,t)=>n+t.target_count,0)"/><span class="batch-muted">账号 {{new Set(rows.map(r=>r.media_account_id)).size}} 个 · 成片 {{rows.length}} 条</span>
@@ -308,7 +312,7 @@ function applyBulk(key, patch, covers) {
       <t-tabs v-if="resourceOnly" v-model="activeResourceCategory"><t-tab-panel v-for="target in form.targets" :key="target.category_id" :value="target.category_id" :label="categoryName(target.category_id)+'（'+rows.filter(row=>row.category_id===target.category_id).length+'）'"/></t-tabs>
       <div class="table-scroll-wrap resource-data-table">
         <t-table class="wt-resource-table" :data="resourceOnly?resourceRows:filteredRows" :columns="resourceOnly?resourceColumns:columns" row-key="row_key" :selected-row-keys="selection" :reserve-selected-row-on-paginate="true" :pagination="resourceOnly?undefined:{current:page,pageSize,total:filteredRows.length,pageSizeOptions:[10,20,50],showJumper:false}" @page-change="value=>{page=value.current;pageSize=value.pageSize}"
-          :scroll="{ x: resourceOnly ? '1102px' : reviewOnly ? '940px' : '1072px' }" empty="暂无候选，可添加候选或返回资源配置配对"
+          :scroll="{ x: resourceOnly ? '1102px' : reviewOnly ? '940px' : '1072px' }" :empty="resourcesLocked ? '暂无候选，可先保存批次，再从继续配置补充资源' : '暂无候选，可添加候选或返回资源配置配对'"
           @select-change="keys=>{const visible=new Set(filteredRows.map(row=>row.row_key));selection=[...new Set([...selection.filter(key=>!visible.has(key)),...keys])]}">
           <template #content="{row}"><div class="batch-content-identity"><button v-if="candidateCover(row)" class="batch-cover-preview" type="button" :aria-label="'预览发布封面 · '+(row.content.description||outputName(row))" @click="preview={label:'发布封面',image:true,url:candidateCover(row)}"><img :src="candidateCover(row)" alt="发布封面"/></button><span v-else class="batch-content-cover-placeholder">{{row.content.cover_file_id && row.content.cover_file_id !== '0' ? '发布封面引用待核实' : '未选择发布封面'}}</span><div><span class="batch-content-name" :title="row.content.description">{{row.content.description||'待填写发布文案'}}</span><small class="batch-muted">{{categoryName(row.category_id)}}</small></div></div></template>
           <template #video="{ row }">
@@ -331,7 +335,7 @@ function applyBulk(key, patch, covers) {
           <template #op="{ row, rowIndex }"><ResourceRowActions>
             <t-button v-if="!resourceOnly" size="small" variant="text" :disabled="disabled" @click="activeKey = row.row_key">编辑</t-button>
             <template v-if="resourceOnly"><t-button size="small" variant="text" :disabled="disabled" @click="replacingKey=row.row_key">更换成片</t-button><t-button size="small" variant="text" theme="danger" :disabled="disabled" @click="remove(row)">移出</t-button></template>
-            <details v-else-if="!reviewOnly" class="batch-content-more"><summary>更多</summary><div>
+            <details v-else-if="!reviewOnly && !resourcesLocked" class="batch-content-more"><summary>更多</summary><div>
             <t-button v-if="!reviewOnly" size="small" variant="text" :disabled="disabled" @click="openPair(row)">调整配对</t-button>
             <t-button v-if="!reviewOnly" size="small" variant="text" :disabled="disabled || rows.indexOf(row) === 0" @click="moveEntry(rows, rows.indexOf(row), -1)">上移</t-button>
             <t-button v-if="!reviewOnly" size="small" variant="text" :disabled="disabled || rows.indexOf(row) === rows.length - 1" @click="moveEntry(rows, rows.indexOf(row), 1)">下移</t-button>
