@@ -47,7 +47,8 @@ const shortfalls = computed(() => candidateShortfalls(props.form));
 const nameOf = id => props.categories.find(item => item.value === id)?.label || "原类目暂不可用";
 const accounts = computed(() => props.form.config.accounts);
 const outputs = computed(() => props.form.config.output_ids);
-const fixed = computed(() => props.disabled || loading.value || resourceLoading.value);
+// Read-only inventory can overlap category edits; inspect() discards obsolete responses.
+const fixed = computed(() => props.disabled || loading.value);
 
 function showResources(kind, categoryId) {
   outputCategory.value = categoryId;

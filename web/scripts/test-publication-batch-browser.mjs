@@ -10,8 +10,9 @@ page.on("pageerror", error => exceptions.push(error.message));
 const recordedCalls = [];
 let saved;
 let savedKey;
-const actor = { id: "71", role: "operator", team_id: "3", category_ids: ["12"], status: "enabled", username: "test" };
+const actor = { id: "71", role: "operator", team_id: "3", category_ids: ["12","13"], status: "enabled", username: "test" };
 const category = { id: "12", name: "合成测试类目", enabled: true };
+const secondCategory={id:"13",name:"第二测试类目",enabled:true};
 const account = { id: "9007199254740993", name: "由我发布", platform: "baidu", category_ids: ["12"], eligible: true };
 const alternateAccount={...account,id:"9007199254741001",name:"由我发布备用"};
 const outputs = [
@@ -51,9 +52,9 @@ await page.route("**/api/v1/**", async route => {
   function send(data) { return route.fulfill({ json: packet(data) }); }
   switch (resource) {
     case "/api/v1/auth/me": return send(actor);
-    case "/api/v1/categories": return send([category]);
+    case "/api/v1/categories": return send([category,secondCategory]);
     case "/api/v1/publication/account": return send({ items: [account,alternateAccount], total: 2 });
-    case "/api/v1/publication/resource": return send({ availability: "available", available_output_count: 2,
+    case "/api/v1/publication/resource": await new Promise(resolve=>setTimeout(resolve,300)); return send({ availability: "available", available_output_count: 2,
       eligible_account_count: 2, account_count: 2, unknown_output_count: 0, as_of: now });
     case "/api/v1/publication/output": {
       const selected = params.get("output_ids")?.split(",");
@@ -121,6 +122,10 @@ try {
   await input("批次名称").fill("浏览器批次");
   await page.locator(".batch-category-chip").filter({hasText:category.name}).click();
   assert.equal(await page.getByRole("checkbox", {name:category.name,exact:true}).isChecked(),true);
+  await page.locator('.batch-category-chip').filter({hasText:secondCategory.name}).click();
+  await input(`${secondCategory.name}发布目标`).waitFor();
+  await page.locator('.batch-category-chip').filter({hasText:secondCategory.name}).click();
+  await input(`${secondCategory.name}发布目标`).waitFor({state:'hidden'});
   await input(`${category.name}发布目标`).fill("2");
   await input('目标数量').fill('2');
   await button('采用系统推荐').click();
