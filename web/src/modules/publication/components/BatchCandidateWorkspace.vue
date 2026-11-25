@@ -23,7 +23,7 @@ import { coverConfigFromReference, emptyCoverConfig } from "../coverPreparation.
 import { presentBatchIssues, localContentIssue } from "../batchIssuePresentation.js";
 import { contentIssue, contentIssues } from "../eligibility.js";
 
-const props = defineProps({ form: Object, catalog: Object, categories: Array, actor: Object, recipes: Object, coverFiles: Object, focusKey: String, validationContext: Object, disabled: Boolean, resourceOnly: Boolean, reviewOnly: Boolean, validationIssues: {type:Array,default:()=>[]} });
+const props = defineProps({ form: Object, catalog: Object, categories: Array, actor: Object, recipes: Object, coverFiles: Object, focusKey: String, validationContext: Object, disabled: Boolean, resourceOnly: Boolean, embedded:Boolean, reviewOnly: Boolean, validationIssues: {type:Array,default:()=>[]} });
 const emit = defineEmits(["work", "changed"]);
 const compose = createComposeClient();
 const batch = createPublicationBatchClient();
@@ -38,6 +38,9 @@ const pairError = ref("");
 const confirmationFeedback = ref(null);
 const confirmationRows = ref({});
 let previewSequence = 0;
+const resourceCategory=ref('');
+const activeResourceCategory=computed({get:()=>props.form.targets.some(t=>t.category_id===resourceCategory.value)?resourceCategory.value:props.form.targets[0]?.category_id,set:value=>{resourceCategory.value=value}});
+const resourceRows=computed(()=>rows.value.filter(row=>row.category_id===activeResourceCategory.value));
 const resourceColumns = [
  {colKey:'order',title:'序号',width:72},{colKey:'account',title:'发布账号',width:180},{colKey:'video',title:'成片资源',width:280},{colKey:'source',title:'匹配来源',width:110},{colKey:'resourceStatus',title:'资源检查',width:160},{colKey:'op',title:'操作',width:220,fixed:'right'},
 ];
@@ -255,11 +258,11 @@ function applyBulk(key, patch, covers) {
 </script>
 
 <template>
-  <ResourceCard :class="{'batch-content-card': !resourceOnly}">
-    <ResourceSection :title="resourceOnly ? '账号与成片匹配' : reviewOnly ? '发布内容' : '内容配置'">
+  <component :is="embedded?'div':ResourceCard" :class="{'batch-content-card': !resourceOnly}">
+    <component :is="embedded?'div':ResourceSection" :title="resourceOnly ? '账号与成片匹配' : reviewOnly ? '发布内容' : '内容配置'">
       <div v-if="resourceOnly" class="batch-inline batch-section-actions">
         <t-button theme="default" variant="outline" :disabled="disabled || !form.targets.length" @click="openPair()">添加候选</t-button>
-        <template><ResourceStatusBadge :label="'已匹配 '+rows.length+' / '+form.targets.reduce((n,t)=>n+t.target_count,0)"/><span class="batch-muted">账号 {{new Set(rows.map(r=>r.media_account_id)).size}} 个 · 成片 {{rows.length}} 条</span></template>
+        <ResourceStatusBadge :label="'已匹配 '+rows.length+' / '+form.targets.reduce((n,t)=>n+t.target_count,0)"/><span class="batch-muted">账号 {{new Set(rows.map(r=>r.media_account_id)).size}} 个 · 成片 {{rows.length}} 条</span>
       </div>
       <ResourceFilterBar v-if="!resourceOnly && !reviewOnly" class="batch-content-filters">
         <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">搜索内容</span><t-input v-model="search" aria-label="搜索候选内容" placeholder="发布文案、账号或成片" clearable @enter="query"/></label>
@@ -276,8 +279,9 @@ function applyBulk(key, patch, covers) {
       </ResourceSelectionToolbar>
 
       <FeedbackAlert v-if="confirmationFeedback" :theme="confirmationFeedback.theme" :message="confirmationFeedback.message" />
+      <t-tabs v-if="resourceOnly" v-model="activeResourceCategory"><t-tab-panel v-for="target in form.targets" :key="target.category_id" :value="target.category_id" :label="categoryName(target.category_id)+'（'+rows.filter(row=>row.category_id===target.category_id).length+'）'"/></t-tabs>
       <div class="table-scroll-wrap resource-data-table">
-        <t-table class="wt-resource-table" :data="resourceOnly?rows:filteredRows" :columns="resourceOnly?resourceColumns:columns" row-key="row_key" :selected-row-keys="selection" :reserve-selected-row-on-paginate="true" :pagination="resourceOnly?undefined:{current:page,pageSize,total:filteredRows.length,pageSizeOptions:[10,20,50],showJumper:false}" @page-change="value=>{page=value.current;pageSize=value.pageSize}"
+        <t-table class="wt-resource-table" :data="resourceOnly?resourceRows:filteredRows" :columns="resourceOnly?resourceColumns:columns" row-key="row_key" :selected-row-keys="selection" :reserve-selected-row-on-paginate="true" :pagination="resourceOnly?undefined:{current:page,pageSize,total:filteredRows.length,pageSizeOptions:[10,20,50],showJumper:false}" @page-change="value=>{page=value.current;pageSize=value.pageSize}"
           :scroll="{ x: resourceOnly ? '1102px' : reviewOnly ? '940px' : '1072px' }" empty="暂无候选，可添加候选或返回资源配置配对"
           @select-change="keys=>{const visible=new Set(filteredRows.map(row=>row.row_key));selection=[...new Set([...selection.filter(key=>!visible.has(key)),...keys])]}">
           <template #content="{row}"><div class="batch-content-identity"><img v-if="candidateCover(row)" :src="candidateCover(row)" alt="发布封面"/><span v-else class="batch-content-cover-placeholder">{{row.content.cover_file_id && row.content.cover_file_id !== '0' ? '发布封面引用待核实' : '未选择发布封面'}}</span><div><span class="batch-content-name" :title="row.content.description">{{row.content.description||'待填写发布文案'}}</span><small class="batch-muted">{{categoryName(row.category_id)}}</small></div></div></template>
@@ -315,8 +319,8 @@ function applyBulk(key, patch, covers) {
           </ResourceRowActions></template>
         </t-table>
       </div>
-    </ResourceSection>
-  </ResourceCard>
+    </component>
+  </component>
 
   <BatchCandidateEditor v-if="active && !resourceOnly" :key="`${active.row_key}:${active.input_revision}`" :row="active"
     :output="outputFor(active) && { ...outputFor(active), id: active.composite_output_id }" :platform="form.platform"
