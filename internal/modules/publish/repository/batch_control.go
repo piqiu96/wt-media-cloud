@@ -109,6 +109,9 @@ func projectBatchExecutionFacts(v model.Batch, rows []model.Task, now time.Time,
 	out.CreatedCount = int64(len(rows))
 	for _, row := range rows {
 		out.TaskCounts[row.Status]++
+		if row.Status == model.StatusReviewing && row.VerificationRequiredAt(now) {
+			out.VerificationRequiredCount++
+		}
 		if row.Status == model.StatusPublished && row.WorkID != nil {
 			out.PublishedCount++
 		}

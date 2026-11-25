@@ -27,23 +27,24 @@ type BatchPause struct {
 }
 
 type BatchExecution struct {
-	Phase             string           `json:"phase"`
-	FirstStartedAt    *time.Time       `json:"first_started_at"`
-	GroupNo           *uint32          `json:"execution_group_no"`
-	TaskIDs           []string         `json:"group_task_ids"`
-	GroupEndedAt      *time.Time       `json:"group_ended_at"`
-	NextGroupAt       *time.Time       `json:"next_group_at"`
-	Pause             *BatchPause      `json:"pause"`
-	StoppedAt         *time.Time       `json:"stopped_at"`
-	EndedAt           *time.Time       `json:"ended_at"`
-	StopReason        string           `json:"stop_reason,omitempty"`
-	FinishReason      string           `json:"finish_reason,omitempty"`
-	TargetCount       int64            `json:"target_count"`
-	CreatedCount      int64            `json:"created_count"`
-	CreationShortfall *int64           `json:"creation_shortfall"`
-	PublishedCount    int64            `json:"published_count"`
-	TargetShortfall   int64            `json:"target_shortfall"`
-	TaskCounts        map[Status]int64 `json:"task_counts"`
+	VerificationRequiredCount int64            `json:"verification_required_count"`
+	Phase                     string           `json:"phase"`
+	FirstStartedAt            *time.Time       `json:"first_started_at"`
+	GroupNo                   *uint32          `json:"execution_group_no"`
+	TaskIDs                   []string         `json:"group_task_ids"`
+	GroupEndedAt              *time.Time       `json:"group_ended_at"`
+	NextGroupAt               *time.Time       `json:"next_group_at"`
+	Pause                     *BatchPause      `json:"pause"`
+	StoppedAt                 *time.Time       `json:"stopped_at"`
+	EndedAt                   *time.Time       `json:"ended_at"`
+	StopReason                string           `json:"stop_reason,omitempty"`
+	FinishReason              string           `json:"finish_reason,omitempty"`
+	TargetCount               int64            `json:"target_count"`
+	CreatedCount              int64            `json:"created_count"`
+	CreationShortfall         *int64           `json:"creation_shortfall"`
+	PublishedCount            int64            `json:"published_count"`
+	TargetShortfall           int64            `json:"target_shortfall"`
+	TaskCounts                map[Status]int64 `json:"task_counts"`
 }
 
 type CreationShortfall struct {
