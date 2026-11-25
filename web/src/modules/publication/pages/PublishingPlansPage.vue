@@ -367,6 +367,10 @@ async function reload(background = false) {
       loading.value = false;
       if (!background) {
         await nextTick();
+        // Shared descriptions and footer resolve their measured layout in ResizeObserver.
+        // Restore after that first frame so the requested position is not clamped early.
+        await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+        if (disposed || run !== seq) return;
         const host = document.querySelector(".content-area");
         const restore = Number(route.query.scroll);
         if (host)

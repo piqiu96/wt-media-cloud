@@ -120,6 +120,14 @@ async function choose(name, close = true) {
     .click();
   if (close) await page.keyboard.press("Escape");
 }
+async function checkedArrangement() {
+  const response = page.waitForResponse(
+    (r) => new URL(r.url()).pathname === "/api/v1/publication-plan/validate",
+  );
+  await button("检查安排").click();
+  await response;
+  return structuredClone(saved);
+}
 try {
   await page.goto(base + "/publish-plans?view=create");
   await page
@@ -139,6 +147,32 @@ try {
   assert.equal(await num("批次 01A类目数量").inputValue(), "1");
   assert.equal(await num("批次 01B类目数量").inputValue(), "0");
   assert.equal(await num("批次 01 · 拆分B类目数量").inputValue(), "1");
+  const beforeMerge = await checkedArrangement();
+  await row(0).getByRole("button", { name: "合并下一批", exact: true }).click();
+  assert.equal(await matrix().locator("tbody tr").count(), 1);
+  const merged = await checkedArrangement();
+  assert.equal(merged.batches[0].row_key, beforeMerge.batches[0].row_key);
+  assert.deepEqual(merged.batches[0].targets, [
+    { category_id: "1", target_count: 1 },
+    { category_id: "2", target_count: 1 },
+  ]);
+  await row(0).getByRole("button", { name: "拆分", exact: true }).click();
+  const splitAgain = await checkedArrangement();
+  assert.equal(splitAgain.batches[0].row_key, beforeMerge.batches[0].row_key);
+  await row(1).getByRole("button", { name: "上移", exact: true }).click();
+  assert.equal(
+    await page
+      .locator('[aria-label="批次1名称"] input,input[aria-label="批次1名称"]')
+      .first()
+      .inputValue(),
+    "批次 01 · 拆分",
+  );
+  await row(0).getByRole("button", { name: "下移", exact: true }).click();
+  const restoredOrder = await checkedArrangement();
+  assert.deepEqual(
+    restoredOrder.batches.map((b) => b.row_key),
+    splitAgain.batches.map((b) => b.row_key),
+  );
   await choose("C未知");
   await choose("D失败");
   const inventory = page.getByRole("region", {
@@ -159,8 +193,7 @@ try {
   await button("新增批次").click();
   await setNumber("批次 03C未知数量", 1);
   await setNumber("批次 03D失败数量", 1);
-  await button("检查安排").click();
-  await page.getByText("目标与批次安排检查通过", { exact: false }).waitFor();
+  await checkedArrangement();
   assert.deepEqual(
     saved.goals.map((g) => g.target_count),
     [1, 1, 1, 1],

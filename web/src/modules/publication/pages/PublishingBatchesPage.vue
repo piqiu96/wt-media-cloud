@@ -283,6 +283,9 @@ function restore(value) {
 async function savedDetail(saved, startAfterSave = false) {
   allowLeave = true;
   try {
+    if (saved.plan_id) {
+      return await router.push(planReturn(route.query) || { name: "PublishPlans", query: { view: "detail", id: saved.plan_id } });
+    }
     await open("detail", saved, { replace: true, start: startAfterSave });
   } finally {
     allowLeave = false;
@@ -771,9 +774,9 @@ onBeforeUnmount(() => {
       <t-button v-if="step < 2" theme="primary" :disabled="freeze" @click="goStep(step + 1)">下一步</t-button>
       <t-button v-else :theme="pending ? 'primary' : 'default'" :variant="pending ? 'base' : 'outline'"
         :loading="saving" :disabled="preparing" @click="save()">
-        {{ pending ? "查询或重试原请求" : detail ? "保存修改" : "保存批次" }}
+        {{ pending ? "查询或重试原请求" : detail?.plan_id ? "保存并返回计划" : detail ? "保存修改" : "保存批次" }}
       </t-button>
-      <t-button v-if="step === 2 && !pending" theme="primary" :loading="saving" :disabled="preparing" @click="save(true)">
+      <t-button v-if="step === 2 && !pending && !detail?.plan_id" theme="primary" :loading="saving" :disabled="preparing" @click="save(true)">
         {{ detail ? "开始发布" : "创建并发布" }}
       </t-button>
     </template>
