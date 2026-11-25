@@ -1,11 +1,13 @@
 package repository
 
 import (
+	"database/sql"
 	"fmt"
 	identity "github.com/wt-media/wt-media-cloud/internal/modules/identity/service"
 	"github.com/wt-media/wt-media-cloud/internal/modules/publish/model"
 	"gorm.io/gorm"
 	"strings"
+	"time"
 )
 
 type PlanFilter struct {
@@ -71,28 +73,71 @@ func (s Store) ListPlans(f PlanFilter) ([]model.Plan, int64, error) {
 	}
 	return rows, count, e
 }
-func (s Store) PlanBatchPage(id uint64, page, size int, status string, pending *bool) ([]model.Batch, int64, error) {
-	q := s.DB.Model(&model.Batch{}).Where("plan_id=?", id)
-	if status != "" {
-		q = q.Where("execution_status=?", status)
+
+// One minimal task projection reuses the same verification predicate as progress.
+// Matching public work follows verifiedPlanWorks' original task/attempt/output scope.
+func planPendingBatchIDs(tx *gorm.DB, id uint64, now time.Time) ([]uint64, error) {
+	var facts []struct {
+		model.Task
+		MatchedPublic bool `gorm:"column:matched_public"`
 	}
-	if pending != nil {
-		sql := `EXISTS(SELECT 1 FROM publication_task t WHERE t.batch_id=publication_batch.id AND t.status IN ('pending','queued','running','awaiting_human','uncertain'))`
-		if !*pending {
-			sql = "NOT " + sql
+	e := tx.Table("publication_task AS t").Select("t.id,t.batch_id,t.status,t.accepted_at,t.current_attempt_id,t.check_stopped_at,t.latest_manual_verification_json,t.revision,t.work_id,w.id IS NOT NULL AS matched_public").
+		Joins("JOIN publication_batch b ON b.id=t.batch_id AND b.plan_id=?", id).
+		Joins("LEFT JOIN work w ON w.id=t.work_id AND w.publication_id=t.id AND w.attempt_id=t.current_attempt_id AND w.platform=t.platform AND w.operator_id=t.operator_id AND w.composite_output_id=t.composite_output_id").
+		Where("t.status IN ?", []model.Status{model.StatusPending, model.StatusQueued, model.StatusRunning, model.StatusAwaitingHuman, model.StatusUncertain, model.StatusReviewing, model.StatusPublished}).Find(&facts).Error
+	if e != nil {
+		return nil, e
+	}
+	ids := []uint64{}
+	seen := map[uint64]bool{}
+	for _, fact := range facts {
+		v := fact.Task
+		if v.Status == model.StatusPublished && !fact.MatchedPublic {
+			v.VerificationRequired = true
 		}
-		q = q.Where(sql)
+		if v.BatchID != nil && planTaskUnresolved(v, now) && !seen[*v.BatchID] {
+			seen[*v.BatchID] = true
+			ids = append(ids, *v.BatchID)
+		}
 	}
-	var n int64
-	if e := q.Count(&n).Error; e != nil {
-		return nil, 0, e
-	}
-	rows := []model.Batch{}
-	e := q.Order("plan_group_order,plan_batch_order,id").Offset((page - 1) * size).Limit(size).Find(&rows).Error
-	if e == nil {
-		rows, e = s.enrichBatches(rows, nil)
-	}
-	return rows, n, e
+	return ids, nil
+}
+func (s Store) PlanBatchPage(id uint64, page, size int, status string, pending *bool) (rows []model.Batch, n int64, e error) {
+	rows = []model.Batch{}
+	e = s.DB.Transaction(func(tx *gorm.DB) error {
+		now := s.planNow(time.Now().UTC())
+		q := tx.Model(&model.Batch{}).Where("plan_id=?", id)
+		if status != "" {
+			q = q.Where("execution_status=?", status)
+		}
+		if pending != nil {
+			ids, err := planPendingBatchIDs(tx, id, now)
+			if err != nil {
+				return err
+			}
+			if len(ids) == 0 {
+				if *pending {
+					q = q.Where("1=0")
+				}
+			} else if *pending {
+				q = q.Where("id IN ?", ids)
+			} else {
+				q = q.Where("id NOT IN ?", ids)
+			}
+		}
+		if err := q.Count(&n).Error; err != nil {
+			return err
+		}
+		if err := q.Order("plan_group_order,plan_batch_order,id").Offset((page - 1) * size).Limit(size).Find(&rows).Error; err != nil {
+			return err
+		}
+		reader := s
+		reader.DB = tx
+		var err error
+		rows, err = reader.enrichBatches(rows, nil)
+		return err
+	}, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
+	return
 }
 func (s Store) ListPlanRecords(id uint64, page, size int) ([]model.PlanRecord, int64, error) {
 	q := s.DB.Table("audit_logs").Where("target_type='publication_plan' AND target_id=?", fmt.Sprint(id))
