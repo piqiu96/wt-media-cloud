@@ -136,6 +136,15 @@ for (const role of ["operator", "senior_operator", "admin"]) {
         total: 2,
       });
     if (p.endsWith("/record")) return send({ items: [], total: 0 });
+    if (role === "admin" && /^\/api\/v1\/publication-batch\/[12]$/.test(p))
+      return route.fulfill({
+        status: 404,
+        json: {
+          errcode: 18002,
+          message: "模拟批次不可读",
+          error: { code: "publication_not_found" },
+        },
+      });
     if (/^\/api\/v1\/publication-batch\/[12]$/.test(p))
       return send(d.batches[Number(p.at(-1)) - 1].batch);
     if (p.endsWith("/execution-preview")) {
@@ -211,6 +220,20 @@ for (const role of ["operator", "senior_operator", "admin"]) {
     );
     assert.equal(
       await page.getByRole("button", { name: "编辑配置", exact: true }).count(),
+      0,
+    );
+    await page
+      .getByRole("button", { name: "详情", exact: true })
+      .nth(1)
+      .click();
+    await page.getByText("模拟批次不可读", { exact: false }).waitFor();
+    assert.notEqual(
+      await page.locator(".content-area").evaluate((e) => e.style.overflow),
+      "hidden",
+    );
+    await page.locator(".content-area").evaluate((e) => (e.scrollTop = 0));
+    assert.equal(
+      await page.locator(".content-area").evaluate((e) => e.scrollTop),
       0,
     );
   } else {
@@ -333,6 +356,15 @@ for (const role of ["operator", "senior_operator", "admin"]) {
     }
     if (p === "/api/v1/publication-plan" && q.method() === "POST") {
       posts++;
+      if (posts === 1)
+        return route.fulfill({
+          status: 400,
+          json: {
+            errcode: 18001,
+            message: "首次配置明确无效",
+            error: { code: "publication_invalid" },
+          },
+        });
       const input = q.postDataJSON();
       assert.equal(input.batches[0].name, "AI首批");
       created = {
@@ -389,6 +421,16 @@ for (const role of ["operator", "senior_operator", "admin"]) {
   await page.getByRole("button", { name: "AI 推荐拆批", exact: true }).click();
   await page.getByRole("button", { name: "采用建议", exact: true }).click();
   await page.getByRole("button", { name: "创建计划", exact: true }).click();
+  await page.getByText("首次配置明确无效", { exact: false }).waitFor();
+  assert.equal(
+    await page.getByLabel("计划名称", { exact: true }).last().isEnabled(),
+    true,
+  );
+  await page
+    .getByLabel("计划名称", { exact: true })
+    .last()
+    .fill("修正后周期计划");
+  await page.getByRole("button", { name: "创建计划", exact: true }).click();
   await page
     .getByRole("button", { name: "核对原创建请求", exact: true })
     .waitFor();
@@ -396,7 +438,7 @@ for (const role of ["operator", "senior_operator", "admin"]) {
     .getByRole("button", { name: "核对原创建请求", exact: true })
     .click();
   await page.getByRole("heading", { name: "发布计划详情" }).waitFor();
-  assert.equal(posts, 1);
+  assert.equal(posts, 2);
   assert.equal(recommendCalls, 1);
   await page.screenshot({ path: out + "/create-recovered.png" });
   await page.close();

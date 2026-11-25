@@ -75,6 +75,7 @@ const drawerBounds = ref({}),
   recordPage = ref(1);
 let requestedAction = null;
 let recordSequence = 0;
+let drawerLocked = false;
 let drawerScroll = 0,
   drawerOverflow = "",
   seq = 0,
@@ -346,6 +347,8 @@ async function save() {
     error.value = issue;
     return;
   }
+  const firstCreate = mode.value !== "edit" && !pendingCreate.value;
+  let createPostSent = false;
   busy.value = true;
   try {
     await identity();
@@ -382,7 +385,10 @@ async function save() {
     } catch (e) {
       throw e;
     }
-    if (!r) r = await api.create(pendingCreate.value);
+    if (!r) {
+      createPostSent = true;
+      r = await api.create(pendingCreate.value);
+    }
     if (!r?.plan?.id) throw Error("创建结果不完整，请保留原请求");
     try {
       await draft.value.clear();
@@ -396,6 +402,20 @@ async function save() {
     allowLeave = true;
     await open("detail", r.plan.id);
   } catch (e) {
+    // Only a first command that was never sent, or an explicit rejection of that
+    // first POST, may return to editable input. Previously unknown commands stay.
+    if (
+      firstCreate &&
+      (!createPostSent || [400, 401, 403, 404, 409, 422].includes(e.status))
+    ) {
+      pendingCreate.value = null;
+      if (draft.value)
+        try {
+          await draft.value.save({ form: clone(form.value), pending: null });
+        } catch (localError) {
+          draftError.value = humanError(localError);
+        }
+    }
     error.value =
       humanError(e) +
       (pendingCreate.value ? "；原请求已保留，请核对创建结果后继续" : "");
@@ -463,12 +483,21 @@ function adopt() {
   recommendation.value = null;
 }
 function batchRoute(row, view = "detail") {
-  const q = { view, id: row.batch_id, from_plan: plan.value.id };
+  const q = {
+    view,
+    id: row.batch_id,
+    from_plan: plan.value.id,
+    plan_scroll: String(
+      document.querySelector(".content-area")?.scrollTop || 0,
+    ),
+  };
   for (const [k, v] of Object.entries(listQuery())) q["plan_" + k] = v;
   return { name: "PublishBatches", query: q };
 }
 async function closePreview() {
   preview.value = null;
+  if (!drawerLocked) return;
+  drawerLocked = false;
   const area = document.querySelector(".content-area");
   if (area) {
     area.style.overflow = drawerOverflow;
@@ -499,12 +528,14 @@ async function showBatch(row) {
       width: r.width + "px",
       height: r.height + "px",
     };
+    drawerLocked = true;
     area.style.overflow = "hidden";
   }
   busy.value = true;
   try {
     preview.value = await batchApi.get(row.batch_id);
   } catch (e) {
+    await closePreview();
     error.value = humanError(e);
   } finally {
     busy.value = false;
@@ -683,7 +714,10 @@ onBeforeUnmount(() => {
   clearInterval(timer);
   stream?.abort();
   const area = document.querySelector(".content-area");
-  if (area && preview.value) area.style.overflow = drawerOverflow;
+  if (area && drawerLocked) {
+    area.style.overflow = drawerOverflow;
+    area.scrollTop = drawerScroll;
+  }
 });
 </script>
 <template>
