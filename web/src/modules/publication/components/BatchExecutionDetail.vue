@@ -28,7 +28,7 @@ const checkedCounts = computed(() => [
   <ResourceCard v-if="counts && (execution.first_started_at || execution.stopped_at)" class="detail-card">
     <ResourceSection title="执行情况">
       <ResourceDescriptions>
-        <t-descriptions-item label="执行阶段"><ResourceStatusBadge :label="batchPhases[phase] || '等待状态更新'" /></t-descriptions-item>
+        <t-descriptions-item v-if="!['ended','cancelled'].includes(batch.execution_status)" label="执行阶段"><ResourceStatusBadge :label="batchPhases[phase] || '等待状态更新'" /></t-descriptions-item>
         <t-descriptions-item v-if="execution.stopped_at" label="终止时间">{{ formatPublicationTime(execution.stopped_at) }}</t-descriptions-item>
         <t-descriptions-item v-if="execution.first_started_at" label="首次开始">{{ formatPublicationTime(execution.first_started_at) }}</t-descriptions-item>
         <t-descriptions-item v-if="execution.execution_group_no" label="执行组">第 {{ execution.execution_group_no }} 组</t-descriptions-item>

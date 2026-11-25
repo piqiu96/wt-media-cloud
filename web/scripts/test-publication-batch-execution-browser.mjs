@@ -313,7 +313,7 @@ const regressions = {
     ]) {
       batch=prepared(id,'受控批次',{execution_status:state,allowed_actions:actions,
         execution:{...newExecution(),phase,first_started_at:state==='not_started'?null:now,
-          task_counts:phase==='awaiting_processing'?{uncertain:1}:{}}});
+          task_counts:phase==='awaiting_processing'?{uncertain:1}:{}, stopped_at:state==='cancelled'?now:null}});
       await page.goto(new URL('/publish-batches',base).href);
       const row=page.getByRole('row').filter({hasText:'受控批次'});
       await row.getByText(label,{exact:true}).waitFor();
@@ -330,6 +330,10 @@ const regressions = {
     const readonly=page.getByRole('row').filter({hasText:'受控批次'});
     await readonly.getByRole('button',{name:'详情',exact:true}).waitFor();
     assert.deepEqual(await readonly.locator('.resource-row-actions').getByRole('button').allTextContents(),['详情']);
+    await readonly.getByRole('button',{name:'详情',exact:true}).click();
+    await heading('受控批次').waitFor();
+    assert.equal(await page.getByText('执行阶段',{exact:true}).count(),0);
+    assert.equal(await button('复制').count(),0);
   },
   async "changed-revision"() {
     await createAndStart("启动前配置已变更");
