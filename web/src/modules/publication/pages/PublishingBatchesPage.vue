@@ -788,7 +788,7 @@ onBeforeUnmount(() => {
                 aria-label="组间发布间隔（秒）" :disabled="freeze" @change="review = null" /></label>
               <label>组间处理<t-select v-model="form.execution_setting.between_group_policy" aria-label="组间处理" :options="groupPolicies"
                 :disabled="freeze" @change="review = null" /></label>
-              <label><span class="batch-field-title">异常任务上限<ResourceFieldHelp label="异常任务上限" content="异常任务达到该数量时，暂停发布，人工决定继续或终止。" /></span>
+              <label><span class="batch-field-title">异常任务上限<ResourceFieldHelp label="异常任务上限" content="异常任务达到该数量时，暂停发布，人工决定继续或终止。" /><span class="batch-muted">（必填）</span></span>
                 <t-input-number v-model="form.execution_setting.exception_task_limit" aria-label="异常任务上限" :min="1" :max="4294967295"
                   :decimal-places="0" placeholder="输入正整数" :disabled="freeze" @change="review = null" />
               </label>
@@ -799,7 +799,7 @@ onBeforeUnmount(() => {
       </template>
     </div>
     <template #footer>
-      <span v-if="isCreating" class="batch-footer-note batch-muted">{{ persisted ? "草稿仅保存在本机，保存批次后进入批次列表。" : "未保存的输入仅在当前页面会话保留。" }}</span>
+      <span v-if="isCreating" class="batch-footer-note batch-muted">{{ persisted ? "草稿仅保存在本机，保存批次后进入批次详情。" : "未保存的输入仅在当前页面会话保留。" }}</span>
       <t-button v-if="isCreating && persisted && !pending" theme="default" variant="outline" :disabled="freeze" @click="saveDraft">保存草稿</t-button>
       <t-button v-if="step === 2 && !pending" theme="default" variant="outline" :disabled="freeze" @click="goStep(1)">返回内容配置</t-button>
       <t-button v-if="step < 2" theme="primary" :disabled="freeze || !!resourceReview" @click="goStep(step + 1)">{{step === 0 ? '确认资源' : '下一步'}}</t-button>

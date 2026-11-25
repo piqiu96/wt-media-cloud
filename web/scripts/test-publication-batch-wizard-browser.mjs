@@ -109,13 +109,19 @@ try {
     console.log('PASS legacy draft step '+step+' inherits confirmed resources');
   }
   {
-    const f=form();f.config.candidates=[];
+    const f=form();f.config.candidates=[];f.execution_setting.exception_task_limit=null;
     const s=await scene({draft:{form:f,step:0},inventoryFailure:true});await s.page.goto(base+'/publish-batches?view=create');
     await s.button('采用系统推荐').click();await s.page.getByText('资源盘点尚未核实完整，请重新盘点后再推荐。原目标和候选保持不变。',{exact:true}).waitFor();
     assert.equal(await s.field(category.name+'发布目标').inputValue(),'2');
     await s.confirm();await s.page.getByText('暂无候选，可先保存批次，再从继续配置补充资源',{exact:true}).waitFor();
     await s.button('下一步').click();
     await s.page.getByRole('region',{name:'发布内容',exact:true}).getByText('暂无候选，可先保存批次，再从继续配置补充资源',{exact:true}).waitFor();
+    await s.page.getByText('草稿仅保存在本机，保存批次后进入批次详情。',{exact:true}).waitFor();
+    await s.page.getByText('（必填）',{exact:true}).waitFor();
+    await s.button('保存批次').click();
+    await s.page.getByText('请填写异常任务上限（正整数）',{exact:true}).first().waitFor();
+    assert.equal(s.calls.some(c=>c.path==='/api/v1/publication-batch'&&c.method==='POST'),false);
+    await s.field('异常任务上限').fill('5');
     await s.button('保存批次').click();
     await s.page.getByRole('heading',{name:f.name,exact:true}).waitFor();
     assert.equal(s.saved().targets[0].target_count,2);assert.equal(s.saved().config.candidates.length,0);
