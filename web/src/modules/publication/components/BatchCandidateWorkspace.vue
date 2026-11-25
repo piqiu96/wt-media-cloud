@@ -40,7 +40,7 @@ let previewSequence = 0;
 const resourceColumns = [
  {colKey:'order',title:'序号',width:72},{colKey:'account',title:'发布账号',width:180},{colKey:'video',title:'成片资源',width:280},{colKey:'source',title:'匹配来源',width:110},{colKey:'resourceStatus',title:'资源检查',width:160},{colKey:'op',title:'操作',width:220,fixed:'right'},
 ];
-const resourceIssue = row => !props.catalog.accounts.has(row.media_account_id) || !props.catalog.outputs.has(row.composite_output_id) ? '资源待核实' : props.catalog.accounts.get(row.media_account_id)?.eligible===false ? props.catalog.accounts.get(row.media_account_id)?.reason || '账号不可用' : batchOutputProblem(props.catalog.outputs.get(row.composite_output_id),row.category_id,props.actor.team_id);
+const resourceIssue = row => !props.catalog.accounts.has(row.media_account_id) || !props.catalog.outputs.has(row.composite_output_id) ? '资源待核实' : props.catalog.accounts.get(row.media_account_id)?.eligible===false ? props.catalog.accounts.get(row.media_account_id)?.reason || '账号不可用' : props.catalog.accounts.get(row.media_account_id)?.eligible!==true ? '账号状态待核实' : batchOutputProblem(props.catalog.outputs.get(row.composite_output_id),row.category_id,props.actor.team_id);
 const rows = computed(() => props.form.config.candidates);
 const active = computed(() => rows.value.find(row => row.row_key === activeKey.value));
 const selected = computed(() => rows.value.filter(row => selection.value.includes(row.row_key)));
@@ -54,6 +54,7 @@ const rowLabel = row => `${outputName(row)} · ${accountName(row)}`;
 const search=ref(''),categoryFilter=ref(''),stateFilter=ref(''),applied=ref({}),page=ref(1),pageSize=ref(10);
 const rowIssues=row=>{
  const messages=props.validationIssues.filter(issue=>issue.row_key===row.row_key).map(issue=>issue.message);
+ const resource=resourceIssue(row);if(resource)messages.push(resource);
  messages.push(...contentIssues({...row,content:{...row.content,cover_file_id:row.content.cover_file_id==='0'?'':row.content.cover_file_id,portrait_cover_file_id:row.content.portrait_cover_file_id==='0'?'':row.content.portrait_cover_file_id}}).map(issue=>issue.message));
  const live=statusIssue(row);if(live)messages.unshift(live.message);
  return [...new Set(messages.filter(Boolean))];
@@ -73,7 +74,7 @@ const columns=computed(()=>[
 ]);
 function candidateCover(row){
  const file=props.coverFiles?.[row.row_key]?.horizontal;
- try{return file?.fileId===row.content.cover_file_id?files.resourceURL(file):thumb(row)}catch{return thumb(row)}
+ try{return file?.fileId===row.content.cover_file_id && file.resource_path?files.resourceURL(file):null}catch{return null}
 }
 
 function isManual(row) {
@@ -276,7 +277,7 @@ function applyBulk(key, patch, covers) {
         <t-table class="wt-resource-table" :data="resourceOnly?rows:filteredRows" :columns="resourceOnly?resourceColumns:columns" row-key="row_key" :selected-row-keys="selection" :reserve-selected-row-on-paginate="true" :pagination="resourceOnly?undefined:{current:page,pageSize,total:filteredRows.length,pageSizeOptions:[10,20,50],showJumper:false}" @page-change="value=>{page=value.current;pageSize=value.pageSize}"
           :scroll="{ x: resourceOnly ? '1102px' : reviewOnly ? '940px' : '1072px' }" empty="暂无候选，可添加候选或返回资源配置配对"
           @select-change="keys=>{const visible=new Set(filteredRows.map(row=>row.row_key));selection=[...new Set([...selection.filter(key=>!visible.has(key)),...keys])]}">
-          <template #content="{row}"><div class="batch-content-identity"><img v-if="candidateCover(row)" :src="candidateCover(row)" alt="发布封面"/><div><span class="batch-content-name" :title="row.content.description">{{row.content.description||'待填写发布文案'}}</span><small class="batch-muted">{{categoryName(row.category_id)}}</small></div></div></template>
+          <template #content="{row}"><div class="batch-content-identity"><img v-if="candidateCover(row)" :src="candidateCover(row)" alt="发布封面"/><span v-else class="batch-content-cover-placeholder">{{row.content.cover_file_id && row.content.cover_file_id !== '0' ? '发布封面引用待核实' : '未选择发布封面'}}</span><div><span class="batch-content-name" :title="row.content.description">{{row.content.description||'待填写发布文案'}}</span><small class="batch-muted">{{categoryName(row.category_id)}}</small></div></div></template>
           <template #video="{ row }">
             <div class="batch-video-cell">
               <img v-if="resourceOnly && thumb(row)" :src="thumb(row)" alt="" />
@@ -357,4 +358,5 @@ function applyBulk(key, patch, covers) {
 .batch-content-identity{display:flex;align-items:center;gap:12px;min-width:0}.batch-content-identity>div{min-width:0}.batch-content-identity>img{width:64px;height:48px;object-fit:contain;border:1px solid var(--wt-border);border-radius:4px}.batch-content-name,.batch-content-problem{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere}.batch-content-name{font-weight:500}.batch-content-problem,.batch-content-issues{font-size:12px;line-height:20px;color:var(--wt-text-tertiary)}.batch-content-issues summary{cursor:pointer;color:var(--wt-primary)}.batch-content-filters{margin-top:16px}.batch-content-filters :deep(.wt-filter-field--wide){flex:1.6 1 280px;max-width:none}
 .batch-content-more summary{cursor:pointer;list-style:none;color:var(--wt-primary);font-size:13px}.batch-content-more>div{display:flex;flex-direction:column;align-items:flex-start}
 .batch-content-asset{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere;font-weight:400;text-align:left}
+.batch-content-cover-placeholder{display:grid;place-items:center;flex:none;width:64px;height:48px;padding:4px;box-sizing:border-box;border:1px dashed var(--wt-border);border-radius:4px;font-size:11px;line-height:14px;text-align:center;color:var(--wt-text-tertiary)}
 </style>
