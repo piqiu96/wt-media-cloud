@@ -1822,7 +1822,11 @@ components:
       type: object
       additionalProperties: false
       properties:
-        id: *id001
+        id:
+          type: string
+          minLength: 1
+          description: Opaque ID from the shared audit log; not a decimal business-object
+            ID.
         actor_id: *id016
         event:
           type: string

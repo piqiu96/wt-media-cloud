@@ -167,6 +167,13 @@ class PublicationPlanContractTest(unittest.TestCase):
             wrong = dict(issue, **{field: 2})
             self.assertFalse(self.schema("Issue").is_valid(wrong))
 
+    def test_record_identity_reuses_shared_opaque_audit_id(self):
+        record = {"id": "audit_01jexample", "actor_id": "9", "event": "publication_plan.finish",
+                  "created_at": "2026-11-25T00:00:00Z", "details": {"revision": "7"}}
+        self.schema("Record").validate(record)
+        record["id"] = ""
+        self.assertFalse(self.schema("Record").is_valid(record))
+
     def test_manual_failure_requires_closed_scene_and_no_publishable_work(self):
         resolve = {"attempt_id": "5", "expected_revision": "6", "conclusion": "failed",
                    "evidence": {"platform_uid": "uid", "reason": "原稿被平台明确拒发", "basis": "核实原账号与指定原稿，平台已明确拒发且浏览器现场已经关闭", "scene_closed": True, "no_publishable_work": True}}
