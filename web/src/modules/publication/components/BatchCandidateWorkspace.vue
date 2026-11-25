@@ -363,4 +363,5 @@ function applyBulk(key, patch, covers) {
 .batch-content-more summary{cursor:pointer;list-style:none;color:var(--wt-primary);font-size:13px}.batch-content-more>div{display:flex;flex-direction:column;align-items:flex-start}
 .batch-content-asset{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere;font-weight:400;text-align:left}
 .batch-content-cover-placeholder{display:grid;place-items:center;flex:none;width:64px;height:48px;padding:4px;box-sizing:border-box;border:1px dashed var(--wt-border);border-radius:4px;font-size:11px;line-height:14px;text-align:center;color:var(--wt-text-tertiary)}
+@media(max-width:680px){.batch-content-card :deep(.table-scroll-wrap){margin-inline:-16px;width:calc(100% + 32px)}}
 </style>
