@@ -5,7 +5,7 @@ import ResourceSection from "../../../shared/ui/resource/ResourceSection.vue";
 import ResourceDescriptions from "../../../shared/ui/resource/ResourceDescriptions.vue";
 import ResourceNotice from "../../../shared/ui/resource/ResourceNotice.vue";
 import ResourceStatusBadge from "../../../shared/ui/resource/ResourceStatusBadge.vue";
-import { batchStatus } from "../batchPresentation.js";
+import { batchStatus, batchRecordLabel } from "../batchPresentation.js";
 import { configurationLabels } from "../batchPreparation.js";
 import BatchExecutionDetail from "./BatchExecutionDetail.vue";
 import BatchFormalTasks from "./BatchFormalTasks.vue";
@@ -43,20 +43,6 @@ const scope = ref({ page: 1, page_size: 10 }),
   records = ref([]),
   error = ref("");
 let recordSequence = 0;
-const recordLabels = {
-  "publication_batch.create": "保存批次",
-  "publication_batch.configure": "保存配置修改",
-  "publication_batch.start": "开始发布",
-  "publication_batch.pause": "暂停发布",
-  "publication_batch.resume": "继续发布",
-  "publication_batch.stop": "终止发布",
-  "publication_batch.finish": "结束批次",
-  "publication_batch.plan_skeleton": "创建计划批次",
-  created: "保存批次",
-  configuration_updated: "保存配置修改",
-  publication_batch_created: "保存批次",
-  publication_batch_configuration_updated: "保存配置修改",
-};
 async function loadRecords(page = 1) {
   const run = ++recordSequence,
     id = props.batch.id;
@@ -217,7 +203,7 @@ onMounted(async () => {
         ><p v-if="error" role="alert">{{ error }}</p>
         <div v-for="r in records" :key="r.id" class="plan-record">
           {{ formatPublicationTime(r.created_at) }} ·
-          {{ recordLabels[r.event] || "批次业务记录" }}
+          {{ batchRecordLabel(r.event) }}
         </div>
         <ResourceNotice v-if="!records.length && !error"
           >暂无操作记录</ResourceNotice

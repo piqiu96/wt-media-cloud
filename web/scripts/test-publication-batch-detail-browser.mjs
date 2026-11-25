@@ -43,6 +43,7 @@ try {
         const outputs=(scene.rows||[]).map(r=>({id:r.composite_output_id,composite_output_id:r.composite_output_id,name:longName,category_id:'4',team_id:'7',platforms:['baidu'],occupied:!!scene.occupied,video:{status:'ready'},media:{duration_ms:30000}}));
         return send({items:outputs,total:outputs.length});
       }
+      if(path.endsWith('/record'))return send({items:[{id:'1',event:'publication_batch.group_assigned',actor_id:'9',created_at:'2026-11-25T10:00:00Z'},{id:'2',event:'publication_batch.ended',created_at:'2026-11-25T10:00:00Z'}],total:2});
       if(path.endsWith('/task'))return send({items:[],total:0});
       return send({items:[],total:0});
     });
@@ -87,6 +88,8 @@ try {
         if(scene.multi)await candidateSection.getByRole('columnheader',{name:'内容类目',exact:true}).waitFor();
       }
     }
+    await page.getByText('安排本组任务',{exact:true}).waitFor();
+    await page.getByText('批次执行结束',{exact:true}).waitFor();
     await page.setViewportSize({width:390,height:844});
     assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
     assert.deepEqual(errors,[]);assert.equal(calls.some(c=>c.method!=='GET'),false);

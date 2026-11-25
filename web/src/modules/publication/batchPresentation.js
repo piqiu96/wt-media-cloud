@@ -19,3 +19,17 @@ export function batchListActions(batch, owner) {
     : batchPendingCount(batch) > 0 ? ['process'] : [];
   return [...actions, 'detail', ...['pause', 'resume', 'finish', 'stop', 'copy'].filter(a => allowed.includes(a))];
 }
+
+const batchRecordLabels = {
+  'publication_batch.create': '保存批次', 'publication_batch.configure': '保存配置修改',
+  created: '保存批次', configuration_updated: '保存配置修改',
+  publication_batch_created: '保存批次', publication_batch_configuration_updated: '保存配置修改',
+  'publication_batch.start': '开始发布', 'publication_batch.pause': '暂停发布',
+  'publication_batch.resume': '继续发布', 'publication_batch.stop': '终止发布',
+  'publication_batch.finish': '结束批次', 'publication_batch.ended': '批次执行结束',
+  'publication_batch.group_assigned': '安排本组任务', 'publication_batch.group_ended': '本组处理结束',
+  'publication_batch.stop_settled': '终止处理完成', 'publication_batch.plan_skeleton': '创建计划批次',
+};
+export function batchRecordLabel(event) {
+  return batchRecordLabels[event] || '批次业务记录';
+}
