@@ -7,7 +7,7 @@
   C.canManage=()=>O.role()!=='运营';
   C.guard=x=>{if(C.access(x))return true;C.toast('该内容不在当前可查看范围内');return false;};
   // These declarations describe the demo templates only, not runtime permissions.
-  C.prod.editable={'视频截取':['start','end'],'引导视频插入':['insertSeconds','maxDuration'],'引导画中画':['insertSeconds','maxDuration']};
+  C.prod.editable={'广告画中画＋片尾':['start_seconds','end_seconds','max_duration_seconds'],'视频截取':['start','end'],'引导视频插入':['insertSeconds','maxDuration'],'引导画中画':['insertSeconds','maxDuration']};
   C.help=(label,text)=>`<button type="button" class="production-help" data-help="${E(text)}" aria-label="${E(label)}说明">?</button>`;
   C.enhanceHelp=root=>root.querySelectorAll('[data-help]').forEach(button=>{
     if(button.dataset.helpReady)return;button.dataset.helpReady='1';
@@ -34,7 +34,7 @@
       row.addEventListener('dragend',()=>source=null);
     });
   };
-  C.templateDetail=(template,version='v1')=>C.open({title:'合成模板说明',kind:'ex-drawer complex',body:()=>C.facts([['模板',E(template)],['版本',E(version||'未记录')],['定义来源','离线演示模板，不代表服务端 schema']])+C.section('制作过程',template==='视频截取'?'<p>源素材 → 按起止时间截取 → 输出成片。</p>':template==='引导画中画'?'<p>源素材 → 从指定位置叠加引导视频 → 按时长约束输出成片。</p>':'<p>源素材 → 在指定秒数插入引导视频 → 按时长约束输出成片。</p>')+C.prod.table(['参数','类型／含义','任务中可调整'],(C.prod.schemas[template]||[]).map(([k,l,t])=>`<tr><td>${E(l)}<small>${E(k)}</small></td><td>${t==='number'?E(C.prod.parameterHint(k)||'非负整数，单位秒'):t==='url'?'视频访问地址':'分:秒'} </td><td>${(C.prod.editable[template]||[]).includes(k)?'可调整':'固定'}</td></tr>`).join(''))+'<p class="ops-note">策略定义如何制作及默认值；选材规则与执行时间由策略配置。平台标签不增加成片份数。执行不包含发布。</p>'});
+  C.templateDetail=(template,version='v1')=>C.open({title:'合成模板说明',kind:'ex-drawer complex',body:()=>C.facts([['模板',E(template)],['版本',E(version||'未记录')],['定义来源','离线演示模板，不代表服务端 schema']])+C.section('制作过程',template==='广告画中画＋片尾'?'<p>正片前段 → 广告画中画 → 从原插入点继续正片 → 配乐片尾。广告期间仅播放广告声音，无音轨时静音。</p>':template==='视频截取'?'<p>源素材 → 按起止时间截取 → 输出成片。</p>':template==='引导画中画'?'<p>源素材 → 从指定位置叠加引导视频 → 按时长约束输出成片。</p>':'<p>源素材 → 在指定秒数插入引导视频 → 按时长约束输出成片。</p>')+C.prod.table(['参数','类型／含义','任务中可调整'],(C.prod.schemas[template]||[]).map(([k,l,t])=>`<tr><td>${E(l)}<small>${E(k)}</small></td><td>${t==='number'?E(C.prod.parameterHint(k)||'非负整数，单位秒'):t==='url'?'视频访问地址':'分:秒'} </td><td>${(C.prod.editable[template]||[]).includes(k)?'可调整':'固定'}</td></tr>`).join(''))+'<p class="ops-note">策略定义如何制作及默认值；选材规则与执行时间由策略配置。平台标签不增加成片份数。执行不包含发布。</p>'});
   C.prod.selectionTable=details=>'<div class="production-selection-results">'+C.prod.table(['素材','选材结果','依据'],details.map(x=>`<tr><td>${E(x.title||C.get('materials',x.id)?.title||x.id)}</td><td>${C.tag(x.selected?'选入':'跳过',x.selected?'success':'')}</td><td>${E(x.reason||'未记录')}</td></tr>`).join(''))+'</div>';
   C.prod.progress=(tasks,compact=false)=>{
     const n=ProductionModel.counts(tasks),states=[['success','成功'],['failed','失败'],['cancelled','已取消'],['running','处理中'],['pending','排队中']];

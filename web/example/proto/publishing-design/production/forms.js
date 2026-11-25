@@ -3,13 +3,14 @@
   const C=CP,O=OPS;
   const table=(heads,rows)=>`<div class="ex-table-scroll"><table class="ex-table ops-table ${heads.at(-1)==='操作'?'production-action-table':'production-data-table'}"><thead><tr>${heads.map(h=>`<th>${h}</th>`).join('')}</tr></thead><tbody>${rows||`<tr><td colspan="${heads.length}">${C.empty('暂无匹配内容')}</td></tr>`}</tbody></table></div>`;
   const copy=v=>JSON.parse(JSON.stringify(v));
-  const newVersion=base=>copy({...O.version(),guideUrl:'',insertSeconds:0,guideDuration:0,maxDuration:0,...base});
+  const newVersion=base=>copy({...O.version(),guideUrl:'',insertSeconds:0,guideDuration:0,maxDuration:0,ad_video_url:'',start_seconds:0,end_seconds:0,max_duration_seconds:180,ad_start_min_seconds:10,ad_start_max_seconds:15,ad_pip_width:0.92,transition_seconds:0.2,...base});
   const schemas={
+    '广告画中画＋片尾':[['ad_video_url','广告视频URL','url'],['start_seconds','正片开始秒数','number'],['end_seconds','正片结束秒数（0为自动）','number'],['max_duration_seconds','成片时长上限（秒）','number'],['ad_start_min_seconds','广告出现最早秒数','number'],['ad_start_max_seconds','广告出现最晚秒数','number'],['ad_pip_width','广告画中画宽度比例','number'],['transition_seconds','段落转场时长（秒）','number']],
     '视频截取':[['start','截取起点','text'],['end','截取终点','text']],
     '引导视频插入':[['guideUrl','引导视频地址','url'],['insertSeconds','插入位置（秒）','number'],['guideDuration','引导视频时长（秒）','number'],['maxDuration','成片时长上限（秒）','number']],
     '引导画中画':[['guideUrl','引导视频地址','url'],['insertSeconds','开始位置（秒）','number'],['guideDuration','引导视频时长（秒）','number'],['maxDuration','成片时长上限（秒）','number']]
   };
-  const parameterHint=(key)=>({insertSeconds:'0 表示片头，其他数值表示从主体第几秒开始。',guideDuration:'0 表示使用完整引导视频。',maxDuration:'0 表示不限制成片时长。'})[key]||'';
+  const parameterHint=(key)=>({ad_video_url:'广告期间仅播放广告声音，无音轨时静音。',end_seconds:'0 表示自动选取终点。',insertSeconds:'0 表示片头，其他数值表示从主体第几秒开始。',guideDuration:'0 表示使用完整引导视频。',maxDuration:'0 表示不限制成片时长。'})[key]||'';
   const parameterValue=(key,value)=>value==null?'—':Number(value)===0?({insertSeconds:'片头（0 秒）',guideDuration:'完整视频',maxDuration:'不限'})[key]??String(value):['insertSeconds','guideDuration','maxDuration'].includes(key)?value+' 秒':String(value);
   const versionForm=(vs,template='引导视频插入')=>vs.map((v,i)=>`<article class="ops-version" data-version-index="${i}"><div class="ops-version-head"><strong>成片设置 ${i+1}</strong>${C.prod.orderActions(vs,i,{copy:true})}</div>
     <div class="ex-form-grid">${C.field('成片设置名称','v.'+i+'.name',v.name,{required:true})}<div class="ex-field required"><div class="production-field-label"><label id="version-platform-${i}">适用平台</label>${C.help('适用平台','至少选择一个平台。平台标签不增加成片份数。')}</div><div class="ops-platforms" role="group" aria-labelledby="version-platform-${i}" aria-describedby="version-platform-help-${i}">${O.platforms.map(p=>`<label><input type="checkbox" data-platform-version="${i}" value="${p}" ${v.platforms.includes(p)?'checked':''}>${p}</label>`).join('')}</div><span id="version-platform-help-${i}" class="ex-help" data-platform-help hidden></span></div>
@@ -22,8 +23,11 @@
     C.prod.wireOrder(d,vs,'[data-version-index]','versionIndex');
   };
   const updateCount=(d,vs,n)=>{const el=d.querySelector('[data-count]');if(el){const count=n??Number(el.dataset.count);el.textContent=`${count} 条素材，共生成 ${count*vs.reduce((s,v)=>s+Number(v.qty||0),0)} 条合成任务`;}};
-  const changeVersion=(vs,k,value)=>{const m=k.match(/^v\.(\d+)\.(.+)$/);if(!m)return false;vs[+m[1]][m[2]]=['qty','insertSeconds','guideDuration','maxDuration'].includes(m[2])?Number(value):value;return true;};
+  const changeVersion=(vs,k,value)=>{const m=k.match(/^v\.(\d+)\.(.+)$/);if(!m)return false;vs[+m[1]][m[2]]=['qty','insertSeconds','guideDuration','maxDuration','start_seconds','end_seconds','max_duration_seconds','ad_start_min_seconds','ad_start_max_seconds','ad_pip_width','transition_seconds'].includes(m[2])?Number(value):value;return true;};
   const seconds=t=>/^\d{1,3}:[0-5]\d$/.test(t)?Number(t.split(':')[0])*60+Number(t.split(':')[1]):NaN;
-  const valid=(vs,template)=>vs.length&&vs.every(v=>v.name.trim()&&Number.isInteger(v.qty)&&v.qty>=1&&v.qty<=20&&v.platforms.length&&v.platforms.every(p=>O.platforms.includes(p))&&(template&&!['视频截取'].includes(template)?/^https?:\/\//.test(v.guideUrl||''):true)&&Number.isFinite(seconds(v.start))&&Number.isFinite(seconds(v.end))&&seconds(v.end)>seconds(v.start)&&['insertSeconds','guideDuration','maxDuration'].every(k=>Number.isInteger(v[k]??0)&&(v[k]??0)>=0));
+  const valid=(vs,template)=>{
+    if(template==='广告画中画＋片尾')return vs.length&&vs.every(v=>v.name.trim()&&Number.isInteger(v.qty)&&v.qty>=1&&v.qty<=20&&v.platforms.length&&v.platforms.every(p=>O.platforms.includes(p))&&/^https?:\/\//.test(v.ad_video_url||'')&&v.start_seconds>=0&&(v.end_seconds===0||v.end_seconds>v.start_seconds)&&v.max_duration_seconds>=1&&v.ad_start_min_seconds>=0&&v.ad_start_max_seconds>=v.ad_start_min_seconds&&v.ad_start_max_seconds<v.max_duration_seconds&&v.ad_pip_width>=.1&&v.ad_pip_width<=1&&v.transition_seconds>=0&&v.transition_seconds<=1);
+    return vs.length&&vs.every(v=>v.name.trim()&&Number.isInteger(v.qty)&&v.qty>=1&&v.qty<=20&&v.platforms.length&&v.platforms.every(p=>O.platforms.includes(p))&&(template&&!['视频截取'].includes(template)?/^https?:\/\//.test(v.guideUrl||''):true)&&Number.isFinite(seconds(v.start))&&Number.isFinite(seconds(v.end))&&seconds(v.end)>seconds(v.start)&&['insertSeconds','guideDuration','maxDuration'].every(k=>Number.isInteger(v[k]??0)&&(v[k]??0)>=0));
+  };
   C.prod={parameterHint,parameterValue,table,versionForm,wireVersions,updateCount,changeVersion,valid,copy,schemas,newVersion};
 })();
