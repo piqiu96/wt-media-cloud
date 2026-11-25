@@ -13,6 +13,7 @@ import (
 	"github.com/wt-media/wt-media-cloud/internal/shared/api"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -110,5 +111,62 @@ func TestPlanDuplicateOutputUsesActualHTTPConflictEnvelope(t *testing.T) {
 	issue := body.Error.Details.Issues[0]
 	if issue.BatchID != "2" || issue.RowKey != "first" || issue.RelatedBatchID != "3" || issue.RelatedRowKey != "second" {
 		t.Fatalf("wrong issue %s", r.Body())
+	}
+}
+
+func TestPlanNonApplicationUsesBoundActualHTTPEnvelopeAndLeavesOrdinaryConflictsUnknown(t *testing.T) {
+	actual := []json.RawMessage{}
+	for _, err := range []error{&repository.PlanCommandNotApplied{Command: "start", RequestKey: "original", ExpectedRevision: 2, CurrentRevision: 3}, repository.ErrConflict, repository.ErrOccupied, repository.ErrUnresolved} {
+		h := server.New()
+		h.POST("/proof", func(_ context.Context, c *app.RequestContext) { respondBatch(c, nil, err) })
+		r := ut.PerformRequest(h.Engine, "POST", "/proof", nil).Result()
+		actual = append(actual, append(json.RawMessage(nil), r.Body()...))
+		if r.StatusCode() != 409 {
+			t.Fatalf("status %d %s", r.StatusCode(), r.Body())
+		}
+		var body struct {
+			Error struct {
+				Details map[string]any `json:"details"`
+			} `json:"error"`
+		}
+		if e := json.Unmarshal(r.Body(), &body); e != nil {
+			t.Fatal(e)
+		}
+		if _, ok := err.(*repository.PlanCommandNotApplied); ok {
+			d := body.Error.Details
+			if len(d) != 5 || d["command_applied"] != false || d["request_key"] != "original" || d["command"] != "start" || d["expected_revision"] != "2" || d["current_revision"] != "3" {
+				t.Fatalf("not exact proof %s", r.Body())
+			}
+		} else if _, exists := body.Error.Details["command_applied"]; exists {
+			t.Fatalf("ordinary error proves false %s", r.Body())
+		}
+	}
+	if path := os.Getenv("WT_MEDIA_PLAN_ERROR_FIXTURE"); path != "" {
+		raw, e := json.Marshal(actual)
+		if e != nil {
+			t.Fatal(e)
+		}
+		if e = os.WriteFile(path, raw, 0600); e != nil {
+			t.Fatal(e)
+		}
+	}
+
+}
+
+func TestPlanProofCommandDecoderRejectsNoncanonicalRevisionAndIDs(t *testing.T) {
+	valid := `{"request_key":"original","expected_revision":"2","first_batch_id":"3","batch_confirmations":[{"batch_id":"3","expected_revision":"1","included_row_keys":["row"],"excluded_row_keys":[],"allow_shortfall":false,"expected_shortfalls":[{"category_id":"4","shortfall":0}]}]}`
+	for _, bad := range []string{strings.Replace(valid, `"expected_revision":"2"`, `"expected_revision":"02"`, 1), strings.Replace(valid, `"batch_id":"3"`, `"batch_id":"03"`, 1), strings.Replace(valid, `"category_id":"4"`, `"category_id":"04"`, 1)} {
+		c := app.NewContext(0)
+		c.Request.SetBodyString(bad)
+		var in model.StartPlanInput
+		if e := decodePlanCommand(c, &in, "request_key", "expected_revision", "first_batch_id", "batch_confirmations"); e == nil {
+			t.Fatalf("accepted noncanonical input %s", bad)
+		}
+	}
+	c := app.NewContext(0)
+	c.Request.SetBodyString(valid)
+	var in model.StartPlanInput
+	if e := decodePlanCommand(c, &in, "request_key", "expected_revision", "first_batch_id", "batch_confirmations"); e != nil {
+		t.Fatal(e)
 	}
 }

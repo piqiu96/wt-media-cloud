@@ -13,6 +13,8 @@ import (
 )
 
 type PlanExecutionRepository interface {
+	ProbePlanStart(uint64, int64, model.StartPlanInput, string) (*model.StartPlanResult, error)
+	ProbePlanAdvance(uint64, int64, model.PlanAdvanceInput, string, bool) (*model.PlanAdvanceResult, error)
 	FinishPlan(uint64, int64, model.FinishPlanInput, time.Time) (model.Plan, error)
 	ReconcileStoppedPlan(uint64, time.Time) error
 	StartPlan(uint64, int64, model.StartPlanInput, string, []model.Task, time.Time) (model.StartPlanResult, error)
@@ -39,9 +41,6 @@ func planStartHash(in model.StartPlanInput) string {
 	sort.Slice(in.BatchConfirmations, func(i, j int) bool { return in.BatchConfirmations[i].BatchID < in.BatchConfirmations[j].BatchID })
 	return batchCommandHash(in)
 }
-func validPlanKey(key string) bool {
-	return len(key) > 0 && len(key) <= 128 && strings.TrimSpace(key) == key
-}
 func (s *Service) planOwner(a identity.PublicUser, id uint64) (model.Plan, []model.Batch, error) {
 	p, b, e := s.readPlan(a, id)
 	if e == nil && !planOwn(a, p) {
@@ -54,7 +53,7 @@ func (s *Service) planOwner(a identity.PublicUser, id uint64) (model.Plan, []mod
 }
 func (s *Service) StartPlan(ctx context.Context, a identity.PublicUser, id uint64, in model.StartPlanInput) (model.StartPlanResult, error) {
 	empty := model.StartPlanResult{}
-	if !validPlanKey(in.RequestKey) || in.ExpectedRevision == 0 || in.FirstBatchID == 0 || len(in.BatchConfirmations) == 0 {
+	if !model.ValidPlanStartCommand(in) {
 		return empty, ErrInvalid
 	}
 	p, b, e := s.planOwner(a, id)
@@ -62,7 +61,7 @@ func (s *Service) StartPlan(ctx context.Context, a identity.PublicUser, id uint6
 		return empty, e
 	}
 	digest := planStartHash(in)
-	prior, e := repository.ReplayPlanStart(p, in.RequestKey, digest)
+	prior, e := s.PlanExecutionRepo.ProbePlanStart(id, int64(a.ID), in, digest)
 	if e != nil {
 		return empty, e
 	}
@@ -151,15 +150,15 @@ func (s *Service) PlanControl(a identity.PublicUser, id uint64, action string, i
 }
 func (s *Service) AdvancePlan(ctx context.Context, a identity.PublicUser, id uint64, in model.PlanAdvanceInput, automatic bool) (model.PlanAdvanceResult, error) {
 	empty := model.PlanAdvanceResult{}
-	if !validPlanKey(in.RequestKey) || in.ExpectedRevision == 0 || in.CurrentBatchID == 0 || in.NextBatchID == 0 || len(in.ExpectedBasisFingerprint) != 64 || !automatic && (in.Decision != "continue" && in.Decision != "skip" || !validReason(in.Reason)) {
+	if !model.ValidPlanAdvanceCommand(in, automatic) {
 		return empty, ErrInvalid
 	}
-	p, _, e := s.planOwner(a, id)
+	_, _, e := s.planOwner(a, id)
 	if e != nil {
 		return empty, e
 	}
 	digest := batchCommandHash(in)
-	prior, e := repository.ReplayPlanAdvance(p, in.RequestKey, digest)
+	prior, e := s.PlanExecutionRepo.ProbePlanAdvance(id, int64(a.ID), in, digest, automatic)
 	if e != nil {
 		return empty, e
 	}

@@ -213,6 +213,11 @@ func failBatchControl(c *app.RequestContext, err error) bool {
 	var name, message, action string
 	var retryable bool
 	var item *repository.BatchExecutionConflict
+	var notApplied *repository.PlanCommandNotApplied
+	if errors.As(err, &notApplied) {
+		api.FailureCode(c, consts.StatusConflict, errcode.PublishConflict, "原请求版本已过期，确认该请求未执行", "publication_conflict", notApplied, false, "reload")
+		return true
+	}
 	var planConflict *repository.PlanConflictError
 	var details any
 	if errors.As(err, &planConflict) {

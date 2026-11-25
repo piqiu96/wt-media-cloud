@@ -6,6 +6,7 @@ import (
 	"github.com/cloudwego/hertz/pkg/app"
 	"github.com/wt-media/wt-media-cloud/internal/modules/publish/model"
 	"github.com/wt-media/wt-media-cloud/internal/modules/publish/service"
+	"strconv"
 )
 
 func decodePlanCommand(c *app.RequestContext, out any, required ...string) error {
@@ -16,7 +17,47 @@ func decodePlanCommand(c *app.RequestContext, out any, required ...string) error
 	if json.Unmarshal(c.Request.Body(), &fields) != nil {
 		return service.ErrInvalid
 	}
-	return requireBatchFields(fields, required...)
+	if e := requireBatchFields(fields, required...); e != nil {
+		return e
+	}
+	switch out.(type) {
+	case *model.StartPlanInput, *model.PlanAdvanceInput:
+		var value any
+		if json.Unmarshal(c.Request.Body(), &value) != nil || !canonicalPlanCommandIDs(value) {
+			return service.ErrInvalid
+		}
+	}
+	return nil
+}
+
+// Proof-bearing commands must satisfy the wire ID schema before canonical hashing.
+func canonicalPlanCommandIDs(value any) bool {
+	switch v := value.(type) {
+	case map[string]any:
+		for key, item := range v {
+			switch key {
+			case "expected_revision", "first_batch_id", "batch_id", "current_batch_id", "next_batch_id", "category_id":
+				text, ok := item.(string)
+				if !ok {
+					return false
+				}
+				id, e := strconv.ParseUint(text, 10, 64)
+				if e != nil || id == 0 || strconv.FormatUint(id, 10) != text {
+					return false
+				}
+			}
+			if !canonicalPlanCommandIDs(item) {
+				return false
+			}
+		}
+	case []any:
+		for _, item := range v {
+			if !canonicalPlanCommandIDs(item) {
+				return false
+			}
+		}
+	}
+	return true
 }
 func StartPlan(ctx context.Context, c *app.RequestContext) {
 	a, id, ok := authorizeBatchID(c)
@@ -35,6 +76,19 @@ func StartPlan(ctx context.Context, c *app.RequestContext) {
 	if requireBatchObjects(raw.Confirmations, "batch_id", "expected_revision", "included_row_keys", "excluded_row_keys", "allow_shortfall", "expected_shortfalls") != nil {
 		failBatch(c, service.ErrInvalid)
 		return
+	}
+	var rawConfirmations []struct {
+		Shortfalls json.RawMessage `json:"expected_shortfalls"`
+	}
+	if json.Unmarshal(raw.Confirmations, &rawConfirmations) != nil {
+		failBatch(c, service.ErrInvalid)
+		return
+	}
+	for _, confirmation := range rawConfirmations {
+		if requireBatchObjects(confirmation.Shortfalls, "category_id", "shortfall") != nil {
+			failBatch(c, service.ErrInvalid)
+			return
+		}
 	}
 	out, e := service.Wired().StartPlan(ctx, a, id, in)
 	respondBatch(c, out, e)

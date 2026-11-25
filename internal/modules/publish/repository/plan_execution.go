@@ -45,20 +45,13 @@ func (s ExecutionStore) StartPlan(id uint64, actor int64, in model.StartPlanInpu
 		if p.OwnerID != actor {
 			return ErrNotFound
 		}
-		if p.StartRequestKey != nil {
-			if *p.StartRequestKey != in.RequestKey || p.StartRequestHash == nil || *p.StartRequestHash != digest || len(p.StartReceipt) == 0 {
-				return ErrConflict
-			}
-			if e = json.Unmarshal(p.StartReceipt, &out); e != nil {
-				return e
-			}
-			if out.PlanID != p.ID || out.Revision == 0 || out.FirstStartedAt.IsZero() || len(out.FirstBatchReceipt.TaskIDs) == 0 {
-				return ErrConflict
-			}
-			return nil
+		prior, e := checkPlanStartCommand(p, in, digest)
+		if e != nil {
+			return e
 		}
-		if p.Revision != in.ExpectedRevision {
-			return ErrConflict
+		if prior != nil {
+			out = *prior
+			return nil
 		}
 		if p.Status != "not_started" || p.StartedAt != nil || p.StoppedAt != nil {
 			return ErrParentBlocked
@@ -130,7 +123,7 @@ func (s ExecutionStore) StartPlan(id uint64, actor int64, in model.StartPlanInpu
 			return e
 		}
 		out = model.StartPlanResult{PlanID: id, Revision: p.Revision + 1, FirstStartedAt: now, CurrentBatchID: first.ID, BatchConfirmations: in.BatchConfirmations, FirstBatchReceipt: receipt}
-		if e = tx.Model(&model.Plan{}).Where("id=?", id).Updates(map[string]any{"status": "running", "started_at": now, "current_batch_id": first.ID, "revision": out.Revision, "start_request_key": in.RequestKey, "start_request_hash": digest, "start_receipt_json": mustJSON(out), "updated_at": now}).Error; e != nil {
+		if e = tx.Model(&model.Plan{}).Where("id=?", id).Updates(map[string]any{"status": "running", "started_at": now, "current_batch_id": first.ID, "revision": out.Revision, "start_request_key": in.RequestKey, "start_request_hash": digest, "start_receipt_json": mustJSON(out), "handoff_receipts_json": mustJSON(map[string]planAdvanceReceipt{}), "updated_at": now}).Error; e != nil {
 			return e
 		}
 		p.Revision = out.Revision
@@ -297,20 +290,15 @@ func (s ExecutionStore) AdvancePlan(id uint64, actor int64, in model.PlanAdvance
 		if p.OwnerID != actor {
 			return ErrNotFound
 		}
-		receipts := map[string]planAdvanceReceipt{}
-		if len(p.HandoffReceipts) > 0 {
-			if e = json.Unmarshal(p.HandoffReceipts, &receipts); e != nil {
-				return e
-			}
+		prior, receipts, e := checkPlanAdvanceCommand(p, in, digest, automatic)
+		if e != nil {
+			return e
 		}
-		if r, ok := receipts[in.RequestKey]; ok {
-			if r.Digest != digest {
-				return ErrConflict
-			}
-			out = r.Result
+		if prior != nil {
+			out = *prior
 			return nil
 		}
-		if p.Revision != in.ExpectedRevision || p.CurrentBatchID == nil || *p.CurrentBatchID != in.CurrentBatchID {
+		if p.CurrentBatchID == nil || *p.CurrentBatchID != in.CurrentBatchID {
 			return ErrConflict
 		}
 		if p.Status != "running" || p.StoppedAt != nil || p.EndedAt != nil {
@@ -517,11 +505,14 @@ func ReplayPlanStart(p model.Plan, key, digest string) (*model.StartPlanResult, 
 	if p.StartRequestKey == nil {
 		return nil, nil
 	}
-	if *p.StartRequestKey != key || p.StartRequestHash == nil || *p.StartRequestHash != digest {
+	if *p.StartRequestKey != key || p.StartRequestHash == nil || *p.StartRequestHash == "" || *p.StartRequestHash != digest {
+		return nil, ErrConflict
+	}
+	if !completePlanReceipt(p.StartReceipt, "", "plan_id", "revision", "first_started_at", "current_batch_id", "batch_confirmations", "first_batch_receipt") {
 		return nil, ErrConflict
 	}
 	var r model.StartPlanResult
-	if json.Unmarshal(p.StartReceipt, &r) != nil || r.PlanID != p.ID || r.Revision == 0 || r.FirstStartedAt.IsZero() || len(r.FirstBatchReceipt.TaskIDs) == 0 {
+	if json.Unmarshal(p.StartReceipt, &r) != nil || r.PlanID != p.ID || r.Revision < 2 || r.Revision > p.Revision || r.FirstStartedAt.IsZero() || p.StartedAt == nil || !r.FirstStartedAt.Equal(*p.StartedAt) || r.FirstBatchReceipt.BatchID != r.CurrentBatchID || !r.FirstBatchReceipt.FirstStartedAt.Equal(r.FirstStartedAt) || !validPlanBatchReceipt(r.FirstBatchReceipt) || !model.ValidPlanStartCommand(model.StartPlanInput{RequestKey: key, ExpectedRevision: r.Revision - 1, FirstBatchID: r.CurrentBatchID, BatchConfirmations: r.BatchConfirmations}) {
 		return nil, ErrConflict
 	}
 	return &r, nil
