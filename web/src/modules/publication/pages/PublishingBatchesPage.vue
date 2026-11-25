@@ -380,7 +380,12 @@ async function refresh() {
     if (run !== epoch) return;
     actor.value = user;
     if (view.value === "list") {
-      await loadList(run);
+      await Promise.all([
+        loadList(run),
+        compose.listCategories({ scope: "all" })
+          .then(result => { if (run === epoch) categories.value = result || []; })
+          .catch(error => { if (run === epoch) resourceError.value = problem(error, "类目读取失败"); }),
+      ]);
       return;
     }
     const id = rawQuery("id");
@@ -645,6 +650,7 @@ onBeforeUnmount(() => {
         </div>
       </ResourceFilterBar>
       <FeedbackAlert v-if="pageError" theme="error" :message="pageError" />
+      <FeedbackAlert v-if="resourceError" theme="warning" :message="resourceError" />
       <div class="table-scroll-wrap resource-data-table">
         <t-table class="wt-resource-table" :columns="listColumns" :data="list.items || []" row-key="id" :loading="loading"
            :scroll="{ x: '1497px' }" :empty="pageError ? '读取失败' : '暂无匹配的发布批次'">

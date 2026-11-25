@@ -7,8 +7,12 @@ const browser = await chromium.launch({
 });
 const base = process.env.WT_MEDIA_BROWSER_BASE_URL || "http://127.0.0.1:5173";
 try {
-  for (const width of [1440, 1024]) {
-    for (const kind of ["plans", "batches"]) {
+  for (const [width, categoryFailure] of [
+    [1440, false],
+    [1024, false],
+    [1440, true],
+  ]) {
+    for (const kind of categoryFailure ? ["batches"] : ["plans", "batches"]) {
       const page = await browser.newPage({ viewport: { width, height: 1000 } }),
         errors = [];
       page.on("pageerror", (e) => errors.push(e.message));
@@ -20,7 +24,7 @@ try {
         plan_name: "几何计划",
         operator_id: "9",
         platform: "baidu",
-        targets: [{ category_id: "1", target_count: 1 }],
+        targets: [{ category_id: "4", target_count: 1 }],
         candidate_count: 1,
         configuration_status: "ready",
         execution_status: "not_started",
@@ -34,7 +38,7 @@ try {
         status: "not_started",
         progress: "preparing",
         owner_id: "9",
-        goals: [{ platform: "baidu", category_id: "1", target_count: 1 }],
+        goals: [{ platform: "baidu", category_id: "4", target_count: 1 }],
         published_count: 0,
         batch_count: 1,
         processed_batch_count: 0,
@@ -43,6 +47,7 @@ try {
         updated_at: "2026-11-25T04:00:00Z",
         allowed_actions: ["edit", "cancel"],
       };
+      const categoryRequests = [];
       await page.route("**/api/v1/**", async (route) => {
         const r = route.request(),
           p = new URL(r.url()).pathname;
@@ -58,10 +63,19 @@ try {
             role: "operator",
             team_id: "7",
             status: "enabled",
-            category_ids: ["1"],
+            category_ids: ["4"],
           });
-        if (p === "/api/v1/categories")
-          return send([{ id: "1", name: "游戏", enabled: true }]);
+        if (p === "/api/v1/categories") {
+          categoryRequests.push(
+            Object.fromEntries(new URL(r.url()).searchParams),
+          );
+          if (categoryFailure)
+            return route.fulfill({
+              status: 503,
+              json: { errcode: 18001, message: "类目字典读取失败，请重试" },
+            });
+          return send([{ id: "4", name: "三角洲行动", enabled: true }]);
+        }
         if (p === "/api/v1/publication-plan")
           return send({ items: [plan], total: 1 });
         if (p === "/api/v1/publication-batch")
@@ -74,6 +88,42 @@ try {
         .locator(".resource-data-table .t-table__body tr")
         .filter({ hasText: name });
       await row.waitFor();
+      if (kind === "batches") {
+        await page.waitForFunction(() =>
+          Array.from(document.querySelectorAll("button")).some(
+            (button) =>
+              button.textContent.trim() === "查询" && !button.disabled,
+          ),
+        );
+        assert.equal(
+          categoryRequests.length,
+          1,
+          "first direct batch-list visit must load category labels",
+        );
+        assert.equal(categoryRequests[0].scope, "all");
+        if (categoryFailure) {
+          await page
+            .getByText("类目字典读取失败，请重试", { exact: false })
+            .waitFor();
+          assert.match(
+            await row.locator("td").nth(4).innerText(),
+            /原类目暂不可用 1/,
+          );
+          assert.equal(
+            await row.getByText("三角洲行动 1", { exact: true }).count(),
+            0,
+          );
+        } else {
+          assert.match(
+            await row.locator("td").nth(4).innerText(),
+            /三角洲行动 1/,
+          );
+          assert.equal(
+            await row.getByText("原类目暂不可用 1", { exact: true }).count(),
+            0,
+          );
+        }
+      }
       const card = page.locator(".resource-card").first(),
         filter = card.locator(".resource-filter-bar"),
         fields = filter.locator(".wt-filter-field");
