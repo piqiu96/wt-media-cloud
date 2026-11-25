@@ -355,3 +355,72 @@ func TestPlanRealWorkOverageInOneCellCannotOffsetAnotherCell(t *testing.T) {
 		t.Fatal(e)
 	}
 }
+
+func TestExpiredManualReviewingRemainsEffectiveAfterLateCheckSweep(t *testing.T) {
+	s, c, v := reviewingPublication(t)
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	cutoff := now.Add(-time.Second)
+	accepted := cutoff.Add(-24 * time.Hour)
+	if e := s.DB.Model(&model.Task{}).Where("id=?", v.ID).Updates(map[string]any{"accepted_at": accepted, "check_stopped_at": nil, "next_check_at": nil}).Error; e != nil {
+		t.Fatal(e)
+	}
+	v, _ = s.Get(v.ID)
+	in := publicResolution(c, v)
+	in.Conclusion = model.StatusReviewing
+	in.PlatformWorkID = ""
+	in.WorkURL = ""
+	in.PublishedAt = nil
+	in.Evidence.PubliclyAccessible = false
+	verified, e := s.ResolveResult(v, 9, in, cutoff.Add(time.Second))
+	if e != nil {
+		t.Fatal(e)
+	}
+	if verified.VerificationRequiredAt(cutoff.Add(time.Second)) {
+		t.Fatal("fresh explicit manual reviewing still requires verification")
+	}
+	if e = s.SchedulePublicCheck(cutoff.Add(2 * time.Second)); e != nil {
+		t.Fatal(e)
+	}
+	verified, e = s.Get(v.ID)
+	if e != nil {
+		t.Fatal(e)
+	}
+	if verified.VerificationRequiredAt(cutoff.Add(2 * time.Second)) {
+		t.Fatal("late sweep invalidated newer manual verification without a new observation")
+	}
+	p := model.Plan{TeamID: 7, OwnerID: 9, CreatedBy: 9, Name: "manual-review", DateStart: "2026-11-25", DateEnd: "2026-11-26", Goals: []model.PlanGoal{{Platform: "baidu", CategoryID: 1, TargetCount: 2}}, RequestKey: "manual-review", RequestHash: "manual-review"}
+	rows := []model.PlanStructureBatch{{RowKey: "first", Name: "first", Platform: "baidu", GroupOrder: 1, BatchOrder: 1, Targets: []model.BatchTarget{{CategoryID: 1, TargetCount: 1}}}, {RowKey: "next", Name: "next", Platform: "baidu", GroupOrder: 1, BatchOrder: 2, Targets: []model.BatchTarget{{CategoryID: 1, TargetCount: 1}}}}
+	p, bs, e := s.CreatePlan(p, rows)
+	if e != nil {
+		t.Fatal(e)
+	}
+	if e = s.DB.Model(&model.Plan{}).Where("id=?", p.ID).Updates(map[string]any{"started_at": accepted, "current_batch_id": bs[0].ID, "status": "running"}).Error; e != nil {
+		t.Fatal(e)
+	}
+	if e = s.DB.Model(&model.Batch{}).Where("id=?", bs[0].ID).Updates(map[string]any{"started_at": accepted, "execution_status": model.BatchEnded}).Error; e != nil {
+		t.Fatal(e)
+	}
+	if e = s.DB.Model(&model.Task{}).Where("id=?", v.ID).Updates(map[string]any{"batch_id": bs[0].ID, "task_order": 0}).Error; e != nil {
+		t.Fatal(e)
+	}
+	state, e := s.PlanProgress(p.ID, cutoff.Add(2*time.Second))
+	if e != nil || state.Progress != "running" || state.Basis.ExplicitCount != 1 {
+		t.Fatalf("manual result no longer participates in handoff %+v %v", state, e)
+	}
+	// Even after all other batches are legally terminated, reviewing is never final public proof.
+	if e = s.DB.Model(&model.Batch{}).Where("id=?", bs[1].ID).Updates(map[string]any{"execution_status": model.BatchCancelled, "ended_at": now}).Error; e != nil {
+		t.Fatal(e)
+	}
+	if _, e = s.FinishPlan(p.ID, 9, model.FinishPlanInput{ExpectedRevision: p.Revision, ExpectedShortfalls: []model.PlanGoalShortfall{{Platform: "baidu", CategoryID: 1, Shortfall: 2}}, EndReason: "unmet", EndNote: "不可将审核当公开"}, cutoff.Add(2*time.Second)); !errors.Is(e, repo.ErrUnresolved) {
+		t.Fatalf("manual reviewing incorrectly allows finish %v", e)
+	}
+	// A genuinely later stopped/unclear check is a new basis and must block again.
+	newer := cutoff.Add(3 * time.Second)
+	if e = s.DB.Model(&model.Task{}).Where("id=?", v.ID).Update("check_stopped_at", newer).Error; e != nil {
+		t.Fatal(e)
+	}
+	verified, _ = s.Get(v.ID)
+	if !verified.VerificationRequiredAt(newer) {
+		t.Fatal("new unclear observation did not require verification")
+	}
+}

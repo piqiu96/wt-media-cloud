@@ -114,6 +114,15 @@ func (s ExecutionStore) ResolveResult(candidate model.Task, actor int64, in mode
 				updates["accepted_at"] = now
 			}
 		}
+		// Once the original automatic-check lifetime has expired, an explicit
+		// manual reviewing result owns that cutoff. Stop automatic checking in
+		// this same transaction so a later mechanical sweep cannot fabricate a
+		// newer unresolved observation and invalidate the manual evidence.
+		if in.Conclusion == model.StatusReviewing && v.AcceptedAt != nil && !now.Before(v.AcceptedAt.Add(publicCheckLifetime)) {
+			updates["check_stopped_at"] = now
+			updates["next_check_at"] = nil
+			updates["last_check_message"] = in.Evidence.Reason
+		}
 		if in.Conclusion == model.StatusPublished {
 			updates["next_check_at"] = nil
 			updates["check_stopped_at"] = now
