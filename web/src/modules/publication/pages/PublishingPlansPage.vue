@@ -66,6 +66,7 @@ const actor = ref(null),
   loading = ref(false),
   busy = ref(false),
   error = ref(""),
+  formProblem = ref(""),
   draftError = ref(""),
   records = ref({ items: [], total: 0 });
 const drawerBounds = ref({}),
@@ -261,6 +262,7 @@ async function reload(background = false) {
   const run = ++seq;
   if (!background) loading.value = true;
   error.value = "";
+  formProblem.value = "";
   try {
     await identity();
     if (!categories.value.length) {
@@ -429,8 +431,9 @@ const creationReview = ref(null);
 async function reviewSave() {
   if (busy.value) return;
   if (mode.value === 'edit' || pendingCreate.value) return save();
-  const issue = planProblem(form.value);
-  if (issue) { error.value = issue; return; }
+  error.value = "";
+  formProblem.value = planProblem(form.value);
+  if (formProblem.value) return;
   const basis = JSON.stringify(form.value), run = seq;
   if (!await validate() || disposed || run !== seq || basis !== JSON.stringify(form.value)) return;
   creationReview.value = { basis, name: form.value.name,
@@ -446,11 +449,8 @@ function confirmCreate() {
 async function save() {
   if (busy.value) return;
   error.value = "";
-  const issue = planProblem(form.value);
-  if (issue) {
-    error.value = issue;
-    return;
-  }
+  formProblem.value = planProblem(form.value);
+  if (formProblem.value) return;
   const firstCreate = mode.value !== "edit" && !pendingCreate.value;
   let createPostSent = false;
   busy.value = true;
@@ -818,6 +818,10 @@ async function guardNavigation() {
 onBeforeRouteLeave(guardNavigation);
 onBeforeRouteUpdate(guardNavigation);
 watch(
+  () => form.value && planProblem(form.value),
+  () => { formProblem.value = ""; },
+);
+watch(
   form,
   () => {
     if (draft.value && !draft.value.persistent && !busy.value && form.value)
@@ -852,7 +856,7 @@ onBeforeUnmount(() => {
 </script>
 <template>
   <div ref="overlayHost" class="plan-page" :class="{ 'resource-list-page': mode === 'list' }">
-    <FeedbackAlert v-if="error" theme="error" :message="error" />
+    <FeedbackAlert v-if="formProblem || error" theme="error" :message="formProblem || error" />
     <t-button
       v-if="error && !form && !plan && mode !== 'list'"
       variant="outline"

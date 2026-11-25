@@ -41,7 +41,7 @@ test('plan list execution and each detail footer follow the approved state decis
  const {p,store}=await setup(t,planFixture);await goto(p,'plans');assert.equal(await list(p).count(),6);assert.equal(await list(p).filter({hasText:'PL-202611-001'}).count(),0);
  const ready=list(p).filter({hasText:'PL-202611-002'}),execute=ready.getByRole('button',{name:'执行',exact:true});assert.equal(await execute.isDisabled(),true);
  await execute.locator('..').hover();await p.getByText('请先完成批次配置',{exact:true}).last().waitFor();await shot(p,'01-plan-list-execution-unavailable');
- const cases=[['PL-202611-005',['暂停计划']],['PL-202611-004',['启动计划']],['PL-202611-003',['确认结束','创建补量批次']],['PL-202611-002',[]],['PL-202610-018',[]],['PL-202610-015',[]]];
+ const cases=[['PL-202611-005',['暂停计划']],['PL-202611-004',['启动计划']],['PL-202611-003',['确认结束']],['PL-202611-002',[]],['PL-202610-018',[]],['PL-202610-015',[]]];
  let n=2;
  for(const [id,actions] of cases){await goto(p,'plans',id);assert.deepEqual((await footer(p).getByRole('button').allTextContents()).map(s=>s.trim()),['返回',...actions]);await shot(p,String(n++).padStart(2,'0')+'-plan-detail-'+id);}
  await goto(p,'plans');

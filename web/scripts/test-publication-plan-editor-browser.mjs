@@ -159,10 +159,14 @@ try {
     assert.equal(sections[index].marginTop, "0px");
     assert.equal(sections[index - 1].marginBottom, "0px");
   }
+  await button("创建计划").click();
+  const missingName = page.getByText("请填写计划名称（最多100字）", { exact: true });
+  await missingName.waitFor();
   await page
     .getByLabel("计划名称", { exact: true })
     .last()
     .fill("手工目标矩阵");
+  await missingName.waitFor({ state: "hidden" });
   await page.getByPlaceholder("开始日期", { exact: true }).fill("2026-11-25");
   await page.getByPlaceholder("结束日期", { exact: true }).fill("2026-11-26");
   await page.getByPlaceholder("结束日期", { exact: true }).press("Enter");

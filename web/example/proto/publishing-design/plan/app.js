@@ -76,7 +76,7 @@ const seedPlans=[
   b('BT-202','批次 02 · 百家号','百家号',{'游戏攻略':25,'精彩剪辑':15},'ready',0,true,{configured:true,accountCount:12}),
   b('BT-203','批次 03 · B站','B站',{'游戏攻略':10,'精彩剪辑':20})
  ]},
- {id:'PL-202611-003',name:'多平台周末集中投放',note:'出现目标缺口后优先核实失败结果，再决定补量。',dateStart:'2026-11-01',dateEnd:'2026-11-15',owner:'运营负责人',status:'running',result:'',target:100,platforms:['B站','百家号'],categories:['游戏攻略','精彩剪辑'],goals:clone(goalsA),updated:'2026-11-11 17:58',created:'2026-10-29 08:30',logs:[['11-11 17:58','所有原始批次已结束，待处理缺口 17 条','系统'],['11-10 10:15','批次 04 结束，成功 20 / 25','系统']],batches:[
+ {id:'PL-202611-003',name:'多平台周末集中投放',note:'出现目标缺口后先核实发布结果，再确认结束。',dateStart:'2026-11-01',dateEnd:'2026-11-15',owner:'运营负责人',status:'running',result:'',target:100,platforms:['B站','百家号'],categories:['游戏攻略','精彩剪辑'],goals:clone(goalsA),updated:'2026-11-11 17:58',created:'2026-10-29 08:30',logs:[['11-11 17:58','所有原始批次已结束，待处理缺口 17 条','系统'],['11-10 10:15','批次 04 结束，成功 20 / 25','系统']],batches:[
   b('BT-301','批次 01 · B站攻略','B站',{'游戏攻略':30},'ended',26,true,{executed:true,successCats:{'游戏攻略':26}}),
   b('BT-302','批次 02 · B站剪辑','B站',{'精彩剪辑':20},'ended',16,true,{executed:true,successCats:{'精彩剪辑':16}}),
   b('BT-303','批次 03 · 百家号攻略','百家号',{'游戏攻略':25},'ended',21,true,{executed:true,successCats:{'游戏攻略':21}}),
@@ -178,7 +178,7 @@ const currentNote=p=>{
  if(p.planReview&&p.awaitingPublic&&p.control==='执行已结束')return {txt:'等待平台公开或核实',type:'wait',reason:'已接收稿件尚未公开'};
  if(allEnded(p)){
   const gap=Math.max(0,p.target-successOf(p));
-  return gap>0?{txt:`目标缺口 ${gap} 条`,type:'alert',reason:p.planReview?'待确认结束':'待确认补量或结束'}:{txt:'目标已达成',type:'complete',reason:'已具备结束条件'};
+  return gap>0?{txt:`目标缺口 ${gap} 条`,type:'alert',reason:'待确认结束'}:{txt:'目标已达成',type:'complete',reason:'已具备结束条件'};
  }
  const next=firstNotEnded(p);
  if(p.control==='等待继续确认')return {txt:'失败率超过 10%',type:'alert',reason:'等待人工确认'};
@@ -408,14 +408,14 @@ function detailView(p) {
  let notice=null;
  if(p.status==='running'){
   if(pending.length)notice={tone:'warning',title:`有待处理任务 · ${pending.length} 项待办`,actions:[action('view-batch','查看待处理批次',pending[0].batchId),action('workbench','进入处理工作区',pending[0].batchId)]};
-  else if(allEnded(p)&&gap>0)notice={tone:'warning',title:`全部批次已结束，计划目标尚差 ${gap} 条`,text:`目标 ${p.target} 条，实际发布成功 ${actual} 条。请核实最终结果后，在页底决定补量或确认结束。`};
+  else if(allEnded(p)&&gap>0)notice={tone:'warning',title:`全部批次已结束，计划目标尚差 ${gap} 条`,text:`目标 ${p.target} 条，实际发布成功 ${actual} 条。请核实最终结果后，在页底确认结束。`};
   else if(next?.phase==='ready')notice={tone:'info',title:`${next.name} · 待人工确认执行`,text:'当前批次资源与内容配置完毕，请检查目标和资源后在页底确认执行；不会自动启动。',actions:[action('view-batch','查看批次',next.id)]};
   else if(next?.phase==='draft')notice={tone:'info',title:`${next.name} · 待配置`,text:'请先前往对应批次完成账号、成片与发布内容配置，再人工确认执行。',actions:[action('view-batch','查看批次并配置',next.id)]};
  }
  if(p.status==='ready')notice={tone:'info',title:'计划已确认，等待首批次执行',text:'批次按列表顺序串行推进，执行前需要人工确认。当前无发布成功记录。',actions:[action('view-batch','查看首批次',p.batches[0]?.id)]};
  if(p.status==='stopping')notice={tone:'warning',title:'终止指令已生效，正在等待当前任务收敛',text:'未启动批次已被阻止执行。请核实可能已经在平台提交的任务；待结果收敛后自动结束计划。',actions:openTasks(p).length?[action('workbench','处理待核实任务',current?.id)]:[]};
  const footer=[];
- if(p.status==='running'&&allEnded(p)&&gap>0){footer.push(action('end-plan','确认结束'));footer.push(action('makeup','创建补量批次',null,{primary:true}));}
+ if(p.status==='running'&&allEnded(p)&&gap>0){footer.push(action('end-plan','确认结束',null,{primary:true}));}
  else if(['ready','running'].includes(p.status)&&!executionIssue(p,next))footer.push(action('execute','执行',next.id,{primary:true}));
  if(adapters.loadPlans){
   footer.length=0;
@@ -430,7 +430,7 @@ function detailView(p) {
   if(['执行中','等待配置'].includes(p.control))footer.push(action('pause-plan','暂停计划'));
   if(p.control==='执行已结束'&&p.status!=='ended'){
    notice={tone:p.canSettle?'warning':'info',title:p.canSettle?`本轮执行已结束，目标缺口 ${gap} 条`:'本轮执行已结束，等待结果核实',actions:pending[0]?[action('workbench','去处理',pending[0].batchId)]:[]};
-   if(p.canSettle&&gap>0){footer.push(action('end-plan','确认结束'));footer.push(action('makeup','创建补量批次',null,{primary:true}));}
+   if(p.canSettle&&gap>0){footer.push(action('end-plan','确认结束',null,{primary:true}));}
   }
   if(p.status==='stopping')notice={tone:'warning',title:'计划已终止，等待在途任务核实',actions:pending[0]?[action('workbench','去处理',pending[0].batchId)]:[]};
   if(p.legacyReadOnly){notice={tone:'info',title:'旧版执行记录'};footer.length=0;}
@@ -504,14 +504,7 @@ function renderDrawer(){if(!state.drawer)return '';const d=state.drawer,p=getPla
  ${pending?`<div class="hint orange m-top16">${$icon('alert',15)}${pending} 个任务需要运营介入处理</div>`:''}
  <a class="btn-link" href="/example/operations/publishing/batches">进入发布批次模块</a>
  </div><div class="drawer-foot"><button class="btn" data-act="close-drawer">关闭</button>${pending?`<button class="btn primary" data-act="workbench" data-id="${p.id}" data-batch="${b.id}">去处理 ${pending} 项</button>`:''}${b.phase==='ready'&&can?`<button class="btn primary" data-act="execute" data-id="${p.id}" data-batch="${b.id}">${$icon('play',15)}执行</button>`:''}</div></div></dialog>`;}
- if(d.type==='makeup'){const gaps=[];for(const pl of p.platforms)for(const c of p.categories){const n=(p.goals[pl]?.[c]||0)-actualByCell(p,pl,c);if(n>0)gaps.push({pl,c,n})}
- const availablePlatforms=[...new Set(gaps.map(x=>x.pl))];const selected=d.platform||availablePlatforms[0];d.platform=selected;const cells=gaps.filter(x=>x.pl===selected);
- return `<dialog class="plan-drawer"><div class="drawer"><div class="drawer-hd"><div><div class="drawer-title">创建补量批次</div><div class="subtext m-top12">计划目标固定 · 仅针对未达成的平台 × 类目目标新增尝试</div></div><button class="btn icon-btn" data-act="close-drawer">${$icon('close',17)}</button></div>
- <div class="drawer-body"><div class="hint orange m-bottom16">${$icon('info',16)}<div>原计划目标仍为 ${p.target} 条，已发布 ${successOf(p)} 条。补量属于额外发布尝试，不覆盖原始批次规划或已发布记录。</div></div>
- <div class="form-field m-bottom16"><label class="field-label">补量平台（单选，每批仅一个平台）</label><select class="select" data-makeup="platform">${availablePlatforms.map(n=>`<option value="${n}" ${n===selected?'selected':''}>${n}</option>`).join('')}</select></div>
- <div class="form-field m-bottom16"><label class="field-label">批次名称</label><input class="input" data-makeup="name" value="${E(d.name||`补量批次 · ${selected}`)}"/></div>
- <div class="subheading m-bottom16">目标缺口明细</div><div class="table-wrap resource-data-table resource-embedded-table is-editable is-flush"><table class="table ex-table resource-numeric-columns"><thead><tr><th>类目</th><th class="resource-table-number">目标缺口</th><th class="resource-table-number">本次补量数量</th></tr></thead><tbody>${cells.map(x=>`<tr><td>${E(x.c)}</td><td>${x.n} 条</td><td><input class="input" style="width:96px" type="number" min="0" max="${x.n}" data-makeup-cell="${E(x.c)}" value="${d.values?.[x.c]??x.n}"/></td></tr>`).join('')}</tbody></table></div>
- <div class="fineprint m-top16">补量提交后先生成新的待配置批次，仍需完成资源配置、内容配置，并在前序批次结束后人工确认执行。</div></div><div class="drawer-foot"><button class="btn" data-act="close-drawer">返回</button><button class="btn primary" data-act="create-makeup">确认新增补量批次</button></div></div></dialog>`;}
+
  return '';
 }
 function demoFeedback(p,b){if(!['running','stopping'].includes(b.phase))return '';return `<details class="demo-controls"><summary>演示反馈控制</summary><p>仅用于本地流程评审，真实执行器尚未接入。“停止中”是否保留需结合执行器同步停止能力确认。</p>${(b.tasks||[]).filter(t=>t.status==='retrying').map(t=>`<button class="btn" data-act="demo-retry-result" data-id="${p.id}" data-batch="${b.id}" data-task="${t.id}">模拟重试返回 · ${E(t.id)}</button>`).join('')}<button class="btn" data-act="demo-settle" data-id="${p.id}" data-batch="${b.id}" ${openTasks({...p,batches:[b]}).length?'disabled':''}>模拟执行结果已收敛</button><p>未提供作品证据的剩余数量不会计入成功，后续批次不会自动执行。</p></details>`;}
@@ -554,7 +547,7 @@ function renderModal(){const m=state.modal;if(!m)return '';const p=m.planId?getP
  content=gap?`<p class="modal-text">已公开 ${successOf(p)} / ${p.target} 条。按现有结果保留缺口，结束计划。</p><div class="form-field"><label class="field-label">未达成原因<span class="req">*</span></label><textarea rows="3" class="input" data-modal-field="reason">${E(m.reason||'')}</textarea></div>`:'<p class="modal-text">全部计划目标已达成。确认结束计划。</p>';
  footer=cancelBtn+okBtn('确认结束','do-end-plan');
  }else if(m.type==='end-plan'){
- const g=Math.max(0,p.target-successOf(p));title='确认结束发布计划';content=`<p class="modal-text" style="margin-top:0">所有批次已经结束，但计划目标尚未完全达成。确认后计划将进入「已结束 · 未达成结束」，不再补量或执行。</p><div class="modal-kv"><div><div class="label">计划目标</div><div class="value">${p.target} 条</div></div><div><div class="label">最终发布成功</div><div class="value">${successOf(p)} 条</div></div><div><div class="label">目标缺口</div><div class="value">${g} 条</div></div><div><div class="label">结束结果</div><div class="value">未达成结束</div></div></div><div class="form-field m-top16"><label class="field-label">未达成原因 / 结果说明<span class="req">*</span></label><textarea rows="3" class="input" data-modal-field="reason" placeholder="请说明放弃补量的原因或最终执行结论">${E(m.reason||'')}</textarea></div>`;footer=cancelBtn+okBtn('确认结束','do-end-plan');
+ const g=Math.max(0,p.target-successOf(p));title='确认结束发布计划';content=`<p class="modal-text" style="margin-top:0">所有批次已经结束，但计划目标尚未完全达成。确认后计划将进入「已结束 · 未达成结束」。</p><div class="modal-kv"><div><div class="label">计划目标</div><div class="value">${p.target} 条</div></div><div><div class="label">最终发布成功</div><div class="value">${successOf(p)} 条</div></div><div><div class="label">目标缺口</div><div class="value">${g} 条</div></div><div><div class="label">结束结果</div><div class="value">未达成结束</div></div></div><div class="form-field m-top16"><label class="field-label">未达成原因 / 结果说明<span class="req">*</span></label><textarea rows="3" class="input" data-modal-field="reason" placeholder="请填写未达成原因">${E(m.reason||'')}</textarea></div>`;footer=cancelBtn+okBtn('确认结束','do-end-plan');
  }else if(m.type==='task-verify'){
  title='核实发布结果';content=`<p class="modal-text" style="margin-top:0">${E(m.taskTitle)} · 请根据平台实际状态确认最终结果。</p><div class="form-field"><label class="field-label">核实结论<span class="req">*</span></label><select class="select" data-modal-field="result"><option value="success" ${m.result!=='fail'?'selected':''}>确认已发布成功</option><option value="fail" ${m.result==='fail'?'selected':''}>确认发布失败</option></select></div><div class="form-field m-top16"><label class="field-label">成功发布链接<span class="req">*</span> <span class="subtext">（确认成功时必填）</span></label><input class="input" data-modal-field="url" value="${E(m.url||'')}" placeholder="https://平台作品链接"/></div><div class="form-field m-top16"><label class="field-label">核实说明</label><textarea rows="2" class="input" data-modal-field="comment" placeholder="补充核实依据">${E(m.comment||'')}</textarea></div>`;footer=cancelBtn+okBtn('保存核实结果','do-task-verify');
  }else if(m.type==='task-manual'){
@@ -635,13 +628,13 @@ function onAction(act,el){const id=el.dataset.id,idx=Number(el.dataset.idx),p=id
    }
    return false;
   }
-  const operations={'do-execute-batch':'execute','continue-plan':'continue','resume-plan':'resume','pause-plan':'pause','do-cancel-plan':'cancel','do-end-plan':'finish','create-makeup':'makeup'};
+  const operations={'do-execute-batch':'execute','continue-plan':'continue','resume-plan':'resume','pause-plan':'pause','do-cancel-plan':'cancel','do-end-plan':'finish'};
   if(operations[act]){
    if(act==='do-cancel-plan'&&!state.modal?.reason?.trim()){setToast('请填写终止原因','error');return false;}
-   const draft=state.drawer,pid=id||state.modal?.planId||draft?.planId,plan=getPlan(pid);
-   if(plan?.planReview&&(!adapters.canManage(plan)||act==='create-makeup'))return false;
+   const pid=id||state.modal?.planId||state.drawer?.planId,plan=getPlan(pid);
+   if(plan?.planReview&&!adapters.canManage(plan))return false;
    if(plan?.planReview&&act==='do-execute-batch'&&executionIssue(plan,firstNotEnded(plan))){setToast(executionIssue(plan,firstNotEnded(plan)),'error');return false;}
-   const value=act==='create-makeup'?{platform:draft.platform,name:draft.name||`补量批次 · ${draft.platform}`,cats:Object.fromEntries(plan.categories.map(c=>[c,draft.values[c]===undefined?Math.max(0,(plan.goals[draft.platform]?.[c]||0)-actualByCell(plan,draft.platform,c)):Number(draft.values[c])]))}:state.modal?.reason;
+   const value=state.modal?.reason;
    if(state.actionBusy)return false;state.actionBusy=true;
    adapters.action(pid,operations[act],value).then(result=>{if(result===false){state.actionBusy=false;return;}state.modal=null;state.drawer=null;state.actionBusy=false;plans=adapters.loadPlans();setToast('计划已更新');}).catch(error=>{state.actionBusy=false;setToast(error.message,'error')});return false;
   }
@@ -762,17 +755,6 @@ function onAction(act,el){const id=el.dataset.id,idx=Number(el.dataset.idx),p=id
    if(executionIssue(p,b)){setToast('执行前校验未通过，请刷新后再试','error');break;}
    b.phase='running';b.executed=true;p.status='running';logPlan(p,`人工确认执行 ${b.name}`);state.modal=null;state.drawer=null;state.page='detail';state.planId=p.id;setToast('批次已启动，计划保持进行中；后续批次继续等待');break;
   }
-  case 'makeup':{
-   if(!p||p.planReview||p.status!=='running'||!allEnded(p)||openTasks(p).length)return;
-   state.drawer={type:'makeup',planId:p.id,platform:'',name:'',values:{}};render();break;
-  }
-  case 'create-makeup':{
-   const d=state.drawer,p=d&&getPlan(d.planId),pl=d?.platform,values={};let total=0;if(!p||p.status!=='running'||!allEnded(p)||openTasks(p).length||!p.platforms.includes(pl))return;
-   for(const c of p.categories){const max=(p.goals[pl]?.[c]||0)-actualByCell(p,pl,c);if(max<=0)continue;const val=d.values[c]===undefined?max:Number(d.values[c]);if(!Number.isInteger(val)||val<0||val>max){setToast(`${c} 补量数量无效，请按实际目标缺口填写`,'error');return;}if(val>0){values[c]=val;total+=val;}}
-   if(total<=0){setToast('请至少填写 1 条补量目标','error');break;}
-   const item=b('BT-M'+(++identitySequence),d.name||`补量批次 · ${pl}`,pl,values,'draft',0,false,{type:'makeup'});p.batches.push(item);logPlan(p,`新增补量批次 ${item.id}，目标 ${total} 条（计划总目标不变）`);
-   state.drawer=null;setToast(`已生成 ${total} 条补量批次；请先完成资源配置再人工确认执行`);break;
-  }
   case 'task-action':{
    const p=getPlan(id),bt=p?.batches.find(x=>x.id===el.dataset.batch),t=bt?.tasks.find(x=>x.id===el.dataset.task);if(!t||t.status!=='pending')break;
    const type=t.type==='manual'?'task-manual':t.type==='verify'?'task-verify':'task-failed';openModal(type,{planId:id,batchId:bt.id,taskId:t.id,taskTitle:t.title,result:'success',url:'',comment:''});break;
@@ -846,12 +828,9 @@ listen(host,'input',ev=>{const t=ev.target;if(t.dataset.filter){state.filterDraf
  if(t.dataset.batchName!==undefined){const e=state.editor;if(e){e.batches[Number(t.dataset.batchName)].name=t.value;e.editedBatches=true;}return;}
  if(t.dataset.modalField){if(state.modal)state.modal[t.dataset.modalField]=t.value;return;}
  if(t.dataset.splitCell){if(state.modal){const bt=state.editor.batches[state.modal.index];const n=bt.cats[t.dataset.splitCell]||0;state.modal.values[t.dataset.splitCell]=Math.max(0,Math.min(n,Math.floor(Number(t.value)||0)));}return;}
- if(t.dataset.makeup==='name'){if(state.drawer)state.drawer.name=t.value;return;}
- if(t.dataset.makeupCell){if(state.drawer){state.drawer.values??={};state.drawer.values[t.dataset.makeupCell]=t.value;}return;}
 });
 listen(host,'change',ev=>{const t=ev.target;if(t.hasAttribute('data-page-size')){state.pageSize=Number(t.value);state.pageNo=1;render();return;}if(t.dataset.filter){state.filterDraft[t.dataset.filter]=t.value;return;}
  if(t.dataset.batchPlatform!==undefined){const e=state.editor,b=e?.batches[Number(t.dataset.batchPlatform)];if(!b||!batchEditable(e,b))return;b.platform=t.value;b.cats={};e.editedBatches=true;render();return;}
- if(t.dataset.makeup==='platform'){if(state.drawer){state.drawer.platform=t.value;state.drawer.name=`补量批次 · ${t.value}`;state.drawer.values={};render();}return;}
  if(t.dataset.modalField==='result'||t.dataset.splitCell){render();return;}
  if(t.dataset.editor||t.dataset.matrix||t.dataset.batchCell||t.dataset.batchName!==undefined){if(!pointerActionPending)setTimeout(render,0);return;}
 });

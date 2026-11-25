@@ -119,7 +119,7 @@ const next = async () => {
     await button("确认资源").click();
     await page.getByRole("dialog",{name:"确认资源",exact:true}).waitFor();
     await button("进入内容配置").click();
-  } else await button("预览检查").click();
+  } else await button("下一步").click();
 };
 try {
   await page.goto(new URL("/publish-batches", base).href);

@@ -33,7 +33,8 @@ const stateLabel=computed(()=>{const state=batchState(props.db,props.batch);retu
 const successHelp='已确认发布成功的任务数 / 发布目标数。取消、放弃和结果待确认的任务不计入发布成功数。';
 const tasks=computed(()=>rows.value.filter(t=>(!taskSearch.value||`${t.id} ${t.title} ${account(t.accountId)}`.includes(taskSearch.value))&&(!taskFilter.value||(taskFilter.value==='待处理'?isPendingTask(t,batch.value):t.status===taskFilter.value))));
 const taskSection=ref(null);
-const candidateOnly = computed(() => batch.value.preparationOnly && !batch.value.firstStartedAt);
+const candidateOnly = computed(() => !batch.value.firstStartedAt && rows.value.length === 0);
+const candidates = computed(() => batch.value.candidates ?? []);
 const groupSummary = computed(() => {
   const row = batch.value;
   if (!row.executionReview || candidateOnly.value || row.endedAt || row.stoppedAt) return "";
@@ -96,7 +97,9 @@ const history = computed(() =>
           <Field label="最近更新">{{ date(batch.updatedAt || batch.created) }}</Field>
           <Field v-if="batchState(db, batch) === '已结束'" label="发布结果">{{ metrics.result }}</Field>
         </ResourceDescriptions>
-        <ResourceNotice v-if="batch.stoppedAt">{{ batch.executionReview
+        <ResourceNotice v-if="batch.stoppedAt">{{ candidateOnly
+          ? "此批次在开始发布前已取消。"
+          : batch.executionReview
           ? "已终止后续派发。未领取任务已取消并保留成片占用，在途任务等待原尝试结果。"
           : "已停止发布。未启动任务已取消，在途任务继续回传结果；不能重新启动。" }}</ResourceNotice>
         <ResourceNotice v-if="batch.executionReview && batch.control === '已暂停'" tone="warning">
@@ -107,11 +110,16 @@ const history = computed(() =>
         <ResourceSection title="候选配置">
           <ResourceDescriptions>
             <Field label="发布目标">{{ metrics.target }} 条</Field>
-            <Field label="候选">{{ batch.candidates.length }} 条</Field>
-            <Field label="目标缺口">{{ Math.max(0, metrics.target - batch.candidates.length) }} 条</Field>
+            <Field label="候选">{{ candidates.length }} 条</Field>
+            <Field label="目标缺口">{{ Math.max(0, metrics.target - candidates.length) }} 条</Field>
             <Field label="正式发布任务">0 条</Field>
           </ResourceDescriptions>
-          <BatchContentTable :rows="batch.candidates" :db="db" read-only />
+          <BatchContentTable v-if="candidates.length" :rows="candidates" :db="db" read-only />
+          <ResourceEmptyState
+            v-else
+            title="尚未配置发布内容"
+            :description="batch.stoppedAt ? '批次已取消，不会生成发布任务。' : '完成资源配置和内容准备后，可启动发布。'"
+          />
         </ResourceSection>
         <ResourceSection v-if="batch.executionSettings" title="执行设置">
           <ResourceDescriptions>
@@ -254,7 +262,7 @@ const history = computed(() =>
               :description="
                 rows.length
                   ? '调整搜索或状态筛选。'
-                  : '继续配置并完成预检后生成任务。'
+                  : '此批次暂无正式发布任务。'
               "
           /></template>
         </t-table>

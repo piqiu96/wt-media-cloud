@@ -186,7 +186,7 @@ try {
         assert.notEqual(await image.getAttribute("src"), thumbPath);
       }
       if (sectionName === "内容配置")
-        await page.getByRole("button", { name: "预览检查", exact: true }).click();
+        await page.getByRole("button", { name: "下一步", exact: true }).click();
     }
     assert.deepEqual(errors, []);
     await page.close();
