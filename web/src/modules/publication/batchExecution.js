@@ -84,6 +84,18 @@ export function buildBatchControl(batch, action, { reason = "", failures = [], r
   return input;
 }
 
+// Reviewing totals include normal platform audit. Only the provider's A07 subset
+// requires manual verification; missing projections are unknown, never zero.
+export function batchPendingCount(batch) {
+  const execution = batch.execution;
+  if (!execution) return batch.execution_status === "not_started" ? 0 : null;
+  const verification = execution.verification_required_count;
+  if (!Number.isSafeInteger(verification) || verification < 0) return null;
+  return ["failed", "awaiting_human", "uncertain"].reduce(
+    (sum, status) => sum + (execution.task_counts?.[status] || 0), verification,
+  );
+}
+
 export function batchProgress(execution) {
   if (!execution) return null;
   const { target_count: target, published_count: published, created_count: created,

@@ -34,7 +34,7 @@ import BatchCandidateWorkspace from "../components/BatchCandidateWorkspace.vue";
 import BatchExecutionControls from "../components/BatchExecutionControls.vue";
 import BatchReadonlyBody from "../components/BatchReadonlyBody.vue";
 import BatchFormalTasks from "../components/BatchFormalTasks.vue";
-import { batchPhases, batchTaskLocation } from "../batchExecution.js";
+import { batchPhases, batchTaskLocation, batchPendingCount } from "../batchExecution.js";
 import "../batchPreparation.css";
 import {planReturn} from "../planPreparation.js";
 
@@ -104,7 +104,7 @@ const listColumns = [
   { colKey: 'updated_at', title: '最近更新', width: 155 },
   { colKey: 'op', title: '操作', width: 200, fixed: 'right' },
 ];
-const batchPending = b => ['failed','awaiting_human','uncertain','reviewing'].reduce((n,k)=>n+(b.execution?.task_counts?.[k]||0),0);
+const batchPending = batchPendingCount;
 const batchRate = b => Number(targetSum(b.targets))>0?Math.round((b.execution?.published_count||0)/targetSum(b.targets)*10000)/100:0;
 const recordColumns = [
   { colKey: "created_at", title: "时间", width: 190 },
@@ -652,7 +652,7 @@ onBeforeUnmount(() => {
           <template #coverage="{ row }"><strong class="batch-target-value">{{targetSum(row.targets)}} <span>条</span></strong><small class="batch-muted batch-task-block">{{row.targets.map(t=>categoryName(t.category_id)+' '+t.target_count).join(' · ')}}</small></template>
           <template #progress="{row}"><span v-if="!row.execution?.first_started_at">{{row.candidate_count||0}} 条候选 · 0 条任务</span><template v-else><div class="batch-progress-title"><span>{{row.execution.published_count}} / {{targetSum(row.targets)}}</span><span>{{batchRate(row)}}%</span></div><t-progress color="var(--wt-primary)" :percentage="Math.min(batchRate(row),100)" :label="false" :stroke-width="6"/></template></template>
           <template #state="{row}"><ResourceStatusBadge :label="row.execution_status==='not_started'?(row.configuration_status==='ready'?'待执行':'待配置'):executionState(row)" :tone="batchPending(row)?'warning':row.execution_status==='running'?'info':'neutral'"/><small v-if="row.execution?.phase && row.execution.phase!==row.execution_status" class="batch-muted batch-task-block">{{batchPhases[row.execution.phase]}}</small><small v-if="row.execution?.stopped_at" class="batch-muted batch-task-block">已终止后续派发</small></template>
-          <template #pending="{row}"><t-button v-if="batchPending(row)" theme="warning" variant="text" @click="open('detail',row)">{{batchPending(row)}} 项</t-button><span v-else>—</span></template>
+          <template #pending="{row}"><span v-if="batchPending(row) === null" class="batch-muted">待刷新</span><t-button v-else-if="batchPending(row)>0" theme="warning" variant="text" @click="open('detail',row)">{{batchPending(row)}} 项</t-button><span v-else>—</span></template>
           <template #updated_at="{ row }">{{ formatPublicationTime(row.updated_at) }}</template>
           <template #op="{ row }"><ResourceRowActions>
             <t-button v-if="canStart(row)" variant="text" size="small" @click="openToStart(row)">开始发布</t-button>

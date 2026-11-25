@@ -45,6 +45,7 @@ import {
 } from "../planPreparation.js";
 import {
   batchPhases,
+  batchPendingCount,
   buildBatchStart,
   batchTaskLocation,
 } from "../batchExecution.js";
@@ -136,11 +137,7 @@ const batchFacts = computed(() =>
       )
     : {},
 );
-const pendingBatchCount = (b) =>
-  ["awaiting_human", "uncertain", "reviewing", "failed"].reduce(
-    (n, k) => n + Number(b.execution?.task_counts?.[k] || 0),
-    0,
-  );
+const pendingBatchCount = batchPendingCount;
 const endedLabel = (p) =>
   ({
     achieved: "目标达成",
@@ -1163,12 +1160,14 @@ onBeforeUnmount(() => {
                   <td>
                     <span
                       :class="{
-                        'plan-detail-pending': pendingBatchCount(r.batch),
+                        'plan-detail-pending': pendingBatchCount(r.batch) !== 0,
                       }"
                       >{{
-                        pendingBatchCount(r.batch)
-                          ? pendingBatchCount(r.batch) + " 条待处理"
-                          : "—"
+                        pendingBatchCount(r.batch) === null
+                          ? "待办统计待刷新"
+                          : pendingBatchCount(r.batch)
+                            ? pendingBatchCount(r.batch) + " 条待处理"
+                            : "—"
                       }}</span
                     >
                   </td>
@@ -1189,12 +1188,7 @@ onBeforeUnmount(() => {
                         @updated="reload(true)"
                         @busy="busy = $event"
                       /><t-button
-                        v-if="
-                          r.batch.execution?.task_counts?.awaiting_human ||
-                          r.batch.execution?.task_counts?.uncertain ||
-                          r.batch.execution?.task_counts?.reviewing ||
-                          r.batch.execution?.task_counts?.failed
-                        "
+                        v-if="pendingBatchCount(r.batch) > 0"
                         variant="text"
                         @click="router.push(batchRoute(r))"
                         >去处理</t-button

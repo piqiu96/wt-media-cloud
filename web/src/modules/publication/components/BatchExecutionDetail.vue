@@ -8,12 +8,13 @@ import ResourceProgress from "../../../shared/ui/resource/ResourceProgress.vue";
 import ResourceStatusBadge from "../../../shared/ui/resource/ResourceStatusBadge.vue";
 import FeedbackAlert from "../../../shared/ui/feedback/FeedbackAlert.vue";
 import { formatPublicationTime } from "../dateTime.js";
-import { batchPhases, batchProgress } from "../batchExecution.js";
+import { batchPhases, batchProgress, batchPendingCount } from "../batchExecution.js";
 
 const props = defineProps({ batch: { type: Object, required: true } });
 const emit = defineEmits(["tasks"]);
 const execution = computed(() => props.batch.execution);
 const counts = computed(() => batchProgress(execution.value));
+const pendingCount = computed(() => batchPendingCount(props.batch));
 const currentGroup = computed(() => execution.value?.group_task_ids?.length || 0);
 const phase = computed(() => execution.value?.phase);
 const checkedCounts = computed(() => [
@@ -52,7 +53,7 @@ const checkedCounts = computed(() => [
         {key:'target',label:'发布目标',value:counts.target},
         {key:'published',label:'已发布',value:counts.published,tone:'success'},
         {key:'failed',label:'发布失败',value:execution.task_counts?.failed||0,tone:execution.task_counts?.failed?'danger':'neutral'},
-        {key:'pending',label:'待处理',value:counts.exceptions+counts.reviewing,tone:counts.exceptions+counts.reviewing?'warning':'neutral'},
+        {key:'pending',label:'待处理',value:pendingCount===null?'待刷新':pendingCount,tone:pendingCount===0?'neutral':'warning'},
       ]"/>
       <div v-if="execution.first_started_at" class="batch-execution-progress">
         <ResourceProgress label="公开发布率" :percentage="counts.rate"

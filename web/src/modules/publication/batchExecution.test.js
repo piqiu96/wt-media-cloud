@@ -264,3 +264,14 @@ it("returns from the original task to the same batch and filters", () => {
       task_page: "2", task_page_size: "20", task_media_account_id: "953" },
   });
 });
+
+it('counts only explicit exceptions and the provider verification subset, keeping missing statistics unknown',()=>{
+ const value=(reviewing,verification)=>({execution_status:'ended',execution:{task_counts:{reviewing},...(verification===undefined?{}:{verification_required_count:verification})}});
+ expect(execution.batchPendingCount(value(1,0))).toBe(0);
+ expect(execution.batchPendingCount(value(1,1))).toBe(1);
+ expect(execution.batchPendingCount(value(1,undefined))).toBe(null);
+ expect(execution.batchPendingCount({execution_status:'not_started'})).toBe(0);
+ expect(execution.batchPendingCount({execution_status:'ended'})).toBe(null);
+ const mixed=value(12,2);Object.assign(mixed.execution.task_counts,{failed:1,awaiting_human:3,uncertain:4});
+ expect(execution.batchPendingCount(mixed)).toBe(10);
+});
