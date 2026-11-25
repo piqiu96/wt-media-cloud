@@ -189,6 +189,26 @@ class PublicationPlanContractTest(unittest.TestCase):
             bad["evidence"][field] = False
             self.assertFalse(validator.is_valid(bad), field)
 
+    def test_non_application_receipt_is_strict_and_request_bound(self):
+        details = {"command_applied": False, "command": "start", "request_key": "original",
+                   "expected_revision": "2", "current_revision": "3"}
+        self.schema("CommandNotApplied").validate(details)
+        error = {"errcode": 1, "message": "old request", "data": None, "logid": "log",
+                 "error": {"code": "publication_conflict", "details": details}}
+        self.schema("Error").validate(error)
+        for key, value in [("command_applied", True), ("request_key", ""), ("command", "pause"),
+                           ("winning_key", "secret"), ("request_digest", "secret")]:
+            bad = copy.deepcopy(error)
+            bad["error"]["details"][key] = value
+            self.assertFalse(self.schema("Error").is_valid(bad), key)
+        for key in details:
+            bad = copy.deepcopy(details)
+            del bad[key]
+            self.assertFalse(self.schema("CommandNotApplied").is_valid(bad), key)
+        for command in ["start", "confirm-next"]:
+            response = self.plan["paths"][f"/api/v1/publication-plan/{{id}}/{command}"]["post"]["responses"]["409"]
+            self.assertEqual(response["content"]["application/json"]["schema"]["$ref"], "#/components/schemas/Error")
+
     def test_recommendation_has_typed_terminal_and_adoption_events(self):
         events = self.plan["paths"]["/api/v1/publication-plan/recommend"]["post"]["responses"]["200"]["content"]["text/event-stream"]["x-sse-events"]
         self.assertEqual(set(events), {"start", "progress", "item_result", "item_error", "done", "error"})

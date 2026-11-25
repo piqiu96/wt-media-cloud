@@ -313,7 +313,17 @@ paths:
           description: 'publication_not_found: absent or outside authorized scope.'
         '409':
           description: 'publication_conflict/parent_blocked/shortfall_changed/output_occupied:
-            no partial writes; reload current facts.'
+            no partial writes; reload current facts. Only a fully valid original
+            request with no matching immutable receipt, checked under the plan lock,
+            and expected_revision strictly below the monotonic current revision may
+            return details.command_applied=false. Matching original key+digest replays
+            success first; changed input, corrupt/missing receipt data, ordinary resource
+            conflicts and unavailable reads do not prove non-application. This result
+            binds only this command/key/revision; no winning key or digest is exposed.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '503':
           description: 'publication_unavailable: preserve original key and input;
             never assume non-application.'
@@ -485,7 +495,17 @@ paths:
           description: 'publication_not_found: absent or outside authorized scope.'
         '409':
           description: 'publication_conflict/parent_blocked/shortfall_changed/output_occupied:
-            no partial writes; reload current facts.'
+            no partial writes; reload current facts. Only a fully valid original
+            request with no matching immutable receipt, checked under the plan lock,
+            and expected_revision strictly below the monotonic current revision may
+            return details.command_applied=false. Matching original key+digest replays
+            success first; changed input, corrupt/missing receipt data, ordinary resource
+            conflicts and unavailable reads do not prove non-application. This result
+            binds only this command/key/revision; no winning key or digest is exposed.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '503':
           description: 'publication_unavailable: preserve original key and input;
             never assume non-application.'
@@ -1901,6 +1921,30 @@ components:
       - total
       - page
       - page_size
+    CommandNotApplied:
+      type: object
+      additionalProperties: false
+      description: Authoritative non-application for this original valid request only.
+        Receipt replay takes priority. Issued under the plan lock only when the request
+        key has no original receipt and expected_revision is strictly less than the
+        monotonic current_revision. Omission means unknown, never false by implication.
+      properties:
+        command_applied:
+          type: boolean
+          const: false
+        command:
+          type: string
+          enum: [start, confirm-next]
+        request_key:
+          $ref: '#/components/schemas/RequestKey'
+        expected_revision: *id001
+        current_revision: *id001
+      required:
+      - command_applied
+      - command
+      - request_key
+      - expected_revision
+      - current_revision
     Error:
       type: object
       additionalProperties: false
@@ -1926,8 +1970,12 @@ components:
               maxLength: 100
               minLength: 0
             details:
-              type: object
-              additionalProperties: true
+              oneOf:
+              - $ref: '#/components/schemas/CommandNotApplied'
+              - type: object
+                additionalProperties: true
+                not:
+                  required: [command_applied]
           required:
           - code
       required:
