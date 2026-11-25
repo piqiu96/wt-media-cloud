@@ -67,14 +67,14 @@ test('successful result requires a public HTTPS URL and cannot count twice',()=>
  a.taskDone(m,'success',{publishUrl:'https://example.com/review-demo'});a.taskDone(m,'success',{publishUrl:'https://example.com/review-demo'});
  assert.equal(b.success,18);
 });
-test('makeup cannot bypass stale eligibility or increase original target',()=>{
+test('executed plans reject makeup and preserve original batches and target',()=>{
  const a=app(),p=a.plans[2],target=p.target;
  a.state.drawer={type:'makeup',planId:p.id,platform:'B站',values:{'游戏攻略':5}};a.act('create-makeup');
  assert.equal(p.batches.length,4);
  a.state.drawer={type:'makeup',planId:p.id,platform:'B站',values:{'游戏攻略':4,'精彩剪辑':0}};a.act('create-makeup');
- assert.equal(p.batches.length,5);assert.equal(p.target,target);
+ assert.equal(p.batches.length,4);assert.equal(p.target,target);
  a.state.drawer={type:'makeup',planId:p.id,platform:'百家号',values:{}};a.act('create-makeup');
- assert.equal(p.batches.length,5);
+ assert.equal(p.batches.length,4);
 });
 test('new plan identities do not repeat after deletion',()=>{
  const a=app();a.newEditor();const p=a.planFromEditor('draft');a.plans.unshift(p);a.plans.splice(0,1);
@@ -127,7 +127,7 @@ test('detail projection preserves goal totals and never changes the underlying p
 test('detail footer reflects existing serial execution, deficit and ended eligibility',()=>{
  const a=app();
  assert.deepEqual(json(a.evaluate('detailView(plans[1]).footer.map(a=>a.key)')),['execute']);
- assert.deepEqual(json(a.evaluate('detailView(plans[2]).footer.map(a=>a.key)')),['end-plan','makeup']);
+ assert.deepEqual(json(a.evaluate('detailView(plans[2]).footer.map(a=>a.key)')),['end-plan']);
  assert.deepEqual(json(a.evaluate('detailView(plans[5]).footer.map(a=>a.key)')),[]);
  a.plans[1].batches[0].phase='running';
  assert.equal(a.evaluate('detailView(plans[1]).footer.some(a=>a.key==="execute")'),false);
