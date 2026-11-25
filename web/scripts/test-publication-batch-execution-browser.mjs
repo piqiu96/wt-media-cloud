@@ -284,11 +284,9 @@ async function createAndStart(name) {
   await page.goto(new URL("/publish-batches", base).href);
   await button("新建批次").click();
   await field("批次名称").fill(name);
-  await page.locator('[aria-label="目标类目"]').click();
-  await page.locator(".t-select-option").getByText(category.name, { exact: true }).click();
-  await button("添加类目").click();
-  await button("载入可用资源").click();
-  await button("按顺序自动配对").click();
+  await page.locator(".batch-category-chip").filter({hasText:category.name}).click();
+  assert.equal(await page.getByRole("checkbox", {name:category.name,exact:true}).isChecked(),true);
+  await button("重新自动匹配").click();
   await text("已配对 1 条候选").waitFor();
   await button("下一步").click();
   await button("下一步").click();
@@ -603,7 +601,12 @@ const regressions = {
     assert.equal(unknownLabelCount, 0, "stopping is a known list and detail state");
     await delay(5200);
     assert.equal(detailReads(), initialReads + 1, "terminal state stops polling");
+    const filteredRead=page.waitForRequest(request=>{
+      const url=new URL(request.url());
+      return url.pathname==='/api/v1/publication-batch' && url.searchParams.get('execution_status')==='stopping';
+    });
     await page.goto(new URL("/publish-batches?execution_status=stopping", base).href);
+    await filteredRead;
     await heading("发布批次").waitFor();
     assert.ok(calls.some(call => call.endpoint === "/publication-batch" && call.params.get("execution_status") === "stopping"));
   },

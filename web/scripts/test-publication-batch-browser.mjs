@@ -13,6 +13,7 @@ let savedKey;
 const actor = { id: "71", role: "operator", team_id: "3", category_ids: ["12"], status: "enabled", username: "test" };
 const category = { id: "12", name: "合成测试类目", enabled: true };
 const account = { id: "9007199254740993", name: "由我发布", platform: "baidu", category_ids: ["12"], eligible: true };
+const alternateAccount={...account,id:"9007199254741001",name:"由我发布备用"};
 const outputs = [
   { composite_output_id: "9007199254740995", id: 1, name: "合成测试成片 A" },
   { composite_output_id: "9007199254740997", id: 2, name: "合成测试成片 B" },
@@ -50,9 +51,9 @@ await page.route("**/api/v1/**", async route => {
   switch (resource) {
     case "/api/v1/auth/me": return send(actor);
     case "/api/v1/categories": return send([category]);
-    case "/api/v1/publication/account": return send({ items: [account], total: 1 });
+    case "/api/v1/publication/account": return send({ items: [account,alternateAccount], total: 2 });
     case "/api/v1/publication/resource": return send({ availability: "available", available_output_count: 2,
-      eligible_account_count: 1, account_count: 1, unknown_output_count: 0, as_of: now });
+      eligible_account_count: 2, account_count: 2, unknown_output_count: 0, as_of: now });
     case "/api/v1/publication/output": {
       const selected = params.get("output_ids")?.split(",");
       const items = selected ? outputs.filter(row => selected.includes(row.composite_output_id)) : outputs;
@@ -117,12 +118,17 @@ try {
   await heading("发布批次").waitFor();
   await button("新建批次").click();
   await input("批次名称").fill("浏览器批次");
-  await page.locator('[aria-label="目标类目"]').click();
-  await page.locator(".t-select-option").getByText(category.name, { exact: true }).click();
-  await button("添加类目").click();
+  await page.locator(".batch-category-chip").filter({hasText:category.name}).click();
+  assert.equal(await page.getByRole("checkbox", {name:category.name,exact:true}).isChecked(),true);
   await input(`${category.name}发布目标`).fill("2");
+  await input('目标数量').fill('2');
+  await button('采用系统推荐').click();
+  await page.getByText('已采用系统推荐，可继续调整类目数量和匹配。',{exact:true}).waitFor();
+  assert.equal(await input(`${category.name}发布目标`).inputValue(),'2');
+  assert.equal(await page.locator('.batch-section').count(),3,'resource preparation retains the prototype three-section frame');
+
+  await button("账号与本批上限").click();
   await button("载入可用资源").click();
-  await button("展开账号、成片与本批上限设置").click();
   assert.ok(
     Math.abs(
       (
@@ -134,8 +140,19 @@ try {
     ) < 2,
   );
   await input("本批上限").fill("2");
-  await button("按顺序自动配对").click();
+  await button("完成").click();
+  await button("重新自动匹配").click();
   await page.getByText("已配对 2 条候选", { exact: true }).waitFor();
+  const rowAccount=()=>page.locator('[aria-label="第1条发布账号"]').first();
+  await rowAccount().click();
+  await page.locator('.t-select-option:visible').getByText(alternateAccount.name,{exact:true}).click();
+  await page.locator('.t-select-option:visible').first().waitFor({state:'hidden'});
+  assert.equal(await input('第1条发布账号').inputValue(),alternateAccount.name,'inline account selection must update the original matching row');
+  await rowAccount().click();
+  await page.locator('.t-select-option:visible').getByText(account.name,{exact:true}).click();
+  await page.waitForFunction(name=>[...document.querySelectorAll('[aria-label="第1条发布账号"] input, input[aria-label="第1条发布账号"]')].some(input=>input.value===name),account.name);
+  assert.equal(await input('第1条发布账号').inputValue(),account.name);
+
   await next();
 
   const contentTable = page.getByRole("region", { name: "内容配置" });
@@ -153,9 +170,9 @@ try {
     .locator(".t-select-option:visible")
     .getByText("待完善", { exact: true })
     .click();
-  await button("查询内容").click();
+  await button("查询").click();
   assert.equal(await contentTable.locator("tbody tr").count(), 2);
-  await button("重置内容筛选").click();
+  await button("重置").click();
   assert.equal(
     await page.evaluate(
       () => document.documentElement.scrollWidth > innerWidth,
@@ -170,10 +187,10 @@ try {
     )
     .first()
     .fill(outputs[0].name);
-  await button("查询内容").click();
+  await button("查询").click();
   assert.equal(await contentTable.locator("tbody tr").count(), 1);
   await contentTable.locator("tbody tr .t-checkbox").first().click();
-  await button("重置内容筛选").click();
+  await button("重置").click();
   assert.equal(await contentTable.locator("tbody tr").count(), 2);
   assert.equal(
     (
@@ -190,7 +207,7 @@ try {
     )
     .first()
     .fill(outputs[1].name);
-  await button("查询内容").click();
+  await button("查询").click();
   await contentTable.locator("tbody tr .t-checkbox").first().click();
   assert.equal(
     (
@@ -227,7 +244,7 @@ try {
   await filteredSecond
     .getByRole("button", { name: "下移", exact: true })
     .click();
-  await button("重置内容筛选").click();
+  await button("重置").click();
   await page
     .getByRole("region", { name: "批量操作" })
     .getByRole("button", { name: "取消选择", exact: true })
@@ -241,7 +258,7 @@ try {
   await page.getByText("生成结果与请求的行或版本不一致", { exact: true }).waitFor();
   assert.equal(await page.getByText("迟到的文案", { exact: true }).count(), 0);
   await page.keyboard.press("Escape");
-  await firstRow.getByRole("button", { name: "编辑内容" }).click();
+  await firstRow.getByRole("button", { name: "编辑" }).click();
   await page.locator('[aria-label="发布文案"] textarea, textarea[aria-label="发布文案"]').fill("手动保留文案");
   const horizontal = page.locator(".batch-cover-row").filter({ hasText: "横版封面 · 16:9" });
   await input("封面短标题").fill("原生成标题");

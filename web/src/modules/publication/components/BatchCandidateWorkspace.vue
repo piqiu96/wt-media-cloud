@@ -34,6 +34,8 @@ const pairing = ref(null);
 const picker = ref("");
 const bulk = ref(false);
 const preview = ref(null);
+const replacingKey=ref('');
+const replacing=computed(()=>rows.value.find(row=>row.row_key===replacingKey.value));
 const pairError = ref("");
 const confirmationFeedback = ref(null);
 const confirmationRows = ref({});
@@ -134,6 +136,29 @@ function selectPairCategory(category) {
 }
 const blockedOutputIds = computed(() => rows.value.filter(row => row.row_key !== pairing.value?.row_key).map(row => row.composite_output_id));
 
+function accountOptions(row) {
+  const ids=new Set([...props.form.config.accounts.map(item=>item.media_account_id),row.media_account_id]);
+  return [...ids].flatMap(id=>{
+    const account=props.catalog.accounts.get(id);
+    if(!account || (id!==row.media_account_id && !account.category_ids?.map(String).includes(row.category_id))) return [];
+    return [{value:id,label:batchAccountName(account),disabled:account.eligible!==true}];
+  });
+}
+function changeAccount(row,id) {
+  // Table slots may retain the previous row object after an immutable replacement.
+  const current = rows.value.find(item => item.row_key === row.row_key);
+  if (props.disabled || !current || !id || id === current.media_account_id) return;
+  pairing.value = { row_key: current.row_key, ...pairOf(current), media_account_id: id };
+  acceptPair();
+}
+function replaceVideo(output) {
+  const row=replacing.value;
+  if(props.disabled || !row)return;
+  props.catalog.remember('output',output);
+  pairing.value={row_key:row.row_key,...pairOf(row),composite_output_id:batchOutputID(output)};
+  acceptPair();
+  replacingKey.value='';
+}
 function acceptPair() {
   if (!pairing.value?.category_id || !pairing.value.media_account_id || !pairing.value.composite_output_id) return;
   if (blockedOutputIds.value.includes(pairing.value.composite_output_id)) {
@@ -259,16 +284,16 @@ function applyBulk(key, patch, covers) {
 
 <template>
   <component :is="embedded?'div':ResourceCard" :class="{'batch-content-card': !resourceOnly}">
-    <component :is="embedded?'div':ResourceSection" :title="resourceOnly ? '账号与成片匹配' : reviewOnly ? '发布内容' : '内容配置'">
+    <component :is="embedded?'div':ResourceSection" :variant="resourceOnly?'detail':'form'" :title="resourceOnly ? '账号与成片匹配' : reviewOnly ? '发布内容' : '内容配置'">
       <div v-if="resourceOnly" class="batch-inline batch-section-actions">
         <t-button theme="default" variant="outline" :disabled="disabled || !form.targets.length" @click="openPair()">添加候选</t-button>
         <ResourceStatusBadge :label="'已匹配 '+rows.length+' / '+form.targets.reduce((n,t)=>n+t.target_count,0)"/><span class="batch-muted">账号 {{new Set(rows.map(r=>r.media_account_id)).size}} 个 · 成片 {{rows.length}} 条</span>
       </div>
       <ResourceFilterBar v-if="!resourceOnly && !reviewOnly" class="batch-content-filters">
-        <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">搜索内容</span><t-input v-model="search" aria-label="搜索候选内容" placeholder="发布文案、账号或成片" clearable @enter="query"/></label>
+        <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">发布内容 / 账号 / 成片</span><t-input v-model="search" aria-label="搜索候选内容" placeholder="输入标题、账号或成片编号" clearable @enter="query"/></label>
         <label class="wt-filter-field"><span class="wt-filter-field__label">发布类目</span><t-select v-model="categoryFilter" :options="categories.filter(c=>form.targets.some(t=>t.category_id===c.value))" aria-label="筛选候选类目" placeholder="全部" clearable filterable/></label>
         <label class="wt-filter-field"><span class="wt-filter-field__label">配置状态</span><t-select v-model="stateFilter" :options="['待完善','待确认','已就绪'].map(value=>({value,label:value}))" aria-label="筛选候选状态" placeholder="全部" clearable/></label>
-        <div class="wt-filter-actions"><t-button @click="query">查询</t-button><t-button variant="outline" @click="search='';categoryFilter='';stateFilter='';query()">重置</t-button></div>
+        <div class="wt-filter-actions"><t-button theme="primary" @click="query">查询</t-button><t-button variant="outline" @click="search='';categoryFilter='';stateFilter='';query()">重置</t-button></div>
       </ResourceFilterBar>
       <ResourceSelectionToolbar v-if="!resourceOnly && !reviewOnly" :count="selected.length" unit="条候选"
         :hint="pendingConfirmations.length && confirmationProblem ? '请先在结果总览填写执行设置，再检查并确认所选内容。' : ''"
@@ -284,7 +309,7 @@ function applyBulk(key, patch, covers) {
         <t-table class="wt-resource-table" :data="resourceOnly?resourceRows:filteredRows" :columns="resourceOnly?resourceColumns:columns" row-key="row_key" :selected-row-keys="selection" :reserve-selected-row-on-paginate="true" :pagination="resourceOnly?undefined:{current:page,pageSize,total:filteredRows.length,pageSizeOptions:[10,20,50],showJumper:false}" @page-change="value=>{page=value.current;pageSize=value.pageSize}"
           :scroll="{ x: resourceOnly ? '1102px' : reviewOnly ? '940px' : '1072px' }" empty="暂无候选，可添加候选或返回资源配置配对"
           @select-change="keys=>{const visible=new Set(filteredRows.map(row=>row.row_key));selection=[...new Set([...selection.filter(key=>!visible.has(key)),...keys])]}">
-          <template #content="{row}"><div class="batch-content-identity"><img v-if="candidateCover(row)" :src="candidateCover(row)" alt="发布封面"/><span v-else class="batch-content-cover-placeholder">{{row.content.cover_file_id && row.content.cover_file_id !== '0' ? '发布封面引用待核实' : '未选择发布封面'}}</span><div><span class="batch-content-name" :title="row.content.description">{{row.content.description||'待填写发布文案'}}</span><small class="batch-muted">{{categoryName(row.category_id)}}</small></div></div></template>
+          <template #content="{row}"><div class="batch-content-identity"><button v-if="candidateCover(row)" class="batch-cover-preview" type="button" :aria-label="'预览发布封面 · '+(row.content.description||outputName(row))" @click="preview={label:'发布封面',image:true,url:candidateCover(row)}"><img :src="candidateCover(row)" alt="发布封面"/></button><span v-else class="batch-content-cover-placeholder">{{row.content.cover_file_id && row.content.cover_file_id !== '0' ? '发布封面引用待核实' : '未选择发布封面'}}</span><div><span class="batch-content-name" :title="row.content.description">{{row.content.description||'待填写发布文案'}}</span><small class="batch-muted">{{categoryName(row.category_id)}}</small></div></div></template>
           <template #video="{ row }">
             <div class="batch-video-cell">
               <img v-if="resourceOnly && thumb(row)" :src="thumb(row)" alt="" />
@@ -299,17 +324,12 @@ function applyBulk(key, patch, covers) {
           <template #order="{rowIndex}">{{rowIndex+1}}</template>
           <template #source="{row}"><ResourceStatusBadge :label="isManual(row)?'人工指定':'系统匹配'" :tone="isManual(row)?'info':'neutral'"/></template>
           <template #resourceStatus="{row}"><ResourceStatusBadge :label="resourceIssue(row)||'有效'" :tone="resourceIssue(row)?'warning':'success'"/></template>
-          <template #account="{ row }"><template v-if="resourceOnly">{{ accountName(row) }}</template><span v-else class="batch-content-asset" :title="accountName(row)">{{accountName(row)}}</span></template>
+          <template #account="{ row }"><t-select v-if="resourceOnly" :value="row.media_account_id" :options="accountOptions(row)" :disabled="disabled" :aria-label="'第'+(rows.indexOf(row)+1)+'条发布账号'" @change="changeAccount(row,$event)"/><span v-else class="batch-content-asset" :title="accountName(row)">{{accountName(row)}}</span></template>
           <template #category="{ row }">{{ categoryName(row.category_id) }}</template>
           <template #status="{row}"><ResourceStatusBadge :tone="rowIssues(row).length?'warning':'success'" :label="rowState(row)"/><small v-if="rowIssues(row).length" class="batch-content-problem">{{rowIssues(row)[0]}}</small><details v-if="rowIssues(row).length>1" class="batch-content-issues"><summary>另 {{rowIssues(row).length-1}} 项</summary><ul><li v-for="message in rowIssues(row).slice(1)" :key="message">{{message}}</li></ul></details></template>
           <template #op="{ row, rowIndex }"><ResourceRowActions>
             <t-button v-if="!resourceOnly" size="small" variant="text" :disabled="disabled" @click="activeKey = row.row_key">编辑</t-button>
-            <template v-if="resourceOnly">
-            <t-button v-if="!reviewOnly" size="small" variant="text" :disabled="disabled" @click="openPair(row)">调整配对</t-button>
-            <t-button v-if="!reviewOnly" size="small" variant="text" :disabled="disabled || rows.indexOf(row) === 0" @click="moveEntry(rows, rows.indexOf(row), -1)">上移</t-button>
-            <t-button v-if="!reviewOnly" size="small" variant="text" :disabled="disabled || rows.indexOf(row) === rows.length - 1" @click="moveEntry(rows, rows.indexOf(row), 1)">下移</t-button>
-            <t-button v-if="!reviewOnly" size="small" variant="text" theme="danger" :disabled="disabled" @click="remove(row)">移除</t-button>
-            </template>
+            <template v-if="resourceOnly"><t-button size="small" variant="text" :disabled="disabled" @click="replacingKey=row.row_key">更换成片</t-button><t-button size="small" variant="text" theme="danger" :disabled="disabled" @click="remove(row)">移出</t-button></template>
             <details v-else-if="!reviewOnly" class="batch-content-more"><summary>更多</summary><div>
             <t-button v-if="!reviewOnly" size="small" variant="text" :disabled="disabled" @click="openPair(row)">调整配对</t-button>
             <t-button v-if="!reviewOnly" size="small" variant="text" :disabled="disabled || rows.indexOf(row) === 0" @click="moveEntry(rows, rows.indexOf(row), -1)">上移</t-button>
@@ -351,12 +371,14 @@ function applyBulk(key, patch, covers) {
     </div>
     <template #footer><t-button theme="primary" :disabled="!pairing.category_id || !pairing.media_account_id || !pairing.composite_output_id" @click="acceptPair">应用配对</t-button></template>
   </ResourceOverlay>
+  <PublishingResourcePicker v-if="replacing" batch visible kind="output" :platform="form.platform" :category="replacing.category_id" :team-id="String(actor.team_id || '')" :excluded-ids="rows.filter(row=>row.row_key!==replacing.row_key).map(row=>row.composite_output_id)" @selected="replaceVideo" @update:visible="replacingKey=''"/>
   <PublishingResourcePicker v-if="picker && pairing && !reviewOnly" batch visible :kind="picker" :platform="form.platform"
     :category="pairing.category_id" :team-id="String(actor.team_id || '')" :excluded-ids="picker === 'output' ? blockedOutputIds : []"
     @selected="choosePairResource" @update:visible="picker = ''" />
   <ResourceOverlay v-if="preview" visible :title="preview.label" :width="880" :footer="false" @update:visible="!$event && closePreview()">
     <p v-if="preview.loading" role="status">正在读取成片</p>
     <FeedbackAlert v-else-if="preview.error" theme="error" :message="preview.error" />
+    <img v-else-if="preview.image && preview.url" :src="preview.url" class="batch-preview-image" alt="实际发布封面" @error="preview.error='封面暂时无法读取'"/>
     <video v-else-if="preview.url" :src="preview.url" class="batch-preview-video" controls preload="metadata" @error="preview.error = '成片暂时无法读取'" />
   </ResourceOverlay>
 </template>
@@ -368,4 +390,5 @@ function applyBulk(key, patch, covers) {
 .batch-content-asset{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere;font-weight:400;text-align:left}
 .batch-content-cover-placeholder{display:grid;place-items:center;flex:none;width:64px;height:48px;padding:4px;box-sizing:border-box;border:1px dashed var(--wt-border);border-radius:4px;font-size:11px;line-height:14px;text-align:center;color:var(--wt-text-tertiary)}
 @media(max-width:680px){.batch-content-card :deep(.table-scroll-wrap){margin-inline:-16px;width:calc(100% + 32px)}}
+.batch-content-card :deep(.resource-selection-toolbar){background:transparent;border:0;padding:0;margin:0 0 16px}.batch-cover-preview{width:64px;height:48px;flex:none;padding:0;border:1px solid var(--wt-border);border-radius:4px;background:var(--wt-bg-card);cursor:zoom-in}.batch-cover-preview img{width:100%;height:100%;object-fit:contain}.batch-preview-image{display:block;max-width:100%;max-height:65vh;margin:auto;object-fit:contain}
 </style>
