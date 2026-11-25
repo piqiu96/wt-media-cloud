@@ -34,27 +34,28 @@ const states = {
   stopping: "停止中",
   ended: "已结束",
 };
-const tone = (row) =>
-  row.status === "ended"
-    ? "success"
-    : row.status === "not_started"
-      ? "neutral"
-      : "info";
+const tone = (row) => row.status === "ended"
+  ? (row.end_reason === "achieved" ? "success" : "neutral")
+  : row.status === "not_started" ? "neutral" : "info";
 const ends = {
   achieved: "目标达成",
-  unmet: "保留目标缺口",
+  unmet: "未达成结束",
   cancelled: "已终止",
   terminated: "已终止",
 };
 const statuses = Object.entries(states)
   .filter(([value]) => value !== "paused")
   .map(([value, label]) => ({ value, label }));
-const operations = (row) => [
-  "detail",
-  ...(row.allowed_actions || []).filter((a) =>
-    ["edit", "start", "cancel", "copy"].includes(a),
-  ),
-];
+const operations = (row) => {
+  const allowed = row.allowed_actions || [];
+  return [
+    ...(row.status === 'not_started' && (allowed.includes('start') || allowed.includes('edit')) ? ['start'] : []),
+    'detail', ...['edit','cancel','copy'].filter(a => allowed.includes(a)),
+  ];
+};
+const blocked = (row, key) => key !== 'detail' && !(row.allowed_actions || []).includes(key);
+const blockReason = (row, key) => blocked(row,key)
+  ? row.action_blockers?.find(b=>b.action===key)?.message || '请先完成全部待执行批次配置' : '';
 const labels = {
   detail: "详情",
   edit: "编辑",
@@ -212,6 +213,7 @@ const columns = [
           ><Button
             v-for="(key, i) in operations(row)"
             :key="key"
+            :disabled="blocked(row,key)" :title="blockReason(row,key)"
             variant="text"
             :class="{ 'is-primary': i === 0, 'is-danger': key === 'cancel' }"
             @click="operation(row, key)"

@@ -5,7 +5,8 @@ import ResourceSection from "../../../shared/ui/resource/ResourceSection.vue";
 import ResourceDescriptions from "../../../shared/ui/resource/ResourceDescriptions.vue";
 import ResourceNotice from "../../../shared/ui/resource/ResourceNotice.vue";
 import ResourceStatusBadge from "../../../shared/ui/resource/ResourceStatusBadge.vue";
-import { configurationLabels, executionLabels } from "../batchPreparation.js";
+import { batchStatus } from "../batchPresentation.js";
+import { configurationLabels } from "../batchPreparation.js";
 import BatchExecutionDetail from "./BatchExecutionDetail.vue";
 import BatchFormalTasks from "./BatchFormalTasks.vue";
 import { createPublicationBatchClient } from "../../../shared/api/publication.js";
@@ -113,7 +114,7 @@ onMounted(async () => {
             },
             {
               label: '执行状态',
-              value: executionLabels[batch.execution_status] || '未开始',
+              value: batchStatus(batch),
             },
             { label: '发布平台', value: batch.platform === 'baidu' ? '百家号' : platformLabel(batch.platform) },
             { label: '所属计划', value: batch.plan_name || '独立批次' },

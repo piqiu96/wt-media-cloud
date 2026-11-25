@@ -124,8 +124,9 @@ async function checkedArrangement() {
   const response = page.waitForResponse(
     (r) => new URL(r.url()).pathname === "/api/v1/publication-plan/validate",
   );
-  await button("检查安排").click();
+  await button("创建计划").click();
   await response;
+  await page.getByRole("dialog", {name:"确认创建发布计划",exact:true}).getByRole("button",{name:"取消",exact:true}).click();
   return structuredClone(saved);
 }
 try {

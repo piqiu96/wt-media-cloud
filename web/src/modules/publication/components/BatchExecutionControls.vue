@@ -1,4 +1,5 @@
 <script setup>
+import { batchActionLabel } from "../batchPresentation.js";
 import { computed, ref, watch } from "vue";
 import ResourceOverlay from "../../../shared/ui/resource/ResourceOverlay.vue";
 import FeedbackAlert from "../../../shared/ui/feedback/FeedbackAlert.vue";
@@ -13,7 +14,7 @@ import {
   batchCommandJournal, batchControlLabels, buildBatchControl, buildBatchStart, readBatchFailures, sendBatchCommand,
 } from "../batchExecution.js";
 
-const props = defineProps({ batch: Object, actor: Object, rowLabel: Function, categoryName: Function, taskLink: Function });
+const props = defineProps({ batch: Object, actor: Object, rowLabel: Function, categoryName: Function, taskLink: Function, inline: Boolean });
 const emit = defineEmits(["updated", "busy", "pending"]);
 const api = createPublicationBatchClient();
 const session = createSessionClient();
@@ -264,11 +265,11 @@ function refreshStart() {
   <template v-else>
     <t-button v-for="item in actions" :key="item" :disabled="waiting || (!!storageError && ['start','resume'].includes(item))"
       :theme="item === 'stop' ? 'danger' : ['start','resume','pause'].includes(item) ? 'primary' : 'default'"
-      :variant="['start','resume','pause'].includes(item) ? 'base' : 'outline'"
-      @click="open(item)">{{ batchControlLabels[item] }}</t-button>
+      :variant="inline ? 'text' : ['start','resume','pause'].includes(item) ? 'base' : 'outline'"
+      @click="open(item)">{{ batchActionLabel(item,batch) }}</t-button>
   </template>
 
-  <ResourceOverlay :visible="visible" :title="batchControlLabels[action] || '批次操作'"
+  <ResourceOverlay :visible="visible" :title="batchActionLabel(action,source || batch) || '批次操作'"
     form-actions :width="640" :busy="waiting" @update:visible="visible = $event">
     <div v-if="source" class="batch-stack">
       <strong>{{ source.name }}</strong>
@@ -318,8 +319,8 @@ function refreshStart() {
           : "终止已保存的配置。批次尚未生成正式任务。" }}</p>
         <p v-if="action === 'finish'">保留 {{ failedTasks.length }} 条明确失败及成片占用。结束后本批无法重试。</p>
         <t-button v-if="action === 'finish' && !failuresLoaded && !waiting" variant="text" @click="loadFailures">重新读取失败任务</t-button>
-        <label>{{ batchControlLabels[action] }}原因
-          <t-textarea v-model="reason" :maxlength="200" :disabled="waiting" :aria-label="batchControlLabels[action] + '原因'" />
+        <label>{{ batchActionLabel(action,source || batch) }}原因
+          <t-textarea v-model="reason" :maxlength="200" :disabled="waiting" :aria-label="batchActionLabel(action,source || batch) + '原因'" />
         </label>
       </template>
     </div>
@@ -329,7 +330,7 @@ function refreshStart() {
       <t-button v-else-if="refreshRequired || (action === 'start' && !preview && error)" theme="default" variant="outline"
         :disabled="waiting" @click="refreshStart">刷新批次</t-button>
       <t-button v-else :loading="waiting" :disabled="disabled"
-        :theme="action === 'stop' ? 'danger' : 'primary'" @click="submit">确认{{ batchControlLabels[action] }}</t-button>
+        :theme="action === 'stop' ? 'danger' : 'primary'" @click="submit">确认{{ batchActionLabel(action,source || batch) }}</t-button>
     </template>
   </ResourceOverlay>
 </template>

@@ -363,6 +363,9 @@ try {
     calls.filter((c) => c.p === "/api/v1/publication-plan").at(-1).q.search,
     undefined,
   );
+  const startBeforeConfiguration=page.getByRole('row').filter({hasText:'矩阵计划'}).getByRole('button',{name:'执行',exact:true});
+  assert.equal(await startBeforeConfiguration.isDisabled(),true);
+  assert.equal(await startBeforeConfiguration.getAttribute('title'),'请先完成全部待执行批次配置');
   await page
     .locator("tr")
     .filter({ hasText: "矩阵计划" })
@@ -374,14 +377,14 @@ try {
     .fill("结构保存计划");
   await number("游戏目标数").fill("2");
   await number("游戏目标数").blur();
-  await button("保存修改").click();
+  await button("保存").click();
   await page
     .getByText("批次分目标须与每格计划目标一致", { exact: true })
     .waitFor();
   assert.equal(planPut, 0);
   await number("配置批次1游戏数量").fill("2");
   await number("配置批次1游戏数量").blur();
-  await button("保存修改").click();
+  await button("保存").click();
   await page
     .getByRole("heading", { name: "发布计划详情", exact: true })
     .waitFor();
@@ -389,7 +392,7 @@ try {
   // Both inherited batch configurations use the original 107 page and save without a start/task call.
   for (let i = 0; i < 2; i++) {
     await planRow(i)
-      .getByRole("button", { name: "编辑配置", exact: true })
+      .getByRole("button", { name: "去配置", exact: true })
       .click();
     assert.equal(
       await number((i === 0 ? "游戏" : "资讯") + "发布目标").isDisabled(),
@@ -438,7 +441,7 @@ try {
   await page.goto(
     base + "/publish-plans?view=detail&id=3&search=keep&page=2&page_size=20",
   );
-  assert.equal(await button("编辑配置").count(), 0);
+  assert.equal(await button("继续配置").count(), 0);
   assert.equal(await button("编辑").count(), 0);
   await planRow(0)
     .getByRole("button", { name: "详情", exact: true })

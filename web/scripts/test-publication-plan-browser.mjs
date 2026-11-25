@@ -221,7 +221,7 @@ for (const role of process.env.WT_PLAN_CREATE_ONLY
       0,
     );
     assert.equal(
-      await page.getByRole("button", { name: "编辑配置", exact: true }).count(),
+      await page.getByRole("button", { name: "继续配置", exact: true }).count(),
       0,
     );
     await page
@@ -296,7 +296,7 @@ for (const role of process.env.WT_PLAN_CREATE_ONLY
         .click();
     await page.getByRole("button", { name: "暂停计划", exact: true }).waitFor();
     assert.equal(
-      await page.getByRole("button", { name: "编辑配置", exact: true }).count(),
+      await page.getByRole("button", { name: "继续配置", exact: true }).count(),
       0,
     );
   }
@@ -327,6 +327,7 @@ for (const role of process.env.WT_PLAN_CREATE_ONLY
         json: { errcode: 0, message: "success", data, logid: "newplan" },
       });
     if (p === "/api/v1/auth/me") return send(actor);
+    if (p === "/api/v1/publication-plan/validate") return send({valid:true,issues:[]});
     if (p === "/api/v1/categories")
       return send([{ id: "1", name: "三角洲行动", enabled: true }]);
     if (p === "/api/v1/publication-plan/recommend") {
@@ -456,6 +457,7 @@ for (const role of process.env.WT_PLAN_CREATE_ONLY
   await page.getByRole("button", { name: "AI 推荐拆批", exact: true }).click();
   await page.getByRole("button", { name: "采用建议", exact: true }).click();
   await page.getByRole("button", { name: "创建计划", exact: true }).click();
+  await page.getByRole("dialog", {name:"确认创建发布计划",exact:true}).getByRole("button",{name:"确认创建",exact:true}).click();
   await page.getByText("首次配置明确无效", { exact: false }).waitFor();
   assert.equal(
     await page.getByLabel("计划名称", { exact: true }).last().isEnabled(),
@@ -466,6 +468,7 @@ for (const role of process.env.WT_PLAN_CREATE_ONLY
     .last()
     .fill("修正后周期计划");
   await page.getByRole("button", { name: "创建计划", exact: true }).click();
+  await page.getByRole("dialog", {name:"确认创建发布计划",exact:true}).getByRole("button",{name:"确认创建",exact:true}).click();
   await page
     .getByRole("button", { name: "核对原创建请求", exact: true })
     .waitFor();
