@@ -26,7 +26,11 @@ func TestAdRealRender(t *testing.T) {
 	dir := t.TempDir()
 	generate := func(name string, duration string, audio bool) MediaInput {
 		path := filepath.Join(dir, name+".mp4")
-		args := []string{"-v", "error", "-f", "lavfi", "-i", "testsrc2=size=320x180:rate=10"}
+		dimensions := "320x180"
+		if name == "portrait" {
+			dimensions = "180x320"
+		}
+		args := []string{"-v", "error", "-f", "lavfi", "-i", "testsrc2=size=" + dimensions + ":rate=10"}
 		if audio {
 			args = append(args, "-f", "lavfi", "-i", "sine=frequency=660:sample_rate=48000")
 		}
@@ -40,9 +44,13 @@ func TestAdRealRender(t *testing.T) {
 		}
 		return MediaInput{Path: path, Duration: info.Duration, Width: info.Width, Height: info.Height, HasAudio: info.HasAudio}
 	}
-	source, tail := generate("source", "16", true), generate("tail", "6", true)
+	landscape, portrait, tail := generate("source", "16", true), generate("portrait", "16", true), generate("tail", "6", true)
 	defaults := json.RawMessage(`{"width":320,"height":180,"fps":10,"crf":28,"preset":"ultrafast","blur":2,"brightness":-0.08,"shadow_blur":2,"shadow_opacity":0.35,"shadow_offset":2,"tail_seconds":6,"tail_fade":0.35,"ending_index_key":"ending/index.json","filter_threads":1}`)
 	for _, audible := range []bool{true, false} {
+		source := landscape
+		if !audible {
+			source = portrait
+		}
 		ad := generate("ad", "2", audible)
 		for _, transition := range []string{"0", "0.2"} {
 			raw := strings.ReplaceAll(string(adParams()), "\"transition_seconds\":0.2", "\"transition_seconds\":"+transition)
