@@ -148,13 +148,26 @@ class PublicationPlanContractTest(unittest.TestCase):
         execution = {"phase": "not_started", "first_started_at": None, "execution_group_no": None,
                      "group_task_ids": [], "group_ended_at": None, "next_group_at": None, "pause": None,
                      "stopped_at": None, "ended_at": None, "target_count": 1, "created_count": 0,
-                     "creation_shortfall": None, "published_count": 0, "target_shortfall": 1, "task_counts": {}}
+                     "creation_shortfall": None, "published_count": 0, "target_shortfall": 1, "verification_required_count": 0, "task_counts": {}}
         value = dict(configuration, id="1", team_id="2", operator_id="3", created_by="3", revision="1",
                      name="批次", candidate_count=0, configuration_status="incomplete", execution_status="not_started",
                      execution=execution, allowed_actions=[], created_at="2026-11-25T00:00:00Z", updated_at="2026-11-25T00:00:00Z")
         value.pop("config")
         self.schema("BatchSummary", filename).validate(dict(value, **fields))
         self.schema("BatchSummary", filename).validate(value)
+
+    def test_batch_execution_exposes_only_real_review_verification_todo(self):
+        schema = self.docs["publication-batch.openapi.yaml"]["components"]["schemas"]["BatchExecution"]
+        field = schema["properties"]["verification_required_count"]
+        self.assertTrue(field["readOnly"])
+        self.assertIn("verification_required_count", schema["required"])
+        validator = Draft202012Validator(field)
+        for value in [0, 1, 99]:
+            validator.validate(value)
+        for value in [-1, None, "1", 1.5, True]:
+            self.assertFalse(validator.is_valid(value))
+        self.assertIn("reviewing", field["description"])
+        self.assertIn("ExceptionLimit", field["description"])
 
     def test_handoff_into_cancelled_position_is_explicitly_not_a_start_receipt(self):
         value = {"plan_id": "1", "revision": "3", "previous_batch_id": "2", "current_batch_id": "3",

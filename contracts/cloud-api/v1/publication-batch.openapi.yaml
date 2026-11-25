@@ -806,7 +806,7 @@ components:
               code: {type: string}
     BatchExecution:
       type: object
-      required: [phase, first_started_at, execution_group_no, group_task_ids, group_ended_at, next_group_at, pause, stopped_at, ended_at, target_count, created_count, creation_shortfall, published_count, target_shortfall, task_counts]
+      required: [phase, first_started_at, execution_group_no, group_task_ids, group_ended_at, next_group_at, pause, stopped_at, ended_at, target_count, created_count, creation_shortfall, published_count, target_shortfall, verification_required_count, task_counts]
       properties:
         phase: {type: string, enum: [not_started, running, waiting_resources, waiting_interval, awaiting_processing, paused, stopping, ended]}
         first_started_at: {type: [string, 'null'], format: date-time}
@@ -827,6 +827,11 @@ components:
           description: Null until first start. Thereafter calculated from the frozen target and number of formal tasks.
         published_count: {type: integer, minimum: 0, description: Distinct formal tasks with verified public work, excluding reviewing and attempts.}
         target_shortfall: {type: integer, minimum: 0, description: The fixed target less the verified public count, floored at zero.}
+        verification_required_count:
+          type: integer
+          minimum: 0
+          readOnly: true
+          description: Count only reviewing tasks whose original facts require manual verification at the captured projection time. Normal reviewing and freshly valid manual reviewing count zero; uncertain stays in its own task_counts state and is never counted twice here. This projection does not change task states or the batch ExceptionLimit.
         task_counts:
           type: object
           propertyNames: {$ref: 'publication.openapi.yaml#/components/schemas/TaskStatus'}
