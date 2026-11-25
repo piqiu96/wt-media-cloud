@@ -154,6 +154,11 @@ func projectBatch(a identity.PublicUser, v model.Batch) model.Batch {
 				code = "plan_position_blocked"
 				message = "所属计划已停止或该批次不在当前执行位置"
 			}
+			if act == "start" {
+				blocked = true
+				code = "plan_position_blocked"
+				message = "所属计划批次需从计划统一启动，请到计划完成全批确认"
+			}
 			if blocked {
 				v.ActionBlockers = append(v.ActionBlockers, model.BatchActionBlocker{Action: act, Code: code, Message: message})
 			} else {
