@@ -454,12 +454,13 @@ try {
     .locator('[aria-label="搜索任务"] input, input[aria-label="搜索任务"]')
     .first()
     .fill("可筛选任务");
-  await drawer.getByRole("button", { name: "查询", exact: true }).click();
-  await page.waitForResponse(
+  const taskFilterResponse = page.waitForResponse(
     (r) =>
       new URL(r.url()).pathname.endsWith("/1/task") &&
       new URL(r.url()).searchParams.get("search") === "可筛选任务",
   );
+  await drawer.getByRole("button", { name: "查询", exact: true }).click();
+  await taskFilterResponse;
   await drawer
     .locator(".batch-tab .t-pagination")
     .getByText("2", { exact: true })
@@ -473,15 +474,16 @@ try {
     undefined,
   );
   const recordSection = drawer.getByRole("region", { name: "操作记录" });
-  await recordSection
-    .locator(".t-pagination")
-    .getByText("2", { exact: true })
-    .click();
-  await page.waitForResponse(
+  const recordPageResponse = page.waitForResponse(
     (r) =>
       new URL(r.url()).pathname.endsWith("/1/record") &&
       new URL(r.url()).searchParams.get("page") === "2",
   );
+  await recordSection
+    .locator(".t-pagination")
+    .getByText("2", { exact: true })
+    .click();
+  await recordPageResponse;
   await page
     .getByRole("button", { name: "关闭发布批次详情", exact: true })
     .click();
