@@ -1,0 +1,1916 @@
+openapi: 3.1.0
+info:
+  title: WT Media Publication Plan
+  version: 2026.11.25.4
+  description: Session-owned orchestration of prepared batches. No public automatic
+    advance, makeup, cross-user authorization or parallel workflow engine. IDs/revisions
+    decimal strings and timestamps RFC3339. All mutations audit; transaction locks
+    plan then batches by ID, required files/Profile, task, attempt. External model/files/browser
+    outside DB transaction.
+security:
+- sessionCookie: []
+paths:
+  /api/v1/publication-plan:
+    get:
+      operationId: listPublicationPlans
+      description: Scope before filtering/count/pagination. Operator own plans; senior
+        own team/category scope; admin read-only across teams. Exact request_key is
+        creator scoped and ignores other filters.
+      responses:
+        '200':
+          description: PlanPage
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  errcode:
+                    type: integer
+                    const: 0
+                  message:
+                    type: string
+                    maxLength: 2000
+                    minLength: 0
+                  data:
+                    $ref: '#/components/schemas/PlanPage'
+                  logid:
+                    type: string
+                    maxLength: 200
+                    minLength: 0
+                required:
+                - errcode
+                - message
+                - data
+                - logid
+        '400':
+          description: 'publication_invalid: invalid structure or exact selection.'
+        '401':
+          description: Session required.
+        '404':
+          description: 'publication_not_found: absent or outside authorized scope.'
+        '409':
+          description: 'publication_conflict/parent_blocked/shortfall_changed/output_occupied:
+            no partial writes; reload current facts.'
+        '503':
+          description: 'publication_unavailable: preserve original key and input;
+            never assume non-application.'
+      parameters:
+      - in: query
+        name: page
+        schema: &id002
+          type: integer
+          minimum: 1
+      - in: query
+        name: page_size
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+      - in: query
+        name: search
+        schema:
+          type: string
+          maxLength: 100
+          minLength: 0
+      - in: query
+        name: status
+        schema: &id015
+          type: string
+          enum:
+          - not_started
+          - running
+          - paused
+          - stopping
+          - ended
+      - in: query
+        name: platform
+        schema:
+          type: string
+          maxLength: 30
+          minLength: 0
+      - in: query
+        name: category_id
+        schema: &id001
+          type: string
+          pattern: ^[1-9][0-9]*$
+      - in: query
+        name: request_key
+        schema:
+          $ref: '#/components/schemas/RequestKey'
+    post:
+      operationId: createPublicationPlan
+      description: Enabled operator/senior creates only for self. Atomically plan,
+        ordered batch skeletons and audit; zero tasks/attempts/occupancy/authorization.
+        Per-cell sums equal goals; contiguous platform groups and stable row keys.
+        Same creator/key+canonical input returns original object, different input
+        conflicts.
+      responses:
+        '200':
+          description: PlanDetail
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  errcode:
+                    type: integer
+                    const: 0
+                  message:
+                    type: string
+                    maxLength: 2000
+                    minLength: 0
+                  data:
+                    $ref: '#/components/schemas/PlanDetail'
+                  logid:
+                    type: string
+                    maxLength: 200
+                    minLength: 0
+                required:
+                - errcode
+                - message
+                - data
+                - logid
+        '400':
+          description: 'publication_invalid: invalid structure or exact selection.'
+        '401':
+          description: Session required.
+        '404':
+          description: 'publication_not_found: absent or outside authorized scope.'
+        '409':
+          description: 'publication_conflict/parent_blocked/shortfall_changed/output_occupied:
+            no partial writes; reload current facts.'
+        '503':
+          description: 'publication_unavailable: preserve original key and input;
+            never assume non-application.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreatePlanInput'
+  /api/v1/publication-plan/{id}:
+    parameters:
+    - in: path
+      name: id
+      required: true
+      schema: *id001
+    get:
+      operationId: getPublicationPlan
+      description: Returns authoritative goal matrix, actual progress, original batch
+        actions/blockers and current handoff basis. Public means matched publicly
+        accessible linked work only.
+      responses:
+        '200':
+          description: PlanDetail
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  errcode:
+                    type: integer
+                    const: 0
+                  message:
+                    type: string
+                    maxLength: 2000
+                    minLength: 0
+                  data:
+                    $ref: '#/components/schemas/PlanDetail'
+                  logid:
+                    type: string
+                    maxLength: 200
+                    minLength: 0
+                required:
+                - errcode
+                - message
+                - data
+                - logid
+        '400':
+          description: 'publication_invalid: invalid structure or exact selection.'
+        '401':
+          description: Session required.
+        '404':
+          description: 'publication_not_found: absent or outside authorized scope.'
+        '409':
+          description: 'publication_conflict/parent_blocked/shortfall_changed/output_occupied:
+            no partial writes; reload current facts.'
+        '503':
+          description: 'publication_unavailable: preserve original key and input;
+            never assume non-application.'
+  /api/v1/publication-plan/{id}/structure:
+    parameters:
+    - in: path
+      name: id
+      required: true
+      schema: *id001
+    put:
+      operationId: updatePublicationPlanStructure
+      description: Only before first start. Stable batch IDs must belong to this own
+        plan; external owner/plan mutation forbidden. Preserve terminated history;
+        no resurrecting it. Revalidate affected candidates after goal changes; atomic
+        rollback on nonconservation.
+      responses:
+        '200':
+          description: PlanDetail
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  errcode:
+                    type: integer
+                    const: 0
+                  message:
+                    type: string
+                    maxLength: 2000
+                    minLength: 0
+                  data:
+                    $ref: '#/components/schemas/PlanDetail'
+                  logid:
+                    type: string
+                    maxLength: 200
+                    minLength: 0
+                required:
+                - errcode
+                - message
+                - data
+                - logid
+        '400':
+          description: 'publication_invalid: invalid structure or exact selection.'
+        '401':
+          description: Session required.
+        '404':
+          description: 'publication_not_found: absent or outside authorized scope.'
+        '409':
+          description: 'publication_conflict/parent_blocked/shortfall_changed/output_occupied:
+            no partial writes; reload current facts.'
+        '503':
+          description: 'publication_unavailable: preserve original key and input;
+            never assume non-application.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StructureInput'
+  /api/v1/publication-plan/{id}/start:
+    parameters:
+    - in: path
+      name: id
+      required: true
+      schema: *id001
+    post:
+      operationId: startPublicationPlan
+      description: First legal unstarted position after explicit acknowledgement of
+        preceding terminated history. Require every remaining batch ready and exact
+        revision/selection/shortfall. Reject duplicate (platform,output_id) across
+        included rows, locating both batches/rows. Freeze plan and all configurations/selected
+        scopes; create first batch tasks, occupancy, authorization and cursor in one
+        transaction using batch start core. Future occupancy is not taken. Persist
+        immutable original-key/digest receipt; same key+input replays receipt before
+        checking mutable resources; different input conflicts, unknown response requires
+        original key and original input, never row-key matching. Every pending batch
+        needs internally complete confirmed content; current first batch resources
+        must be valid. Future resources are rechecked when its frozen selection starts;
+        later conflict waits for the same resource, never silently reduces target,
+        substitutes output or skips position.
+      responses:
+        '200':
+          description: StartPlanResult
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  errcode:
+                    type: integer
+                    const: 0
+                  message:
+                    type: string
+                    maxLength: 2000
+                    minLength: 0
+                  data:
+                    $ref: '#/components/schemas/StartPlanResult'
+                  logid:
+                    type: string
+                    maxLength: 200
+                    minLength: 0
+                required:
+                - errcode
+                - message
+                - data
+                - logid
+        '400':
+          description: 'publication_invalid: invalid structure or exact selection.'
+        '401':
+          description: Session required.
+        '404':
+          description: 'publication_not_found: absent or outside authorized scope.'
+        '409':
+          description: 'publication_conflict/parent_blocked/shortfall_changed/output_occupied:
+            no partial writes; reload current facts.'
+        '503':
+          description: 'publication_unavailable: preserve original key and input;
+            never assume non-application.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StartPlanInput'
+  /api/v1/publication-plan/{id}/pause:
+    parameters:
+    - in: path
+      name: id
+      required: true
+      schema: *id001
+    post:
+      operationId: pausePublicationPlan
+      description: Only prevents subsequent batch starts; current batch authorized
+        execution continues. Does not unfreeze configurations.
+      responses:
+        '200':
+          description: PlanDetail
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  errcode:
+                    type: integer
+                    const: 0
+                  message:
+                    type: string
+                    maxLength: 2000
+                    minLength: 0
+                  data:
+                    $ref: '#/components/schemas/PlanDetail'
+                  logid:
+                    type: string
+                    maxLength: 200
+                    minLength: 0
+                required:
+                - errcode
+                - message
+                - data
+                - logid
+        '400':
+          description: 'publication_invalid: invalid structure or exact selection.'
+        '401':
+          description: Session required.
+        '404':
+          description: 'publication_not_found: absent or outside authorized scope.'
+        '409':
+          description: 'publication_conflict/parent_blocked/shortfall_changed/output_occupied:
+            no partial writes; reload current facts.'
+        '503':
+          description: 'publication_unavailable: preserve original key and input;
+            never assume non-application.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReasonInput'
+  /api/v1/publication-plan/{id}/resume:
+    parameters:
+    - in: path
+      name: id
+      required: true
+      schema: *id001
+    post:
+      operationId: resumePublicationPlan
+      description: Explicitly clear manual plan pause and reevaluate full gates. Never
+        clear batch exception pause or manual confirmation because resources recovered.
+      responses:
+        '200':
+          description: PlanDetail
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  errcode:
+                    type: integer
+                    const: 0
+                  message:
+                    type: string
+                    maxLength: 2000
+                    minLength: 0
+                  data:
+                    $ref: '#/components/schemas/PlanDetail'
+                  logid:
+                    type: string
+                    maxLength: 200
+                    minLength: 0
+                required:
+                - errcode
+                - message
+                - data
+                - logid
+        '400':
+          description: 'publication_invalid: invalid structure or exact selection.'
+        '401':
+          description: Session required.
+        '404':
+          description: 'publication_not_found: absent or outside authorized scope.'
+        '409':
+          description: 'publication_conflict/parent_blocked/shortfall_changed/output_occupied:
+            no partial writes; reload current facts.'
+        '503':
+          description: 'publication_unavailable: preserve original key and input;
+            never assume non-application.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RevisionInput'
+  /api/v1/publication-plan/{id}/confirm-next:
+    parameters:
+    - in: path
+      name: id
+      required: true
+      schema: *id001
+    post:
+      operationId: confirmPublicationPlanNext
+      description: Under plan lock compare fresh canonical basis including all started
+        prefix task revisions/status/attempts, check stop/expiry and latest manual
+        facts, current/next batch. Recheck all gates after comparing. No unresolved/verification-required
+        task may be bypassed. failed*10 <= published+reviewing+failed automatically
+        hands off without extra batch finish; >10 requires continue; zero denominator
+        requires skip. Cancelled/abandoned excluded. Batch own pause still blocks.
+        Atomically handoff and next batch start/cursor; old batch retry forbidden.
+        Original key+digest immutable receipt replay; changed facts/input conflict.
+        Frozen selection cannot be replaced.
+      responses:
+        '200':
+          description: AdvanceResult
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  errcode:
+                    type: integer
+                    const: 0
+                  message:
+                    type: string
+                    maxLength: 2000
+                    minLength: 0
+                  data:
+                    $ref: '#/components/schemas/AdvanceResult'
+                  logid:
+                    type: string
+                    maxLength: 200
+                    minLength: 0
+                required:
+                - errcode
+                - message
+                - data
+                - logid
+        '400':
+          description: 'publication_invalid: invalid structure or exact selection.'
+        '401':
+          description: Session required.
+        '404':
+          description: 'publication_not_found: absent or outside authorized scope.'
+        '409':
+          description: 'publication_conflict/parent_blocked/shortfall_changed/output_occupied:
+            no partial writes; reload current facts.'
+        '503':
+          description: 'publication_unavailable: preserve original key and input;
+            never assume non-application.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConfirmNextInput'
+  /api/v1/publication-plan/{id}/takeover:
+    parameters:
+    - in: path
+      name: id
+      required: true
+      schema: *id001
+    post:
+      operationId: takeoverPublicationPlan
+      description: Only self current position in an already first-started plan. Atomically
+        pause plan future progression and permit current batch legal control using
+        frozen selection. Cannot bypass full-plan first start or start a future batch.
+      responses:
+        '200':
+          description: PlanDetail
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  errcode:
+                    type: integer
+                    const: 0
+                  message:
+                    type: string
+                    maxLength: 2000
+                    minLength: 0
+                  data:
+                    $ref: '#/components/schemas/PlanDetail'
+                  logid:
+                    type: string
+                    maxLength: 200
+                    minLength: 0
+                required:
+                - errcode
+                - message
+                - data
+                - logid
+        '400':
+          description: 'publication_invalid: invalid structure or exact selection.'
+        '401':
+          description: Session required.
+        '404':
+          description: 'publication_not_found: absent or outside authorized scope.'
+        '409':
+          description: 'publication_conflict/parent_blocked/shortfall_changed/output_occupied:
+            no partial writes; reload current facts.'
+        '503':
+          description: 'publication_unavailable: preserve original key and input;
+            never assume non-application.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TakeoverInput'
+  /api/v1/publication-plan/{id}/finish:
+    parameters:
+    - in: path
+      name: id
+      required: true
+      schema: *id001
+    post:
+      operationId: finishPublicationPlan
+      description: Under plan lock require all existing batches processed and no unresolved
+        or reviewing/verification-required result. Recompute exact per-cell public
+        shortfalls, no cross-cell offset. achieved requires every cell met; unmet
+        requires reason note. Preserve target, records and occupation. Late public
+        results update statistics only, never reopen or replay.
+      responses:
+        '200':
+          description: PlanDetail
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  errcode:
+                    type: integer
+                    const: 0
+                  message:
+                    type: string
+                    maxLength: 2000
+                    minLength: 0
+                  data:
+                    $ref: '#/components/schemas/PlanDetail'
+                  logid:
+                    type: string
+                    maxLength: 200
+                    minLength: 0
+                required:
+                - errcode
+                - message
+                - data
+                - logid
+        '400':
+          description: 'publication_invalid: invalid structure or exact selection.'
+        '401':
+          description: Session required.
+        '404':
+          description: 'publication_not_found: absent or outside authorized scope.'
+        '409':
+          description: 'publication_conflict/parent_blocked/shortfall_changed/output_occupied:
+            no partial writes; reload current facts.'
+        '503':
+          description: 'publication_unavailable: preserve original key and input;
+            never assume non-application.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FinishPlanInput'
+  /api/v1/publication-plan/{id}/cancel:
+    parameters:
+    - in: path
+      name: id
+      required: true
+      schema: *id001
+    post:
+      operationId: cancelPublicationPlan
+      description: Persist irreversible plan fence over all batches including unconfigured
+        skeletons. Claim/start/retry/resume and report submitting permission/heartbeat
+        control read same parent fence. Cancel unclaimed, safely settle active/unknown/human
+        and original observations; already issued permission cannot be revoked and
+        actual result is retained. No republish or resume; single batch stop never
+        cancels plan.
+      responses:
+        '200':
+          description: CancelResult
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  errcode:
+                    type: integer
+                    const: 0
+                  message:
+                    type: string
+                    maxLength: 2000
+                    minLength: 0
+                  data:
+                    $ref: '#/components/schemas/CancelResult'
+                  logid:
+                    type: string
+                    maxLength: 200
+                    minLength: 0
+                required:
+                - errcode
+                - message
+                - data
+                - logid
+        '400':
+          description: 'publication_invalid: invalid structure or exact selection.'
+        '401':
+          description: Session required.
+        '404':
+          description: 'publication_not_found: absent or outside authorized scope.'
+        '409':
+          description: 'publication_conflict/parent_blocked/shortfall_changed/output_occupied:
+            no partial writes; reload current facts.'
+        '503':
+          description: 'publication_unavailable: preserve original key and input;
+            never assume non-application.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReasonInput'
+  /api/v1/publication-plan/{id}/batch:
+    parameters:
+    - in: path
+      name: id
+      required: true
+      schema: *id001
+    get:
+      operationId: listPublicationPlanBatches
+      description: Scope before pagination; original batch actions and audit facts,
+        no second execution workflow.
+      responses:
+        '200':
+          description: BatchPage
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  errcode:
+                    type: integer
+                    const: 0
+                  message:
+                    type: string
+                    maxLength: 2000
+                    minLength: 0
+                  data:
+                    $ref: '#/components/schemas/BatchPage'
+                  logid:
+                    type: string
+                    maxLength: 200
+                    minLength: 0
+                required:
+                - errcode
+                - message
+                - data
+                - logid
+        '400':
+          description: 'publication_invalid: invalid structure or exact selection.'
+        '401':
+          description: Session required.
+        '404':
+          description: 'publication_not_found: absent or outside authorized scope.'
+        '409':
+          description: 'publication_conflict/parent_blocked/shortfall_changed/output_occupied:
+            no partial writes; reload current facts.'
+        '503':
+          description: 'publication_unavailable: preserve original key and input;
+            never assume non-application.'
+      parameters:
+      - in: query
+        name: page
+        required: false
+        schema: *id002
+      - in: query
+        name: page_size
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+      - in: query
+        name: execution_status
+        schema:
+          $ref: publication-batch.openapi.yaml#/components/schemas/ExecutionStatus
+      - in: query
+        name: pending
+        schema:
+          type: boolean
+  /api/v1/publication-plan/{id}/record:
+    parameters:
+    - in: path
+      name: id
+      required: true
+      schema: *id001
+    get:
+      operationId: listPublicationPlanRecords
+      description: Scope before pagination; original batch actions and audit facts,
+        no second execution workflow.
+      responses:
+        '200':
+          description: RecordPage
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  errcode:
+                    type: integer
+                    const: 0
+                  message:
+                    type: string
+                    maxLength: 2000
+                    minLength: 0
+                  data:
+                    $ref: '#/components/schemas/RecordPage'
+                  logid:
+                    type: string
+                    maxLength: 200
+                    minLength: 0
+                required:
+                - errcode
+                - message
+                - data
+                - logid
+        '400':
+          description: 'publication_invalid: invalid structure or exact selection.'
+        '401':
+          description: Session required.
+        '404':
+          description: 'publication_not_found: absent or outside authorized scope.'
+        '409':
+          description: 'publication_conflict/parent_blocked/shortfall_changed/output_occupied:
+            no partial writes; reload current facts.'
+        '503':
+          description: 'publication_unavailable: preserve original key and input;
+            never assume non-application.'
+      parameters:
+      - in: query
+        name: page
+        required: false
+        schema: *id002
+      - in: query
+        name: page_size
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+  /api/v1/publication-plan/{id}/copy:
+    parameters:
+    - in: path
+      name: id
+      required: true
+      schema: *id001
+    get:
+      operationId: copyPublicationPlan
+      description: Authorized projection. Batch buttons use identical original batch
+        names/permissions/conditions/APIs and blockers, including plan frozen/position
+        constraints. Copy only ended plan whitelist, requires fresh period/key and
+        resource review; no tasks/results/authorization/occupation inherited.
+      responses:
+        '200':
+          description: CopyResult
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  errcode:
+                    type: integer
+                    const: 0
+                  message:
+                    type: string
+                    maxLength: 2000
+                    minLength: 0
+                  data:
+                    $ref: '#/components/schemas/CopyResult'
+                  logid:
+                    type: string
+                    maxLength: 200
+                    minLength: 0
+                required:
+                - errcode
+                - message
+                - data
+                - logid
+        '400':
+          description: 'publication_invalid: invalid structure or exact selection.'
+        '401':
+          description: Session required.
+        '404':
+          description: 'publication_not_found: absent or outside authorized scope.'
+        '409':
+          description: 'publication_conflict/parent_blocked/shortfall_changed/output_occupied:
+            no partial writes; reload current facts.'
+        '503':
+          description: 'publication_unavailable: preserve original key and input;
+            never assume non-application.'
+      parameters:
+      - in: query
+        name: expected_revision
+        required: true
+        schema: *id001
+  /api/v1/publication-plan/validate:
+    post:
+      operationId: validatePublicationPlan
+      description: Read-only conservation, scope and platform-group/order validation.
+        No reservation or authorization.
+      responses:
+        '200':
+          description: ValidationResult
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                properties:
+                  errcode:
+                    type: integer
+                    const: 0
+                  message:
+                    type: string
+                    maxLength: 2000
+                    minLength: 0
+                  data:
+                    $ref: '#/components/schemas/ValidationResult'
+                  logid:
+                    type: string
+                    maxLength: 200
+                    minLength: 0
+                required:
+                - errcode
+                - message
+                - data
+                - logid
+        '400':
+          description: 'publication_invalid: invalid structure or exact selection.'
+        '401':
+          description: Session required.
+        '404':
+          description: 'publication_not_found: absent or outside authorized scope.'
+        '409':
+          description: 'publication_conflict/parent_blocked/shortfall_changed/output_occupied:
+            no partial writes; reload current facts.'
+        '503':
+          description: 'publication_unavailable: preserve original key and input;
+            never assume non-application.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ValidateInput'
+  /api/v1/publication-plan/recommend:
+    post:
+      operationId: recommendPublicationPlan
+      description: Real configured DeepSeek after self/category authorization; server
+        derives authorized resource counts. Send goals, counts, existing arrangement
+        and instruction only, no credentials/account/Profile identifiers/video/resource
+        snapshots. No deterministic fake AI or autosave/adoption. Complete output
+        must pass conservation/group/order validation. Deadline180s; disconnect cancels;
+        model unavailable explicit failure; manual editing remains usable.
+      responses:
+        '200':
+          description: Bounded SSE; only complete validated item_result can be adopted;
+            terminal done or error.
+          content:
+            text/event-stream:
+              schema:
+                type: string
+              x-sse-events:
+                start:
+                  schema:
+                    type: object
+                    additionalProperties: false
+                    required:
+                    - request_id
+                    - message
+                    properties:
+                      request_id:
+                        type: string
+                        minLength: 1
+                      message:
+                        type: string
+                progress:
+                  schema:
+                    type: object
+                    additionalProperties: false
+                    required:
+                    - request_id
+                    - message
+                    properties:
+                      request_id:
+                        type: string
+                        minLength: 1
+                      message:
+                        type: string
+                item_result:
+                  schema:
+                    type: object
+                    additionalProperties: false
+                    required:
+                    - request_id
+                    - result
+                    properties:
+                      request_id:
+                        type: string
+                        minLength: 1
+                      result:
+                        $ref: '#/components/schemas/RecommendationResult'
+                item_error:
+                  schema:
+                    type: object
+                    additionalProperties: false
+                    required:
+                    - request_id
+                    - code
+                    - message
+                    properties:
+                      request_id:
+                        type: string
+                        minLength: 1
+                      code:
+                        type: string
+                      message:
+                        type: string
+                done:
+                  schema:
+                    type: object
+                    additionalProperties: false
+                    required:
+                    - request_id
+                    - completed
+                    - failed
+                    properties:
+                      request_id:
+                        type: string
+                        minLength: 1
+                      completed:
+                        type: integer
+                        minimum: 0
+                      failed:
+                        type: integer
+                        minimum: 0
+                error:
+                  schema:
+                    type: object
+                    additionalProperties: false
+                    required:
+                    - request_id
+                    - code
+                    - message
+                    properties:
+                      request_id:
+                        type: string
+                        minLength: 1
+                      code:
+                        type: string
+                      message:
+                        type: string
+        '400':
+          description: 'publication_invalid: invalid structure or exact selection.'
+        '401':
+          description: Session required.
+        '404':
+          description: 'publication_not_found: absent or outside authorized scope.'
+        '409':
+          description: 'publication_conflict/parent_blocked/shortfall_changed/output_occupied:
+            no partial writes; reload current facts.'
+        '503':
+          description: 'publication_unavailable: preserve original key and input;
+            never assume non-application.'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RecommendationInput'
+components:
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: wt_media_session
+  schemas:
+    ID: *id001
+    RequestKey:
+      type: string
+      maxLength: 128
+      minLength: 1
+    Fingerprint:
+      type: string
+      pattern: ^[a-f0-9]{64}$
+    Goal:
+      type: object
+      additionalProperties: false
+      properties:
+        platform:
+          type: string
+          enum:
+          - baidu
+        category_id: *id001
+        target_count: *id002
+      required:
+      - platform
+      - category_id
+      - target_count
+    Target:
+      type: object
+      additionalProperties: false
+      properties:
+        category_id: *id001
+        target_count: *id002
+      required:
+      - category_id
+      - target_count
+    Skeleton:
+      type: object
+      additionalProperties: false
+      properties:
+        row_key: &id003
+          type: string
+          maxLength: 64
+          minLength: 1
+        name: &id004
+          type: string
+          maxLength: 100
+          minLength: 1
+        platform: &id005
+          type: string
+          enum:
+          - baidu
+        group_order: *id002
+        batch_order: *id002
+        targets: &id006
+          type: array
+          items:
+            $ref: '#/components/schemas/Target'
+          minItems: 1
+          maxItems: 1000
+      required:
+      - row_key
+      - name
+      - platform
+      - group_order
+      - batch_order
+      - targets
+    StructureBatch:
+      type: object
+      additionalProperties: false
+      properties:
+        row_key: *id003
+        name: *id004
+        platform: *id005
+        group_order: *id002
+        batch_order: *id002
+        targets: *id006
+        batch_id: *id001
+      required:
+      - row_key
+      - name
+      - platform
+      - group_order
+      - batch_order
+      - targets
+    CreatePlanInput:
+      type: object
+      additionalProperties: false
+      properties:
+        name: &id008
+          type: string
+          maxLength: 100
+          minLength: 1
+        date_start: &id007
+          type: string
+          format: date
+        date_end: *id007
+        note: &id009
+          type: string
+          maxLength: 2000
+          minLength: 0
+        goals: &id010
+          type: array
+          items:
+            $ref: '#/components/schemas/Goal'
+          minItems: 1
+          maxItems: 1000
+        batches: &id011
+          type: array
+          items:
+            $ref: '#/components/schemas/Skeleton'
+          minItems: 1
+          maxItems: 1000
+        request_key:
+          $ref: '#/components/schemas/RequestKey'
+      required:
+      - name
+      - date_start
+      - date_end
+      - note
+      - goals
+      - batches
+      - request_key
+    StructureInput:
+      type: object
+      additionalProperties: false
+      properties:
+        name: *id008
+        date_start: *id007
+        date_end: *id007
+        note: *id009
+        goals: *id010
+        batches:
+          type: array
+          items:
+            $ref: '#/components/schemas/StructureBatch'
+          minItems: 1
+          maxItems: 1000
+        expected_revision: *id001
+      required:
+      - name
+      - date_start
+      - date_end
+      - note
+      - goals
+      - batches
+      - expected_revision
+    ValidateInput:
+      type: object
+      additionalProperties: false
+      properties:
+        name: *id008
+        date_start: *id007
+        date_end: *id007
+        note: *id009
+        goals: *id010
+        batches: *id011
+        plan_id: *id001
+        expected_revision: *id001
+      required:
+      - name
+      - date_start
+      - date_end
+      - note
+      - goals
+      - batches
+    Issue:
+      type: object
+      additionalProperties: false
+      properties:
+        code:
+          type: string
+          maxLength: 100
+          minLength: 1
+        message:
+          type: string
+          maxLength: 1000
+          minLength: 1
+        batch_id: *id001
+        row_key:
+          type: string
+          maxLength: 64
+          minLength: 0
+        related_batch_id: *id001
+        related_row_key:
+          type: string
+          maxLength: 64
+          minLength: 0
+        platform:
+          type: string
+          maxLength: 30
+          minLength: 0
+        category_id: *id001
+        field:
+          type: string
+          maxLength: 100
+          minLength: 0
+      required:
+      - code
+      - message
+    ValidationResult:
+      type: object
+      additionalProperties: false
+      properties:
+        valid: &id013
+          type: boolean
+        issues:
+          type: array
+          items:
+            $ref: '#/components/schemas/Issue'
+          minItems: 0
+          maxItems: 1000
+      required:
+      - valid
+      - issues
+    ActionBlocker:
+      type: object
+      additionalProperties: false
+      properties:
+        action:
+          type: string
+          maxLength: 50
+          minLength: 1
+        code:
+          type: string
+          maxLength: 100
+          minLength: 1
+        message:
+          type: string
+          maxLength: 1000
+          minLength: 1
+      required:
+      - action
+      - code
+      - message
+    GoalShortfall:
+      type: object
+      additionalProperties: false
+      properties:
+        platform:
+          type: string
+          enum:
+          - baidu
+        category_id: *id001
+        shortfall: &id012
+          type: integer
+          minimum: 0
+      required:
+      - platform
+      - category_id
+      - shortfall
+    GoalResult:
+      type: object
+      additionalProperties: false
+      properties:
+        platform:
+          type: string
+          maxLength: 30
+          minLength: 1
+        category_id: *id001
+        target_count: *id002
+        published_count: *id012
+        shortfall: *id012
+      required:
+      - platform
+      - category_id
+      - target_count
+      - published_count
+      - shortfall
+    BatchConfirmation:
+      type: object
+      additionalProperties: false
+      properties:
+        batch_id: *id001
+        expected_revision: *id001
+        included_row_keys:
+          type: array
+          items:
+            type: string
+            maxLength: 64
+            minLength: 1
+          minItems: 1
+          maxItems: 1000
+          uniqueItems: true
+        excluded_row_keys:
+          type: array
+          items:
+            type: string
+            maxLength: 64
+            minLength: 1
+          minItems: 0
+          maxItems: 1000
+          uniqueItems: true
+        allow_shortfall: *id013
+        expected_shortfalls:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            properties:
+              category_id: *id001
+              shortfall: *id012
+            required:
+            - category_id
+            - shortfall
+          minItems: 1
+          maxItems: 1000
+      required:
+      - batch_id
+      - expected_revision
+      - included_row_keys
+      - excluded_row_keys
+      - allow_shortfall
+      - expected_shortfalls
+    StartPlanInput:
+      type: object
+      additionalProperties: false
+      properties:
+        request_key:
+          $ref: '#/components/schemas/RequestKey'
+        expected_revision: *id001
+        first_batch_id: *id001
+        batch_confirmations:
+          type: array
+          items:
+            $ref: '#/components/schemas/BatchConfirmation'
+          minItems: 1
+          maxItems: 1000
+      required:
+      - request_key
+      - expected_revision
+      - first_batch_id
+      - batch_confirmations
+    ConfirmNextInput:
+      type: object
+      additionalProperties: false
+      properties:
+        request_key:
+          $ref: '#/components/schemas/RequestKey'
+        expected_revision: *id001
+        current_batch_id: *id001
+        next_batch_id: *id001
+        expected_basis_fingerprint:
+          $ref: '#/components/schemas/Fingerprint'
+        decision:
+          type: string
+          enum:
+          - continue
+          - skip
+        reason:
+          type: string
+          maxLength: 200
+          minLength: 1
+      required:
+      - request_key
+      - expected_revision
+      - current_batch_id
+      - next_batch_id
+      - expected_basis_fingerprint
+      - decision
+      - reason
+    TakeoverInput:
+      type: object
+      additionalProperties: false
+      properties:
+        expected_revision: *id001
+        current_batch_id: *id001
+        expected_batch_revision: *id001
+        reason:
+          type: string
+          maxLength: 200
+          minLength: 1
+      required:
+      - expected_revision
+      - current_batch_id
+      - expected_batch_revision
+      - reason
+    ReasonInput:
+      type: object
+      additionalProperties: false
+      properties:
+        expected_revision: *id001
+        reason:
+          type: string
+          maxLength: 200
+          minLength: 1
+      required:
+      - expected_revision
+      - reason
+    RevisionInput:
+      type: object
+      additionalProperties: false
+      properties:
+        expected_revision: *id001
+      required:
+      - expected_revision
+    FinishPlanInput:
+      type: object
+      additionalProperties: false
+      properties:
+        expected_revision: *id001
+        expected_shortfalls:
+          type: array
+          items:
+            $ref: '#/components/schemas/GoalShortfall'
+          minItems: 1
+          maxItems: 1000
+        end_reason:
+          type: string
+          enum:
+          - achieved
+          - unmet
+        end_note:
+          type: string
+          maxLength: 2000
+          minLength: 0
+      required:
+      - expected_revision
+      - expected_shortfalls
+      - end_reason
+      - end_note
+      allOf:
+      - if:
+          properties:
+            end_reason:
+              const: unmet
+        then:
+          properties:
+            end_note:
+              type: string
+              maxLength: 2000
+              minLength: 1
+    HandoffBasis:
+      type: object
+      additionalProperties: false
+      properties:
+        current_batch_id: &id014
+          type:
+          - string
+          - 'null'
+          pattern: ^[1-9][0-9]*$
+        next_batch_id: *id014
+        current_batch_revision: *id014
+        next_batch_revision: *id014
+        explicit_count: *id012
+        failed_count: *id012
+        fingerprint:
+          $ref: '#/components/schemas/Fingerprint'
+      required:
+      - current_batch_id
+      - next_batch_id
+      - current_batch_revision
+      - next_batch_revision
+      - explicit_count
+      - failed_count
+      - fingerprint
+    PlanBatch:
+      type: object
+      additionalProperties: false
+      properties:
+        batch_id: *id001
+        row_key:
+          type: string
+          maxLength: 64
+          minLength: 1
+        group_order: *id002
+        batch_order: *id002
+        batch:
+          $ref: publication-batch.openapi.yaml#/components/schemas/BatchDetail
+        configured: *id013
+        handed_off_at: &id016
+          type:
+          - string
+          - 'null'
+          format: date-time
+        allowed_actions:
+          type: array
+          items:
+            type: string
+            maxLength: 50
+            minLength: 1
+          minItems: 0
+          maxItems: 1000
+        action_blockers:
+          type: array
+          items:
+            $ref: '#/components/schemas/ActionBlocker'
+          minItems: 0
+          maxItems: 1000
+        frozen_confirmation:
+          oneOf:
+          - $ref: '#/components/schemas/BatchConfirmation'
+          - type: 'null'
+          readOnly: true
+      required:
+      - batch_id
+      - row_key
+      - group_order
+      - batch_order
+      - batch
+      - configured
+      - handed_off_at
+      - allowed_actions
+      - action_blockers
+      - frozen_confirmation
+    Plan:
+      type: object
+      additionalProperties: false
+      properties:
+        id: *id001
+        team_id: *id001
+        owner_id: *id001
+        created_by: *id001
+        name:
+          type: string
+          maxLength: 100
+          minLength: 1
+        date_start: *id007
+        date_end: *id007
+        note:
+          type: string
+          maxLength: 2000
+          minLength: 0
+        goals:
+          type: array
+          items:
+            $ref: '#/components/schemas/Goal'
+          minItems: 1
+          maxItems: 1000
+        status: *id015
+        progress:
+          type: string
+          enum:
+          - preparing
+          - running
+          - manual_paused
+          - batch_paused
+          - waiting_tasks
+          - waiting_verification
+          - waiting_resources
+          - waiting_continue
+          - waiting_skip
+          - ready_to_finish
+          - stopping
+          - ended
+        current_batch_id: *id014
+        revision: *id001
+        started_at: *id016
+        stopped_at: *id016
+        ended_at: *id016
+        end_reason:
+          type: string
+          enum:
+          - ''
+          - achieved
+          - unmet
+          - cancelled
+        end_note:
+          type: string
+          maxLength: 2000
+          minLength: 0
+        created_at: &id017
+          type: string
+          format: date-time
+        updated_at: *id017
+        goal_results:
+          type: array
+          items:
+            $ref: '#/components/schemas/GoalResult'
+          minItems: 0
+          maxItems: 1000
+        batch_count: *id012
+        processed_batch_count: *id012
+        published_count: *id012
+        pending_count: *id012
+        verification_required_count: *id012
+        allowed_actions:
+          type: array
+          items:
+            type: string
+            maxLength: 50
+            minLength: 1
+          minItems: 0
+          maxItems: 1000
+        action_blockers:
+          type: array
+          items:
+            $ref: '#/components/schemas/ActionBlocker'
+          minItems: 0
+          maxItems: 1000
+        handoff_basis:
+          oneOf:
+          - $ref: '#/components/schemas/HandoffBasis'
+          - type: 'null'
+      required:
+      - id
+      - team_id
+      - owner_id
+      - created_by
+      - name
+      - date_start
+      - date_end
+      - note
+      - goals
+      - status
+      - progress
+      - current_batch_id
+      - revision
+      - started_at
+      - stopped_at
+      - ended_at
+      - end_reason
+      - end_note
+      - created_at
+      - updated_at
+      - goal_results
+      - batch_count
+      - processed_batch_count
+      - published_count
+      - pending_count
+      - verification_required_count
+      - allowed_actions
+      - action_blockers
+      - handoff_basis
+    PlanDetail:
+      type: object
+      additionalProperties: false
+      properties:
+        plan:
+          $ref: '#/components/schemas/Plan'
+        batches:
+          type: array
+          items:
+            $ref: '#/components/schemas/PlanBatch'
+          minItems: 0
+          maxItems: 1000
+        issues:
+          type: array
+          items:
+            $ref: '#/components/schemas/Issue'
+          minItems: 0
+          maxItems: 1000
+      required:
+      - plan
+      - batches
+      - issues
+    StartPlanResult:
+      type: object
+      additionalProperties: false
+      properties:
+        plan_id: *id001
+        revision: *id001
+        first_started_at: *id017
+        current_batch_id: *id001
+        batch_confirmations:
+          type: array
+          items:
+            $ref: '#/components/schemas/BatchConfirmation'
+          minItems: 1
+          maxItems: 1000
+        first_batch_receipt: &id018
+          $ref: publication-batch.openapi.yaml#/components/schemas/BatchStartResult
+      required:
+      - plan_id
+      - revision
+      - first_started_at
+      - current_batch_id
+      - batch_confirmations
+      - first_batch_receipt
+    AdvanceResult:
+      type: object
+      additionalProperties: false
+      properties:
+        plan_id: *id001
+        revision: *id001
+        previous_batch_id: *id001
+        current_batch_id: *id001
+        decision:
+          type: string
+          enum:
+          - automatic
+          - continue
+          - skip
+        advanced_at: *id017
+        batch_receipt: *id018
+      required:
+      - plan_id
+      - revision
+      - previous_batch_id
+      - current_batch_id
+      - decision
+      - advanced_at
+      - batch_receipt
+    CancelResult:
+      type: object
+      additionalProperties: false
+      properties:
+        plan:
+          $ref: '#/components/schemas/Plan'
+        affected_batch_ids:
+          type: array
+          items: *id001
+          minItems: 0
+          maxItems: 1000
+        settling_batch_ids:
+          type: array
+          items: *id001
+          minItems: 0
+          maxItems: 1000
+      required:
+      - plan
+      - affected_batch_ids
+      - settling_batch_ids
+    CopyResult:
+      type: object
+      additionalProperties: false
+      properties:
+        name: *id008
+        note: *id009
+        goals: *id010
+        batches: *id011
+      required:
+      - name
+      - note
+      - goals
+      - batches
+      description: Whitelist only. Fresh dates and request key required for creation;
+        no resource candidates, formal identities, attempts, results or authorization
+        copied.
+    RecommendationInput:
+      type: object
+      additionalProperties: false
+      properties:
+        goals:
+          type: array
+          items:
+            $ref: '#/components/schemas/Goal'
+          minItems: 1
+          maxItems: 1000
+        batches:
+          type: array
+          items:
+            $ref: '#/components/schemas/Skeleton'
+          minItems: 0
+          maxItems: 1000
+        instruction:
+          type: string
+          maxLength: 500
+          minLength: 0
+      required:
+      - goals
+      - batches
+      - instruction
+    RecommendationResult:
+      type: object
+      additionalProperties: false
+      properties:
+        batches:
+          type: array
+          items:
+            $ref: '#/components/schemas/Skeleton'
+          minItems: 1
+          maxItems: 1000
+        resource_as_of: *id017
+        issues:
+          type: array
+          items:
+            $ref: '#/components/schemas/Issue'
+          minItems: 0
+          maxItems: 1000
+      required:
+      - batches
+      - resource_as_of
+      - issues
+    Record:
+      type: object
+      additionalProperties: false
+      properties:
+        id: *id001
+        actor_id: *id014
+        event:
+          type: string
+          maxLength: 100
+          minLength: 1
+        created_at: *id017
+        details:
+          type: object
+          additionalProperties: true
+      required:
+      - id
+      - actor_id
+      - event
+      - created_at
+      - details
+    PlanPage:
+      type: object
+      additionalProperties: false
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Plan'
+          minItems: 0
+          maxItems: 1000
+        total: *id012
+        page: *id002
+        page_size: *id002
+      required:
+      - items
+      - total
+      - page
+      - page_size
+    BatchPage:
+      type: object
+      additionalProperties: false
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/PlanBatch'
+          minItems: 0
+          maxItems: 1000
+        total: *id012
+        page: *id002
+        page_size: *id002
+      required:
+      - items
+      - total
+      - page
+      - page_size
+    RecordPage:
+      type: object
+      additionalProperties: false
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Record'
+          minItems: 0
+          maxItems: 1000
+        total: *id012
+        page: *id002
+        page_size: *id002
+      required:
+      - items
+      - total
+      - page
+      - page_size
+    Error:
+      type: object
+      additionalProperties: false
+      properties:
+        errcode:
+          type: integer
+        message:
+          type: string
+          maxLength: 2000
+          minLength: 0
+        data:
+          type: 'null'
+        logid:
+          type: string
+          maxLength: 200
+          minLength: 0
+        error:
+          type: object
+          additionalProperties: false
+          properties:
+            code:
+              type: string
+              maxLength: 100
+              minLength: 0
+            details:
+              type: object
+              additionalProperties: true
+          required:
+          - code
+      required:
+      - errcode
+      - message
+      - data
+      - logid
+      - error

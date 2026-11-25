@@ -1,14 +1,14 @@
 openapi: 3.1.0
 info:
   title: WT Media Publication Batch
-  version: 2026.11.25.3
-  description: Session API using errcode/message/data/logid. Saves store candidate configuration and current file references atomically with audit. Incomplete content or candidate shortfalls may be saved. Account ownership, category scope and input structure are mandatory. Only first start creates formal tasks and output occupancy. Attempts are created by actual claim.
+  version: 2026.11.25.4
+  description: Plan first start freezes every attached configuration including future batches; direct configuration/task-content/start/retry/claim/resume and submitting permission respect plan ownership, position and permanent stop. Manual plan pause only stops later batch starts; batch exception pause remains independent. Original check/result settlement remains allowed. Session API using errcode/message/data/logid. Saves store candidate configuration and current file references atomically with audit. Incomplete content or candidate shortfalls may be saved. Account ownership, category scope and input structure are mandatory. Only first start creates formal tasks and output occupancy. Attempts are created by actual claim.
 security: [{sessionCookie: []}]
 paths:
   /api/v1/publication-batch:
     get:
       operationId: listPublicationBatch
-      description: Scope before count and pagination. Operators see their own records. Senior operators see their team; all target categories must be in scope. Administrators can read across teams. Exact request_key lookup is creator scoped and independent of other filters.
+      description: Exclude plan skeletons until configured. Scope before count and pagination. Operators see their own records. Senior operators see their team; all target categories must be in scope. Administrators can read across teams. Exact request_key lookup is creator scoped and independent of other filters.
       parameters:
         - {$ref: '#/components/parameters/Page'}
         - {$ref: '#/components/parameters/PageSize'}
@@ -501,6 +501,20 @@ components:
         platform: {const: baidu}
         targets: {$ref: '#/components/schemas/Targets'}
         config: {$ref: '#/components/schemas/Config'}
+        plan_id: {type: [string, 'null'], pattern: '^[1-9][0-9]*$', readOnly: true, description: 'Only plan transaction writes association; external create/save cannot set or move it.'}
+        plan_name: {type: [string, 'null'], readOnly: true}
+        plan_configuration_frozen: {type: boolean, readOnly: true}
+        plan_current_position: {type: boolean, readOnly: true}
+        handed_off_at: {type: [string, 'null'], format: date-time, readOnly: true}
+        action_blockers:
+          type: array
+          items:
+            type: object
+            required: [action, code, message]
+            properties:
+              action: {type: string}
+              code: {type: string}
+              message: {type: string}
         execution_setting: {$ref: '#/components/schemas/ExecutionSetting'}
     Success:
       type: object
