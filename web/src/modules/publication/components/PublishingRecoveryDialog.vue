@@ -29,7 +29,7 @@ const sceneClosed = ref(false),
   workMatched = ref(false),
   publiclyAccessible = ref(false);
 const supplement = computed(
-  () => props.task?.status === PublicationStatus.Reviewing,
+  () => !!props.management && props.task?.status === PublicationStatus.Reviewing,
 );
 const hasReceipt = computed(() =>
   [PublicationStatus.Reviewing, PublicationStatus.Published].includes(
@@ -69,7 +69,7 @@ watch(
 function submit() {
   validation.value = "";
   if (props.busy) return;
-  if (props.management && (!supplement.value || !props.savedEvidence?.scene_closed)) {
+  if (props.management && (!supplement.value || conclusion.value !== PublicationStatus.Published || !props.savedEvidence?.scene_closed)) {
     validation.value = "原尝试缺少安全结束记录，请由任务所属运营先核实。";
     return;
   }

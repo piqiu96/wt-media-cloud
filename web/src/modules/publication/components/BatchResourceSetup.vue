@@ -16,6 +16,7 @@ const props = defineProps({
   categories: { type: Array, required: true },
   actor: { type: Object, required: true },
   disabled: Boolean,
+  inheritedTargets: Boolean,
 });
 const emit = defineEmits(["allocated", "work"]);
 const batch = createPublicationBatchClient();
@@ -164,19 +165,19 @@ function allocate() {
     <ResourceCard>
       <ResourceSection title="目标与资源盘点">
         <div class="batch-inline">
-          <t-select v-model="category" :options="availableCategories" filterable aria-label="目标类目" placeholder="选择目标类目" :disabled="fixed" />
-          <t-button theme="default" variant="outline" :disabled="fixed || !category || form.targets.length >= 100" @click="addTarget">添加类目</t-button>
+          <t-select v-model="category" :options="availableCategories" filterable aria-label="目标类目" placeholder="选择目标类目" :disabled="fixed || inheritedTargets" />
+          <t-button theme="default" variant="outline" :disabled="fixed || inheritedTargets || !category || form.targets.length >= 100" @click="addTarget">添加类目</t-button>
           <t-button v-if="form.targets.length" variant="text" :loading="resourceLoading" :disabled="fixed" @click="inspect">刷新盘点</t-button>
         </div>
         <p v-if="!form.targets.length" class="batch-muted">添加类目并填写发布目标，按列表顺序分配资源。</p>
         <div v-for="(target, index) in form.targets" :key="target.category_id" class="batch-resource-row">
           <ResourceReorderActions :item-key="target.category_id" scope="targets" :index="index" :count="form.targets.length"
-            :draggable="false" :remove-disabled="fixed || hasCandidates(target.category_id)" @move="!fixed && moveEntry(form.targets, index, $event)"
+            :draggable="false" :remove-disabled="fixed || inheritedTargets || hasCandidates(target.category_id)" @move="!fixed && !inheritedTargets && moveEntry(form.targets, index, $event)"
             @remove="removeTarget(index)">
             {{ nameOf(target.category_id) }}
           </ResourceReorderActions>
           <div class="batch-inline">
-            <label>发布目标<t-input-number v-model="target.target_count" :aria-label="`${nameOf(target.category_id)}发布目标`" :min="0" :max="Number.MAX_SAFE_INTEGER" :decimal-places="0" :disabled="fixed" /></label>
+            <label>发布目标<t-input-number v-model="target.target_count" :aria-label="`${nameOf(target.category_id)}发布目标`" :min="0" :max="Number.MAX_SAFE_INTEGER" :decimal-places="0" :disabled="fixed || inheritedTargets" /></label>
             <div class="batch-inventory">
               <strong>{{ resourceLoading && !inventory[target.category_id] ? "盘点中" : displayAvailability(inventory[target.category_id]) }}</strong>
               <span v-if="inventory[target.category_id]?.as_of">

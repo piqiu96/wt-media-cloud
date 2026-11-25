@@ -36,6 +36,7 @@ import BatchExecutionDetail from "../components/BatchExecutionDetail.vue";
 import BatchFormalTasks from "../components/BatchFormalTasks.vue";
 import { batchPhases, batchTaskLocation } from "../batchExecution.js";
 import "../batchPreparation.css";
+import {planReturn} from "../planPreparation.js";
 
 const api = createPublicationBatchClient();
 const session = createSessionClient();
@@ -162,8 +163,8 @@ function problem(error, fallback) {
 }
 
 function listLocation() {
-  return Object.fromEntries(["search", "platform", "configuration_status", "execution_status", "page", "page_size"]
-    .flatMap(key => rawQuery(key) ? [[key, rawQuery(key)]] : []));
+  return { ...Object.fromEntries(Object.entries(route.query).filter(([key,value]) => ["from_plan","plan_search","plan_status","plan_platform","plan_category_id","plan_page","plan_page_size","plan_scroll"].includes(key) && typeof value === "string")), ...Object.fromEntries(["search", "platform", "configuration_status", "execution_status", "page", "page_size"]
+    .flatMap(key => rawQuery(key) ? [[key, rawQuery(key)]] : [])) };
 }
 function scrollHost(element) {
   let parent = element?.parentElement;
@@ -203,6 +204,8 @@ function openToStart(item) {
   return open("detail", item, { start: true });
 }
 function back() {
+  const parent = planReturn(route.query);
+  if (parent) return router.push(parent);
   if (view.value === "edit" && detail.value) return open("detail", detail.value);
   return router.push({ query: listLocation() });
 }
@@ -786,7 +789,7 @@ onBeforeUnmount(() => {
       </p>
       <ResourceCard><ResourceWizardSteps :steps="steps" :current="step" /></ResourceCard>
       <BatchResourceSetup v-if="step === 0" :form="form" :catalog="catalog" :categories="categoryOptions"
-        :actor="actor" :disabled="freeze" @work="preparing = $event" />
+         :actor="actor" :inherited-targets="!!detail?.plan_id" :disabled="freeze" @work="preparing = $event" />
       <BatchCandidateWorkspace v-if="step === 1" :form="form" :catalog="catalog" :categories="categoryOptions"
         :actor="actor" :recipes="recipes" :cover-files="coverFiles" :disabled="freeze" :focus-key="issueRowKey"
         :validation-context="validationContext" @work="preparing = $event" />
