@@ -494,6 +494,9 @@ async function refresh() {
   }
 }
 watch(() => route.fullPath, refresh, { immediate: true });
+watch(() => form.value?.name, name => {
+  if (name?.trim() && formError.value === "请填写批次名称") formError.value = "";
+});
 watch(() => JSON.stringify(payload()), () => {
   if (!routeDraftReady || !form.value || !newDraft.value || newDraft.value.persistent || !dirty.value) return;
   try { newDraft.value.remember(snapshot(payload())); } catch (error) { draftError.value = problem(error, "暂存输入失败"); }
@@ -797,7 +800,7 @@ onBeforeUnmount(() => {
             </div>
           </ResourceSection>
         </ResourceCard>
-        <BatchCandidateWorkspace review-only :form="form" :catalog="catalog" :categories="categoryOptions" :actor="actor" :recipes="recipes" :cover-files="coverFiles" :disabled="freeze" :validation-context="validationContext" :validation-issues="readiness?.issues || []" @changed="review=null" @work="preparing=$event"/>
+        <BatchCandidateWorkspace review-only :resources-locked="resourcesConfirmed" :form="form" :catalog="catalog" :categories="categoryOptions" :actor="actor" :recipes="recipes" :cover-files="coverFiles" :disabled="freeze" :validation-context="validationContext" :validation-issues="readiness?.issues || []" @changed="review=null" @work="preparing=$event"/>
       </template>
     </div>
     <template #footer>

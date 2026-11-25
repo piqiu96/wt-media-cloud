@@ -80,7 +80,9 @@ try {
     const s=await scene();const {page,button,field}=s;
     await page.goto(base+'/publish-batches?view=create');
     await button('确认资源').click();await page.getByText('请填写批次名称',{exact:true}).waitFor();
-    await field('批次名称').fill('新建确认边界');await button('确认资源').click();
+    await field('批次名称').fill('新建确认边界');
+    assert.equal(await page.getByText('请填写批次名称',{exact:true}).count(),0,'corrected name must clear its obsolete validation error');
+    await button('确认资源').click();
     await page.getByText('请至少添加一个目标类目',{exact:true}).waitFor();
     await page.locator('.batch-category-chip').filter({hasText:category.name}).click();
     await field(category.name+'发布目标').fill('');await field(category.name+'发布目标').press('Tab');
@@ -112,7 +114,9 @@ try {
     await s.button('采用系统推荐').click();await s.page.getByText('资源盘点尚未核实完整，请重新盘点后再推荐。原目标和候选保持不变。',{exact:true}).waitFor();
     assert.equal(await s.field(category.name+'发布目标').inputValue(),'2');
     await s.confirm();await s.page.getByText('暂无候选，可先保存批次，再从继续配置补充资源',{exact:true}).waitFor();
-    await s.button('预览检查').click();await s.button('保存批次').click();
+    await s.button('预览检查').click();
+    await s.page.getByRole('region',{name:'发布内容',exact:true}).getByText('暂无候选，可先保存批次，再从继续配置补充资源',{exact:true}).waitFor();
+    await s.button('保存批次').click();
     await s.page.getByRole('heading',{name:f.name,exact:true}).waitFor();
     assert.equal(s.saved().targets[0].target_count,2);assert.equal(s.saved().config.candidates.length,0);
     await s.close();console.log('PASS inventory failure/zero candidates/incomplete save preserves original target and no task side effects');
