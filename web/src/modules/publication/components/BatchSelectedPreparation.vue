@@ -242,7 +242,7 @@ function applyAll() {
 </script>
 
 <template>
-  <ResourceOverlay form-actions :visible="true" kind="drawer" :width="960" :busy="busy"
+  <ResourceOverlay form-actions :visible="true" :width="960" :busy="busy"
     :title="`批量配置 · 已选 ${rows.length} 条候选`" @update:visible="!$event && emit('close')">
     <div v-if="phase === 'setup'" class="batch-stack">
       <t-checkbox-group v-model="chosen" :options="modeOptions" aria-label="批量配置内容类型" />

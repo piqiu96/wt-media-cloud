@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from "vue-router";
 import ResourcePageHeader from "../../../shared/ui/resource/ResourcePageHeader.vue";
+import { presentBatchIssues } from "../batchIssuePresentation.js";
 import ResourceCard from "../../../shared/ui/resource/ResourceCard.vue";
 import ResourceDetailPage from "../../../shared/ui/resource/ResourceDetailPage.vue";
 import ResourceEditorPage from "../../../shared/ui/resource/ResourceEditorPage.vue";
@@ -656,7 +657,7 @@ onBeforeUnmount(() => {
            :scroll="{ x: '1497px' }" :empty="pageError ? '读取失败' : '暂无匹配的发布批次'">
           <template #id="{ row }"><ResourceId :value="row.id" label="批次 ID" /></template>
           <template #name="{ row }"><ResourceNameLink @click="open('detail', row)">{{ row.name }}</ResourceNameLink></template>
-          <template #platform="{ row }">{{ platformLabel(row.platform) }}</template>
+          <template #platform="{ row }">{{ row.platform === 'baidu' ? '百家号' : platformLabel(row.platform) }}</template>
           <template #plan="{row}"><span class="batch-cell-text">{{row.plan_name||'独立批次'}}</span></template>
           <template #coverage="{ row }"><strong class="batch-target-value">{{targetSum(row.targets)}} <span>条</span></strong><small class="batch-muted batch-task-block">{{row.targets.map(t=>categoryName(t.category_id)+' '+t.target_count).join(' · ')}}</small></template>
           <template #progress="{row}"><span v-if="!row.execution?.first_started_at">{{row.candidate_count||0}} 条候选 · 0 条任务</span><template v-else><div class="batch-progress-title"><span>{{row.execution.published_count}} / {{targetSum(row.targets)}}</span><span>{{batchRate(row)}}%</span></div><t-progress color="var(--wt-primary)" :percentage="Math.min(batchRate(row),100)" :label="false" :stroke-width="6"/></template></template>
@@ -732,7 +733,7 @@ onBeforeUnmount(() => {
       <template v-if="step === 2">
         <ResourceCard>
           <ResourceSection title="准备结果">
-            <div class="batch-review-summary"><label>批次名称<t-input v-model="form.name" aria-label="复查批次名称" :disabled="freeze" :maxlength="100"/></label><div><span>发布平台</span><strong>{{platformLabel(form.platform)}}</strong></div><div><span>候选配置</span><strong>{{form.config.candidates.length}} 条</strong></div></div>
+            <div class="batch-review-summary"><label>批次名称<t-input v-model="form.name" aria-label="复查批次名称" :disabled="freeze" :maxlength="100"/></label><div><span>发布平台</span><strong>{{form.platform === 'baidu' ? '百家号' : platformLabel(form.platform)}}</strong></div><div><span>候选配置</span><strong>{{form.config.candidates.length}} 条</strong></div></div>
             <ul class="batch-categories">
               <li v-for="entry in candidateShortfalls(form)" :key="entry.category_id">
                 <strong>{{ categoryName(entry.category_id) }}</strong>
@@ -747,13 +748,8 @@ onBeforeUnmount(() => {
                 :label="readiness.ready ? '配置就绪' : '配置待完善'" />
             </div>
             <FeedbackAlert v-if="review?.error" theme="warning" :message="review.error" />
-            <ul v-if="readiness?.issues?.length" class="batch-issues">
-              <li v-for="(issue, index) in readiness.issues" :key="index">
-                <strong v-if="form.config.candidates.find(row => row.row_key === issue.row_key)">{{ rowLabel(form.config.candidates.find(row => row.row_key === issue.row_key)) }} · </strong>
-                {{ issue.message }}
-                <t-button v-if="issue.row_key" size="small" variant="text" :disabled="freeze" @click="issueRowKey = issue.row_key; goStep(1)">查看候选</t-button>
-              </li>
-            </ul>
+            <p v-if="readiness?.issues?.some(issue=>issue.row_key)" class="batch-review-notice" role="status">当前有 {{new Set(readiness.issues.filter(issue=>issue.row_key).map(issue=>issue.row_key)).size}} 条候选待处理，请在下方发布内容中查看并编辑。</p>
+            <ul v-if="readiness?.issues?.some(issue=>!issue.row_key)" class="batch-issues"><li v-for="(issue,index) in presentBatchIssues(readiness.issues.filter(issue=>!issue.row_key))" :key="index">{{issue.message}}</li></ul>
           </ResourceSection>
         </ResourceCard>
         <ResourceCard>

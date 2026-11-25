@@ -23,6 +23,7 @@ export function emptyBatch(source) {
   if (source) return snapshot({
     name: source.name,
     platform: source.platform,
+    recommendation_quantity: source.recommendation_quantity ?? null,
     targets: source.targets || [],
     config: {
       ...source.config,
@@ -36,6 +37,7 @@ export function emptyBatch(source) {
   return {
     name: "",
     platform: "baidu",
+    recommendation_quantity: null,
     targets: [],
     config: { accounts: [], output_ids: [], manual_pairs: [], candidates: [] },
     execution_setting: {

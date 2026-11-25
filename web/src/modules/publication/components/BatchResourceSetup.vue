@@ -1,16 +1,20 @@
 <script setup>
+import { recommendCategoryQuantities } from "../batchRecommendation.js";
+import { feedback } from "../../../shared/ui/feedback/index.js";
+import ResourceFieldHelp from "../../../shared/ui/resource/ResourceFieldHelp.vue";
 import { computed, ref, watch } from "vue";
 import { createPublicationBatchClient, createPublicationClient } from "../../../shared/api/publication.js";
 import BatchCandidateWorkspace from "./BatchCandidateWorkspace.vue";
 import ResourceNotice from "../../../shared/ui/resource/ResourceNotice.vue";
-import ResourceCard from "../../../shared/ui/resource/ResourceCard.vue";
-import ResourceSection from "../../../shared/ui/resource/ResourceSection.vue";
+import { MoveIcon, RefreshIcon } from "tdesign-icons-vue-next";
+import BatchSetupSection from "./BatchSetupSection.vue";
+import ResourceOverlay from "../../../shared/ui/resource/ResourceOverlay.vue";
 import ResourceReorderActions from "../../../shared/ui/resource/ResourceReorderActions.vue";
 import { formatPublicationTime } from "../dateTime.js";
 import FeedbackAlert from "../../../shared/ui/feedback/FeedbackAlert.vue";
 import PublishingResourcePicker from "./PublishingResourcePicker.vue";
 import { batchAccountName, batchOutputID, batchOutputName, batchOutputProblem } from "../useBatchResourceCatalog.js";
-import { candidateShortfalls, displayAvailability, moveEntry, reconcileAllocation, snapshot } from "../batchPreparation.js";
+import { batchInput, candidateShortfalls, displayAvailability, moveEntry, reconcileAllocation, snapshot } from "../batchPreparation.js";
 
 const props = defineProps({
   form: { type: Object, required: true },
@@ -26,7 +30,6 @@ const props = defineProps({
 const emit = defineEmits(["allocated", "work"]);
 const batch = createPublicationBatchClient();
 const publication = createPublicationClient();
-const category = ref("");
 const picker = ref("");
 const outputCategory = ref("");
 const inventory = ref({});
@@ -35,16 +38,82 @@ const loading = ref(false);
 const resourceLoading = ref(false);
 const outcome = ref("");
 const poolOpen=ref(false);
+const recommending=ref(false);
 let inventorySequence = 0;
 const automaticResourceLimit = 1000;
 
-const availableCategories = computed(() => props.categories.filter(item => !props.form.targets.some(row => item.value === row.category_id)));
+const targetTotal=computed(()=>props.form.targets.reduce((n,t)=>n+t.target_count,0));
 const shortfalls = computed(() => candidateShortfalls(props.form));
 const nameOf = id => props.categories.find(item => item.value === id)?.label || "原类目暂不可用";
 const accounts = computed(() => props.form.config.accounts);
 const outputs = computed(() => props.form.config.output_ids);
+// Read-only inventory can overlap category edits; inspect() discards obsolete responses.
 const fixed = computed(() => props.disabled || loading.value);
 
+function showResources(kind, categoryId) {
+  outputCategory.value = categoryId;
+  picker.value = kind;
+}
+function dropTarget(event, index) {
+  if (fixed.value || props.inheritedTargets) return;
+  try {
+    const data = JSON.parse(event.dataTransfer.getData('application/x-wt-resource-reorder'));
+    if (data.scope !== 'batch-targets') return;
+    const from = props.form.targets.findIndex(row => row.category_id === data.key);
+    if (from >= 0 && from !== index) moveEntry(props.form.targets, from, index-from);
+  } catch { /* Ignore foreign drag payloads. */ }
+}
+const selectedCategories = computed(() => props.form.targets.map(row=>row.category_id));
+async function changeCategories(values) {
+  if (fixed.value || props.inheritedTargets) return;
+  for (let i=props.form.targets.length-1;i>=0;i--) {
+    if (!values.includes(props.form.targets[i].category_id)) removeTarget(i);
+  }
+  for (const value of values) if (!props.form.targets.some(row=>row.category_id===value)) props.form.targets.push({category_id:value,target_count:1});
+}
+function dragTarget(event, id) {
+  event.dataTransfer.effectAllowed='move';
+  event.dataTransfer.setData('application/x-wt-resource-reorder',JSON.stringify({scope:'batch-targets',key:id}));
+}
+async function checkResources() {
+  await perform(async()=>{
+    const result=await batch.validate({...batchInput(props.form),...props.validationContext});
+    const issues=(result.issues||[]).filter(issue=>['category_id','media_account_id','composite_output_id'].includes(issue.field));
+    if(issues.length) error.value=[...new Set(issues.map(issue=>issue.message))].join('；');
+    else outcome.value='资源检查完成。文案、封面与执行设置仍需在后续步骤检查。';
+  });
+}
+async function rematch() {
+  await loadAvailable();
+  if (!error.value) await allocate();
+}
+async function recommend() {
+  if (fixed.value || props.inheritedTargets || recommending.value) return;
+  recommending.value=true;
+  try {
+  if(props.form.config.candidates.length && !await feedback.confirmWarning({title:'采用系统推荐？',message:'将重新分配类目数量并匹配资源。保留相同配对的已编辑内容，移出的配对不再纳入本批。',confirmText:'采用推荐'})) return;
+  await inspect();
+  if(props.form.targets.some(t=>!inventory.value[t.category_id]?.as_of||inventory.value[t.category_id]?.error||inventory.value[t.category_id]?.unknown_output_count)) {
+    error.value='资源盘点尚未核实完整，请重新盘点后再推荐。原目标和候选保持不变。';return;
+  }
+  const capacityTargets=props.form.targets.map(t=>({...t,target_count:Math.min(automaticResourceLimit,inventory.value[t.category_id].available_output_count||0)}));
+  if(!capacityTargets.some(t=>t.target_count>0)){outcome.value='当前无可匹配资源，原目标与候选保持不变。请补充成片或检查本人账号。';return;}
+  await loadAvailable(capacityTargets);
+  if(error.value)return;
+  await perform(async()=>{
+    const allocation={platform:props.form.platform,targets:capacityTargets,accounts:accounts.value,output_ids:outputs.value,manual_pairs:props.form.config.manual_pairs};
+    const capacity=await batch.allocate(snapshot(allocation));
+    const capacities=capacityTargets.map(t=>({category:t.category_id,capacity:(capacity.config.candidates||[]).filter(row=>row.category_id===t.category_id).length}));
+    const targets=recommendCategoryQuantities(capacities,props.form.recommendation_quantity).map(t=>({category_id:t.category,target_count:t.count}));
+    if(!targets.some(t=>t.target_count>0)){outcome.value='当前无可匹配资源，原目标与候选保持不变。请补充成片或检查本人账号。';return;}
+    const result=await batch.allocate(snapshot({...allocation,targets}));
+    props.form.targets=targets;
+    props.form.config.candidates=reconcileAllocation(props.form.config.candidates,result.config.candidates||[]);
+    outcome.value='已采用系统推荐，可继续调整类目数量和匹配。';
+    emit('allocated');
+  });
+  } finally { recommending.value=false; }
+}
 async function inspect() {
   const sequence = ++inventorySequence;
   resourceLoading.value = true;
@@ -62,11 +131,6 @@ async function inspect() {
 }
 watch(() => props.form.targets.map(row => row.category_id).join(","), inspect, { immediate: true });
 
-function addTarget() {
-  if (!category.value) return;
-  props.form.targets.push({ category_id: category.value, target_count: 1 });
-  category.value = "";
-}
 function removeTarget(index) {
   const id = props.form.targets[index].category_id;
   if (hasCandidates(id)) return;
@@ -115,9 +179,9 @@ async function perform(work) {
   }
 }
 
-function loadAvailable() {
+function loadAvailable(targets = props.form.targets) {
   return perform(async () => {
-    const targetIds = new Set(props.form.targets.map(row => row.category_id));
+    const targetIds = new Set(targets.map(row => row.category_id));
     const foundAccounts = new Map(accounts.value.map(row => [row.media_account_id, row]));
     const foundOutputs = new Set(outputs.value);
     const platform = props.form.platform;
@@ -127,7 +191,7 @@ function loadAvailable() {
         foundAccounts.set(String(account.id), { media_account_id: String(account.id), limit: 1 });
       }
     }, () => foundAccounts.size < automaticResourceLimit);
-    for (const target of props.form.targets) {
+    for (const target of targets) {
       const targetCount = Number(target.target_count) || 0;
       let count = [...foundOutputs].filter(id => String(props.catalog.outputs.get(id)?.category_id) === target.category_id).length;
       await pageResources(publication.outputs, { platform, category_id: target.category_id }, output => {
@@ -159,40 +223,29 @@ function allocate() {
 
 <template>
   <div class="batch-stack">
-    <ResourceCard>
-      <ResourceSection title="发布范围" variant="form">
+    <BatchSetupSection number="01" title="发布范围" help="选择单个平台与参与分配的类目。">
+      <div class="batch-form-grid batch-scope-grid">
+        <label><span><em>*</em> 批次名称</span><t-input v-model="form.name" aria-label="批次名称" :maxlength="100" :disabled="fixed" placeholder="请输入批次名称"/></label>
+        <label><span><em>*</em> 发布平台</span><t-select :value="form.platform" :options="[{label:'百家号',value:'baidu'}]" aria-label="批次发布平台" disabled/></label>
+      </div>
+      <div class="batch-category-field"><label><span><em>*</em> 发布类目</span></label><t-checkbox-group :value="selectedCategories" :disabled="fixed||inheritedTargets" @change="changeCategories"><t-checkbox v-for="c in categories" :key="c.value" :value="c.value" class="batch-category-chip" :disabled="hasCandidates(c.value)">{{c.label}}</t-checkbox></t-checkbox-group><small v-if="form.targets.some(t=>hasCandidates(t.category_id))" class="batch-muted">已有候选的类目需先移除对应候选再取消选择。</small></div>
+    </BatchSetupSection>
+    <BatchSetupSection v-if="form.targets.length" number="02" title="类目数量与优先级" help="上方类目优先匹配；数量不足时保留原目标并显示缺口。">
+      <div class="batch-goal-row"><label class="batch-goal-field"><span>目标数量<ResourceFieldHelp label="目标数量" content="作为推荐数量的参考，类目数量仍可调整。只有点击采用系统推荐才更新分配；资源未知时不推荐。"/></span><t-input-number :value="inheritedTargets ? form.targets.reduce((n,t)=>n+t.target_count,0) : form.recommendation_quantity" @change="form.recommendation_quantity=$event" :min="1" :max="9999" :decimal-places="0" clearable :disabled="fixed||inheritedTargets" placeholder="请输入目标数量" aria-label="目标数量"/></label><div class="batch-inline"><t-button variant="text" :loading="resourceLoading" :disabled="fixed" @click="inspect">刷新盘点</t-button><t-button variant="outline" theme="default" :loading="recommending" :disabled="fixed||inheritedTargets||recommending" @click="recommend"><template #icon><RefreshIcon/></template>采用系统推荐</t-button></div></div>
+      <div class="batch-total-line"><div><small>类目数量合计</small><strong>{{form.targets.reduce((n,t)=>n+t.target_count,0)}} <span>条候选目标</span></strong></div><p v-if="inheritedTargets">目标来自计划</p><p v-else-if="form.recommendation_quantity>0">目标 {{form.recommendation_quantity}} 条 · {{targetTotal===form.recommendation_quantity?'已按目标分配':targetTotal<form.recommendation_quantity?'比目标少 '+(form.recommendation_quantity-targetTotal)+' 条':'超出目标 '+(targetTotal-form.recommendation_quantity)+' 条'}}</p></div>
+        <div v-if="form.targets.length" class="resource-data-table resource-embedded-table is-editable batch-target-container" role="region" aria-label="类目目标分配，可横向滚动" tabindex="0"><table><thead><tr><th>优先级</th><th>内容类目</th><th class="resource-table-number">可用账号</th><th class="resource-table-number">可用成片</th><th class="resource-table-number">本批次目标</th><th class="resource-table-number">预计分配</th><th class="resource-table-number">缺口</th></tr></thead><tbody><tr v-for="(target,index) in form.targets" :key="target.category_id" @dragover.prevent @drop.prevent="dropTarget($event,index)"><td><button class="batch-drag-handle" type="button" :draggable="!fixed&&!inheritedTargets" :disabled="fixed||inheritedTargets" :aria-label="'调整'+nameOf(target.category_id)+'优先级'" title="拖拽排序，或使用上下方向键" @dragstart="dragTarget($event,target.category_id)" @keydown.up.prevent="moveEntry(form.targets,index,-1)" @keydown.down.prevent="moveEntry(form.targets,index,1)"><MoveIcon/></button><span class="batch-priority">P{{index+1}}</span></td><td><strong>{{nameOf(target.category_id)}}</strong><small v-if="inventory[target.category_id]?.as_of" class="batch-muted batch-task-block">{{formatPublicationTime(inventory[target.category_id].as_of)}}</small></td><td class="resource-table-number"><t-button variant="text" size="small" :disabled="fixed" :aria-label="'查看'+nameOf(target.category_id)+'可用账号'" @click="showResources('account',target.category_id)">{{inventory[target.category_id]?.as_of?inventory[target.category_id].eligible_account_count:'—'}}</t-button></td><td class="resource-table-number"><t-button variant="text" size="small" :disabled="fixed" :aria-label="'查看'+nameOf(target.category_id)+'可用成片'" @click="showResources('output',target.category_id)">{{inventory[target.category_id]?.as_of?inventory[target.category_id].available_output_count:'—'}}</t-button><small class="batch-muted batch-task-block" v-if="inventory[target.category_id]?.error||inventory[target.category_id]?.unknown_output_count">{{displayAvailability(inventory[target.category_id])}}</small></td><td class="resource-table-number"><t-input-number v-model="target.target_count" :aria-label="nameOf(target.category_id)+'发布目标'" :min="0" :max="Number.MAX_SAFE_INTEGER" :decimal-places="0" :disabled="fixed||inheritedTargets"/></td><td class="resource-table-number">{{shortfalls[index].candidate_count}}</td><td class="resource-table-number">{{shortfalls[index].shortfall}}</td></tr></tbody></table></div>
+    </BatchSetupSection>
+    <BatchSetupSection v-if="form.targets.length" number="03" title="账号与成片匹配" help="系统按顺序匹配，可人工调整；保存配置不创建正式任务。">
+      <template #actions><t-button variant="outline" theme="default" :loading="loading" :disabled="fixed" @click="rematch"><template #icon><RefreshIcon/></template>重新自动匹配</t-button><t-button variant="outline" theme="default" :loading="resourceLoading" :disabled="fixed" @click="checkResources">检查资源冲突</t-button><t-button variant="text" :disabled="fixed" @click="poolOpen=true">账号与本批上限</t-button></template>
+      <FeedbackAlert v-if="error" theme="error" :message="error"/>
+      <p v-if="outcome" role="status" class="batch-muted">{{outcome}}</p>
+      <BatchCandidateWorkspace embedded resource-only :form="form" :catalog="catalog" :categories="categories" :actor="actor" :recipes="recipes||{}" :cover-files="coverFiles||{}" :validation-context="validationContext" :disabled="fixed" @work="emit('work',$event)"/>
+    </BatchSetupSection>
+    <ResourceOverlay :visible="poolOpen" title="发布账号与资源设置" :width="960" @update:visible="poolOpen=$event">
+      <div class="batch-inline batch-section-actions"><t-button theme="default" variant="outline" :loading="loading" :disabled="fixed" @click="loadAvailable()">载入可用资源</t-button></div>
         <div class="batch-form-grid">
-          <label>批次名称<t-input v-model="form.name" aria-label="批次名称" :maxlength="100" :disabled="fixed" placeholder="例如：本周百度视频发布" /></label>
-          <label>发布平台<t-input aria-label="发布平台" value="百家号" disabled /></label>
-        </div>
-      </ResourceSection>
-    </ResourceCard>
-
-    <ResourceCard>
-      <ResourceSection title="类目数量与优先级" variant="form">
-        <div class="batch-inline">
-          <t-select v-model="category" :options="availableCategories" filterable aria-label="目标类目" placeholder="选择目标类目" :disabled="fixed || inheritedTargets" />
-          <t-button theme="default" variant="outline" :disabled="fixed || inheritedTargets || !category || form.targets.length >= 100" @click="addTarget">添加类目</t-button>
-          <t-button v-if="form.targets.length" variant="text" :loading="resourceLoading" :disabled="fixed" @click="inspect">刷新盘点</t-button>
-        </div>
-        <p v-if="!form.targets.length" class="batch-muted">添加类目并填写发布目标，按列表顺序分配资源。</p>
-        <div class="batch-total-line"><div><small>类目数量合计</small><strong>{{form.targets.reduce((n,t)=>n+t.target_count,0)}} <span>条候选目标</span></strong></div><p v-if="inheritedTargets">目标来自计划，账号、成片与内容可在本批配置</p></div>
-        <div v-if="form.targets.length" class="resource-data-table resource-embedded-table is-editable batch-target-container" role="region" aria-label="类目目标分配，可横向滚动" tabindex="0"><table><thead><tr><th>优先级</th><th>内容类目</th><th class="resource-table-number">可用账号</th><th class="resource-table-number">可用成片</th><th class="resource-table-number">本批次目标</th><th class="resource-table-number">已匹配</th><th class="resource-table-number">缺口</th><th>操作</th></tr></thead><tbody><tr v-for="(target,index) in form.targets" :key="target.category_id"><td><div class="batch-inline"><span>P{{index+1}}</span><t-button size="small" variant="text" :disabled="fixed||inheritedTargets||index===0" @click="moveEntry(form.targets,index,-1)">上移</t-button><t-button size="small" variant="text" :disabled="fixed||inheritedTargets||index===form.targets.length-1" @click="moveEntry(form.targets,index,1)">下移</t-button></div></td><td><strong>{{nameOf(target.category_id)}}</strong><small v-if="inventory[target.category_id]?.as_of" class="batch-muted batch-task-block">{{formatPublicationTime(inventory[target.category_id].as_of)}}</small></td><td class="resource-table-number">{{inventory[target.category_id]?.as_of?inventory[target.category_id].eligible_account_count:'—'}}</td><td class="resource-table-number">{{inventory[target.category_id]?.as_of?inventory[target.category_id].available_output_count:'—'}}<small class="batch-muted batch-task-block" v-if="inventory[target.category_id]?.error||inventory[target.category_id]?.unknown_output_count">{{displayAvailability(inventory[target.category_id])}}</small></td><td class="resource-table-number"><t-input-number v-model="target.target_count" :aria-label="nameOf(target.category_id)+'发布目标'" :min="0" :max="Number.MAX_SAFE_INTEGER" :decimal-places="0" :disabled="fixed||inheritedTargets"/></td><td class="resource-table-number">{{shortfalls[index].candidate_count}}</td><td class="resource-table-number">{{shortfalls[index].shortfall}}</td><td><t-button variant="text" theme="danger" :disabled="fixed||inheritedTargets||hasCandidates(target.category_id)" @click="removeTarget(index)">移除</t-button></td></tr></tbody></table></div>
-      </ResourceSection>
-    </ResourceCard>
-
-    <ResourceCard v-if="form.targets.length">
-      <ResourceSection title="资源选择与上限" variant="form">
-        <FeedbackAlert v-if="error" theme="error" :message="error" />
-        <p class="batch-muted" v-if="outcome" role="status">{{ outcome }}</p>
-        <div class="batch-inline batch-section-actions">
-          <t-button theme="default" variant="outline" :loading="loading" :disabled="fixed" @click="loadAvailable">载入可用资源</t-button>
-          <t-button theme="primary" :loading="loading" :disabled="fixed || !accounts.length || !outputs.length" @click="allocate">按顺序自动配对</t-button>
-        </div>
-        <t-button variant="text" @click="poolOpen=!poolOpen">{{poolOpen?'收起资源设置':'展开账号、成片与本批上限设置'}}</t-button>
-        <div v-show="poolOpen" class="batch-form-grid">
           <div>
-            <div class="batch-subhead"><h4>本人发布账号</h4><t-button variant="text" :disabled="fixed" @click="picker = 'account'">选择账号</t-button></div>
+            <div class="batch-subhead"><h4>本人发布账号</h4><t-button variant="text" :disabled="fixed" @click="showResources('account','')">选择账号</t-button></div>
             <p class="batch-muted">每账号上限由本批所有类目共用。</p>
             <div v-for="(item, index) in accounts" :key="item.media_account_id" class="batch-resource-row">
               <ResourceReorderActions :item-key="item.media_account_id" scope="accounts" :index="index" :count="accounts.length"
@@ -218,13 +271,12 @@ function allocate() {
             </div>
           </div>
         </div>
-      </ResourceSection>
-    </ResourceCard>
 
-    <BatchCandidateWorkspace v-if="form.targets.length" resource-only :form="form" :catalog="catalog" :categories="categories" :actor="actor" :recipes="recipes||{}" :cover-files="coverFiles||{}" :validation-context="validationContext" :disabled="fixed" @work="emit('work',$event)"/>
+      <template #footer><t-button @click="poolOpen=false">完成</t-button></template>
+    </ResourceOverlay>
 
     <PublishingResourcePicker v-if="picker" batch :visible="true" :kind="picker" :platform="form.platform"
-      :category="picker === 'output' ? outputCategory : undefined" :team-id="String(actor.team_id || '')"
+      :category="outputCategory || undefined" :team-id="String(actor.team_id || '')"
       :excluded-ids="picker === 'output' ? outputs : accounts.map(row => row.media_account_id)"
       @selected="picked" @update:visible="picker = ''" />
   </div>

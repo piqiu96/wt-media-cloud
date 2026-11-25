@@ -10,13 +10,16 @@ page.on("pageerror", error => exceptions.push(error.message));
 const recordedCalls = [];
 let saved;
 let savedKey;
-const actor = { id: "71", role: "operator", team_id: "3", category_ids: ["12"], status: "enabled", username: "test" };
+const actor = { id: "71", role: "operator", team_id: "3", category_ids: ["12","13"], status: "enabled", username: "test" };
 const category = { id: "12", name: "合成测试类目", enabled: true };
+const secondCategory={id:"13",name:"第二测试类目",enabled:true};
 const account = { id: "9007199254740993", name: "由我发布", platform: "baidu", category_ids: ["12"], eligible: true };
+const alternateAccount={...account,id:"9007199254741001",name:"由我发布备用"};
 const outputs = [
   { composite_output_id: "9007199254740995", id: 1, name: "合成测试成片 A" },
   { composite_output_id: "9007199254740997", id: 2, name: "合成测试成片 B" },
-].map(item => ({ ...item, category_id: "12", team_id: "3", occupied: false, platforms: ["baidu"], video: { status: "ready" } }));
+].map(item => ({ ...item, category_id: "12", team_id: "3", occupied: false, platforms: ["baidu"], video: { status: "ready" }, media: {duration_ms:30000} }));
+const spareOutput={...outputs[1],id:3,composite_output_id:"9007199254741011",name:"替换后的测试成片 C"};
 const now = "2026-11-25T10:00:00Z";
 const template = { id: "903", name: "合成横版模板", canvas_width: 1280, canvas_height: 720,
   enabled: true, published_revision: 2, published_config: { backgroundMode: "solid" } };
@@ -49,13 +52,13 @@ await page.route("**/api/v1/**", async route => {
   function send(data) { return route.fulfill({ json: packet(data) }); }
   switch (resource) {
     case "/api/v1/auth/me": return send(actor);
-    case "/api/v1/categories": return send([category]);
-    case "/api/v1/publication/account": return send({ items: [account], total: 1 });
-    case "/api/v1/publication/resource": return send({ availability: "available", available_output_count: 2,
-      eligible_account_count: 1, account_count: 1, unknown_output_count: 0, as_of: now });
+    case "/api/v1/categories": return send([category,secondCategory]);
+    case "/api/v1/publication/account": return send({ items: [account,alternateAccount], total: 2 });
+    case "/api/v1/publication/resource": await new Promise(resolve=>setTimeout(resolve,300)); return send({ availability: "available", available_output_count: 2,
+      eligible_account_count: 2, account_count: 2, unknown_output_count: 0, as_of: now });
     case "/api/v1/publication/output": {
       const selected = params.get("output_ids")?.split(",");
-      const items = selected ? outputs.filter(row => selected.includes(row.composite_output_id)) : outputs;
+      const items = selected ? [...outputs,spareOutput].filter(row => selected.includes(row.composite_output_id)) : [...outputs,spareOutput];
       return send({ items, total: items.length });
     }
     case "/api/v1/publication-batch/allocate":
@@ -117,12 +120,21 @@ try {
   await heading("发布批次").waitFor();
   await button("新建批次").click();
   await input("批次名称").fill("浏览器批次");
-  await page.locator('[aria-label="目标类目"]').click();
-  await page.locator(".t-select-option").getByText(category.name, { exact: true }).click();
-  await button("添加类目").click();
+  await page.locator(".batch-category-chip").filter({hasText:category.name}).click();
+  assert.equal(await page.getByRole("checkbox", {name:category.name,exact:true}).isChecked(),true);
+  await page.locator('.batch-category-chip').filter({hasText:secondCategory.name}).click();
+  await input(`${secondCategory.name}发布目标`).waitFor();
+  await page.locator('.batch-category-chip').filter({hasText:secondCategory.name}).click();
+  await input(`${secondCategory.name}发布目标`).waitFor({state:'hidden'});
   await input(`${category.name}发布目标`).fill("2");
+  await input('目标数量').fill('2');
+  await button('采用系统推荐').click();
+  await page.getByText('已采用系统推荐，可继续调整类目数量和匹配。',{exact:true}).waitFor();
+  assert.equal(await input(`${category.name}发布目标`).inputValue(),'2');
+  assert.equal(await page.locator('.batch-section').count(),3,'resource preparation retains the prototype three-section frame');
+
+  await button("账号与本批上限").click();
   await button("载入可用资源").click();
-  await button("展开账号、成片与本批上限设置").click();
   assert.ok(
     Math.abs(
       (
@@ -134,11 +146,23 @@ try {
     ) < 2,
   );
   await input("本批上限").fill("2");
-  await button("按顺序自动配对").click();
+  await button("完成").click();
+  await button("重新自动匹配").click();
   await page.getByText("已配对 2 条候选", { exact: true }).waitFor();
+  const rowAccount=()=>page.locator('[aria-label="第1条发布账号"]').first();
+  await rowAccount().click();
+  await page.locator('.t-select-option:visible').getByText(alternateAccount.name,{exact:true}).click();
+  await page.locator('.t-select-option:visible').first().waitFor({state:'hidden'});
+  assert.equal(await input('第1条发布账号').inputValue(),alternateAccount.name,'inline account selection must update the original matching row');
+  await rowAccount().click();
+  await page.locator('.t-select-option:visible').getByText(account.name,{exact:true}).click();
+  await page.waitForFunction(name=>[...document.querySelectorAll('[aria-label="第1条发布账号"] input, input[aria-label="第1条发布账号"]')].some(input=>input.value===name),account.name);
+  assert.equal(await input('第1条发布账号').inputValue(),account.name);
+
   await next();
 
   const contentTable = page.getByRole("region", { name: "内容配置" });
+  await contentTable.getByText("成片 ID：9007199254740995 · 时长：30.0 秒",{exact:true}).waitFor();
   for (const title of ["发布内容", "发布账号", "发布成片", "配置状态"])
     await contentTable
       .getByRole("columnheader", { name: title, exact: true })
@@ -153,9 +177,9 @@ try {
     .locator(".t-select-option:visible")
     .getByText("待完善", { exact: true })
     .click();
-  await button("查询内容").click();
+  await button("查询").click();
   assert.equal(await contentTable.locator("tbody tr").count(), 2);
-  await button("重置内容筛选").click();
+  await button("重置").click();
   assert.equal(
     await page.evaluate(
       () => document.documentElement.scrollWidth > innerWidth,
@@ -170,10 +194,10 @@ try {
     )
     .first()
     .fill(outputs[0].name);
-  await button("查询内容").click();
+  await button("查询").click();
   assert.equal(await contentTable.locator("tbody tr").count(), 1);
   await contentTable.locator("tbody tr .t-checkbox").first().click();
-  await button("重置内容筛选").click();
+  await button("重置").click();
   assert.equal(await contentTable.locator("tbody tr").count(), 2);
   assert.equal(
     (
@@ -190,7 +214,7 @@ try {
     )
     .first()
     .fill(outputs[1].name);
-  await button("查询内容").click();
+  await button("查询").click();
   await contentTable.locator("tbody tr .t-checkbox").first().click();
   assert.equal(
     (
@@ -227,7 +251,7 @@ try {
   await filteredSecond
     .getByRole("button", { name: "下移", exact: true })
     .click();
-  await button("重置内容筛选").click();
+  await button("重置").click();
   await page
     .getByRole("region", { name: "批量操作" })
     .getByRole("button", { name: "取消选择", exact: true })
@@ -241,7 +265,7 @@ try {
   await page.getByText("生成结果与请求的行或版本不一致", { exact: true }).waitFor();
   assert.equal(await page.getByText("迟到的文案", { exact: true }).count(), 0);
   await page.keyboard.press("Escape");
-  await firstRow.getByRole("button", { name: "编辑内容" }).click();
+  await firstRow.getByRole("button", { name: "编辑" }).click();
   await page.locator('[aria-label="发布文案"] textarea, textarea[aria-label="发布文案"]').fill("手动保留文案");
   const horizontal = page.locator(".batch-cover-row").filter({ hasText: "横版封面 · 16:9" });
   await input("封面短标题").fill("原生成标题");
@@ -344,15 +368,17 @@ try {
   await button("查询").click();
   await button("编辑配置").click();
   await heading("编辑批次 · 浏览器批次").waitFor();
-  await next();
-  await tableRows().filter({ hasText: outputs[1].name }).locator(".batch-content-more summary").click();
-  await tableRows().filter({ hasText: outputs[1].name }).getByRole("button", { name: "移除" }).click();
+  await tableRows().filter({hasText:outputs[1].name}).getByRole("button",{name:"更换成片",exact:true}).click();
+  await page.getByRole('dialog',{name:'选择成片',exact:true}).getByRole('row').filter({hasText:spareOutput.name}).getByRole('button',{name:'选择',exact:true}).click();
+  await tableRows().filter({hasText:spareOutput.name}).getByRole('button',{name:'移出',exact:true}).click();
   await page.locator(".resource-feedback-dialog").getByRole("button", { name: "移除" }).click();
+  await next();
   await next();
   await page.getByText("目标 2 · 候选 1 · 缺口 1", { exact: true }).waitFor();
   await button("保存修改").click();
   await heading("浏览器批次").waitFor();
   assert.equal(saved.config.candidates.length, 1);
+  assert.equal(saved.config.manual_pairs.some(pair=>pair.composite_output_id===spareOutput.composite_output_id),false,"removing a replaced row must clear its current manual pair");
   assert.equal(saved.config.candidates[0].row_key, originalRowKey);
   assert.equal(saved.targets[0].target_count, 2);
   assert.equal(saved.revision, "2");

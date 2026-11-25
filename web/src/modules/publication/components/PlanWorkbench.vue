@@ -216,7 +216,7 @@ function remove(i) {
   <div class="plan-stack plan-workbench-stack">
   <ResourceCard class="plan-editor-section"
     ><ResourceSection title="基础信息" variant="form"
-      ><div class="plan-basic-grid">
+      ><template #title-extra><span class="plan-section-number" aria-hidden="true">01</span></template><div class="plan-basic-grid">
         <label
           ><span><i>*</i>计划名称</span
           ><t-input
@@ -261,6 +261,7 @@ function remove(i) {
       variant="form"
       description="按平台与类目设定目标；资源盘点仅供准备参考，当前库存不会限制或降低计划目标。"
     >
+      <template #title-extra><span class="plan-section-number" aria-hidden="true">03</span></template>
       <div class="plan-goal-scope">
         <label
           ><span><i>*</i>发布平台</span
@@ -354,6 +355,7 @@ function remove(i) {
       variant="form"
       description="每批只发布一个平台，批次严格顺序执行。创建计划只生成待配置骨架，不创建发布任务。"
     >
+      <template #title-extra><span class="plan-section-number" aria-hidden="true">04</span></template>
       <div class="plan-section-split">
         <strong
           >批次规划表

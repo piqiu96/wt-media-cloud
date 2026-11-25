@@ -83,9 +83,10 @@ onBeforeUnmount(() => generation++);
 <template>
   <ResourceCard class="plan-editor-section"
     ><ResourceSection
-      title="资源盘点"
+      title="资源盘点" variant="form"
       description="盘点仅查看本人资源，不锁定账号或成片。账号可覆盖多个类目并顺序发布，类目账号数不可直接相加。"
     >
+      <template #title-extra><span class="plan-section-number" aria-hidden="true">02</span></template>
       <div class="plan-section-tools">
         <t-button
           variant="outline"
