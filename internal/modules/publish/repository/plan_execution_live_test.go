@@ -6,6 +6,7 @@ import (
 	"github.com/wt-media/wt-media-cloud/internal/modules/publish/model"
 	repo "github.com/wt-media/wt-media-cloud/internal/modules/publish/repository"
 	"reflect"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -354,5 +355,100 @@ func TestPlanPermanentFenceAloneBlocksNewSubmitBeforeChildCleanup(t *testing.T) 
 	f, e := s.Report(c.Task, 9, terminationReport(*c, 2, model.AttemptStageSubmitting), true, now)
 	if e != nil || f.AllowSubmit || !f.StopRequested {
 		t.Fatalf("parent-only fence %+v %v", f, e)
+	}
+}
+
+func TestPlanDuplicateOutputErrorIdentifiesOnlyBothOwnedRowsAndRollsBack(t *testing.T) {
+	s, p, bs, in, prepared := preparedPlan(t)
+	second := bs[1]
+	second.Config.Candidates[0].CompositeOutputID = 42
+	var e error
+	second, e = s.EditBatch(second, second.Revision)
+	if e != nil {
+		t.Fatal(e)
+	}
+	p, _, _ = s.GetPlan(p.ID)
+	in.ExpectedRevision = p.Revision
+	in.BatchConfirmations[1].ExpectedRevision = second.Revision
+	_, e = s.StartPlan(p.ID, 9, in, "duplicate", prepared[bs[0].ID], time.Now().UTC())
+	var conflict *repo.PlanConflictError
+	if !errors.As(e, &conflict) {
+		t.Fatalf("missing structured issue %v", e)
+	}
+	if conflict.PlanID != p.ID || len(conflict.Issues) != 1 {
+		t.Fatal(conflict)
+	}
+	issue := conflict.Issues[0]
+	if issue.BatchID != bs[1].ID || issue.RowKey != "second" || issue.RelatedBatchID != bs[0].ID || issue.RelatedRowKey != "first" {
+		t.Fatalf("wrong rows %+v", issue)
+	}
+	got, rows, _ := s.GetPlan(p.ID)
+	if got.StartedAt != nil || rows[0].PlanFrozenAt != nil || rows[1].PlanFrozenAt != nil {
+		t.Fatal("duplicate partially froze plan")
+	}
+	var n int64
+	s.DB.Model(&model.Task{}).Where("batch_id IN ?", []uint64{bs[0].ID, bs[1].ID}).Count(&n)
+	if n != 0 {
+		t.Fatal("duplicate created formal tasks")
+	}
+}
+
+func TestPlanAdmissionClockRechecksReviewExpiryAfterBlockedParentLock(t *testing.T) {
+	s, p, bs, prepared, event := settledPlan(t, 1, 0)
+	var clock atomic.Value
+	clock.Store(event)
+	s.PlanClock = func() time.Time { return clock.Load().(time.Time) }
+	accepted := event.Add(-24*time.Hour + time.Second)
+	if e := s.DB.Model(&model.Task{}).Where("batch_id=?", bs[0].ID).Update("accepted_at", accepted).Error; e != nil {
+		t.Fatal(e)
+	}
+	state, e := s.PlanProgress(p.ID, event)
+	if e != nil || state.Progress != "running" {
+		t.Fatalf("before expiry %+v %v", state, e)
+	}
+	in := model.PlanAdvanceInput{RequestKey: "clock", ExpectedRevision: p.Revision, CurrentBatchID: bs[0].ID, NextBatchID: bs[1].ID, ExpectedBasisFingerprint: state.Basis.Fingerprint}
+	tx := s.DB.Begin()
+	if tx.Error != nil {
+		t.Fatal(tx.Error)
+	}
+	if e = tx.Exec("SELECT id FROM publication_plan WHERE id=? FOR UPDATE", p.ID).Error; e != nil {
+		tx.Rollback()
+		t.Fatal(e)
+	}
+	done := make(chan error, 1)
+	go func() { _, e := s.AdvancePlan(p.ID, 9, in, "clock", prepared[bs[1].ID], true, event); done <- e }()
+	select {
+	case e = <-done:
+		tx.Rollback()
+		t.Fatalf("did not block on parent lock %v", e)
+	case <-time.After(50 * time.Millisecond):
+	}
+	clock.Store(event.Add(2 * time.Second))
+	if e = tx.Commit().Error; e != nil {
+		t.Fatal(e)
+	}
+	select {
+	case e = <-done:
+		if !errors.Is(e, repo.ErrConflict) && !errors.Is(e, repo.ErrUnresolved) {
+			t.Fatalf("expired result advanced %v", e)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("advance stuck")
+	}
+	p, rows, _ := s.GetPlan(p.ID)
+	if *p.CurrentBatchID != bs[0].ID || rows[1].StartedAt != nil {
+		t.Fatal("old admission timestamp passed expiry")
+	}
+	fresh, e := s.PlanProgress(p.ID, event)
+	if e != nil || fresh.Progress != "waiting_verification" {
+		t.Fatalf("read used stale clock %+v %v", fresh, e)
+	}
+	wait := model.PlanResourceWait{NextBatchID: bs[1].ID, CurrentBatchID: bs[0].ID, ExpectedRevision: p.Revision, Basis: state.Basis.Fingerprint, Code: "old-probe", CheckedAt: event}
+	if e = s.RecordPlanResourceWait(p.ID, wait); e != nil {
+		t.Fatal(e)
+	}
+	p, _, _ = s.GetPlan(p.ID)
+	if p.ResourceWait != nil {
+		t.Fatal("old resource probe crossed review deadline")
 	}
 }

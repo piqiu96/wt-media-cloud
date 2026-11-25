@@ -156,6 +156,17 @@ class PublicationPlanContractTest(unittest.TestCase):
         value["batch_receipt"] = {}
         self.assertFalse(self.schema("AdvanceResult").is_valid(value))
 
+    def test_cross_batch_duplicate_issue_uses_two_owned_decimal_row_identities(self):
+        issue = {"code": "duplicate_plan_output", "message": "同一平台成片被两批纳入",
+                 "batch_id": "2", "row_key": "first", "related_batch_id": "3", "related_row_key": "second"}
+        self.schema("Issue").validate(issue)
+        error = {"errcode": 18003, "message": "计划候选存在跨批重复成片", "data": None, "logid": "test",
+                 "error": {"code": "publication_conflict", "details": {"plan_id": "1", "current_revision": "3", "issues": [issue]}}}
+        self.schema("Error").validate(error)
+        for field in ["batch_id", "related_batch_id"]:
+            wrong = dict(issue, **{field: 2})
+            self.assertFalse(self.schema("Issue").is_valid(wrong))
+
     def test_manual_failure_requires_closed_scene_and_no_publishable_work(self):
         resolve = {"attempt_id": "5", "expected_revision": "6", "conclusion": "failed",
                    "evidence": {"platform_uid": "uid", "reason": "原稿被平台明确拒发", "basis": "核实原账号与指定原稿，平台已明确拒发且浏览器现场已经关闭", "scene_closed": True, "no_publishable_work": True}}

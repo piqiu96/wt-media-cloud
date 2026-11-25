@@ -213,7 +213,12 @@ func failBatchControl(c *app.RequestContext, err error) bool {
 	var name, message, action string
 	var retryable bool
 	var item *repository.BatchExecutionConflict
+	var planConflict *repository.PlanConflictError
 	var details any
+	if errors.As(err, &planConflict) {
+		api.FailureCode(c, consts.StatusConflict, errcode.PublishConflict, "计划候选存在跨批重复成片", "publication_conflict", planConflict, false, "reload")
+		return true
+	}
 	if errors.As(err, &item) {
 		details = item
 	}

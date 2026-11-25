@@ -36,6 +36,7 @@ type Filter struct {
 	CreatedFrom, CreatedBefore *time.Time
 }
 type Store struct {
+	PlanClock func() time.Time
 	DB        *gorm.DB
 	LockFiles func(*gorm.DB, []int64) error
 }

@@ -2,11 +2,13 @@ package publish
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/app/server"
 	"github.com/cloudwego/hertz/pkg/common/ut"
 	"github.com/wt-media/wt-media-cloud/internal/modules/publish/model"
+	"github.com/wt-media/wt-media-cloud/internal/modules/publish/repository"
 	"github.com/wt-media/wt-media-cloud/internal/modules/publish/service"
 	"github.com/wt-media/wt-media-cloud/internal/shared/api"
 	"io"
@@ -72,5 +74,41 @@ func TestPlanRecommendationUsesSharedTypedSSEAndRejectsFailure(t *testing.T) {
 		} else if strings.Count(text, "event: item_result") != 1 || !strings.Contains(text, `"batches"`) {
 			t.Fatal(text)
 		}
+	}
+}
+
+func TestPlanDuplicateOutputUsesActualHTTPConflictEnvelope(t *testing.T) {
+	h := server.New()
+	h.POST("/plan-conflict", func(_ context.Context, c *app.RequestContext) {
+		respondBatch(c, nil, &repository.PlanConflictError{PlanID: 1, CurrentRevision: 3, Issues: []repository.PlanConflictIssue{{Code: "duplicate_plan_output", Message: "两个已纳入的行使用同平台成片", BatchID: 2, RowKey: "first", RelatedBatchID: 3, RelatedRowKey: "second"}}})
+	})
+	r := ut.PerformRequest(h.Engine, "POST", "/plan-conflict", nil).Result()
+	if r.StatusCode() != 409 {
+		t.Fatal(r.StatusCode())
+	}
+	var body struct {
+		Error struct {
+			Code    string `json:"code"`
+			Details struct {
+				PlanID          string `json:"plan_id"`
+				CurrentRevision string `json:"current_revision"`
+				Issues          []struct {
+					BatchID        string `json:"batch_id"`
+					RowKey         string `json:"row_key"`
+					RelatedBatchID string `json:"related_batch_id"`
+					RelatedRowKey  string `json:"related_row_key"`
+				} `json:"issues"`
+			} `json:"details"`
+		} `json:"error"`
+	}
+	if e := json.Unmarshal(r.Body(), &body); e != nil {
+		t.Fatal(e)
+	}
+	if body.Error.Code != "publication_conflict" || body.Error.Details.PlanID != "1" || body.Error.Details.CurrentRevision != "3" || len(body.Error.Details.Issues) != 1 {
+		t.Fatalf("lost issue %s", r.Body())
+	}
+	issue := body.Error.Details.Issues[0]
+	if issue.BatchID != "2" || issue.RowKey != "first" || issue.RelatedBatchID != "3" || issue.RelatedRowKey != "second" {
+		t.Fatalf("wrong issue %s", r.Body())
 	}
 }

@@ -76,7 +76,10 @@ func (s ExecutionStore) StartPlan(id uint64, actor int64, in model.StartPlanInpu
 			confirmed[c.BatchID] = c
 		}
 		var first *model.Batch
-		outputs := map[string]bool{}
+		outputs := map[string]struct {
+			BatchID uint64
+			RowKey  string
+		}{}
 		count := 0
 		for i, b := range ordered {
 			if b.ExecutionStatus == model.BatchCancelled {
@@ -105,10 +108,13 @@ func (s ExecutionStore) StartPlan(id uint64, actor int64, in model.StartPlanInpu
 			}
 			for _, row := range selected {
 				key := b.Platform + ":" + strconv.FormatInt(row.CompositeOutputID, 10)
-				if outputs[key] {
-					return ErrConflict
+				if prior, exists := outputs[key]; exists {
+					return &PlanConflictError{PlanID: p.ID, CurrentRevision: p.Revision, Issues: []PlanConflictIssue{{Code: "duplicate_plan_output", Message: "同一平台成片被两个批次纳入，请调整其中一行", BatchID: b.ID, RowKey: row.RowKey, RelatedBatchID: prior.BatchID, RelatedRowKey: prior.RowKey}}}
 				}
-				outputs[key] = true
+				outputs[key] = struct {
+					BatchID uint64
+					RowKey  string
+				}{b.ID, row.RowKey}
 			}
 			if e = tx.Model(&model.Batch{}).Where("id=?", b.ID).Updates(map[string]any{"plan_frozen_at": now, "frozen_confirmation_json": mustJSON(c)}).Error; e != nil {
 				return e
@@ -260,7 +266,7 @@ func (s Store) PlanProgress(id uint64, now time.Time) (PlanProgress, error) {
 		if e != nil {
 			return e
 		}
-		out, e = planProgress(tx, p, rows, now)
+		out, e = planProgress(tx, p, rows, s.planNow(now))
 		return e
 	})
 	return out, e
@@ -305,7 +311,7 @@ func (s ExecutionStore) AdvancePlan(id uint64, actor int64, in model.PlanAdvance
 		if e != nil {
 			return e
 		}
-		state, e := planProgress(tx, p, rows, now)
+		state, e := planProgress(tx, p, rows, s.planNow(now))
 		if e != nil {
 			return e
 		}
@@ -533,7 +539,7 @@ func (s Store) RecordPlanResourceWait(id uint64, wait model.PlanResourceWait) er
 		if e != nil {
 			return e
 		}
-		state, e := planProgress(tx, p, rows, wait.CheckedAt)
+		state, e := planProgress(tx, p, rows, s.planNow(wait.CheckedAt))
 		if e != nil {
 			return e
 		}
@@ -542,4 +548,34 @@ func (s Store) RecordPlanResourceWait(id uint64, wait model.PlanResourceWait) er
 		}
 		return tx.Model(&model.Plan{}).Where("id=?", id).Update("resource_wait_json", mustJSON(wait)).Error
 	})
+}
+
+type PlanConflictIssue struct {
+	Code           string `json:"code"`
+	Message        string `json:"message"`
+	BatchID        uint64 `json:"batch_id,string"`
+	RowKey         string `json:"row_key"`
+	RelatedBatchID uint64 `json:"related_batch_id,string"`
+	RelatedRowKey  string `json:"related_row_key"`
+}
+type PlanConflictError struct {
+	PlanID          uint64              `json:"plan_id,string"`
+	CurrentRevision uint64              `json:"current_revision,string"`
+	Issues          []PlanConflictIssue `json:"issues"`
+}
+
+func (e *PlanConflictError) Error() string { return ErrConflict.Error() }
+func (e *PlanConflictError) Unwrap() error { return ErrConflict }
+
+// Command timestamps remain audit facts; admission cannot use a clock captured
+// before waiting for the parent fence. Tests can move only this internal clock.
+func (s Store) planNow(event time.Time) time.Time {
+	now := time.Now().UTC()
+	if s.PlanClock != nil {
+		now = s.PlanClock().UTC()
+	}
+	if event.After(now) {
+		return event
+	}
+	return now
 }
