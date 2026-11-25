@@ -115,7 +115,7 @@ onMounted(async () => {
               label: '执行状态',
               value: executionLabels[batch.execution_status] || '未开始',
             },
-            { label: '发布平台', value: platformLabel(batch.platform) },
+            { label: '发布平台', value: batch.platform === 'baidu' ? '百家号' : platformLabel(batch.platform) },
             { label: '所属计划', value: batch.plan_name || '独立批次' },
             { label: '创建人 ID', value: batch.created_by || '历史记录未提供' },
             {

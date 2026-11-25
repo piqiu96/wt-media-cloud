@@ -38,6 +38,7 @@ import {
   planStates,
   planLabels,
   planRecordLabels,
+  planRecordDescription,
   planProgressLabels,
   planJournal,
   sendPlanCommand,
@@ -1215,6 +1216,7 @@ onBeforeUnmount(() => {
           ><ol v-if="records.items.length" class="plan-detail-history">
             <li v-for="r in records.items" :key="r.id">
               <p>{{ planRecordLabels[r.event] || "计划业务记录" }}</p>
+              <p v-if="planRecordDescription(r)" class="plan-muted">{{planRecordDescription(r)}}</p>
               <span
                 >{{ formatPublicationTime(r.created_at)
                 }}<template v-if="r.actor_id">

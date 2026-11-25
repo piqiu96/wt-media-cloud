@@ -330,6 +330,8 @@ export const planRecordLabels = {
   "publication_plan.structure": "修改计划安排",
   "publication_plan.start": "首次启动计划",
   "publication_plan.advance": "推进下一批",
+  "publication_plan.handoff": "推进下一批",
+  "publication_plan.cancel_settled": "终止后收尾完成",
   "publication_plan.pause": "暂停计划",
   "publication_plan.resume": "恢复计划",
   "publication_plan.takeover": "接管当前批次",
@@ -347,4 +349,17 @@ export async function readPlanDraftChoice(client, choose) {
     return client.get();
   }
   return null;
+}
+
+export function planRecordDescription(record) {
+  const details = record?.details;
+  if (!details || typeof details !== 'object') return '';
+  const result = details.result;
+  if (record.event === 'publication_plan.handoff' && result) {
+    const from = result.previous_batch_id, to = result.current_batch_id;
+    if (!from || !to) return '';
+    const decision = {automatic:'自动推进',continue:'人工确认继续',skip:'人工确认跳过'}[result.decision] || '按条件推进';
+    return `批次 #${from} → 批次 #${to} · ${decision}${details.reason ? ' · '+details.reason : ''}`;
+  }
+  return typeof details.reason === 'string' ? details.reason : '';
 }

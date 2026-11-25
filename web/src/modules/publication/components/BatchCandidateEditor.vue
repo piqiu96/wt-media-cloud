@@ -109,21 +109,21 @@ function applyArtwork(profile) {
 </script>
 
 <template>
-  <ResourceOverlay form-actions :visible="true" kind="drawer" :width="960" :title="`编辑候选内容 · ${outputName}`"
+  <ResourceOverlay form-actions :visible="true" :width="960" title="编辑发布内容"
     @update:visible="!$event && emit('close')">
     <div class="batch-stack">
-      <p class="batch-muted">发布账号 {{ accountName }}</p>
+      <div class="batch-content-source"><div><small>发布账号</small><strong>{{accountName}}</strong><span>百家号</span></div><div><small>发布成片</small><strong :title="outputName">{{outputName}}</strong><span>成片 ID：{{row.composite_output_id}}</span></div></div>
       <ResourceSection title="文案与创作声明">
         <div class="batch-form-grid">
           <label class="batch-form-wide">发布文案
-            <t-textarea :value="row.content.description || ''" :maxlength="1000" aria-label="发布文案" :disabled="disabled"
+            <t-textarea :value="row.content.description || ''" :maxlength="50" aria-label="发布文案" :disabled="disabled"
               @change="emit('edit', { description: $event })" />
           </label>
-          <label>话题<t-input :value="row.content.topics || ''" :maxlength="200" aria-label="话题" :disabled="disabled"
+          <label>话题<t-input :value="row.content.topics || ''" :maxlength="50" aria-label="话题" :disabled="disabled"
             @change="emit('edit', { topics: $event })" /></label>
           <label>封面短标题<t-input :value="row.cover_title || ''" :maxlength="100" aria-label="封面短标题" :disabled="disabled"
             @change="emit('edit', { cover_title: $event })" /></label>
-          <small class="batch-muted">文案和话题合计 {{ publicationTextLength(row.content.description, row.content.topics) }}/50 字</small>
+          <small class="batch-form-wide" :class="publicationTextLength(row.content.description,row.content.topics)>50 ? 'batch-text-error' : 'batch-muted'" role="status">文案和话题合计 {{ publicationTextLength(row.content.description, row.content.topics) }}/50 字（含分隔空格） · {{publicationTextLength(row.content.description,row.content.topics)>50 ? '已超出，请缩短后确认' : '剩余 '+(50-publicationTextLength(row.content.description,row.content.topics))+' 字'}}</small>
           <label>创作声明
             <t-select :value="row.content.declaration || ''" :options="[{ label: '无需声明', value: '无需声明' }]"
               clearable placeholder="按内容事实选择" aria-label="创作声明" :disabled="disabled"

@@ -20,6 +20,7 @@ import { feedback } from "../../../shared/ui/feedback/index.js";
 import { batchAccountName, batchOutputID, batchOutputName, batchOutputProblem } from "../useBatchResourceCatalog.js";
 import { batchFormProblem, batchInput, coverProfiles, editCandidate, moveEntry, newCandidate, pairOf, replaceCandidatePair, reviewSelectedConfirmations } from "../batchPreparation.js";
 import { coverConfigFromReference, emptyCoverConfig } from "../coverPreparation.js";
+import { presentBatchIssues, localContentIssue } from "../batchIssuePresentation.js";
 import { contentIssue, contentIssues } from "../eligibility.js";
 
 const props = defineProps({ form: Object, catalog: Object, categories: Array, actor: Object, recipes: Object, coverFiles: Object, focusKey: String, validationContext: Object, disabled: Boolean, resourceOnly: Boolean, reviewOnly: Boolean, validationIssues: {type:Array,default:()=>[]} });
@@ -53,11 +54,12 @@ const outputName = row => batchOutputName(outputFor(row));
 const rowLabel = row => `${outputName(row)} · ${accountName(row)}`;
 const search=ref(''),categoryFilter=ref(''),stateFilter=ref(''),applied=ref({}),page=ref(1),pageSize=ref(10);
 const rowIssues=row=>{
- const messages=props.validationIssues.filter(issue=>issue.row_key===row.row_key).map(issue=>issue.message);
- const resource=resourceIssue(row);if(resource)messages.push(resource);
- messages.push(...contentIssues({...row,content:{...row.content,cover_file_id:row.content.cover_file_id==='0'?'':row.content.cover_file_id,portrait_cover_file_id:row.content.portrait_cover_file_id==='0'?'':row.content.portrait_cover_file_id}}).map(issue=>issue.message));
- const live=statusIssue(row);if(live)messages.unshift(live.message);
- return [...new Set(messages.filter(Boolean))];
+ const issues=props.validationIssues.filter(issue=>issue.row_key===row.row_key);
+ const resource=resourceIssue(row);
+ if(resource) issues.push({row_key:row.row_key,field:'composite_output_id',code:resource==='该成片已被当前平台的任务占用'?'output_occupied':undefined,message:resource});
+ issues.push(...contentIssues({...row,content:{...row.content,cover_file_id:row.content.cover_file_id==='0'?'':row.content.cover_file_id,portrait_cover_file_id:row.content.portrait_cover_file_id==='0'?'':row.content.portrait_cover_file_id}}).map(issue=>localContentIssue(issue,row.row_key)));
+ const live=statusIssue(row);if(live)issues.unshift(live.code ? {...live,row_key:row.row_key} : localContentIssue(live,row.row_key));
+ return presentBatchIssues(issues).map(issue=>issue.message);
 };
 const rowState=row=>rowIssues(row).length ? rowIssues(row).every(v=>/确认/.test(v))?'待确认':'待完善' : '已就绪';
 const filteredRows=computed(()=>rows.value.filter(row=>
@@ -253,12 +255,18 @@ function applyBulk(key, patch, covers) {
 </script>
 
 <template>
-  <ResourceCard>
+  <ResourceCard :class="{'batch-content-card': !resourceOnly}">
     <ResourceSection :title="resourceOnly ? '账号与成片匹配' : reviewOnly ? '发布内容' : '内容配置'">
-      <div v-if="!reviewOnly" class="batch-inline batch-section-actions">
+      <div v-if="resourceOnly" class="batch-inline batch-section-actions">
         <t-button theme="default" variant="outline" :disabled="disabled || !form.targets.length" @click="openPair()">添加候选</t-button>
-        <span v-if="!resourceOnly" class="batch-muted">{{ rows.length }} 条候选 · 需要核对文案、封面和声明</span><template v-else><ResourceStatusBadge :label="'已匹配 '+rows.length+' / '+form.targets.reduce((n,t)=>n+t.target_count,0)"/><span class="batch-muted">账号 {{new Set(rows.map(r=>r.media_account_id)).size}} 个 · 成片 {{rows.length}} 条</span></template>
+        <template><ResourceStatusBadge :label="'已匹配 '+rows.length+' / '+form.targets.reduce((n,t)=>n+t.target_count,0)"/><span class="batch-muted">账号 {{new Set(rows.map(r=>r.media_account_id)).size}} 个 · 成片 {{rows.length}} 条</span></template>
       </div>
+      <ResourceFilterBar v-if="!resourceOnly && !reviewOnly" class="batch-content-filters">
+        <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">搜索内容</span><t-input v-model="search" aria-label="搜索候选内容" placeholder="发布文案、账号或成片" clearable @enter="query"/></label>
+        <label class="wt-filter-field"><span class="wt-filter-field__label">发布类目</span><t-select v-model="categoryFilter" :options="categories.filter(c=>form.targets.some(t=>t.category_id===c.value))" aria-label="筛选候选类目" placeholder="全部" clearable filterable/></label>
+        <label class="wt-filter-field"><span class="wt-filter-field__label">配置状态</span><t-select v-model="stateFilter" :options="['待完善','待确认','已就绪'].map(value=>({value,label:value}))" aria-label="筛选候选状态" placeholder="全部" clearable/></label>
+        <div class="wt-filter-actions"><t-button @click="query">查询</t-button><t-button variant="outline" @click="search='';categoryFilter='';stateFilter='';query()">重置</t-button></div>
+      </ResourceFilterBar>
       <ResourceSelectionToolbar v-if="!resourceOnly && !reviewOnly" :count="selected.length" unit="条候选"
         :hint="pendingConfirmations.length && confirmationProblem ? '请先在结果总览填写执行设置，再检查并确认所选内容。' : ''"
         @clear="selection = []">
@@ -266,12 +274,7 @@ function applyBulk(key, patch, covers) {
         <t-button size="small" variant="outline" theme="default"
           :disabled="disabled || !pendingConfirmations.length || !!confirmationProblem" @click="confirmSelected">确认内容</t-button>
       </ResourceSelectionToolbar>
-      <ResourceFilterBar v-if="!resourceOnly && !reviewOnly" class="batch-content-filters">
-        <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">搜索内容</span><t-input v-model="search" aria-label="搜索候选内容" placeholder="发布文案、账号或成片" clearable @enter="query"/></label>
-        <label class="wt-filter-field"><span class="wt-filter-field__label">发布类目</span><t-select v-model="categoryFilter" :options="categories.filter(c=>form.targets.some(t=>t.category_id===c.value))" aria-label="筛选候选类目" placeholder="全部" clearable filterable/></label>
-        <label class="wt-filter-field"><span class="wt-filter-field__label">配置状态</span><t-select v-model="stateFilter" :options="['待完善','待确认','已就绪'].map(value=>({value,label:value}))" aria-label="筛选候选状态" placeholder="全部" clearable/></label>
-        <div class="wt-filter-actions"><t-button @click="query">查询内容</t-button><t-button variant="outline" @click="search='';categoryFilter='';stateFilter='';query()">重置内容筛选</t-button></div>
-      </ResourceFilterBar>
+
       <FeedbackAlert v-if="confirmationFeedback" :theme="confirmationFeedback.theme" :message="confirmationFeedback.message" />
       <div class="table-scroll-wrap resource-data-table">
         <t-table class="wt-resource-table" :data="resourceOnly?rows:filteredRows" :columns="resourceOnly?resourceColumns:columns" row-key="row_key" :selected-row-keys="selection" :reserve-selected-row-on-paginate="true" :pagination="resourceOnly?undefined:{current:page,pageSize,total:filteredRows.length,pageSizeOptions:[10,20,50],showJumper:false}" @page-change="value=>{page=value.current;pageSize=value.pageSize}"
@@ -296,7 +299,7 @@ function applyBulk(key, patch, covers) {
           <template #category="{ row }">{{ categoryName(row.category_id) }}</template>
           <template #status="{row}"><ResourceStatusBadge :tone="rowIssues(row).length?'warning':'success'" :label="rowState(row)"/><small v-if="rowIssues(row).length" class="batch-content-problem">{{rowIssues(row)[0]}}</small><details v-if="rowIssues(row).length>1" class="batch-content-issues"><summary>另 {{rowIssues(row).length-1}} 项</summary><ul><li v-for="message in rowIssues(row).slice(1)" :key="message">{{message}}</li></ul></details></template>
           <template #op="{ row, rowIndex }"><ResourceRowActions>
-            <t-button v-if="!resourceOnly" size="small" variant="text" :disabled="disabled" @click="activeKey = row.row_key">{{reviewOnly?"编辑":"编辑内容"}}</t-button>
+            <t-button v-if="!resourceOnly" size="small" variant="text" :disabled="disabled" @click="activeKey = row.row_key">编辑</t-button>
             <template v-if="resourceOnly">
             <t-button v-if="!reviewOnly" size="small" variant="text" :disabled="disabled" @click="openPair(row)">调整配对</t-button>
             <t-button v-if="!reviewOnly" size="small" variant="text" :disabled="disabled || rows.indexOf(row) === 0" @click="moveEntry(rows, rows.indexOf(row), -1)">上移</t-button>
@@ -355,6 +358,7 @@ function applyBulk(key, patch, covers) {
 </template>
 
 <style scoped>
+.batch-content-card :deep(.resource-section__header){margin-bottom:20px}.batch-content-card :deep(.table-scroll-wrap){margin-inline:calc(-1 * var(--wt-space-card,24px));width:calc(100% + 2 * var(--wt-space-card,24px));max-width:none;border-inline:0;border-radius:0}.batch-content-card :deep(.resource-filter-bar){border-bottom:0;padding-bottom:20px;margin-bottom:0}.batch-content-card :deep(.resource-section__header h3){font-weight:500}
 .batch-content-identity{display:flex;align-items:center;gap:12px;min-width:0}.batch-content-identity>div{min-width:0}.batch-content-identity>img{width:64px;height:48px;object-fit:contain;border:1px solid var(--wt-border);border-radius:4px}.batch-content-name,.batch-content-problem{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere}.batch-content-name{font-weight:500}.batch-content-problem,.batch-content-issues{font-size:12px;line-height:20px;color:var(--wt-text-tertiary)}.batch-content-issues summary{cursor:pointer;color:var(--wt-primary)}.batch-content-filters{margin-top:16px}.batch-content-filters :deep(.wt-filter-field--wide){flex:1.6 1 280px;max-width:none}
 .batch-content-more summary{cursor:pointer;list-style:none;color:var(--wt-primary);font-size:13px}.batch-content-more>div{display:flex;flex-direction:column;align-items:flex-start}
 .batch-content-asset{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere;font-weight:400;text-align:left}

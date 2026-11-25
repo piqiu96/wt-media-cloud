@@ -225,3 +225,6 @@
 
 /* List panels use the shared opt-in geometry; the page header already owns its gap. */
 .plan-page.resource-list-page { gap: 0; }
+
+/* Match the prototype's quiet field labels within publishing pages only. */
+.plan-page .resource-section .t-descriptions__label{font-weight:400}
