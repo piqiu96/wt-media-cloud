@@ -37,6 +37,7 @@ import BatchExecutionControls from "../components/BatchExecutionControls.vue";
 import BatchReadonlyBody from "../components/BatchReadonlyBody.vue";
 import BatchFormalTasks from "../components/BatchFormalTasks.vue";
 import { batchPhases, batchTaskLocation, batchPendingCount } from "../batchExecution.js";
+import "../batchNumberStepper.css";
 import "../batchPreparation.css";
 import {planReturn} from "../planPreparation.js";
 

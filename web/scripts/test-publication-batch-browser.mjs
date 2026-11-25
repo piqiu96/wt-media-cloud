@@ -128,6 +128,20 @@ try {
   await input(`${secondCategory.name}发布目标`).waitFor({state:'hidden'});
   await input(`${category.name}发布目标`).fill("2");
   await input('目标数量').fill('2');
+  const quantityControl = page.locator('.batch-goal-field .t-input-number');
+  const quantityGeometry = await quantityControl.evaluate(control => {
+    const box = control.getBoundingClientRect();
+    const children = [...control.children].map(child => child.getBoundingClientRect());
+    return { width: box.width, height: box.height, border: getComputedStyle(control).borderLeftWidth,
+      gaps: children.slice(1).map((child,index) => child.left - children[index].right) };
+  });
+  assert.equal(quantityGeometry.height,36,'numeric input must retain the prototype single joined 36px control');
+  assert.equal(quantityGeometry.border,'1px','one outer border must enclose minus, input and plus');
+  assert.ok(quantityGeometry.gaps.every(gap => Math.abs(gap) < 1),'stepper segments must have no gaps');
+  await input('目标数量').press('ArrowUp');
+  assert.equal(await input('目标数量').inputValue(),'3');
+  await input('目标数量').press('ArrowDown');
+  assert.equal(await input('目标数量').inputValue(),'2');
   await button('采用系统推荐').click();
   await page.getByText('已采用系统推荐，可继续调整类目数量和匹配。',{exact:true}).waitFor();
   assert.equal(await input(`${category.name}发布目标`).inputValue(),'2');
