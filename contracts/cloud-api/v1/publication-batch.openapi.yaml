@@ -501,20 +501,6 @@ components:
         platform: {const: baidu}
         targets: {$ref: '#/components/schemas/Targets'}
         config: {$ref: '#/components/schemas/Config'}
-        plan_id: {type: [string, 'null'], pattern: '^[1-9][0-9]*$', readOnly: true, description: 'Only plan transaction writes association; external create/save cannot set or move it.'}
-        plan_name: {type: [string, 'null'], readOnly: true}
-        plan_configuration_frozen: {type: boolean, readOnly: true}
-        plan_current_position: {type: boolean, readOnly: true}
-        handed_off_at: {type: [string, 'null'], format: date-time, readOnly: true}
-        action_blockers:
-          type: array
-          items:
-            type: object
-            required: [action, code, message]
-            properties:
-              action: {type: string}
-              code: {type: string}
-              message: {type: string}
         execution_setting: {$ref: '#/components/schemas/ExecutionSetting'}
     Success:
       type: object
@@ -548,6 +534,20 @@ components:
         platform: {$ref: '#/components/schemas/Platform'}
         targets: {$ref: '#/components/schemas/Targets'}
         candidate_count: {type: integer, minimum: 0}
+        plan_id: {type: [string, 'null'], pattern: '^[1-9][0-9]*$', readOnly: true, description: 'Only plan transaction writes association; external create/save cannot set or move it.'}
+        plan_name: {type: [string, 'null'], readOnly: true}
+        plan_configuration_frozen: {type: boolean, readOnly: true}
+        plan_current_position: {type: boolean, readOnly: true}
+        handed_off_at: {type: [string, 'null'], format: date-time, readOnly: true}
+        action_blockers:
+          type: array
+          items:
+            type: object
+            required: [action, code, message]
+            properties:
+              action: {type: string}
+              code: {type: string}
+              message: {type: string}
         execution_setting: {$ref: '#/components/schemas/ExecutionSetting'}
         configuration_status: {enum: [incomplete, ready]}
         execution_status: {$ref: '#/components/schemas/ExecutionStatus'}

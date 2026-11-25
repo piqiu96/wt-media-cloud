@@ -108,6 +108,43 @@ class PublicationPlanContractTest(unittest.TestCase):
         finish["end_reason"] = "cancelled"
         self.assertFalse(self.schema("FinishPlanInput").is_valid(finish))
 
+    def test_batch_plan_projection_cannot_be_written_through_configuration(self):
+        filename = "publication-batch.openapi.yaml"
+        doc = self.docs[filename]
+        fields = {"plan_id": "9", "plan_name": "父计划", "plan_configuration_frozen": True,
+                  "plan_current_position": False, "handed_off_at": None, "action_blockers": []}
+        configuration = {"platform": "baidu", "targets": [{"category_id": "2", "target_count": 1}],
+                         "config": {"candidates": []},
+                         "execution_setting": {"concurrency_limit": 5, "group_interval_seconds": 0,
+                                               "between_group_policy": "auto_continue", "exception_task_limit": 3}}
+        for path, method, command in [
+            ("/api/v1/publication-batch", "post", {"name": "批次", "request_key": "create-1"}),
+            ("/api/v1/publication-batch/{id}/configuration", "put", {"name": "批次", "expected_revision": "1"})]:
+            validator = Draft202012Validator(
+                {"$ref": f"{(API / filename).as_uri()}#/paths/{path.replace('~', '~0').replace('/', '~1')}/{method}/requestBody/content/application~1json/schema"},
+                registry=self.registry)
+            valid = dict(configuration, **command)
+            validator.validate(valid)
+            for field, value in fields.items():
+                with self.subTest(method=method, field=field):
+                    self.assertFalse(validator.is_valid(dict(valid, **{field: value})))
+        summary = doc["components"]["schemas"]["BatchSummary"]
+        for field in fields:
+            self.assertIn(field, summary["properties"])
+            self.assertNotIn(field, summary["required"])
+            self.assertNotIn(field, doc["components"]["schemas"]["Configuration"]["properties"])
+        # Use the actual response projection, including all inherited required fields.
+        execution = {"phase": "not_started", "first_started_at": None, "execution_group_no": None,
+                     "group_task_ids": [], "group_ended_at": None, "next_group_at": None, "pause": None,
+                     "stopped_at": None, "ended_at": None, "target_count": 1, "created_count": 0,
+                     "creation_shortfall": None, "published_count": 0, "target_shortfall": 1, "task_counts": {}}
+        value = dict(configuration, id="1", team_id="2", operator_id="3", created_by="3", revision="1",
+                     name="批次", candidate_count=0, configuration_status="incomplete", execution_status="not_started",
+                     execution=execution, allowed_actions=[], created_at="2026-11-25T00:00:00Z", updated_at="2026-11-25T00:00:00Z")
+        value.pop("config")
+        self.schema("BatchSummary", filename).validate(dict(value, **fields))
+        self.schema("BatchSummary", filename).validate(value)
+
     def test_manual_failure_requires_closed_scene_and_no_publishable_work(self):
         resolve = {"attempt_id": "5", "expected_revision": "6", "conclusion": "failed",
                    "evidence": {"platform_uid": "uid", "reason": "原稿被平台明确拒发", "basis": "核实原账号与指定原稿，平台已明确拒发且浏览器现场已经关闭", "scene_closed": True, "no_publishable_work": True}}
