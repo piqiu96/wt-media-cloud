@@ -33,8 +33,8 @@ for(const [planId,label]of [['PL-202611-002','unconfigured'],['PL-202611-004','r
   assert.equal(await dialog.evaluate(el=>el.contains(document.activeElement)),true,'opening moves focus inside the drawer');
   assert.match(await dialog.innerText(),new RegExp('批次 '+label));
   assert.match(await dialog.innerText(),label==='unconfigured'?/待配置/:label==='ready'?/待执行/:/待处理/);
-  assert.equal(await dialog.locator('input:not([readonly]):not([disabled]), textarea:not([readonly]):not([disabled])').count(),1,'only task list search accepts text');
-  for(const title of ['批次信息','执行情况','批次任务','执行记录'])assert.ok(await dialog.getByRole('heading',{name:new RegExp('^'+title)}).isVisible(),title+' should be visible');
+  assert.equal(await dialog.locator('input:not([readonly]):not([disabled]), textarea:not([readonly]):not([disabled])').count(),label==='unconfigured'?0:1,'only started task lists expose search');
+  for(const title of label==='unconfigured'?['批次信息','候选配置','操作记录']:['批次信息','执行情况','批次任务','执行记录'])assert.ok(await dialog.getByRole('heading',{name:new RegExp('^'+title)}).isVisible(),title+' should be visible');
   await p.waitForTimeout(250);const box=await dialog.boundingBox();assert.ok(Math.abs(box.x-216)<=1&&Math.abs(box.y-72)<=1&&Math.abs(box.width-1224)<=1&&Math.abs(box.height-928)<=1,'drawer only fills the content area below the header and beside the menu');
   assert.equal(await dialog.getByRole('button',{name:/^(去配置|执行|编辑|前往批次详情)$/}).count(),0);
   const afterData=(await store.get()).data;
@@ -58,7 +58,7 @@ for(const [planId,label]of [['PL-202611-002','unconfigured'],['PL-202611-004','r
    assert.notEqual(first,second,'native navigation keeps its own keyboard sequence');
    assert.equal(await navigation.evaluate(el=>el.contains(document.activeElement)),true);
    await p.keyboard.press('Escape');await navigation.waitFor({state:'hidden'});assert.ok(await dialog.isVisible(),'Escape closes only the navigation above the drawer');
-   await dialog.getByRole('heading',{name:'执行记录',exact:false}).scrollIntoViewIfNeeded();
+   await dialog.getByRole('heading',{name:label==='unconfigured'?'操作记录':'执行记录',exact:false}).scrollIntoViewIfNeeded();
    await screenshot(p,'plan-batch-preview-mobile-records');
    await dialog.getByRole('button',{name:'关闭发布批次详情',exact:true}).click();await dialog.waitFor({state:'hidden'});
    await p.waitForFunction(el=>el===document.activeElement,await trigger.elementHandle());
