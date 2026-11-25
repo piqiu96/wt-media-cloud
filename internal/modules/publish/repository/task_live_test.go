@@ -26,6 +26,7 @@ import (
 func isolated(t *testing.T) *gorm.DB {
 	db := isolatedBeforeBatchExecution(t)
 	applyFileMigration(t, db, "20261125_117_publication_batch_execution.sql")
+	applyFileMigration(t, db, "20261125_118_publication_plan.sql")
 	return db
 }
 

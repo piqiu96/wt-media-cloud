@@ -24,3 +24,5 @@ Cloud-owned public HTTPS JSON API contracts for Web and Desktop consumers.
 - Publication batch revision `2026.11.25.2` adds first-start preview and atomic authorization, fixed-group control, revision-bound pause/resume/stop/finish, formal task pagination and verified public counts. The existing configuration save remains preparation.
 
 - Publication batch revision `2026.11.25.3` adds the optional A02 conflict detail `start_request_applied: false` only when a different durable first-start key and valid immutable receipt prove this pending request did not win. Other conflicts omit it; the original key/digest remain private. Cloud-Agent and publish error-code revisions remain `2026.11.25.2`.
+
+CHG109 publishes `v1/publication-plan.openapi.yaml` revision `2026.11.25.4` and advances publication/publication-batch projections to the same Cloud API revision. Plans orchestrate own prepared batches using the existing batch start transaction, fixed selections and 10% handoff; no makeup or cross-user authorization API. Local plan continuation is Agent-owned LocalAPI `2026.11.25.2`. Cloud-Agent and publishing error revisions remain `2026.11.25.2`.

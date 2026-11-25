@@ -28,17 +28,19 @@ export function outputUnavailable(output, category, account) {
   return "";
 }
 export function publicationTextLength(description,topics) {return Array.from(description || "").length + (topics ? 1+Array.from(topics).length : 0);}
-export function contentIssue(form) {
+export function contentIssues(form) {
+  const issues = [], content = form.content || {};
   if (!form.category_id || !form.media_account_id || !form.composite_output_id)
-    return { field: "resource", message: "请选择发布类目、账号和成片" };
-  if (!form.content.description.trim()) return { field: "text", message: "请填写发布标题" };
-  if (publicationTextLength(form.content.description,form.content.topics)>50) return { field: "text", message: "百度发布标题与话题合计不能超过50字（含分隔空格），请缩短后再确认" };
-  if (!form.content.cover_file_id) return { field: "cover", message: "请选择发布封面" };
-  if (!form.content.portrait_cover_file_id) return { field: "portrait", message: "请选择或生成3:4竖版封面" };
-  if (!form.content.declaration) return { field: "declaration", message: "请按内容事实选择创作声明" };
-  if (!form.content.confirmed) return { field: "confirmation", message: "请核对并确认当前文案、封面和声明" };
-  return null;
+    issues.push({ field: "resource", message: "请选择发布类目、账号和成片" });
+  if (!String(content.description || "").trim()) issues.push({ field: "text", message: "请填写发布标题" });
+  else if (publicationTextLength(content.description,content.topics)>50) issues.push({ field: "text", message: "百度发布标题与话题合计不能超过50字（含分隔空格），请缩短后再确认" });
+  if (!content.cover_file_id) issues.push({ field: "cover", message: "请选择发布封面" });
+  if (!content.portrait_cover_file_id) issues.push({ field: "portrait", message: "请选择或生成3:4竖版封面" });
+  if (!content.declaration) issues.push({ field: "declaration", message: "请按内容事实选择创作声明" });
+  if (!content.confirmed) issues.push({ field: "confirmation", message: "请核对并确认当前文案、封面和声明" });
+  return issues;
 }
+export function contentIssue(form) { return contentIssues(form)[0] || null; }
 
 export function contentProblem(form) { return contentIssue(form)?.message || ""; }
 

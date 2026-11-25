@@ -28,7 +28,7 @@ export function createPublicationDraftClient({
 }) {
   const user = String(userId ?? "");
   if (!/^[1-9][0-9]*$/.test(user)) throw identityChanged();
-  if (!["task", "batch"].includes(draftType)) throw new Error("不支持的续编类型");
+  if (!["task", "batch", "plan"].includes(draftType)) throw new Error("不支持的续编类型");
   const typeArgs = draftType === "task" ? {} : { draft_type: draftType };
   const generation = sessionGeneration;
   const key = `${tauri ? "desktop" : "web"}:${user}:${draftType}`;

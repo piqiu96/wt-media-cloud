@@ -13,7 +13,7 @@ import {
 } from "./proto/publishing-design/taskActions.js";
 import { canRetry } from "./proto/publishing-design/model.js";
 import { reconcileExecutionGroup } from "./proto/publishing-design/batchExecutionSettings.js";
-import { queueTask } from "./proto/publishing-design/relationships.js";
+import { syncPlan, queueTask } from "./proto/publishing-design/relationships.js";
 import { planAction, protectPlanSnapshot } from "./proto/publishing-design/planBridge.js";
 import {
   batchState,
@@ -211,7 +211,7 @@ export function createBatchStore({ file, check } = {}) {
                 ];
               input.attempt = t.attemptHistory?.at(-1)?.number;
             }
-            verifyResult(db, t, input, "本地演示用户");
+            verifyResult(db, t, input, "本地演示用户", { reviewing: b.planReview });
             if (input.status === "已发布")
               t.publicAt = new Date(input.publicAt).toISOString();
           } else if (input.action === "start") {
@@ -239,6 +239,7 @@ export function createBatchStore({ file, check } = {}) {
             result: "成功",
           });
         } else runBatchCommand(db, b, action, input, check);
+        if (b?.planReview) syncPlan(db, db.plans.find(plan => plan.id === b.planId));
         migrateBatchLifecycle(db);
         for (const entry of b?.log?.slice(logLength) || [])
           Object.assign(entry, { beforeState, afterState: batchState(db, b) });
@@ -267,7 +268,7 @@ export function createPublishingMiddleware({ webRoot }) {
       if (req.headers.origin && new URL(req.headers.origin).host !== host)
         throw Error("拒绝跨站写入");
       const hash = createHash("sha256")
-        .update(webRoot + host)
+        .update(webRoot + host + (url.searchParams.get("review") === "chg109" ? ":chg109" : ""))
         .digest("hex")
         .slice(0, 16);
       if (!stores.has(hash))

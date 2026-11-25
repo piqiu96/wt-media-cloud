@@ -1,6 +1,8 @@
 <script setup>
 import { computed, ref, watch } from "vue";
 import { createPublicationBatchClient, createPublicationClient } from "../../../shared/api/publication.js";
+import BatchCandidateWorkspace from "./BatchCandidateWorkspace.vue";
+import ResourceNotice from "../../../shared/ui/resource/ResourceNotice.vue";
 import ResourceCard from "../../../shared/ui/resource/ResourceCard.vue";
 import ResourceSection from "../../../shared/ui/resource/ResourceSection.vue";
 import ResourceReorderActions from "../../../shared/ui/resource/ResourceReorderActions.vue";
@@ -16,6 +18,10 @@ const props = defineProps({
   categories: { type: Array, required: true },
   actor: { type: Object, required: true },
   disabled: Boolean,
+  inheritedTargets: Boolean,
+  recipes: Object,
+  coverFiles: Object,
+  validationContext: Object,
 });
 const emit = defineEmits(["allocated", "work"]);
 const batch = createPublicationBatchClient();
@@ -28,6 +34,7 @@ const error = ref("");
 const loading = ref(false);
 const resourceLoading = ref(false);
 const outcome = ref("");
+const poolOpen=ref(false);
 let inventorySequence = 0;
 const automaticResourceLimit = 1000;
 
@@ -153,54 +160,37 @@ function allocate() {
 <template>
   <div class="batch-stack">
     <ResourceCard>
-      <ResourceSection title="批次信息">
+      <ResourceSection title="发布范围" variant="form">
         <div class="batch-form-grid">
           <label>批次名称<t-input v-model="form.name" aria-label="批次名称" :maxlength="100" :disabled="fixed" placeholder="例如：本周百度视频发布" /></label>
-          <label>发布平台<t-input aria-label="发布平台" value="百度" disabled /></label>
+          <label>发布平台<t-input aria-label="发布平台" value="百家号" disabled /></label>
         </div>
       </ResourceSection>
     </ResourceCard>
 
     <ResourceCard>
-      <ResourceSection title="目标与资源盘点">
+      <ResourceSection title="类目数量与优先级" variant="form">
         <div class="batch-inline">
-          <t-select v-model="category" :options="availableCategories" filterable aria-label="目标类目" placeholder="选择目标类目" :disabled="fixed" />
-          <t-button theme="default" variant="outline" :disabled="fixed || !category || form.targets.length >= 100" @click="addTarget">添加类目</t-button>
+          <t-select v-model="category" :options="availableCategories" filterable aria-label="目标类目" placeholder="选择目标类目" :disabled="fixed || inheritedTargets" />
+          <t-button theme="default" variant="outline" :disabled="fixed || inheritedTargets || !category || form.targets.length >= 100" @click="addTarget">添加类目</t-button>
           <t-button v-if="form.targets.length" variant="text" :loading="resourceLoading" :disabled="fixed" @click="inspect">刷新盘点</t-button>
         </div>
         <p v-if="!form.targets.length" class="batch-muted">添加类目并填写发布目标，按列表顺序分配资源。</p>
-        <div v-for="(target, index) in form.targets" :key="target.category_id" class="batch-resource-row">
-          <ResourceReorderActions :item-key="target.category_id" scope="targets" :index="index" :count="form.targets.length"
-            :draggable="false" :remove-disabled="fixed || hasCandidates(target.category_id)" @move="!fixed && moveEntry(form.targets, index, $event)"
-            @remove="removeTarget(index)">
-            {{ nameOf(target.category_id) }}
-          </ResourceReorderActions>
-          <div class="batch-inline">
-            <label>发布目标<t-input-number v-model="target.target_count" :aria-label="`${nameOf(target.category_id)}发布目标`" :min="0" :max="Number.MAX_SAFE_INTEGER" :decimal-places="0" :disabled="fixed" /></label>
-            <div class="batch-inventory">
-              <strong>{{ resourceLoading && !inventory[target.category_id] ? "盘点中" : displayAvailability(inventory[target.category_id]) }}</strong>
-              <span v-if="inventory[target.category_id]?.as_of">
-                可发布账号 {{ inventory[target.category_id].eligible_account_count }} / {{ inventory[target.category_id].account_count }}
-                <template v-if="inventory[target.category_id].unknown_output_count"> · {{ inventory[target.category_id].unknown_output_count }} 个成片状态未知</template>
-                · {{ formatPublicationTime(inventory[target.category_id].as_of) }}
-              </span>
-              <span>已配对 {{ shortfalls[index].candidate_count }} 条 · 缺口 {{ shortfalls[index].shortfall }} 条</span>
-              <span v-if="hasCandidates(target.category_id)">移除类目前需先移除该类目的候选配置</span>
-            </div>
-          </div>
-        </div>
+        <div class="batch-total-line"><div><small>类目数量合计</small><strong>{{form.targets.reduce((n,t)=>n+t.target_count,0)}} <span>条候选目标</span></strong></div><p v-if="inheritedTargets">目标来自计划，账号、成片与内容可在本批配置</p></div>
+        <div v-if="form.targets.length" class="resource-data-table resource-embedded-table is-editable batch-target-container" role="region" aria-label="类目目标分配，可横向滚动" tabindex="0"><table><thead><tr><th>优先级</th><th>内容类目</th><th class="resource-table-number">可用账号</th><th class="resource-table-number">可用成片</th><th class="resource-table-number">本批次目标</th><th class="resource-table-number">已匹配</th><th class="resource-table-number">缺口</th><th>操作</th></tr></thead><tbody><tr v-for="(target,index) in form.targets" :key="target.category_id"><td><div class="batch-inline"><span>P{{index+1}}</span><t-button size="small" variant="text" :disabled="fixed||inheritedTargets||index===0" @click="moveEntry(form.targets,index,-1)">上移</t-button><t-button size="small" variant="text" :disabled="fixed||inheritedTargets||index===form.targets.length-1" @click="moveEntry(form.targets,index,1)">下移</t-button></div></td><td><strong>{{nameOf(target.category_id)}}</strong><small v-if="inventory[target.category_id]?.as_of" class="batch-muted batch-task-block">{{formatPublicationTime(inventory[target.category_id].as_of)}}</small></td><td class="resource-table-number">{{inventory[target.category_id]?.as_of?inventory[target.category_id].eligible_account_count:'—'}}</td><td class="resource-table-number">{{inventory[target.category_id]?.as_of?inventory[target.category_id].available_output_count:'—'}}<small class="batch-muted batch-task-block" v-if="inventory[target.category_id]?.error||inventory[target.category_id]?.unknown_output_count">{{displayAvailability(inventory[target.category_id])}}</small></td><td class="resource-table-number"><t-input-number v-model="target.target_count" :aria-label="nameOf(target.category_id)+'发布目标'" :min="0" :max="Number.MAX_SAFE_INTEGER" :decimal-places="0" :disabled="fixed||inheritedTargets"/></td><td class="resource-table-number">{{shortfalls[index].candidate_count}}</td><td class="resource-table-number">{{shortfalls[index].shortfall}}</td><td><t-button variant="text" theme="danger" :disabled="fixed||inheritedTargets||hasCandidates(target.category_id)" @click="removeTarget(index)">移除</t-button></td></tr></tbody></table></div>
       </ResourceSection>
     </ResourceCard>
 
     <ResourceCard v-if="form.targets.length">
-      <ResourceSection title="配对资源">
+      <ResourceSection title="资源选择与上限" variant="form">
         <FeedbackAlert v-if="error" theme="error" :message="error" />
         <p class="batch-muted" v-if="outcome" role="status">{{ outcome }}</p>
         <div class="batch-inline batch-section-actions">
           <t-button theme="default" variant="outline" :loading="loading" :disabled="fixed" @click="loadAvailable">载入可用资源</t-button>
           <t-button theme="primary" :loading="loading" :disabled="fixed || !accounts.length || !outputs.length" @click="allocate">按顺序自动配对</t-button>
         </div>
-        <div class="batch-form-grid">
+        <t-button variant="text" @click="poolOpen=!poolOpen">{{poolOpen?'收起资源设置':'展开账号、成片与本批上限设置'}}</t-button>
+        <div v-show="poolOpen" class="batch-form-grid">
           <div>
             <div class="batch-subhead"><h4>本人发布账号</h4><t-button variant="text" :disabled="fixed" @click="picker = 'account'">选择账号</t-button></div>
             <p class="batch-muted">每账号上限由本批所有类目共用。</p>
@@ -230,6 +220,8 @@ function allocate() {
         </div>
       </ResourceSection>
     </ResourceCard>
+
+    <BatchCandidateWorkspace v-if="form.targets.length" resource-only :form="form" :catalog="catalog" :categories="categories" :actor="actor" :recipes="recipes||{}" :cover-files="coverFiles||{}" :validation-context="validationContext" :disabled="fixed" @work="emit('work',$event)"/>
 
     <PublishingResourcePicker v-if="picker" batch :visible="true" :kind="picker" :platform="form.platform"
       :category="picker === 'output' ? outputCategory : undefined" :team-id="String(actor.team_id || '')"

@@ -16,8 +16,8 @@ import ProductionPage from './ProductionPage.vue';
 import {loadProduction} from './production/loader.js';
 import {syncProductionResources,productionPublication,publishingPlatform} from './production/bridge.js';
 import { reconcileExecutionGroup } from "./batchExecutionSettings.js";
-import { addExecutionReviewScenarios } from "./scenarios.js";
-import {navigationGroups,productionPages,operationURL,readOperationRoute,updateOperationURL} from './routes.js';
+import { addExecutionReviewScenarios, addPlanReviewScenarios } from "./scenarios.js";
+import {navigationGroups,productionPages,operationURL,readOperationRoute,updateOperationURL,preservePlanReview} from './routes.js';
 import {
   ref,
   shallowRef,
@@ -194,6 +194,7 @@ onMounted(async () => {
     if (saved) Object.assign(db, saved);
     migrateRelationships(db);
     migrateBatchLifecycle(db);
+    if (planReview && new URLSearchParams(location.search).get("samples") !== "0") addPlanReviewScenarios(db);
     if (executionReview && new URLSearchParams(location.search).get("samples") !== "0") addExecutionReviewScenarios(db);
     await nextTick();
     if (!db.images.some((i) => i.pureBackground))
@@ -292,7 +293,8 @@ const isProduction=computed(()=>productionPages.includes(page.value));
 const accountRef=ref(null),accountSceneKey=ref(location.search),accountAcceptedURL=ref(location.pathname+location.search+location.hash);
 const previewMode = new URLSearchParams(location.search).get("review");
 const executionReview = previewMode === "chg108";
-const preparationPreview = executionReview || previewMode === "chg107";
+const planReview = previewMode === "chg109";
+const preparationPreview = executionReview || planReview || previewMode === "chg107";
 if (preparationPreview) {
   const role = new URLSearchParams(location.search).get("role");
   prototypeSession.actor = role === "admin" ? "周予宁" : role === "operator" ? "林予安" : "陈小雨";
@@ -511,13 +513,19 @@ async function returnToTaskList() {
  if(b){page.value='batches';await nextTick();batchManagerRef.value?.open(b,false,true,true);}
  else{page.value='tasks';updateOperationURL('tasks');try{const saved=JSON.parse(sessionStorage.getItem('publishing-task-list')||'null');if(saved){query.value=saved.query;applied.value=saved.appliedQuery||'';size.value=saved.size||20;filterFrom.value=saved.from||'';filterTo.value=saved.to||'';pageNo.value=saved.page;filterPlatform.value=saved.platform;filterCategory.value=saved.category;filterStatus.value=saved.status;Object.assign(appliedFilters,saved.applied);}}catch{}await nextTick();for(const {el,top,left} of listScroll||[]){if(el.isConnected)el.scrollTo(left,top);}if(!listScroll)try{window.scrollTo(0,JSON.parse(sessionStorage.getItem('publishing-task-list')||'{}').scroll||0);}catch{}}
 }
-async function navigateContext(href){
+async function navigateContext(href,batchAction){
  const url=new URL(href,location.origin),route=readOperationRoute(url);
  if(url.origin!==location.origin)return;
+ preservePlanReview(url);
  const moved=await navigate(route.page,false,url.pathname+url.search,false);
  if(moved===false)return;
  await nextTick();
- if(route.page==='batches')batchManagerRef.value?.directURL();
+ if(route.page==='batches'){
+  const batch=db.batches.find(row=>row.id===route.batchId);
+  if(batch&&batchAction==='configure')return batchManagerRef.value?.action(batch,batchAction);
+  batchManagerRef.value?.directURL();
+  if(batch&&batchAction)await batchManagerRef.value?.action(batch,batchAction);
+ }
 }
 
 function view(row) {
@@ -691,9 +699,10 @@ async function batchAction(b) {
   );
 }
 function configureBatch(b) {
+  if (b.planFrozenAt) return;
   detailOpen.value = false;
   page.value='batches';
-  if (b.phase !== "内容预检通过") composerRef.value?.openBatch(b);
+  if (b.planReview || b.phase !== "内容预检通过") composerRef.value?.openBatch(b);
   else view(b);
 }
 watch(
@@ -812,7 +821,7 @@ async function returnAfterConfiguration(){await nextTick();if(closingForNavigati
 async function onCreated({ batch, tasks, start: shouldStart }) {
   const saved = await persistNow();
   const fromPlan=new URL(location.href).searchParams.get('fromPlan');
-  if(batch&&fromPlan&&String(batch.planId)===fromPlan)await navigateContext(operationURL('batches',{batchId:batch.id,fromPlan}));
+  if(batch&&fromPlan&&String(batch.planId)===fromPlan)await navigateContext(batch.planReview?operationURL('plans',{planId:fromPlan}):operationURL('batches',{batchId:batch.id,fromPlan}));
   else{await navigate(batch ? 'batches' : 'tasks');view(batch || tasks[0]);}
   if (saved) toast(batch?.preparationOnly ? "批次配置已保存" : `已保存 ${tasks.length} 条任务`);
   if (saved && shouldStart && batch) await batchManagerRef.value?.action(batch, "execute");
@@ -1543,7 +1552,7 @@ function cloneTask(t) {
         ></t-alert
       >
       <PersonalSettingsPage v-if="isAccountPage" :key="page+prototypeSession.actor+accountSceneKey" :page="page" ref="accountRef" @navigate="navigateContext" />
-      <PlanPage v-if="page === 'plans' && hydrated" :db="db" :persist="persistNow" :key="prototypeSession.actor" ref="planRef" @navigate="navigateContext" @view-change="value=>planPageView=value" />
+      <PlanPage v-if="page === 'plans' && hydrated" :db="db" :persist="persistNow" :plan-review="planReview" :key="prototypeSession.actor" ref="planRef" @navigate="navigateContext" @view-change="value=>planPageView=value" />
       <ProductionPage v-if="isProduction && productionContext" :context="productionContext" :page="page" />
       <div v-if="taskDetailPage" class="breadcrumbs" aria-label="当前位置">内容运营 / 发布任务 / 详情</div>
       <PublishingTaskPage v-if="taskDetailPage" title="发布任务详情" @back="returnToTaskList">
@@ -1596,7 +1605,7 @@ function cloneTask(t) {
         :persist="persistNow"
         :active="page === 'batches'"
         :preparation-only="preparationPreview"
-        :execution-review="executionReview"
+        :execution-review="executionReview || planReview"
         @detail-change="batchDetailOpen = $event"
         @navigate="navigateContext"
         @configure="configureBatch"
@@ -2011,7 +2020,7 @@ function cloneTask(t) {
       ref="composerRef"
       :db="db"
       :preparation-only="preparationPreview"
-      :execution-review="executionReview"
+      :execution-review="executionReview || planReview"
       :persist="persistNow"
       @edit="editRow"
       @preview="openPreview"

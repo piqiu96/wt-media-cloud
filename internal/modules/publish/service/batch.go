@@ -116,6 +116,7 @@ func batchCopyAllowed(v model.Batch) bool {
 	return v.ExecutionStatus == model.BatchEnded || v.ExecutionStatus == model.BatchCancelled
 }
 func projectBatch(a identity.PublicUser, v model.Batch) model.Batch {
+	v.ActionBlockers = []model.BatchActionBlocker{}
 	v.AllowedActions = []string{}
 	if ownsBatch(a, v) {
 		if v.ExecutionStatus == model.BatchNotStarted && v.StartedAt == nil {
@@ -136,6 +137,40 @@ func projectBatch(a identity.PublicUser, v model.Batch) model.Batch {
 			v.AllowedActions = append(v.AllowedActions, "copy")
 		}
 	}
+	if v.PlanID != nil {
+		filtered := []string{}
+		v.ActionBlockers = []model.BatchActionBlocker{}
+		for _, act := range v.AllowedActions {
+			blocked := false
+			code := ""
+			message := ""
+			if v.PlanConfigurationFrozen && (act == "edit" || act == "start") {
+				blocked = true
+				code = "plan_configuration_frozen"
+				message = "计划已启动，配置固定；请从计划当前位置处理"
+			}
+			if (v.PlanPermanentStopped || v.PlanPositionBlocked) && act != "copy" {
+				blocked = true
+				code = "plan_position_blocked"
+				message = "所属计划已停止或该批次不在当前执行位置"
+			}
+			if act == "start" {
+				blocked = true
+				code = "plan_position_blocked"
+				message = "所属计划批次需从计划统一启动，请到计划完成全批确认"
+			}
+			if blocked {
+				v.ActionBlockers = append(v.ActionBlockers, model.BatchActionBlocker{Action: act, Code: code, Message: message})
+			} else {
+				filtered = append(filtered, act)
+			}
+		}
+		v.AllowedActions = filtered
+		if ownsBatch(a, v) && v.PlanTakeoverAvailable {
+			v.AllowedActions = append(v.AllowedActions, "takeover")
+		}
+	}
+
 	return v
 }
 func batchDetail(a identity.PublicUser, v model.Batch) model.BatchDetail {

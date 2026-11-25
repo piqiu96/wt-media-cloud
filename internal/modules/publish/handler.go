@@ -25,6 +25,7 @@ import (
 
 func RegisterRoutes(h *server.Hertz) {
 	registerBatchRoutes(h)
+	registerPlanRoutes(h)
 	h.GET("/api/v1/publication", List)
 	h.GET("/api/v1/publication/output", OutputCandidates)
 	h.GET("/api/v1/publication/request", FindByRequest)
@@ -212,7 +213,17 @@ func failBatchControl(c *app.RequestContext, err error) bool {
 	var name, message, action string
 	var retryable bool
 	var item *repository.BatchExecutionConflict
+	var notApplied *repository.PlanCommandNotApplied
+	if errors.As(err, &notApplied) {
+		api.FailureCode(c, consts.StatusConflict, errcode.PublishConflict, "原请求版本已过期，确认该请求未执行", "publication_conflict", notApplied, false, "reload")
+		return true
+	}
+	var planConflict *repository.PlanConflictError
 	var details any
+	if errors.As(err, &planConflict) {
+		api.FailureCode(c, consts.StatusConflict, errcode.PublishConflict, "计划候选存在跨批重复成片", "publication_conflict", planConflict, false, "reload")
+		return true
+	}
 	if errors.As(err, &item) {
 		details = item
 	}

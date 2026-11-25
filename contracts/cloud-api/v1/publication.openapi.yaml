@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: WT Media Publication Task
-  version: 2026.11.25.2
+  version: 2026.11.25.4
   description: Administrators manage Cloud records only. Senior operators execute and copy only their own tasks and create with their own accounts. Managers may cancel unclaimed tasks; stopping a claimed scene or verifying an uncertain scene belongs to the task operator. Managers supplement reviewing results or abandon failed tasks only against the exact original recorded safe disposition, checked by the existing transaction. Task platform_submission_id/target_url contain original receipts; platform_work_id/work_url/work_id only identify verified public work (ADR-0035). Standalone creation requires separate revision-bound start authorization. Batch tasks receive formal authorization at first batch start and dispatch only through their current fixed group and parent control. Baidu task preparation is available. IDs and revisions are decimal strings; timestamps RFC3339. Uses errcode/message/data/logid.
 paths:
   /api/v1/publication/generate:
@@ -30,11 +30,11 @@ paths:
           description: 'SSE start/progress/item_result or item_error/done. Each batch item echoes row_key/input_revision/field_revisions. Batch items have unique row_key. Structural errors reject the request before streaming and unavailable row resources produce item_error. Deadline may emit a terminal error with completed item counts. item_result.result contains content (exact selected fields) and field_revisions. Partial, malformed, extra or overlong model output is an item_error; current inputs remain unchanged.'
           content:
             text/event-stream: {schema: {type: string}}
-        '400': {description: Invalid fields or generation basis.}
-        '401': {description: Authentication required.}
-        '404': {description: Output absent or outside actor scope.}
-        '429': {description: Generation concurrency limit reached before opening stream.}
-        '503': {description: DeepSeek credentials or model unavailable before opening stream.}
+        '400': {description: 'Invalid fields or generation basis.'}
+        '401': {description: 'Authentication required.'}
+        '404': {description: 'Output absent or outside actor scope.'}
+        '429': {description: 'Generation concurrency limit reached before opening stream.'}
+        '503': {description: 'DeepSeek credentials or model unavailable before opening stream.'}
   /api/v1/publication/request:
     get:
       operationId: findPublicationByRequest
@@ -43,9 +43,9 @@ paths:
       parameters:
         - {in: query, name: request_key, required: true, schema: {type: string, minLength: 1, maxLength: 64}}
       responses:
-        '200': {description: Original Publication, still subject to current account/team/category read permissions.}
-        '400': {description: Invalid request key.}
-        '404': {description: No accessible original task for this creator and key.}
+        '200': {description: 'Original Publication, still subject to current account/team/category read permissions.'}
+        '400': {description: 'Invalid request key.'}
+        '404': {description: 'No accessible original task for this creator and key.'}
   /api/v1/publication:
     get:
       operationId: listPublications
@@ -61,7 +61,7 @@ paths:
         - {in: query, name: status, schema: {type: string, enum: [pending, queued, running, awaiting_human, uncertain, reviewing, failed, published, cancelled, abandoned]}}
       responses:
         '200': {description: '{items:[Publication],total,page,page_size,summary:{all,awaiting_human,running,uncertain}}. Summary uses the same non-status filters and actor scope, independent of pagination. Scope uses account owner, team and category; creator is audit only.'}
-        '400': {description: Invalid query.}
+        '400': {description: 'Invalid query.'}
     post:
       operationId: createPublication
       security: [{sessionCookie: []}]
@@ -82,11 +82,11 @@ paths:
                 content: {$ref: '#/components/schemas/Content'}
                 not_before: {type: [string, 'null'], format: date-time}
       responses:
-        '201': {description: Pending Publication, without authorization or attempt. Same creator/key/input returns the original record even if resources later change.}
-        '400': {description: Invalid content or unavailable resource.}
-        '404': {description: Resource missing or outside actor scope.}
-        '409': {description: Same key with different input, output occupied on this platform, or unsupported platform.}
-        '503': {description: Storage or persistence unavailable; retry with the same key and input.}
+        '201': {description: 'Pending Publication, without authorization or attempt. Same creator/key/input returns the original record even if resources later change.'}
+        '400': {description: 'Invalid content or unavailable resource.'}
+        '404': {description: 'Resource missing or outside actor scope.'}
+        '409': {description: 'Same key with different input, output occupied on this platform, or unsupported platform.'}
+        '503': {description: 'Storage or persistence unavailable; retry with the same key and input.'}
   /api/v1/publication/output:
     get:
       operationId: listPublicationOutputCandidates
@@ -124,9 +124,9 @@ paths:
                       total: {type: integer}
                       page: {type: integer}
                       page_size: {type: integer}
-        '400': {description: Invalid platform or pagination/filter input.}
-        '404': {description: Production authorization denied.}
-        '503': {description: Candidate or occupancy read failed; no candidates are returned as available.}
+        '400': {description: 'Invalid platform or pagination/filter input.'}
+        '404': {description: 'Production authorization denied.'}
+        '503': {description: 'Candidate or occupancy read failed; no candidates are returned as available.'}
   /api/v1/publication/{id}:
     parameters:
       - {in: path, name: id, required: true, schema: {$ref: '#/components/schemas/ID'}}
@@ -134,8 +134,8 @@ paths:
       operationId: getPublication
       security: [{sessionCookie: []}]
       responses:
-        '200': {description: Publication with saved content and safe resource snapshot. No cookies, signed grants or bucket secrets.}
-        '404': {description: Task absent or outside actor scope.}
+        '200': {description: 'Publication with saved content and safe resource snapshot. No cookies, signed grants or bucket secrets.'}
+        '404': {description: 'Task absent or outside actor scope.'}
   /api/v1/publication/{id}/content:
     parameters:
       - {in: path, name: id, required: true, schema: {$ref: '#/components/schemas/ID'}}
@@ -155,10 +155,10 @@ paths:
                 content: {$ref: '#/components/schemas/Content'}
                 not_before: {type: [string, 'null'], format: date-time}
       responses:
-        '200': {description: Updated Publication, revision incremented. Platform/account/output/category remain fixed.}
-        '400': {description: Invalid or unconfirmed content.}
-        '404': {description: Task absent or outside actor scope.}
-        '409': {description: Revision changed, task claimed or authorized, task no longer pending, or parent configuration is frozen. Reload before editing.}
+        '200': {description: 'Updated Publication, revision incremented. Platform/account/output/category remain fixed.'}
+        '400': {description: 'Invalid or unconfirmed content.'}
+        '404': {description: 'Task absent or outside actor scope.'}
+        '409': {description: 'Revision changed, task claimed or authorized, task no longer pending, or parent configuration is frozen. Reload before editing.'}
   /api/v1/publication/{id}/start:
     post:
       operationId: startPublication
@@ -182,7 +182,7 @@ paths:
       parameters: [{in: path, name: id, required: true, schema: {$ref: '#/components/schemas/ID'}}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ResultResolution'}}}}
       responses:
-        '200': {description: 'Revision-checked current-attempt verification, preserving the original result. Supports four explicit conclusions for uncertain, or published supplement for reviewing. Published requires exact public identity, actual published_at and explicit public/content evidence. Work deduplication and task association are atomic. The original submission ID is preserved separately from public work ID. Failure requires explicit no-publishable-work and closed-scene evidence from the original account, not merely a missing submit flag.'}
+        '200': {description: 'Revision-checked current-attempt verification, preserving the original result. The task owner may record all four conclusions for uncertain or reviewing; management of another owner remains limited to published supplement for reviewing. Every manual conclusion including uncertain updates latest_manual_verification and preserves the immutable original receipt/result and occupancy. Normal reviewing participates in plan handoff but blocks final finish; stopped/expired automatic checking without newer effective explicit manual verification blocks plan handoff as verification_required. Time expiry is computed at transaction current time, not delayed until sweep. Published requires exact public identity, actual published_at and explicit public/content evidence. Work deduplication and task association are atomic. The original submission ID is preserved separately from public work ID. Failure requires explicit no-publishable-work and closed-scene evidence from the original account, not merely a missing submit flag.'}
         '409': {description: 'Stale revision/attempt, active scene, unsafe or unsupported conclusion. No input, occupancy or original result is changed.'}
   /api/v1/publication/{id}/retry:
     post:
@@ -285,6 +285,64 @@ components:
             no_publishable_work: {type: boolean}
             work_matched: {type: boolean}
             publicly_accessible: {type: boolean}
+      allOf:
+        - if: {properties: {conclusion: {const: failed}}}
+          then:
+            properties:
+              evidence:
+                properties:
+                  scene_closed: {const: true}
+                  no_publishable_work: {const: true}
+              platform_submission_id: {const: ''}
+              target_url: {const: ''}
+              platform_work_id: {const: ''}
+              work_url: {const: ''}
+              published_at: {type: 'null'}
+        - if: {properties: {conclusion: {enum: [reviewing, published]}}}
+          then:
+            required: [platform_submission_id]
+            properties:
+              platform_submission_id: {type: string, pattern: '^[1-9][0-9]*$'}
+              evidence:
+                required: [work_matched]
+                properties:
+                  scene_closed: {const: true}
+                  work_matched: {const: true}
+                  no_publishable_work: {const: false}
+        - if: {properties: {conclusion: {const: published}}}
+          then:
+            required: [platform_work_id, work_url, published_at]
+            properties:
+              platform_work_id: {type: string, pattern: '^[1-9][0-9]*$'}
+              work_url: {type: string, format: uri}
+              published_at: {type: string, format: date-time}
+              evidence:
+                required: [publicly_accessible]
+                properties:
+                  publicly_accessible: {const: true}
+        - if: {properties: {conclusion: {const: uncertain}}}
+          then:
+            properties:
+              platform_submission_id: {const: ''}
+              target_url: {const: ''}
+              platform_work_id: {const: ''}
+              work_url: {const: ''}
+              published_at: {type: 'null'}
+        - if: {properties: {conclusion: {const: reviewing}}}
+          then:
+            properties:
+              platform_work_id: {const: ''}
+              work_url: {const: ''}
+              published_at: {type: 'null'}
+    LatestManualVerification:
+      type: object
+      readOnly: true
+      required: [verified_at, conclusion, attempt_id, task_revision]
+      properties:
+        verified_at: {type: string, format: date-time}
+        conclusion: {enum: [failed, uncertain, reviewing, published]}
+        attempt_id: {$ref: '#/components/schemas/ID'}
+        task_revision: {$ref: '#/components/schemas/ID'}
     Abandonment:
       type: object
       additionalProperties: false
@@ -358,5 +416,11 @@ components:
         composite_output_id: {$ref: '#/components/schemas/ID'}
         content: {$ref: '#/components/schemas/Content'}
         resources: {type: object}
+        verification_required: {type: boolean, readOnly: true, description: 'Computed from original receipt, check stop/expiry at current time and latest effective manual conclusion. Neither timeout nor a note proves failure or public success.'}
+        latest_manual_verification:
+          oneOf:
+            - {$ref: '#/components/schemas/LatestManualVerification'}
+            - {type: 'null'}
+        check_stopped_at: {type: [string, 'null'], format: date-time, readOnly: true}
         last_checked_at: {type: [string, 'null'], format: date-time, readOnly: true, description: Most recent independent original-submission observation time; never the platform publication time.}
         last_check_message: {type: [string, 'null'], readOnly: true, description: Latest read-only observation reason. Incomplete evidence keeps the task reviewing.}

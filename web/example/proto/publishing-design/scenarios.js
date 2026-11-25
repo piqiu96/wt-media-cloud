@@ -2,6 +2,9 @@
 import {
   nextId,
   confirmPlan,
+  dispatchPlan,
+  pausePlan,
+  syncPlan,
   createPublication,
   clone,
   claimTask,
@@ -329,5 +332,92 @@ export function addExecutionReviewScenarios(db) {
       batch.endedAt = new Date().toISOString();
     }
     reconcileExecutionGroup(db, batch, Date.now(), { dispatch: false });
+  }
+}
+
+// CHG109 uses the existing plan and batch commands. Only these fixture outcomes are simulated.
+export function addPlanReviewScenarios(db) {
+  const platform = "百家号";
+  const category = "三角洲行动";
+  const sourceAsset = db.assets.find(asset => asset.category === category && asset.cover);
+  if (!sourceAsset) return;
+  const definitions = [
+    { id: "PREPARE", name: "首启前 · 尚有批次待配置" },
+    { id: "READY", name: "首启前 · 全部批次已配置" },
+    { id: "DUPLICATE", name: "首启前 · 同平台成片重复" },
+    { id: "10", name: "失败率 10% · 已自动进入下一批", results: [...Array(9).fill("已发布"), "执行失败"] },
+    { id: "20", name: "失败率 20% · 等待确认下一批", results: [...Array(8).fill("已发布"), "执行失败", "执行失败"] },
+    { id: "ZERO", name: "零分母 · 等待确认跳过", results: ["已取消"] },
+    { id: "PENDING", name: "人工现场与结果未知 · 暂缓衔接", results: ["等待人工", "结果待确认"] },
+    { id: "PAUSED", name: "人工暂停 · 当前批次保留", results: ["已发布"], paused: true },
+    { id: "CHECK", name: "自动核验已停止 · 待人工核实", results: ["平台审核中"], checkStopped: true },
+    { id: "PUBLIC", name: "平台已接收 · 计入衔接、未公开", results: ["平台审核中"], finishNext: true },
+    { id: "FINISH", name: "明确未公开 · 按缺口确认结束", results: ["执行失败"], final: true },
+    { id: "OPERATOR", name: "普通运营 · 本人已配置计划", owner: "lin" },
+  ];
+  for (const scenario of definitions) {
+    const id = "PL-109-" + scenario.id;
+    if (db.plans.some(plan => plan.id === id)) continue;
+    let sequence = nextId(db);
+    const owner = scenario.owner === "lin" ? { id: "lin", name: "林予安" } : { id: "chen", name: "陈小雨" };
+    const counts = [scenario.results?.length || 1, ...(scenario.final ? [] : [1])];
+    const plan = confirmPlan(db, {
+      id, name: scenario.name, confirmKey: id, platformOrder: [platform],
+      targets: [{ platform, category, count: counts.reduce((left, right) => left + right) }],
+      splits: counts.map((count, index) => ({ id: id + "-B" + (index + 1),
+        name: index ? "批次 02 · 下一批" : "批次 01 · 首批", platform, targets: [{ category, count }] })),
+    });
+    const time = new Date().toISOString();
+    Object.assign(plan, { planReview: true, ownerId: owner.id, ownerName: owner.name, createdBy: owner.id,
+      created: time, updated: time, dateStart: time.slice(0, 10), dateEnd: time.slice(0, 10), note: "原型演示数据" });
+    const account = { id: sequence++, name: "演示百家号", platform, categories: [category], ownerId: owner.id,
+      enabled: true, loginValid: true, platformUid: "demo-uid-" + id, profileId: "demo-profile-" + id };
+    db.accounts.push(account);
+    let firstAsset;
+    for (const [index, item] of plan.items.entries()) {
+      const batch = db.batches.find(row => row.id === item.id);
+      Object.assign(batch, { planReview: true, preparationOnly: true, executionReview: true, ownerId: owner.id, created: time,
+        executionSettings: { concurrency: 5, groupInterval: 0, groupPolicy: "自动继续", exceptionLimit: 5 } });
+      if (scenario.id === "PREPARE" && index === 1) continue;
+      batch.phase = "内容预检通过";
+      batch.candidates = Array.from({ length: counts[index] }, (_, rowIndex) => {
+        const asset = scenario.id === "DUPLICATE" && index ? firstAsset : { ...sourceAsset, id: sequence++, category,
+          ready: true, fileAvailable: true, title: `演示成片 ${index + 1}-${rowIndex + 1}` };
+        if (!index && !rowIndex) firstAsset = asset;
+        if (!db.assets.some(row => row.id === asset.id)) db.assets.push(asset);
+        return initCandidate({ ...defaults(platform, asset, db), platform, category, accountId: account.id, assetId: asset.id,
+          key: `${item.id}-row-${rowIndex + 1}`, declaration: declarationOptions(platform)[0].value,
+          contentApproved: true, coverApproved: true });
+      });
+    }
+    if (!scenario.results) continue;
+    dispatchPlan(db, plan);
+    if (scenario.paused) pausePlan(plan);
+    const batch = db.batches.find(row => row.id === plan.items[0].id);
+    for (const [index, task] of rowsFor(db, batch).entries()) {
+      const status = scenario.results[index];
+      task.attempts = 1;
+      task.attemptHistory = [{ number: 1, started: time, snapshot: task.snapshot }];
+      if (status === "已发布") {
+        const workId = nextId(db);
+        db.works ||= [];
+        db.works.push({ id: workId, platform, platformId: "demo-" + workId, sourceTaskIds: [task.id] });
+        Object.assign(task, { workId, platformId: "demo-" + workId });
+      }
+      if (status === "执行失败" || scenario.checkStopped)
+        task.executorEvidence = { attempt: 1, confirmedUnpublished: true };
+      if (status === "等待人工") task.suspendedAt = time;
+      if (scenario.checkStopped) task.autoCheckStoppedAt = time;
+      setResult(task, status, { evidence: status === "已发布" ? "演示：原尝试已确认公开作品"
+        : status === "平台审核中" ? "演示：平台接收回执，尚未公开" : "演示：" + status });
+    }
+    reconcileExecutionGroup(db, batch, Date.now(), { dispatch: false });
+    syncPlan(db, plan);
+    if (scenario.finishNext) {
+      const nextBatch = db.batches.find(row => row.id === plan.items[1].id);
+      for (const task of rowsFor(db, nextBatch)) setResult(task, "执行失败", { evidence: "演示：明确未公开" });
+      reconcileExecutionGroup(db, nextBatch, Date.now(), { dispatch: false });
+      syncPlan(db, plan);
+    }
   }
 }

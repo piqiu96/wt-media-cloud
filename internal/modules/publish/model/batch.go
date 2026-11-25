@@ -86,6 +86,24 @@ const (
 )
 
 type Batch struct {
+	PlanTakeoverAvailable   bool                 `json:"-" gorm:"-"`
+	PlanName                *string              `json:"plan_name" gorm:"-"`
+	PlanConfigurationFrozen bool                 `json:"plan_configuration_frozen" gorm:"-"`
+	PlanCurrentPosition     bool                 `json:"plan_current_position" gorm:"-"`
+	ActionBlockers          []BatchActionBlocker `json:"action_blockers" gorm:"-"`
+
+	PlanPermanentStopped    bool                   `json:"-" gorm:"-"`
+	PlanPositionBlocked     bool                   `json:"-" gorm:"-"`
+	PlanID                  *uint64                `json:"plan_id,string"`
+	PlanRowKey              *string                `json:"-"`
+	PlanGroupOrder          *uint32                `json:"-"`
+	PlanBatchOrder          *uint32                `json:"-"`
+	PlanConfiguredAt        *time.Time             `json:"-"`
+	PlanFrozenAt            *time.Time             `json:"-"`
+	FrozenConfirmation      *PlanBatchConfirmation `json:"-" gorm:"column:frozen_confirmation_json;serializer:json"`
+	HandedOffAt             *time.Time             `json:"handed_off_at"`
+	HandoffBasisFingerprint *string                `json:"-"`
+
 	ID                  uint64                `json:"id,string"`
 	TeamID              int64                 `json:"team_id,string"`
 	OperatorID          int64                 `json:"operator_id,string"`
@@ -135,4 +153,20 @@ type BatchRecord struct {
 	ActorID   *int64    `json:"actor_id,string"`
 	Event     string    `json:"event"`
 	CreatedAt time.Time `json:"created_at"`
+}
+
+type BatchActionBlocker struct {
+	Action  string `json:"action"`
+	Code    string `json:"code"`
+	Message string `json:"message"`
+}
+
+func ProjectPlanBatch(p Plan, b Batch) Batch {
+	b.PlanTakeoverAvailable = CanTakeoverPlanBatch(p, b)
+	b.PlanName = &p.Name
+	b.PlanConfigurationFrozen = p.StartedAt != nil
+	b.PlanCurrentPosition = p.CurrentBatchID != nil && *p.CurrentBatchID == b.ID && b.HandedOffAt == nil
+	b.PlanPermanentStopped = p.StoppedAt != nil || p.EndedAt != nil
+	b.PlanPositionBlocked = p.StartedAt != nil && !b.PlanCurrentPosition
+	return b
 }

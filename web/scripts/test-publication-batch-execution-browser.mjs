@@ -27,7 +27,7 @@ const candidates = outputs.map((output, index) => ({
 const newExecution = () => ({
   phase: "not_started", first_started_at: null, execution_group_no: null, group_task_ids: [],
   group_ended_at: null, next_group_at: null, pause: null, stopped_at: null, ended_at: null,
-  target_count: 4, created_count: 0, creation_shortfall: null, published_count: 0, target_shortfall: 4, task_counts: {},
+  verification_required_count: 0, target_count: 4, created_count: 0, creation_shortfall: null, published_count: 0, target_shortfall: 4, task_counts: {},
 });
 function prepared(batchID, name, value = {}) {
   return {
@@ -447,7 +447,7 @@ const regressions = {
       batch.execution = {
         ...newExecution(), phase: status, first_started_at: now, created_count: 2,
         pause: status === "paused" ? { id: "3", kind: "manual", reason: "复核原尝试", paused_at: now, exceptions: [] } : null,
-        ended_at: status === "ended" ? now : null, task_counts: { failed: 1, reviewing: 1 },
+        ended_at: status === "ended" ? now : null, verification_required_count: 1, task_counts: { failed: 1, reviewing: 1 },
       };
       await page.goto(detailURL);
       const row = page.getByRole("row").filter({ hasText: "发布文案 0" });
@@ -516,7 +516,7 @@ const regressions = {
     batch.allowed_actions = ["copy"];
     batch.execution = {
       ...newExecution(), phase: "ended", first_started_at: now, ended_at: now, target_count: 60,
-      created_count: 21, creation_shortfall: 39, target_shortfall: 60, task_counts: { reviewing: 1, cancelled: 20 },
+      created_count: 21, creation_shortfall: 39, target_shortfall: 60, verification_required_count: 1, task_counts: { reviewing: 1, cancelled: 20 },
     };
     tasks = [{
       ...candidates[0], id: "150", revision: "6", batch_id: id, platform: "baidu", operator_id: owner.id,
@@ -546,7 +546,7 @@ const regressions = {
     await button("查询").click();
     await taskEntered;
     if (!publishBeforeManualSummary) await initialQuery;
-    batch.execution = { ...batch.execution, published_count: 1, target_shortfall: 59, task_counts: { published: 1, cancelled: 20 } };
+    batch.execution = { ...batch.execution, published_count: 1, target_shortfall: 59, verification_required_count: 0, task_counts: { published: 1, cancelled: 20 } };
     tasks[0] = { ...tasks[0], status: "published", revision: "7", platform_work_id: "5900", allowed_actions: [] };
     if (publishBeforeManualSummary) {
       releaseSummary();

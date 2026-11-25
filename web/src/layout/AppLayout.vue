@@ -40,6 +40,7 @@ const menuItems = [
   ] },
   { value: 'operations', title: '运营执行', icon: 'send', children: [
     { value: 'publishing', title: '发布管理', icon: 'send', children: [
+      { title: '发布计划', path: '/publish-plans', icon: 'calendar' },
       { title: '发布批次', path: '/publish-batches', icon: 'view-list' },
       { title: '发布任务', path: '/publish', icon: 'send' },
     ] },

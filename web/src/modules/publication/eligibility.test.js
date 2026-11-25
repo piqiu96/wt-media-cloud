@@ -4,6 +4,8 @@ import {
   accountUnavailable,
   outputUnavailable,
   contentProblem,
+  contentIssues,
+  contentIssue,
 } from "./eligibility.js";
 describe("publication preparation eligibility", () => {
   const account = {
@@ -89,4 +91,24 @@ it('targets title and topic validation at their fields', async () => {
  expect(contentIssue(form).field).toBe('text');
  form.content.description='有效标题';
  expect(contentIssue(form).field).toBe('cover');
+});
+
+it("returns every existing content issue without changing first-issue compatibility or input", () => {
+  const form = {
+    category_id: "1",
+    media_account_id: "2",
+    composite_output_id: "3",
+    content: { description: "", confirmed: false },
+  };
+  const before = JSON.stringify(form),
+    issues = contentIssues(form);
+  expect(issues.map((issue) => issue.field)).toEqual([
+    "text",
+    "cover",
+    "portrait",
+    "declaration",
+    "confirmation",
+  ]);
+  expect(contentIssue(form)).toEqual(issues[0]);
+  expect(JSON.stringify(form)).toBe(before);
 });

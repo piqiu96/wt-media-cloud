@@ -69,6 +69,7 @@ func runWorkerProcess() error {
 	// one the deployment runs — the reconcile exists to finish tasks the executor
 	// abandoned, and a sweep no process runs is exactly the dead code that left
 	// cancelled downloads stuck.
+	runner.Register("publication-plan-advance", 5*time.Second, func(ctx context.Context) error { return publishing.Wired().AdvanceRunningPlans(ctx) })
 	runner.Register("publication-enqueue", 5*time.Second, func(context.Context) error {
 		return publishing.ExecutionStore().QueueDue(time.Now().UTC())
 	})

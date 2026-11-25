@@ -5,6 +5,7 @@ import FeedbackAlert from "../../../shared/ui/feedback/FeedbackAlert.vue";
 import { feedback } from "../../../shared/ui/feedback/index.js";
 import { cloudResourceURL } from "../../../shared/api/http.js";
 import { createPublicationBatchClient } from "../../../shared/api/publication.js";
+import { createPublicationPlanClient } from "../../../shared/api/publicationPlan.js";
 import { createSessionClient } from "../../../shared/api/session.js";
 import { canRunLocalAgent } from "../../../utils.js";
 import { publicationStatuses } from "../status.js";
@@ -219,7 +220,18 @@ async function send(operation, retry = false) {
   }
 }
 
-function submit() {
+async function submit() {
+  if (action.value === "takeover") {
+    if (disabled.value) return;
+    setBusy(true);
+    try {
+      await checkIdentity();
+      const current = await createPublicationPlanClient().get(source.value.plan_id);
+      await createPublicationPlanClient().takeover(source.value.plan_id, {expected_revision:current.plan.revision,current_batch_id:source.value.id,expected_batch_revision:source.value.revision,reason:reason.value.trim()});
+      visible.value=false;emit("updated",await api.get(source.value.id));
+    } catch (failure) {error.value=previewProblem(failure,"接管结果待核对，请读取当前计划");} finally {setBusy(false);}
+    return;
+  }
   if (disabled.value) return;
   let input;
   try {

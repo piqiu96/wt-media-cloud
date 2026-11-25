@@ -113,7 +113,7 @@ const history = computed(() =>
           </ResourceDescriptions>
           <BatchContentTable :rows="batch.candidates" :db="db" read-only />
         </ResourceSection>
-        <ResourceSection title="执行设置">
+        <ResourceSection v-if="batch.executionSettings" title="执行设置">
           <ResourceDescriptions>
             <Field label="并发数">{{ batch.executionSettings.concurrency }}</Field>
             <Field label="组间发布间隔">{{ batch.executionSettings.groupInterval }} 秒</Field>

@@ -5,7 +5,7 @@ export const batchPhases = {
 };
 
 export const batchControlLabels = {
-  start: "开始发布", pause: "暂停发布", resume: "继续发布", stop: "终止发布", finish: "结束批次",
+  start: "开始发布", pause: "暂停发布", resume: "继续发布", stop: "终止发布", finish: "结束批次", takeover: "接管当前批次",
 };
 
 const taskRef = ({ id, revision }) => ({ task_id: id, revision });
@@ -82,6 +82,18 @@ export function buildBatchControl(batch, action, { reason = "", failures = [], r
   const input = { expected_revision: batch.revision, reason: reason.trim() };
   if (action === "finish") input.expected_failed_tasks = failures.map(taskRef);
   return input;
+}
+
+// Reviewing totals include normal platform audit. Only the provider's A07 subset
+// requires manual verification; missing projections are unknown, never zero.
+export function batchPendingCount(batch) {
+  const execution = batch.execution;
+  if (!execution) return batch.execution_status === "not_started" ? 0 : null;
+  const verification = execution.verification_required_count;
+  if (!Number.isSafeInteger(verification) || verification < 0) return null;
+  return ["failed", "awaiting_human", "uncertain"].reduce(
+    (sum, status) => sum + (execution.task_counts?.[status] || 0), verification,
+  );
 }
 
 export function batchProgress(execution) {
@@ -226,6 +238,10 @@ export function batchTaskLocation(batchID, taskID, listFilters, taskScope) {
   ]) {
     for (const key of keys) if (values[key]) query[prefix + key] = String(values[key]);
   }
+  if (/^[1-9][0-9]*$/.test(listFilters.from_plan || "")) {
+    query.from_plan = listFilters.from_plan;
+    for (const key of ["search","status","platform","category_id","page","page_size","scroll"]) if (typeof listFilters["plan_"+key] === "string") query["plan_"+key] = listFilters["plan_"+key];
+  }
   return { name: "Publish", query };
 }
 
@@ -239,6 +255,10 @@ export function batchTaskReturn(query) {
   for (const key of taskFilterKeys) {
     const value = query["task_" + key];
     if (typeof value === "string") back["task_" + key] = value;
+  }
+  if (/^[1-9][0-9]*$/.test(query.from_plan || "")) {
+    back.from_plan = query.from_plan;
+    for (const key of ["search","status","platform","category_id","page","page_size","scroll"]) if (typeof query["plan_"+key] === "string") back["plan_"+key] = query["plan_"+key];
   }
   return { name: "PublishBatches", query: back };
 }

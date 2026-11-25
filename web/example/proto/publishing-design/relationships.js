@@ -1,6 +1,6 @@
 import { taskInterval, batchTaskCanStart, profileOf, uidOf } from "./batchExecutionSettings.js";
 import { publishMethod } from "./publishingSettings.js";
-import { freezeBatch, isDisposed } from "./batchLifecycle.js";
+import { freezeBatch, isDisposed, runBatchCommand, startReviewScope, trustedPublicTask } from "./batchLifecycle.js";
 // Offline prototype business rules. No runtime API or external platform calls.
 import { platforms, validate, nextBatch, stats, canRetry } from "./model.js";
 export const clone = (x) => JSON.parse(JSON.stringify(x));
@@ -359,6 +359,50 @@ export function queueTask(db, t, { retry = false } = {}) {
   });
   return true;
 }
+export const planBatchConfigured = batch => batch?.phase === "内容预检通过" && !!batch.candidates?.length;
+export function awaitingPlanCheck(task) {
+  if (task.status !== "平台审核中") return false;
+  if (!task.submittedAt) return true;
+  if (!task.autoCheckStoppedAt) return false;
+  const last = task.verifications?.at(-1);
+  return !(last?.attempt === task.attemptHistory?.at(-1)?.number && last?.status === "平台审核中" && last.at >= task.autoCheckStoppedAt);
+}
+
+function firstPlanPosition(db, plan) {
+  let position = plan.position;
+  if (!planHasStarted(db, plan)) {
+    while (position < plan.items.length) {
+      const batch = itemRecord(db, plan.items[position]);
+      if (batch?.control !== "已取消" || !batchTasks(db, batch).every(isDisposed)) break;
+      position++;
+    }
+  }
+  return position;
+}
+
+export function planStartIssue(db, plan) {
+  if (!plan) return "计划不存在";
+  const pending = plan.items.map(item => itemRecord(db, item)).filter(batch => batch?.control !== "已取消");
+  if (!pending.length || !itemRecord(db, plan.items[firstPlanPosition(db, plan)])) return "暂无可执行批次";
+  const incomplete = pending.filter(batch => !planBatchConfigured(batch));
+  if (incomplete.length) return "请先完成全部待执行批次的配置：" + incomplete.map(batch => batch?.name || "批次不存在").join("、");
+  const outputs = new Map();
+  for (const batch of pending) {
+    for (const [index, row] of batch.candidates.entries()) {
+      const key = JSON.stringify([batch.platform, row.assetId]);
+      const label = batch.name + "第" + (index + 1) + "行";
+      if (outputs.has(key)) return outputs.get(key) + "与" + label + "使用同平台成片";
+      outputs.set(key, label);
+    }
+  }
+  for (const batch of pending) {
+    const result = startReviewScope(db, batch);
+    const blocked = result.preview.find(row => row.errors.length);
+    if (blocked) return batch.name + "：" + blocked.errors.join("；");
+  }
+  return "";
+}
+
 function ready(db, b) {
   if (!b || b.phase !== "内容预检通过" || !batchTasks(db, b).length)
     throw Error("批次未就绪，请先配置资源和内容");
@@ -366,6 +410,14 @@ function ready(db, b) {
     throw Error("批次已终结，不可恢复队列");
 }
 function preflightDispatch(db, b) {
+  if (b?.planReview) {
+    if (!planBatchConfigured(b) || b.stoppedAt || b.firstStartedAt || b.control === "已取消")
+      throw Error("批次未就绪，请先配置资源和内容");
+    const scope = startReviewScope(db, b);
+    const blocked = scope.preview.find(row => row.errors.length);
+    if (blocked) throw Error(blocked.errors.join("；"));
+    return scope;
+  }
   ready(db, b);
   for (const t of batchTasks(db, b).filter((t) => t.status === "待执行")) {
     const errors = validate(t, db, t.id);
@@ -382,7 +434,8 @@ function lock(p, owner) {
 export function takeBatchControl(db, b, confirmed = false) {
   const p = associatedPlan(db, { kind: "batch", id: b.id });
   if (!p) return;
-  if (!confirmed) throw Error("请确认人工接管及首次启动锁定");
+  if (p.planReview && !p.lockedAt) throw Error("请先执行计划并冻结全部配置");
+  if (!confirmed) throw Error(p.planReview ? "请确认人工接管原计划批次" : "请确认人工接管计划并锁定结构");
   if (["已取消", "执行已结束"].includes(p.control))
     throw Error("计划已终结，不能接管整批");
   if (p.items[p.position]?.id !== b.id)
@@ -401,7 +454,7 @@ export function dispatchBatch(
   b,
   { fromPlan = false, takeover = false } = {},
 ) {
-  preflightDispatch(db, b);
+  const scope = preflightDispatch(db, b);
   const p = associatedPlan(db, { kind: "batch", id: b.id });
   if (p) {
     if (fromPlan) {
@@ -412,6 +465,11 @@ export function dispatchBatch(
       )
         throw Error("无有效计划调度权");
     } else takeBatchControl(db, b, takeover);
+  }
+  if (b.planReview) {
+    return runBatchCommand(db, b, "execute", {
+      planAuthorized: true, scope: scope.signature, partial: scope.shortfalls.some(row => row.shortfall > 0),
+    });
   }
   const pending = batchTasks(db, b).filter((t) => t.status === "待执行");
   for (const t of pending) {
@@ -426,14 +484,18 @@ export function dispatchPlan(db, p) {
     throw Error("计划已终结，补量请另行规划");
   if (!p.confirmed || !p.items.length)
     throw Error("请先确认计划并生成批次骨架");
-  let position = p.position;
-  if (!planHasStarted(db, p)) {
-    while (position < p.items.length) {
-      const cancelled = itemRecord(db, p.items[position]);
-      if (cancelled?.control !== "已取消" || !batchTasks(db, cancelled).every(isDisposed)) break;
-      position++;
-    }
+  if (p.planReview && p.lockedAt) {
+    if (p.control !== "已暂停") throw Error("当前计划无需恢复");
+    lock(p, "plan");
+    p.control = "执行中";
+    syncPlan(db, p);
+    return;
   }
+  if (p.planReview) {
+    const issue = planStartIssue(db, p);
+    if (issue) throw Error(issue);
+  }
+  const position = firstPlanPosition(db, p);
   const b = itemRecord(db, p.items[position]);
   if (
     p.lockedAt &&
@@ -449,17 +511,25 @@ export function dispatchPlan(db, p) {
   preflightDispatch(db, b);
   p.position = position;
   lock(p, "plan");
+  if (p.planReview) {
+    for (const item of p.items) itemRecord(db, item).planFrozenAt = p.lockedAt;
+  }
   p.control = "执行中";
   dispatchBatch(db, b, { fromPlan: true });
   syncPlan(db, p);
 }
 export function decision(db, p) {
   const b = itemRecord(db, p.items[p.position]);
-  return nextBatch(batchTasks(db, b));
+  const result = nextBatch(batchTasks(db, b));
+  if (!p.planReview) return result;
+  if (b?.control === "已暂停" ||
+      planItems(p).slice(0, p.position + 1).some(item => itemTasks(db, item).some(task => unresolved(task) || awaitingPlanCheck(task) || (task.status === "已发布" && !trustedPublicTask(db, task)))))
+    return "等待核实";
+  return p.position === p.items.length - 1 ? "自动继续" : result;
 }
 export function advance(db, p, confirmed = false) {
   if (
-    !["执行中", "等待继续确认", "等待跳过确认", "等待配置"].includes(
+    !["执行中", "等待继续确认", "等待跳过确认", "等待配置", "等待资源"].includes(
       p.control,
     ) ||
     p.owner !== "plan"
@@ -476,13 +546,20 @@ export function advance(db, p, confirmed = false) {
       if (batchTasks(db, next).some((t) => t.attempts > 0))
         throw Error("下一批已有执行记录，请核查调度权，禁止重复派发");
     } catch (e) {
-      p.control = "等待配置";
+      p.control = p.planReview ? "等待资源" : "等待配置";
+      if (p.planReview) return;
       throw e;
     }
   }
   const current = itemRecord(db, p.items[p.position]);
   if (d === "等待跳过确认") p.skipped.push({ ...p.items[p.position] });
-  if (current.control !== "已取消") current.control = "执行已结束";
+  if (current.control !== "已取消") {
+    current.control = "执行已结束";
+    if (p.planReview) {
+      current.endedAt ||= new Date().toISOString();
+      for (const task of batchTasks(db, current)) task.planHandedOff = true;
+    }
+  }
   p.log.push({
     type: "批次已处理",
     batchId: current.id,
@@ -499,8 +576,12 @@ export function advance(db, p, confirmed = false) {
   syncPlan(db, p);
 }
 export function syncPlan(db, p) {
-  if (!["执行中", "等待配置"].includes(p.control) || p.owner !== "plan") return;
+  if (!p || !["执行中", "等待配置", "等待资源"].includes(p.control) || p.owner !== "plan") return;
   const d = decision(db, p);
+  if (p.planReview && d === "等待核实") {
+    p.control = "执行中";
+    return;
+  }
   if (d === "自动继续" || p.boundaryApproved === p.position) {
     advance(db, p, p.boundaryApproved === p.position);
   }
@@ -529,7 +610,7 @@ export function cancelBatchSafely(db, b) {
   return cancellationImpact(db, b);
 }
 export function pausePlan(p) {
-  if (!["执行中", "等待配置", "等待继续确认", "等待跳过确认"].includes(p.control)) return;
+  if (!["执行中", "等待配置", "等待资源", "等待继续确认", "等待跳过确认"].includes(p.control)) return;
   p.control = "已暂停";
   p.log.push({ type: "暂停后续调度", time: new Date().toISOString() });
 }

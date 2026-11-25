@@ -54,18 +54,30 @@ func (s ExecutionStore) ResolveResult(candidate model.Task, actor int64, in mode
 		if e != nil {
 			return e
 		}
+		if e = lockPublishUse(tx, in.AttemptID); e != nil {
+			return e
+		}
+		now = s.planNow(now)
 		v, e := taskSnapshot(tx, candidate.ID)
 		if e != nil {
 			return e
 		}
-		if !sameCandidate(v, candidate) || v.Revision != in.ExpectedRevision || (v.Status != model.StatusUncertain && !(v.Status == model.StatusReviewing && in.Conclusion == model.StatusPublished)) || v.CurrentAttemptID == nil || *v.CurrentAttemptID != in.AttemptID {
+		if !sameCandidate(v, candidate) || v.Revision != in.ExpectedRevision || (v.Status != model.StatusUncertain && v.Status != model.StatusReviewing) || v.CurrentAttemptID == nil || *v.CurrentAttemptID != in.AttemptID {
 			return &ConflictError{TaskID: v.ID, Revision: v.Revision}
 		}
 		var a model.Attempt
 		if e := tx.First(&a, in.AttemptID).Error; e != nil {
 			return e
 		}
-		if a.PublicationID != v.ID || a.ExecutorUserID != v.OperatorID || in.Evidence.PlatformUID != a.Input.PlatformUID || a.Input.PlatformUID != v.PlatformAccountUID || (v.Status == model.StatusUncertain && (a.ResolvedAt != nil || a.Status != model.AttemptStatusInterrupted)) || (v.Status == model.StatusReviewing && safeDisposition(a) != model.StatusReviewing) {
+		if actor != v.OperatorID && (v.Status != model.StatusReviewing || in.Conclusion != model.StatusPublished) {
+			return ErrNotFound
+		}
+		original := a
+		original.ResolvedAt = nil
+		original.ResolutionNote = nil
+		originalReviewing := safeDisposition(original) == model.StatusReviewing
+		manualUnknown := v.LatestManualVerification != nil && v.LatestManualVerification.AttemptID == a.ID && v.LatestManualVerification.Conclusion == model.StatusUncertain
+		if a.PublicationID != v.ID || a.ExecutorUserID != v.OperatorID || in.Evidence.PlatformUID != a.Input.PlatformUID || a.Input.PlatformUID != v.PlatformAccountUID || (v.Status == model.StatusUncertain && !originalReviewing && !manualUnknown && (a.ResolvedAt != nil || a.Status != model.AttemptStatusInterrupted)) || (v.Status == model.StatusReviewing && safeDisposition(a) != model.StatusReviewing) {
 			return ErrConflict
 		}
 		if v.Platform != "baidu" {
@@ -75,7 +87,13 @@ func (s ExecutionStore) ResolveResult(candidate model.Task, actor int64, in mode
 			return ErrConflict
 		}
 		changes := map[string]any{"resolution_note": mustJSON(in)}
-		updates := map[string]any{"updated_at": now}
+		latest := model.LatestManualVerification{VerifiedAt: now, Conclusion: in.Conclusion, AttemptID: a.ID, TaskRevision: v.Revision + 1}
+		updates := map[string]any{"updated_at": now, "latest_manual_verification_json": mustJSON(latest), "status": in.Conclusion}
+		if in.Conclusion == model.StatusUncertain || in.Conclusion == model.StatusFailed {
+			updates["check_stopped_at"] = now
+			updates["next_check_at"] = nil
+			updates["last_check_message"] = in.Evidence.Reason
+		}
 		if in.Conclusion != model.StatusUncertain {
 			changes["resolved_at"] = now
 			changes["resolved_by"] = actor
@@ -95,6 +113,15 @@ func (s ExecutionStore) ResolveResult(candidate model.Task, actor int64, in mode
 			if v.AcceptedAt == nil {
 				updates["accepted_at"] = now
 			}
+		}
+		// Once the original automatic-check lifetime has expired, an explicit
+		// manual reviewing result owns that cutoff. Stop automatic checking in
+		// this same transaction so a later mechanical sweep cannot fabricate a
+		// newer unresolved observation and invalidate the manual evidence.
+		if in.Conclusion == model.StatusReviewing && v.AcceptedAt != nil && !now.Before(v.AcceptedAt.Add(publicCheckLifetime)) {
+			updates["check_stopped_at"] = now
+			updates["next_check_at"] = nil
+			updates["last_check_message"] = in.Evidence.Reason
 		}
 		if in.Conclusion == model.StatusPublished {
 			updates["next_check_at"] = nil

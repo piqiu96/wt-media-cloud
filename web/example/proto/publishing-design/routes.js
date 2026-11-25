@@ -41,10 +41,18 @@ export function legacyOperationURL(url) {
   }
   return null;
 }
+export function preservePlanReview(next, current = new URL(location.href)) {
+ if(current.searchParams.get('review')!=='chg109')return;
+ for(const key of ['review','role','samples']){
+  const value=current.searchParams.get(key);
+  if(value!==null)next.searchParams.set(key,value);
+ }
+}
 export function updateOperationURL(page,options={},replace=false) {
   const current=new URL(location.href);
  if(page==='batches'&&options.batchId&&!options.fromPlan&&current.searchParams.get('fromPlan'))options={...options,fromPlan:current.searchParams.get('fromPlan')};
  const next = new URL(operationURL(page,options), current.origin);
+ preservePlanReview(next,current);
  const review = current.searchParams.get('review');
  if ((review === 'chg107' && page === 'batches') || (review === 'chg108' && ['batches', 'tasks'].includes(page))) {
    next.searchParams.set('review', review);

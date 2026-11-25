@@ -123,20 +123,86 @@ it("rejects a previous session response after logout", async () => {
 
 it("isolates batch input from task input and clears only its own module", async () => {
   const task = createPublicationDraftClient({ userId: "9", tauri: false });
-  const batch = createPublicationDraftClient({ userId: "9", draftType: "batch", tauri: false });
-  await task.get(); await batch.get();
+  const batch = createPublicationDraftClient({
+    userId: "9",
+    draftType: "batch",
+    tauri: false,
+  });
+  await task.get();
+  await batch.get();
   task.remember({ description: "独立任务" });
   batch.remember({ request_key: "original-batch", config: { candidates: [] } });
   expect((await task.get()).payload).toEqual({ description: "独立任务" });
   expect((await batch.get()).payload.request_key).toBe("original-batch");
   await batch.clear();
   expect((await task.get()).payload.description).toBe("独立任务");
-  expect(() => createPublicationDraftClient({ userId: "9", draftType: "plan", tauri: false })).toThrow();
+  const plan = createPublicationDraftClient({
+    userId: "9",
+    draftType: "plan",
+    tauri: false,
+  });
+  await plan.get();
+  plan.remember({ name: "计划输入" });
+  await batch.clear();
+  expect((await plan.get()).payload).toEqual({ name: "计划输入" });
 });
 
 it("passes batch type through the controlled native bridge", async () => {
-  const invokeImpl = vi.fn(async () => ({ payload: null, revision: "0", schema_version: 1 }));
-  const batch = createPublicationDraftClient({ userId: "9", draftType: "batch", tauri: true, invokeImpl });
+  const invokeImpl = vi.fn(async () => ({
+    payload: null,
+    revision: "0",
+    schema_version: 1,
+  }));
+  const batch = createPublicationDraftClient({
+    userId: "9",
+    draftType: "batch",
+    tauri: true,
+    invokeImpl,
+  });
   await batch.get();
-  expect(invokeImpl).toHaveBeenCalledWith("local_publication_draft_get", { args: { user_id: "9", draft_type: "batch" } });
+  expect(invokeImpl).toHaveBeenCalledWith("local_publication_draft_get", {
+    args: { user_id: "9", draft_type: "batch" },
+  });
+});
+
+it("keeps plan input on native recovery dismiss and uses the read revision on explicit restart", async () => {
+  const { readPlanDraftChoice } =
+    await import("../../modules/publication/planPreparation.js");
+  let revision = "5";
+  const payload = {
+    form: { name: "原计划" },
+    pending: { request_key: "original-create" },
+  };
+  const invokeImpl = vi.fn(async (command, { args }) => {
+    expect(args.draft_type).toBe("plan");
+    if (command === "local_publication_draft_get")
+      return { payload, revision: "5", schema_version: 1 };
+    expect(args.expected_revision).toBe("5");
+    if (revision !== "5") throw { code: "draft_revision_conflict" };
+    return { payload: null, revision: "6", schema_version: 1 };
+  });
+  const client = createPublicationDraftClient({
+    userId: "9",
+    draftType: "plan",
+    tauri: true,
+    invokeImpl,
+  });
+  expect(await readPlanDraftChoice(client, async () => null)).toBe(null);
+  expect(
+    invokeImpl.mock.calls.every(
+      ([command]) => command === "local_publication_draft_get",
+    ),
+  ).toBe(true);
+  expect((await client.get()).payload.pending.request_key).toBe(
+    "original-create",
+  );
+  revision = "6";
+  await expect(
+    readPlanDraftChoice(client, async () => "restart"),
+  ).rejects.toMatchObject({ code: "draft_revision_conflict" });
+  expect((await client.get()).payload).toEqual(payload);
+  revision = "5";
+  expect(
+    (await readPlanDraftChoice(client, async () => "restart")).payload,
+  ).toBe(null);
 });

@@ -1,0 +1,227 @@
+.plan-page {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  min-width: 0;
+}
+.plan-page .resource-card {
+  margin-bottom: 16px;
+}
+.plan-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 20px;
+}
+.plan-fields label {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+.plan-fields input[type="date"] {
+  padding: 7px 10px;
+  border: 1px solid var(--td-border-level-2-color);
+  border-radius: 3px;
+  background: var(--td-bg-color-container);
+}
+.plan-wide {
+  grid-column: 1/-1;
+}
+.plan-inline {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 12px 0;
+}
+.plan-inline > .t-input__wrap {
+  flex: 1;
+  min-width: 160px;
+}
+.plan-table {
+  overflow: auto;
+  max-width: 100%;
+  margin: 18px 0;
+}
+.plan-table table {
+  border-collapse: collapse;
+  width: 100%;
+  min-width: 640px;
+  text-align: left;
+  font-size: 14px;
+}
+.plan-table th {
+  background: var(--wt-color-bg-subtle, #f1f5fa);
+  font-weight: 500;
+}
+.plan-table th,
+.plan-table td {
+  padding: 15px 16px;
+  border-bottom: 1px solid var(--td-component-border);
+}
+.plan-table small {
+  display: block;
+  margin-top: 7px;
+  color: var(--wt-text-tertiary);
+}
+.plan-muted {
+  color: var(--wt-text-tertiary);
+  font-size: 13px;
+  line-height: 1.6;
+}
+.plan-batch-editor {
+  border: 1px solid var(--td-component-border);
+  padding: 16px;
+  margin-top: 16px;
+  border-radius: 6px;
+}
+.plan-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 20px;
+}
+.plan-metrics > div {
+  border: 1px solid var(--td-component-border);
+  padding: 18px;
+  border-radius: 6px;
+  color: var(--wt-text-tertiary);
+}
+.plan-metrics strong {
+  display: block;
+  color: var(--wt-text-primary);
+  font-size: 23px;
+  font-weight: 500;
+  margin-top: 10px;
+}
+.plan-record {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--td-component-border);
+  font-size: 13px;
+}
+.plan-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding: 20px;
+}
+@media (max-width: 800px) {
+  .plan-fields {
+    grid-template-columns: 1fr;
+  }
+  .plan-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+.plan-page > .resource-card .resource-filter-bar > label {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1 1 180px;
+  min-width: 150px;
+}
+.plan-page {
+  position: relative;
+}
+.plan-page .resource-overlay .plan-stack {
+  min-width: 0;
+}
+
+.plan-drawer-host {
+  pointer-events: none;
+  z-index: 1999;
+}
+.plan-drawer-host .t-drawer {
+  pointer-events: auto;
+}
+.plan-drawer-host .t-drawer__content-wrapper {
+  height: 100%;
+}
+.plan-drawer-host .t-drawer__body {
+  overflow: auto;
+  min-height: 0;
+}
+.plan-drawer-host {
+  position: fixed;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+}
+
+/* Shared production layout adapted from example PlanList / PlanDetail / plan editor. */
+.plan-page .resource-card {
+  margin-bottom: 0;
+}
+.plan-detail-subtitle {
+  margin: 24px 0 12px;
+  font-size: 14px;
+  font-weight: 500;
+}
+.plan-detail-table {
+  overflow-x: auto;
+  max-width: 100%;
+}
+.plan-detail-table:focus-visible {
+  outline: 2px solid var(--wt-primary);
+  outline-offset: 2px;
+}
+.plan-detail-table table {
+  width: 100%;
+  white-space: nowrap;
+}
+.plan-detail-table small {
+  display: block;
+  margin-top: 4px;
+  color: var(--wt-text-tertiary);
+  font-size: 12px;
+}
+.plan-detail-total {
+  background: var(--wt-color-bg-subtle);
+}
+.plan-detail-pending {
+  color: var(--wt-color-warning-text);
+}
+.plan-detail-history {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 0 8px;
+}
+.plan-detail-history li {
+  position: relative;
+  padding: 0 0 20px 20px;
+  border-left: 1px solid var(--wt-border);
+}
+.plan-detail-history li:last-child {
+  padding-bottom: 0;
+}
+.plan-detail-history li::before {
+  content: "";
+  position: absolute;
+  left: -4px;
+  top: 8px;
+  width: 7px;
+  height: 7px;
+  background: var(--wt-primary);
+  border-radius: 50%;
+}
+.plan-detail-history p {
+  margin: 0 0 4px;
+  overflow-wrap: anywhere;
+}
+.plan-detail-history span {
+  color: var(--wt-text-tertiary);
+  font-size: 12px;
+}
+.plan-section-tools {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: -44px;
+  margin-bottom: 12px;
+}
+.plan-editor-section {
+  padding: 24px;
+}
+
+/* List panels use the shared opt-in geometry; the page header already owns its gap. */
+.plan-page.resource-list-page { gap: 0; }

@@ -64,7 +64,7 @@ describe('the 本机设置 route', () => {
     // Exact rather than a floor: a floor catches only a table that has been emptied,
     // not one that lost a route, and the walk below would then cover one page fewer
     // without saying so.
-    expect(loaders.length, 'desktop routes carrying a loader (including 图片库、封面模板、作品管理和发布批次)').toBe(26)
+    expect(loaders.length, 'desktop routes carrying a loader (including 图片库、封面模板、作品管理、发布批次和发布计划)').toBe(27)
 
     const projectRoot = new URL('../', import.meta.url)
     let checked = 0

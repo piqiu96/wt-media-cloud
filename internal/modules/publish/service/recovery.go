@@ -32,6 +32,9 @@ func (s *RecoveryService) readable(actor identity.PublicUser, id uint64) (model.
 	return v, e
 }
 func (s *RecoveryService) Resolve(actor identity.PublicUser, id uint64, in model.ResultResolution) (model.Task, error) {
+	if actor.Status != identity.UserStatusEnabled {
+		return model.Task{}, ErrNotFound
+	}
 	v, e := s.readable(actor, id)
 	if e != nil {
 		return v, e

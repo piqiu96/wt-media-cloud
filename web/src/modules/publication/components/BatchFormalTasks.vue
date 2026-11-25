@@ -125,8 +125,8 @@ function taskAction(task) {
         :scroll="{ x: '1184px' }" :loading="loading" :empty="error ? '任务读取失败' : '没有符合条件的正式任务'">
         <template #id="{ row }"><ResourceId :value="row.id" label="任务 ID" /></template>
         <template #content="{ row }">{{ row.content?.description || "—" }}</template>
-        <template #account="{ row }">{{ row.resources?.account_name || accountName(row) }}</template>
-        <template #output="{ row }">{{ row.resources?.output_name || outputName(row) }}</template>
+        <template #account="{ row }"><span class="batch-task-resource-name" :title="row.resources?.account_name || accountName(row)">{{ row.resources?.account_name || accountName(row) }}</span></template>
+        <template #output="{ row }"><span class="batch-task-resource-name" :title="row.resources?.output_name || outputName(row)">{{ row.resources?.output_name || outputName(row) }}</span></template>
         <template #status="{ row }"><ResourceStatusBadge :label="publicationStatuses[row.status] || '状态未知'"
           :tone="row.status === 'published' ? 'success' : ['failed','awaiting_human','uncertain'].includes(row.status) ? 'warning' : 'neutral'" /></template>
         <template #group="{ row }">{{ row.execution_group_no ? '第 ' + row.execution_group_no + ' 组' : '—' }}</template>
@@ -144,3 +144,8 @@ function taskAction(task) {
     </div>
   </div>
 </template>
+
+<style scoped>
+/* BatchDetailContent prototype: retain full resource names, bound their row height. */
+.batch-task-resource-name { overflow-wrap:anywhere; max-width:100%; font-weight:400; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; text-align:left; }
+</style>

@@ -32,10 +32,11 @@ import {
 import BatchResourceSetup from "../components/BatchResourceSetup.vue";
 import BatchCandidateWorkspace from "../components/BatchCandidateWorkspace.vue";
 import BatchExecutionControls from "../components/BatchExecutionControls.vue";
-import BatchExecutionDetail from "../components/BatchExecutionDetail.vue";
+import BatchReadonlyBody from "../components/BatchReadonlyBody.vue";
 import BatchFormalTasks from "../components/BatchFormalTasks.vue";
-import { batchPhases, batchTaskLocation } from "../batchExecution.js";
+import { batchPhases, batchTaskLocation, batchPendingCount } from "../batchExecution.js";
 import "../batchPreparation.css";
+import {planReturn} from "../planPreparation.js";
 
 const api = createPublicationBatchClient();
 const session = createSessionClient();
@@ -92,22 +93,19 @@ let routeDraftReady = false;
 
 const steps = [{ title: "资源配置" }, { title: "内容准备" }, { title: "结果总览" }];
 const listColumns = [
-  { colKey: "id", title: "批次 ID", width: 140 },
-  { colKey: "name", title: "批次名称", ellipsis: true, width: 210 },
-  { colKey: "platform", title: "平台", width: 92 },
-  { colKey: "coverage", title: "目标 / 数量", width: 130 },
-  { colKey: "configuration_status", title: "配置状态", width: 106 },
-  { colKey: "execution_status", title: "执行状态", width: 106 },
-  { colKey: "updated_at", title: "更新时间", width: 180 },
-  { colKey: "op", title: "操作", width: 180, fixed: "right" },
+  { colKey: 'id', title: '批次ID', width: 115 },
+  { colKey: 'name', title: '批次名称', width: 220 },
+  { colKey: 'platform', title: '发布平台', width: 105 },
+  { colKey: 'plan', title: '所属计划', width: 125 },
+  { colKey: 'coverage', title: '发布目标', width: 125 },
+  { colKey: 'progress', title: '发布进度', width: 172 },
+  { colKey: 'state', title: '批次状态', width: 108 },
+  { colKey: 'pending', title: '待处理', width: 72 },
+  { colKey: 'updated_at', title: '最近更新', width: 155 },
+  { colKey: 'op', title: '操作', width: 200, fixed: 'right' },
 ];
-const candidateColumns = [
-  { colKey: "output", title: "候选成片", width: 244 },
-  { colKey: "account", title: "发布账号", width: 140 },
-  { colKey: "category", title: "类目", width: 100 },
-  { colKey: "content", title: "文案", width: 210, ellipsis: true },
-  { colKey: "covers", title: "封面", width: 130 },
-];
+const batchPending = batchPendingCount;
+const batchRate = b => Number(targetSum(b.targets))>0?Math.round((b.execution?.published_count||0)/targetSum(b.targets)*10000)/100:0;
 const recordColumns = [
   { colKey: "created_at", title: "时间", width: 190 },
   { colKey: "event", title: "事件", width: 250 },
@@ -162,8 +160,8 @@ function problem(error, fallback) {
 }
 
 function listLocation() {
-  return Object.fromEntries(["search", "platform", "configuration_status", "execution_status", "page", "page_size"]
-    .flatMap(key => rawQuery(key) ? [[key, rawQuery(key)]] : []));
+  return { ...Object.fromEntries(Object.entries(route.query).filter(([key,value]) => ["from_plan","plan_search","plan_status","plan_platform","plan_category_id","plan_page","plan_page_size","plan_scroll"].includes(key) && typeof value === "string")), ...Object.fromEntries(["search", "platform", "configuration_status", "execution_status", "page", "page_size"]
+    .flatMap(key => rawQuery(key) ? [[key, rawQuery(key)]] : [])) };
 }
 function scrollHost(element) {
   let parent = element?.parentElement;
@@ -203,6 +201,8 @@ function openToStart(item) {
   return open("detail", item, { start: true });
 }
 function back() {
+  const parent = planReturn(route.query);
+  if (parent) return router.push(parent);
   if (view.value === "edit" && detail.value) return open("detail", detail.value);
   return router.push({ query: listLocation() });
 }
@@ -283,6 +283,9 @@ function restore(value) {
 async function savedDetail(saved, startAfterSave = false) {
   allowLeave = true;
   try {
+    if (saved.plan_id) {
+      return await router.push(planReturn(route.query) || { name: "PublishPlans", query: { view: "detail", id: saved.plan_id } });
+    }
     await open("detail", saved, { replace: true, start: startAfterSave });
   } finally {
     allowLeave = false;
@@ -325,7 +328,7 @@ async function syncExecutionDetail(latest, background = false, reloadTasks = tru
         (updated.execution?.task_counts?.reviewing ?? 0) === 0;
       detail.value = updated;
       if (!previouslyStarted && formalTasks.value) recordTab.value = "tasks";
-      if (!background && recordTab.value === "records") loadRecords(id, recordPage.value);
+      if (!background) loadRecords(id, recordPage.value);
       if ((reloadTasks || reviewsSettled) && previouslyStarted && recordTab.value === "tasks") {
         await nextTick();
         if (current()) await taskTable.value?.refresh();
@@ -377,7 +380,12 @@ async function refresh() {
     if (run !== epoch) return;
     actor.value = user;
     if (view.value === "list") {
-      await loadList(run);
+      await Promise.all([
+        loadList(run),
+        compose.listCategories({ scope: "all" })
+          .then(result => { if (run === epoch) categories.value = result || []; })
+          .catch(error => { if (run === epoch) resourceError.value = problem(error, "类目读取失败"); }),
+      ]);
       return;
     }
     const id = rawQuery("id");
@@ -398,6 +406,7 @@ async function refresh() {
       updateCoverResources(configuration, detail.value.readiness?.cover_resources);
       await Promise.all([
         loadingCategories,
+        loadRecords(detail.value.id,1),
         catalog.hydrate(configuration.config, { owner: detail.value.operator_id, platform: detail.value.platform, readOnly: !canEdit(detail.value) })
           .catch(error => { if (run === epoch) resourceError.value = problem(error, "部分资源名称读取失败"); }),
       ]);
@@ -618,11 +627,11 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div v-if="view === 'list'" ref="listRoot" class="publication-batches">
+  <div v-if="view === 'list'" ref="listRoot" class="publication-batches resource-list-page">
     <ResourcePageHeader title="发布批次">
       <template #actions><t-button v-if="canPrepare" theme="primary" @click="open('create')">新建批次</t-button></template>
     </ResourcePageHeader>
-    <ResourceCard class="resource-list-card">
+    <ResourceCard class="resource-list-card resource-list-panel">
       <ResourceFilterBar>
         <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">搜索批次</span>
           <t-input v-model="listFilters.search" aria-label="搜索批次" placeholder="输入批次名称或批次 ID" :maxlength="100" clearable @enter="updateFilters()" />
@@ -641,24 +650,18 @@ onBeforeUnmount(() => {
         </div>
       </ResourceFilterBar>
       <FeedbackAlert v-if="pageError" theme="error" :message="pageError" />
+      <FeedbackAlert v-if="resourceError" theme="warning" :message="resourceError" />
       <div class="table-scroll-wrap resource-data-table">
         <t-table class="wt-resource-table" :columns="listColumns" :data="list.items || []" row-key="id" :loading="loading"
-           :scroll="{ x: '1144px' }" :empty="pageError ? '读取失败' : '暂无匹配的发布批次'">
+           :scroll="{ x: '1497px' }" :empty="pageError ? '读取失败' : '暂无匹配的发布批次'">
           <template #id="{ row }"><ResourceId :value="row.id" label="批次 ID" /></template>
           <template #name="{ row }"><ResourceNameLink @click="open('detail', row)">{{ row.name }}</ResourceNameLink></template>
           <template #platform="{ row }">{{ platformLabel(row.platform) }}</template>
-          <template #coverage="{ row }">
-            {{ targetSum(row.targets) }} / {{ row.execution?.first_started_at ? row.execution.created_count : row.candidate_count }}
-            <small class="batch-muted batch-task-block">{{ row.execution?.first_started_at ? "正式任务" : "候选配置" }}</small>
-          </template>
-          <template #configuration_status="{ row }">
-            <ResourceStatusBadge :label="configState(row)" :tone="row.configuration_status === 'ready' ? 'success' : 'warning'" />
-          </template>
-          <template #execution_status="{ row }">
-            <ResourceStatusBadge :label="executionState(row)" />
-            <small v-if="row.execution?.phase && row.execution.phase !== row.execution_status"
-              class="batch-muted batch-task-block">{{ batchPhases[row.execution.phase] }}</small>
-          </template>
+          <template #plan="{row}"><span class="batch-cell-text">{{row.plan_name||'独立批次'}}</span></template>
+          <template #coverage="{ row }"><strong class="batch-target-value">{{targetSum(row.targets)}} <span>条</span></strong><small class="batch-muted batch-task-block">{{row.targets.map(t=>categoryName(t.category_id)+' '+t.target_count).join(' · ')}}</small></template>
+          <template #progress="{row}"><span v-if="!row.execution?.first_started_at">{{row.candidate_count||0}} 条候选 · 0 条任务</span><template v-else><div class="batch-progress-title"><span>{{row.execution.published_count}} / {{targetSum(row.targets)}}</span><span>{{batchRate(row)}}%</span></div><t-progress color="var(--wt-primary)" :percentage="Math.min(batchRate(row),100)" :label="false" :stroke-width="6"/></template></template>
+          <template #state="{row}"><ResourceStatusBadge :label="row.execution_status==='not_started'?(row.configuration_status==='ready'?'待执行':'待配置'):executionState(row)" :tone="batchPending(row)?'warning':row.execution_status==='running'?'info':'neutral'"/><small v-if="row.execution?.phase && row.execution.phase!==row.execution_status" class="batch-muted batch-task-block">{{batchPhases[row.execution.phase]}}</small><small v-if="row.execution?.stopped_at" class="batch-muted batch-task-block">已终止后续派发</small></template>
+          <template #pending="{row}"><span v-if="batchPending(row) === null" class="batch-muted">待刷新</span><t-button v-else-if="batchPending(row)>0" theme="warning" variant="text" @click="open('detail',row)">{{batchPending(row)}} 项</t-button><span v-else>—</span></template>
           <template #updated_at="{ row }">{{ formatPublicationTime(row.updated_at) }}</template>
           <template #op="{ row }"><ResourceRowActions>
             <t-button v-if="canStart(row)" variant="text" size="small" @click="openToStart(row)">开始发布</t-button>
@@ -677,75 +680,12 @@ onBeforeUnmount(() => {
 
   <ResourceDetailPage v-else-if="view === 'detail' && detail" :title="detail.name" :busy="executionBusy" @back="back">
     <FeedbackAlert v-if="resourceError" theme="warning" :message="resourceError" />
-    <ResourceCard>
-      <ResourceSection title="批次信息">
-        <ResourceDescriptions><t-descriptions-item v-for="item in [
-          { label: '发布平台', value: platformLabel(detail.platform) },
-          { label: '配置状态', value: configState(detail) },
-          { label: '执行状态', value: executionState(detail) },
-          { label: '发布目标', value: `${targetSum(detail.targets)} 条` },
-          { label: '候选配置', value: `${detail.candidate_count} 条` },
-          { label: '更新时间', value: formatPublicationTime(detail.updated_at) },
-        ]" :key="item.label" :label="item.label">{{ item.value }}</t-descriptions-item></ResourceDescriptions>
-      </ResourceSection>
-      <ResourceSection title="执行设置">
-        <ResourceDescriptions><t-descriptions-item v-for="item in [
-          { label: '并发数', value: detail.execution_setting.concurrency_limit },
-          { label: '组间发布间隔', value: `${detail.execution_setting.group_interval_seconds} 秒` },
-          { label: '组间处理', value: groupLabel(detail.execution_setting) },
-          { label: '异常任务上限', value: detail.execution_setting.exception_task_limit },
-        ]" :key="item.label" :label="item.label">{{ item.value }}</t-descriptions-item></ResourceDescriptions>
-      </ResourceSection>
-    </ResourceCard>
-    <BatchExecutionDetail :batch="detail" @tasks="showTaskStatus" />
-    <ResourceCard v-if="!formalTasks">
-      <ResourceSection title="目标与缺口">
-        <ul class="batch-categories">
-          <li v-for="entry in detail.readiness?.shortfalls || []" :key="entry.category_id">
-            <strong>{{ categoryName(entry.category_id) }}</strong>
-            <span>目标 {{ entry.target_count }} · 候选 {{ entry.candidate_count }} · 缺口 {{ entry.shortfall }}</span>
-          </li>
-        </ul>
-      </ResourceSection>
-      <ResourceSection v-if="detail.readiness?.issues?.length" title="配置问题">
-        <ul class="batch-issues">
-          <li v-for="(issue, index) in detail.readiness.issues" :key="index">
-            <strong v-if="detail.config.candidates?.find(row => row.row_key === issue.row_key)">{{ rowLabel(detail.config.candidates.find(row => row.row_key === issue.row_key)) }} · </strong>{{ issue.message }}
-          </li>
-        </ul>
-      </ResourceSection>
-    </ResourceCard>
-    <ResourceCard><div ref="taskPanel">
-      <t-tabs :value="recordTab" @change="$event === 'records' ? showRecords() : (recordTab = $event)">
-        <t-tab-panel v-if="!formalTasks" value="candidates" label="候选配置">
-          <div class="batch-tab">
-            <p v-if="detail.execution_status === 'not_started'" class="batch-muted">批次尚未开始，正式发布任务 0 条。</p>
-            <div class="table-scroll-wrap resource-data-table">
-              <t-table class="wt-resource-table" :columns="candidateColumns" :data="detail.config.candidates || []" row-key="row_key"
-                :scroll="{ x: '824px' }" empty="暂无候选配置">
-                <template #output="{ row }">{{ outputName(row) }}</template>
-                <template #account="{ row }">{{ accountName(row) }}</template>
-                <template #category="{ row }">{{ categoryName(row.category_id) }}</template>
-                <template #content="{ row }">{{ row.content.description || '待完善' }}</template>
-                <template #covers="{ row }">
-                  <div class="batch-cell-covers">
-                    <template v-for="profile in coverProfiles" :key="profile.key">
-                      <img v-if="savedCoverURL(row, profile)" :src="savedCoverURL(row, profile)" :alt="profile.label" />
-                    </template>
-                    <span v-if="!coverProfiles.some(profile => savedCoverURL(row, profile))">—</span>
-                  </div>
-                </template>
-              </t-table>
-            </div>
-          </div>
-        </t-tab-panel>
-        <t-tab-panel v-else value="tasks" label="正式发布任务">
-          <BatchFormalTasks ref="taskTable" :batch="detail" :account-options="taskAccountOptions" :account-name="accountName" :output-name="outputName"
-            :task-link="taskLink" :scope="taskScope" :active="recordTab === 'tasks'" @scope="taskScope = $event"
+    <BatchReadonlyBody :batch="detail" :category-name="categoryName" :task-link="taskLink" :resource-catalog="catalog" :coverURL="(row,key)=>savedCoverURL(row,coverProfiles.find(p=>p.key===(key==='cover_resource_path'?'horizontal':'portrait')))" @tasks="showTaskStatus">
+      <template #tasks><div ref="taskPanel">          <BatchFormalTasks ref="taskTable" :batch="detail" :account-options="taskAccountOptions" :account-name="accountName" :output-name="outputName"
+            :task-link="taskLink" :scope="taskScope" active @scope="taskScope = $event"
             @refresh-summary="syncExecutionDetail(null, false, false)" />
-        </t-tab-panel>
-        <t-tab-panel value="records" label="操作记录">
-          <div class="batch-tab">
+</div></template>
+      <template #records>          <div class="batch-tab">
             <FeedbackAlert v-if="recordsError" theme="error" :message="recordsError" />
             <t-button v-if="recordsError" variant="text" @click="loadRecords(detail.id, recordPage)">重新读取</t-button>
             <div class="table-scroll-wrap resource-data-table">
@@ -761,9 +701,8 @@ onBeforeUnmount(() => {
                 @current-change="loadRecords(detail.id, $event)" />
             </div>
           </div>
-        </t-tab-panel>
-      </t-tabs>
-    </div></ResourceCard>
+</template>
+    </BatchReadonlyBody>
     <template #footer>
       <span v-if="!canPrepare || detail.operator_id !== String(actor?.id)" class="resource-footer-status batch-muted">
         {{ !canPrepare ? '当前角色可查看批次' : detail.operator_id !== String(actor?.id) ? '批次配置由所属运营处理' : '当前状态不允许编辑或复制' }}
@@ -786,13 +725,14 @@ onBeforeUnmount(() => {
       </p>
       <ResourceCard><ResourceWizardSteps :steps="steps" :current="step" /></ResourceCard>
       <BatchResourceSetup v-if="step === 0" :form="form" :catalog="catalog" :categories="categoryOptions"
-        :actor="actor" :disabled="freeze" @work="preparing = $event" />
+         :actor="actor" :recipes="recipes" :cover-files="coverFiles" :validation-context="validationContext" :inherited-targets="!!detail?.plan_id" :disabled="freeze" @work="preparing = $event" />
       <BatchCandidateWorkspace v-if="step === 1" :form="form" :catalog="catalog" :categories="categoryOptions"
         :actor="actor" :recipes="recipes" :cover-files="coverFiles" :disabled="freeze" :focus-key="issueRowKey"
-        :validation-context="validationContext" @work="preparing = $event" />
+        :validation-context="validationContext" :validation-issues="readiness?.issues || []" @changed="review = null" @work="preparing = $event" />
       <template v-if="step === 2">
         <ResourceCard>
           <ResourceSection title="准备结果">
+            <div class="batch-review-summary"><label>批次名称<t-input v-model="form.name" aria-label="复查批次名称" :disabled="freeze" :maxlength="100"/></label><div><span>发布平台</span><strong>{{platformLabel(form.platform)}}</strong></div><div><span>候选配置</span><strong>{{form.config.candidates.length}} 条</strong></div></div>
             <ul class="batch-categories">
               <li v-for="entry in candidateShortfalls(form)" :key="entry.category_id">
                 <strong>{{ categoryName(entry.category_id) }}</strong>
@@ -817,8 +757,8 @@ onBeforeUnmount(() => {
           </ResourceSection>
         </ResourceCard>
         <ResourceCard>
-          <ResourceSection title="执行设置">
-            <div class="batch-form-grid">
+          <ResourceSection title="发布设置">
+            <div class="batch-settings-grid">
               <label>并发数<t-input-number v-model="form.execution_setting.concurrency_limit" :min="1" :decimal-places="0"
                 aria-label="并发数" :disabled="freeze" @change="review = null" /></label>
               <label>组间发布间隔（秒）<t-input-number v-model="form.execution_setting.group_interval_seconds" :min="0" :decimal-places="0"
@@ -832,6 +772,7 @@ onBeforeUnmount(() => {
             </div>
           </ResourceSection>
         </ResourceCard>
+        <BatchCandidateWorkspace review-only :form="form" :catalog="catalog" :categories="categoryOptions" :actor="actor" :recipes="recipes" :cover-files="coverFiles" :disabled="freeze" :validation-context="validationContext" :validation-issues="readiness?.issues || []" @changed="review=null" @work="preparing=$event"/>
       </template>
     </div>
     <template #footer>
@@ -841,9 +782,9 @@ onBeforeUnmount(() => {
       <t-button v-if="step < 2" theme="primary" :disabled="freeze" @click="goStep(step + 1)">下一步</t-button>
       <t-button v-else :theme="pending ? 'primary' : 'default'" :variant="pending ? 'base' : 'outline'"
         :loading="saving" :disabled="preparing" @click="save()">
-        {{ pending ? "查询或重试原请求" : detail ? "保存修改" : "保存批次" }}
+        {{ pending ? "查询或重试原请求" : detail?.plan_id ? "保存并返回计划" : detail ? "保存修改" : "保存批次" }}
       </t-button>
-      <t-button v-if="step === 2 && !pending" theme="primary" :loading="saving" :disabled="preparing" @click="save(true)">
+      <t-button v-if="step === 2 && !pending && !detail?.plan_id" theme="primary" :loading="saving" :disabled="preparing" @click="save(true)">
         {{ detail ? "开始发布" : "创建并发布" }}
       </t-button>
     </template>

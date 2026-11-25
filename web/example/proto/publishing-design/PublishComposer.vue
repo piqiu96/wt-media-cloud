@@ -22,6 +22,7 @@ import { initCandidate } from "./content.js";
 import { recommendCategoryQuantities } from "./batchRecommendations.js";
 import { createPublication, nextId } from "./relationships.js";
 import { currentPrototypeUser } from "./prototypeSession.js";
+import { executionPreview } from "./batchLifecycle.js";
 import { preparationRecord, previewExecutionSettings, previewGroupPolicies } from "./preparationPreview.js";
 import { ensureCoverResults } from "./covers.js";
 import { feedback } from "../../../src/shared/ui/feedback/index.js";
@@ -444,10 +445,11 @@ async function close() {
   await nextTick();
   if(sourceReturn.value){sourceReturn.value=false;emit("return-source");}else emit("closed");
 }
-function openBatch(batch) {
+async function openBatch(batch) {
   sourceReturn.value=false;
   if (
-    batch.phase === "内容预检通过" ||
+    batch.planFrozenAt ||
+    (!batch.planReview && batch.phase === "内容预检通过") ||
     batch.firstStartedAt ||
     batch.control === "已取消"
   )
@@ -487,12 +489,13 @@ function openBatch(batch) {
   activeCategory.value = state.categories[0] || "";
   errors.value = [];
   visible.value = true;
+  if (batch.planReview) await nextTick();
   editBaseline.value = JSON.stringify(state);
 }
 async function saveDraft(silent = false) {
   if (contentBusy.value || busy.value) return false;
   const batch = state.batchId ? props.db.batches.find(b => b.id === state.batchId) : null;
-  if (state.batchId && (!batch || batch.firstStartedAt || batch.control === '已取消' || batch.phase === '内容预检通过')) {
+  if (state.batchId && (!batch || batch.planFrozenAt || batch.firstStartedAt || batch.control === '已取消' || (!batch.planReview && batch.phase === '内容预检通过'))) {
     errors.value = ['当前批次已锁定，不能保存修改。'];
     return false;
   }
@@ -630,6 +633,8 @@ function applyReplacement() {
   }
   replaceRow.value = null;
 }
+const editingPlanBatch = computed(() => props.db.batches.some(batch => batch.id === state.batchId && batch.planReview));
+const canStartPreparation = computed(() => props.executionReview && !editingPlanBatch.value);
 async function savePreparation(start = false) {
   if (busy.value || contentBusy.value) return;
   busy.value = true;
@@ -638,7 +643,14 @@ async function savePreparation(start = false) {
   const localDraft = props.db.publishDraft;
   let record;
   try {
+    if (previous?.planFrozenAt) throw Error("计划已冻结，不能编辑批次");
+    if (previous?.planReview && start) throw Error("请在发布计划中执行");
     record = preparationRecord(state, { id: previous?.id || nextId(props.db), actor: currentPrototypeUser(), existing: previous, executionReview: props.executionReview });
+    if (record.planReview) {
+      record.needsPreflight = false;
+      const checks = executionPreview(props.db, record);
+      record.phase = checks.length && checks.every(row => !row.errors.length) ? "内容预检通过" : "待内容配置";
+    }
     if (previous) props.db.batches.splice(index, 1, record);
     else {
       props.db.batches.unshift(record);
@@ -762,7 +774,7 @@ defineExpose({
     @update:visible="value => { if (!value) close(); }"
     :title="state.batchId ? '编辑发布批次' : '新建发布批次'"
     page
-    :back-label="sourceReturn ? '返回成片管理' : '返回发布批次列表'"
+    :back-label="sourceReturn ? '返回成片管理' : editingPlanBatch ? '返回发布计划' : '返回发布批次列表'"
     kind="drawer"
     :width="1440"
     class="batch-v2-overlay"
@@ -1078,10 +1090,10 @@ defineExpose({
           v-else
           :loading="busy || contentBusy"
           :disabled="contentBusy || (!preparationOnly && (!state.rows.length || !!issues.length))"
-          :theme="executionReview ? 'default' : 'primary'" :variant="executionReview ? 'outline' : 'base'"
+          :theme="canStartPreparation ? 'default' : 'primary'" :variant="canStartPreparation ? 'outline' : 'base'"
           @click="create"
           >{{ preparationOnly ? (state.batchId ? "保存修改" : "保存批次") : "创建批次" }}</t-button
-        ><t-button v-if="executionReview && state.step === 3" theme="primary" :loading="busy"
+        ><t-button v-if="canStartPreparation && state.step === 3" theme="primary" :loading="busy"
           :disabled="contentBusy" @click="savePreparation(true)">{{ state.batchId ? "开始发布" : "创建并发布" }}</t-button
         ></template
       ></template

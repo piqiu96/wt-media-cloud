@@ -10,7 +10,7 @@ exports.attachStore=async function(page,data,onWrite=()=>{}){
   await page.route('**/__example/publishing/**',async route=>{
     try {
       const request=route.request(),body=request.method()==='GET'?null:exports.requestBody(request);
-      const result=request.method()==='GET'?await store.get():request.url().endsWith('/command')?await store.command(body):request.url().endsWith('/bootstrap')?await store.bootstrap(body.data):await store.save(body.data,body.revision);
+      const result=request.method()==='GET'?await store.get():new URL(request.url()).pathname.endsWith('/command')?await store.command(body):new URL(request.url()).pathname.endsWith('/bootstrap')?await store.bootstrap(body.data):await store.save(body.data,body.revision);
       if(request.method()!=='GET')onWrite(structuredClone(result.data));
       await route.fulfill({json:result});
     } catch(error){await route.fulfill({status:409,json:{error:error.message}});}

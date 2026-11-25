@@ -25,6 +25,9 @@ type Content struct {
 	Confirmed           bool         `json:"confirmed"`
 }
 type Task struct {
+	LatestManualVerification *LatestManualVerification `json:"latest_manual_verification" gorm:"column:latest_manual_verification_json;serializer:json"`
+	VerificationRequired     bool                      `json:"verification_required" gorm:"-"`
+
 	BatchID              *uint64             `json:"batch_id,string"`
 	TaskOrder            uint32              `json:"task_order"`
 	RowKey               *string             `json:"row_key,omitempty"`

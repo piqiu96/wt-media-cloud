@@ -1,14 +1,14 @@
 openapi: 3.1.0
 info:
   title: WT Media Publication Batch
-  version: 2026.11.25.3
-  description: Session API using errcode/message/data/logid. Saves store candidate configuration and current file references atomically with audit. Incomplete content or candidate shortfalls may be saved. Account ownership, category scope and input structure are mandatory. Only first start creates formal tasks and output occupancy. Attempts are created by actual claim.
+  version: 2026.11.25.4
+  description: Plan first start freezes every attached configuration including future batches; direct configuration/task-content/start/retry/claim/resume and submitting permission respect plan ownership, position and permanent stop. Manual plan pause only stops later batch starts; batch exception pause remains independent. Original check/result settlement remains allowed. Session API using errcode/message/data/logid. Saves store candidate configuration and current file references atomically with audit. Incomplete content or candidate shortfalls may be saved. Account ownership, category scope and input structure are mandatory. Only first start creates formal tasks and output occupancy. Attempts are created by actual claim.
 security: [{sessionCookie: []}]
 paths:
   /api/v1/publication-batch:
     get:
       operationId: listPublicationBatch
-      description: Scope before count and pagination. Operators see their own records. Senior operators see their team; all target categories must be in scope. Administrators can read across teams. Exact request_key lookup is creator scoped and independent of other filters.
+      description: Exclude plan skeletons until configured. Scope before count and pagination. Operators see their own records. Senior operators see their team; all target categories must be in scope. Administrators can read across teams. Exact request_key lookup is creator scoped and independent of other filters.
       parameters:
         - {$ref: '#/components/parameters/Page'}
         - {$ref: '#/components/parameters/PageSize'}
@@ -534,11 +534,25 @@ components:
         platform: {$ref: '#/components/schemas/Platform'}
         targets: {$ref: '#/components/schemas/Targets'}
         candidate_count: {type: integer, minimum: 0}
+        plan_id: {type: [string, 'null'], pattern: '^[1-9][0-9]*$', readOnly: true, description: 'Only plan transaction writes association; external create/save cannot set or move it.'}
+        plan_name: {type: [string, 'null'], readOnly: true}
+        plan_configuration_frozen: {type: boolean, readOnly: true}
+        plan_current_position: {type: boolean, readOnly: true}
+        handed_off_at: {type: [string, 'null'], format: date-time, readOnly: true}
+        action_blockers:
+          type: array
+          items:
+            type: object
+            required: [action, code, message]
+            properties:
+              action: {type: string}
+              code: {type: string}
+              message: {type: string}
         execution_setting: {$ref: '#/components/schemas/ExecutionSetting'}
         configuration_status: {enum: [incomplete, ready]}
         execution_status: {$ref: '#/components/schemas/ExecutionStatus'}
         execution: {$ref: '#/components/schemas/BatchExecution'}
-        allowed_actions: {type: array, items: {enum: [edit, copy, start, pause, resume, stop, finish]}}
+        allowed_actions: {type: array, items: {enum: [edit, copy, start, pause, resume, stop, finish, takeover]}}
         created_at: {type: string, format: date-time}
         updated_at: {type: string, format: date-time}
     BatchDetail:
@@ -792,7 +806,7 @@ components:
               code: {type: string}
     BatchExecution:
       type: object
-      required: [phase, first_started_at, execution_group_no, group_task_ids, group_ended_at, next_group_at, pause, stopped_at, ended_at, target_count, created_count, creation_shortfall, published_count, target_shortfall, task_counts]
+      required: [phase, first_started_at, execution_group_no, group_task_ids, group_ended_at, next_group_at, pause, stopped_at, ended_at, target_count, created_count, creation_shortfall, published_count, target_shortfall, verification_required_count, task_counts]
       properties:
         phase: {type: string, enum: [not_started, running, waiting_resources, waiting_interval, awaiting_processing, paused, stopping, ended]}
         first_started_at: {type: [string, 'null'], format: date-time}
@@ -813,6 +827,11 @@ components:
           description: Null until first start. Thereafter calculated from the frozen target and number of formal tasks.
         published_count: {type: integer, minimum: 0, description: Distinct formal tasks with verified public work, excluding reviewing and attempts.}
         target_shortfall: {type: integer, minimum: 0, description: The fixed target less the verified public count, floored at zero.}
+        verification_required_count:
+          type: integer
+          minimum: 0
+          readOnly: true
+          description: Count only reviewing tasks whose original facts require manual verification at the captured projection time. Normal reviewing and freshly valid manual reviewing count zero; uncertain stays in its own task_counts state and is never counted twice here. This projection does not change task states or the batch ExceptionLimit.
         task_counts:
           type: object
           propertyNames: {$ref: 'publication.openapi.yaml#/components/schemas/TaskStatus'}

@@ -143,3 +143,7 @@ code, close admission, drain or safely settle v2 Profile holders, preserve
 batch tasks and historical attempts in a restorable backup, and verify legacy
 bounds. Schema 117 introduces foreign keys and v2 state which require explicit
 data preservation for rollback.
+
+### 118 publication plan
+
+`20261125_118_publication_plan.sql` adds plan-owned structure, immutable future-start selection storage, batch handoff facts and the latest manual-verification task projection. Existing standalone batches retain NULL plan ownership and unchanged business facts. Plan skeleton creation creates neither tasks nor output occupancy; only the existing start core may do so. This is the existing forward-only migration system: rollback is tested by explicit reverse DDL in a disposable schema, not by adding a down SQL file that the normal loader would execute. Production reversal after plan execution is not automatic and must preserve plan/task history.

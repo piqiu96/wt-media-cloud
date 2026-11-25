@@ -36,6 +36,7 @@ type Filter struct {
 	CreatedFrom, CreatedBefore *time.Time
 }
 type Store struct {
+	PlanClock func() time.Time
 	DB        *gorm.DB
 	LockFiles func(*gorm.DB, []int64) error
 }
@@ -68,6 +69,7 @@ func (s Store) ByRequest(actor int64, key string) (model.Task, error) {
 func (s Store) Get(id uint64) (model.Task, error) {
 	var v model.Task
 	err := s.DB.Select(cancellationProjection).First(&v, id).Error
+	v.VerificationRequired = v.VerificationRequiredAt(s.planNow(time.Now().UTC()))
 	return v, missing(err)
 }
 func (s Store) Create(v model.Task) (model.Task, error) {
@@ -109,7 +111,7 @@ func (s Store) Edit(v model.Task, revision uint64) (model.Task, error) {
 		if err != nil {
 			return err
 		}
-		if stoppedParent(parent) {
+		if stoppedParent(parent) || parent != nil && parent.PlanFrozenAt != nil {
 			return ErrParentBlocked
 		}
 		var old model.Task
@@ -196,6 +198,10 @@ func (s Store) List(f Filter) ([]model.Task, int64, error) {
 	}
 	out := []model.Task{}
 	err := q.Select(cancellationProjection).Order("id DESC").Offset((f.Page - 1) * f.PageSize).Limit(f.PageSize).Find(&out).Error
+	now := s.planNow(time.Now().UTC())
+	for i := range out {
+		out[i].VerificationRequired = out[i].VerificationRequiredAt(now)
+	}
 	return out, total, err
 }
 func audit(tx *gorm.DB, actor int64, task uint64, action string, revision uint64) error {

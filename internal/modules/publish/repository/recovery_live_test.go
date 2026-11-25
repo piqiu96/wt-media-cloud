@@ -193,8 +193,8 @@ func TestLiveVerificationPreservesMaximumAllowedEvidence(t *testing.T) {
 	}
 }
 
-// Both verifications can read the same versions. One commits its task,
-// attempt and audit; the loser must roll back rather than serialize its reads.
+// Same-scene verification serializes at its original Profile fence before task
+// updates. Exactly one old revision may commit task, attempt and audit.
 func TestLiveConcurrentResolutionUsesVersions(t *testing.T) {
 	s, c, _ := unresolvedPublication(t)
 	v, _ := s.Get(c.Task.ID)
@@ -214,13 +214,17 @@ func TestLiveConcurrentResolutionUsesVersions(t *testing.T) {
 	for i := 0; i < 2; i++ {
 		go func() { _, err := s.ResolveResult(v, 9, in, time.Now().UTC()); result <- err }()
 	}
-	for i := 0; i < 2; i++ {
-		select {
-		case <-reached:
-		case <-time.After(5 * time.Second):
-			close(release)
-			t.Fatal("resolution reads still serialize")
-		}
+	select {
+	case <-reached:
+	case <-time.After(5 * time.Second):
+		close(release)
+		t.Fatal("first resolver did not reach task update")
+	}
+	select {
+	case <-reached:
+		close(release)
+		t.Fatal("same Profile resolver bypassed the original-scene fence")
+	case <-time.After(50 * time.Millisecond):
 	}
 	close(release)
 	successes := 0
