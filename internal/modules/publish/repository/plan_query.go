@@ -89,10 +89,8 @@ func (s Store) PlanBatchPage(id uint64, page, size int, status string, pending *
 	}
 	rows := []model.Batch{}
 	e := q.Order("plan_group_order,plan_batch_order,id").Offset((page - 1) * size).Limit(size).Find(&rows).Error
-	for i := range rows {
-		if e == nil {
-			rows[i], e = s.enrichBatch(rows[i])
-		}
+	if e == nil {
+		rows, e = s.enrichBatches(rows, nil)
 	}
 	return rows, n, e
 }
@@ -115,6 +113,9 @@ func (s Store) PlanRowsByIDs(ids []uint64) (map[uint64][]model.Batch, error) {
 	}
 	var rows []model.Batch
 	e := s.DB.Where("plan_id IN ?", ids).Order("plan_id,plan_group_order,plan_batch_order,id").Find(&rows).Error
+	if e == nil {
+		rows, e = s.enrichBatches(rows, nil)
+	}
 	for _, b := range rows {
 		if b.PlanID != nil {
 			out[*b.PlanID] = append(out[*b.PlanID], b)

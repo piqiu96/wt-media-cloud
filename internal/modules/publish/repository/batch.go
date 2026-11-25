@@ -102,11 +102,9 @@ func (s Store) ListBatches(f BatchFilter) ([]model.Batch, int64, error) {
 	if err != nil {
 		return nil, 0, err
 	}
-	for i, v := range rows {
-		rows[i], err = s.enrichBatch(v)
-		if err != nil {
-			return nil, 0, err
-		}
+	rows, err = s.enrichBatches(rows, nil)
+	if err != nil {
+		return nil, 0, err
 	}
 	return rows, total, nil
 }

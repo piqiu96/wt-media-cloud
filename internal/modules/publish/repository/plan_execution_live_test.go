@@ -7,6 +7,7 @@ import (
 	"github.com/wt-media/wt-media-cloud/internal/modules/publish/model"
 	repo "github.com/wt-media/wt-media-cloud/internal/modules/publish/repository"
 	service "github.com/wt-media/wt-media-cloud/internal/modules/publish/service"
+	"gorm.io/gorm"
 	"reflect"
 	"slices"
 	"sync/atomic"
@@ -525,5 +526,126 @@ func TestPlanTakeoverActionsMatchGuardAndNeverReauthorizeCurrentExecution(t *tes
 	}
 	if _, e = s.ControlPlan(p.ID, 9, p.Revision, "takeover", "重复接管", bs[0].ID, bs[0].Revision, now); !errors.Is(e, repo.ErrConflict) {
 		t.Fatalf("paused repeated takeover %v", e)
+	}
+}
+
+func TestPlanBatchFactsAndActionsMatchIndependentBatchDetailAtEveryStage(t *testing.T) {
+	s, p, bs, in, prepared := preparedPlan(t)
+	team := identity.TeamID(7)
+	owner := identity.PublicUser{ID: 9, Role: identity.RoleOperator, Status: identity.UserStatusEnabled, TeamID: &team, CategoryIDs: []identity.CategoryID{1}}
+	svc := service.Service{PlanRepo: s.Store, BatchRepo: s.Store, PlanExecutionRepo: s}
+	check := func(stage string) {
+		t.Helper()
+		detail, e := svc.GetPlan(owner, p.ID)
+		if e != nil {
+			t.Fatal(e)
+		}
+		for _, b := range detail.Batches {
+			single, e := svc.GetBatch(owner, b.BatchID)
+			if e != nil {
+				t.Fatal(e)
+			}
+			if !reflect.DeepEqual(b.Batch.Execution, single.Execution) || !reflect.DeepEqual(b.AllowedActions, single.AllowedActions) {
+				t.Fatalf("%s batch %d differs: plan execution=%+v actions=%v; standalone execution=%+v actions=%v", stage, b.BatchID, b.Batch.Execution, b.AllowedActions, single.Execution, single.AllowedActions)
+			}
+		}
+	}
+	check("prepared-zero-task")
+	now := time.Now().UTC()
+	if _, e := s.StartPlan(p.ID, 9, in, "fact-start", prepared[bs[0].ID], now); e != nil {
+		t.Fatal(e)
+	}
+	check("started-pending")
+	detail, _ := svc.GetPlan(owner, p.ID)
+	if slices.Contains(detail.Batches[0].AllowedActions, "finish") {
+		t.Fatal("pending task falsely offers finish")
+	}
+	c := acceptanceClaim(t, s, "fact-claim", now)
+	check("running-group")
+	acceptanceReviewing(t, s, c, now)
+	check("reviewing-ended")
+	v, _ := s.Get(c.Task.ID)
+	unknown := resolution(*c, v)
+	unknown.Conclusion = model.StatusUncertain
+	unknown.Evidence.NoPublishableWork = false
+	if _, e := s.ResolveResult(v, 9, unknown, now.Add(time.Second)); e != nil {
+		t.Fatal(e)
+	}
+	check("late-unknown")
+	s.RecordWork = service.NewExecutionStore(s.DB).RecordWork
+	current, _ := s.Get(c.Task.ID)
+	pub := publicResolution(*c, current)
+	pub.PlatformSubmissionID = *current.PlatformSubmissionID
+	pub.TargetURL = ""
+	if _, e := s.ResolveResult(current, 9, pub, now.Add(2*time.Second)); e != nil {
+		t.Fatal(e)
+	}
+	check("verified-public-work")
+	// Also check paginated plan batches against the identical independent projection.
+	page, e := svc.PlanBatches(owner, p.ID, 1, 10, "", nil)
+	if e != nil {
+		t.Fatal(e)
+	}
+	for _, b := range page.Items {
+		single, e := svc.GetBatch(owner, b.BatchID)
+		if e != nil || !reflect.DeepEqual(b.Batch.Execution, single.Execution) || !reflect.DeepEqual(b.AllowedActions, single.AllowedActions) {
+			t.Fatalf("batch page facts differ %v", e)
+		}
+	}
+}
+
+func TestPlanPausedBatchFactsShareCurrentExceptionsWithoutPerBatchQueries(t *testing.T) {
+	s, p, bs, in, prepared := preparedPlan(t)
+	now := time.Now().UTC()
+	if _, e := s.StartPlan(p.ID, 9, in, "paused-facts", prepared[bs[0].ID], now); e != nil {
+		t.Fatal(e)
+	}
+	c := acceptanceClaim(t, s, "pause-facts-claim", now)
+	if _, e := s.Complete(c.Task, 9, terminationCompletion(t, *c, 1, model.StatusFailed, true), now); e != nil {
+		t.Fatal(e)
+	}
+	team := identity.TeamID(7)
+	owner := identity.PublicUser{ID: 9, Role: identity.RoleOperator, Status: identity.UserStatusEnabled, TeamID: &team, CategoryIDs: []identity.CategoryID{1}}
+	svc := service.Service{PlanRepo: s.Store, BatchRepo: s.Store, PlanExecutionRepo: s}
+	detail, e := svc.GetPlan(owner, p.ID)
+	if e != nil {
+		t.Fatal(e)
+	}
+	single, e := svc.GetBatch(owner, bs[0].ID)
+	if e != nil {
+		t.Fatal(e)
+	}
+	if single.Execution.Pause == nil || !reflect.DeepEqual(detail.Batches[0].Batch.Execution, single.Execution) || !reflect.DeepEqual(detail.Batches[0].AllowedActions, single.AllowedActions) {
+		t.Fatalf("paused facts differ %+v / %+v", detail.Batches[0].Batch.Execution, single.Execution)
+	}
+	bulk := model.Plan{TeamID: 7, OwnerID: 9, CreatedBy: 9, Name: "bulk-facts", DateStart: "2026-11-25", DateEnd: "2026-11-26", Goals: []model.PlanGoal{{Platform: "baidu", CategoryID: 1, TargetCount: 8}}, RequestKey: "bulk-facts", RequestHash: "bulk-facts"}
+	bulkRows := []model.PlanStructureBatch{}
+	for i := 1; i <= 8; i++ {
+		bulkRows = append(bulkRows, model.PlanStructureBatch{RowKey: fmt.Sprint("bulk-", i), Name: fmt.Sprint("批", i), Platform: "baidu", GroupOrder: 1, BatchOrder: uint32(i), Targets: []model.BatchTarget{{CategoryID: 1, TargetCount: 1}}})
+	}
+	bulk, _, e = s.CreatePlan(bulk, bulkRows)
+	if e != nil {
+		t.Fatal(e)
+	}
+	var taskQueries, attemptQueries int
+	if e = s.DB.Callback().Query().Before("gorm:query").Register("test:plan-batch-set", func(tx *gorm.DB) {
+		switch tx.Statement.Table {
+		case "publication_task":
+			taskQueries++
+		case "publication_attempt":
+			attemptQueries++
+		}
+	}); e != nil {
+		t.Fatal(e)
+	}
+	defer s.DB.Callback().Query().Remove("test:plan-batch-set")
+	// Ten distinct batches across two page-local plans share one task and one
+	// exception-attempt query rather than one query per batch.
+	ids := []uint64{p.ID, bulk.ID}
+	if _, e = s.PlanRowsByIDs(ids); e != nil {
+		t.Fatal(e)
+	}
+	if taskQueries != 1 || attemptQueries != 1 {
+		t.Fatalf("page facts used N+1 queries: task=%d attempt=%d", taskQueries, attemptQueries)
 	}
 }

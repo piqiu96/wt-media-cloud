@@ -114,6 +114,9 @@ func (s Store) GetPlan(id uint64) (model.Plan, []model.Batch, error) {
 	}
 	var b []model.Batch
 	e := s.DB.Where("plan_id=?", id).Order("plan_group_order,plan_batch_order,id").Find(&b).Error
+	if e == nil {
+		b, e = s.enrichBatches(b, map[uint64]model.Plan{p.ID: p})
+	}
 	return p, b, e
 }
 func (s Store) PlanByRequest(actor int64, key string) (model.Plan, []model.Batch, error) {

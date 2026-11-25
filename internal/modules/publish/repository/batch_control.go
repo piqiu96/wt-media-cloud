@@ -30,6 +30,33 @@ func batchTasks(tx *gorm.DB, id uint64) ([]model.Task, error) {
 	return rows, err
 }
 func batchExceptions(tx *gorm.DB, rows []model.Task) ([]model.BatchException, map[string]string, error) {
+	attempts, e := batchExceptionAttempts(tx, rows)
+	if e != nil {
+		return nil, nil, e
+	}
+	return batchExceptionsFromAttempts(rows, attempts)
+}
+func batchExceptionAttempts(tx *gorm.DB, rows []model.Task) (map[uint64]model.Attempt, error) {
+	ids := []uint64{}
+	seen := map[uint64]bool{}
+	for _, row := range rows {
+		if row.CurrentAttemptID != nil && (row.Status == model.StatusFailed || row.Status == model.StatusAwaitingHuman || row.Status == model.StatusUncertain) && !seen[*row.CurrentAttemptID] {
+			ids = append(ids, *row.CurrentAttemptID)
+			seen[*row.CurrentAttemptID] = true
+		}
+	}
+	out := map[uint64]model.Attempt{}
+	if len(ids) == 0 {
+		return out, nil
+	}
+	var attempts []model.Attempt
+	e := tx.Select("id,error_code,result_hash,resolution_note").Where("id IN ?", ids).Find(&attempts).Error
+	for _, a := range attempts {
+		out[a.ID] = a
+	}
+	return out, e
+}
+func batchExceptionsFromAttempts(rows []model.Task, attempts map[uint64]model.Attempt) ([]model.BatchException, map[string]string, error) {
 	out := []model.BatchException{}
 	basis := map[string]string{}
 	for _, row := range rows {
@@ -41,8 +68,10 @@ func batchExceptions(tx *gorm.DB, rows []model.Task) ([]model.BatchException, ma
 			}
 			var a model.Attempt
 			if row.CurrentAttemptID != nil {
-				if err := tx.First(&a, *row.CurrentAttemptID).Error; err != nil {
-					return nil, nil, err
+				var ok bool
+				a, ok = attempts[*row.CurrentAttemptID]
+				if !ok {
+					return nil, nil, gorm.ErrRecordNotFound
 				}
 				if code == "" && a.ErrorCode != nil {
 					code = *a.ErrorCode
@@ -58,6 +87,17 @@ func batchExceptions(tx *gorm.DB, rows []model.Task) ([]model.BatchException, ma
 }
 
 func projectBatchExecution(tx *gorm.DB, v model.Batch, rows []model.Task, now time.Time) (model.BatchExecution, error) {
+	exceptions := []model.BatchException{}
+	if v.Pause != nil && v.ExecutionStatus == model.BatchPaused {
+		var e error
+		exceptions, _, e = batchExceptions(tx, rows)
+		if e != nil {
+			return model.BatchExecution{}, e
+		}
+	}
+	return projectBatchExecutionFacts(v, rows, now, exceptions)
+}
+func projectBatchExecutionFacts(v model.Batch, rows []model.Task, now time.Time, exceptions []model.BatchException) (model.BatchExecution, error) {
 	out := model.BatchExecution{
 		Phase: v.ExecutionStatus, FirstStartedAt: v.StartedAt, GroupNo: v.ExecutionGroupNo, TaskIDs: []string{},
 		GroupEndedAt: v.GroupEndedAt, NextGroupAt: v.NextGroupAt, Pause: v.Pause, StoppedAt: v.StoppedAt, EndedAt: v.EndedAt,
@@ -96,30 +136,93 @@ func projectBatchExecution(tx *gorm.DB, v model.Batch, rows []model.Task, now ti
 	}
 	if v.Pause != nil && v.ExecutionStatus == model.BatchPaused {
 		pause := *v.Pause
-		var err error
-		pause.Exceptions, _, err = batchExceptions(tx, rows)
-		if err != nil {
-			return out, err
-		}
+		pause.Exceptions = exceptions
 		out.Pause = &pause
 	}
 	return out, nil
 }
 
 func (s Store) enrichBatch(v model.Batch) (model.Batch, error) {
-	if v.PlanID != nil {
-		var p model.Plan
-		if e := s.DB.First(&p, *v.PlanID).Error; e != nil {
-			return v, e
+	rows, e := s.enrichBatches([]model.Batch{v}, nil)
+	if e != nil {
+		return v, e
+	}
+	return rows[0], nil
+}
+
+// All callers use the same projection with page-wide facts. It performs at most
+// one parent query, one task query and one exception-attempt query per batch set.
+func (s Store) enrichBatches(rows []model.Batch, parents map[uint64]model.Plan) ([]model.Batch, error) {
+	if len(rows) == 0 {
+		return rows, nil
+	}
+	ids := []uint64{}
+	planIDs := []uint64{}
+	seen := map[uint64]bool{}
+	for _, b := range rows {
+		ids = append(ids, b.ID)
+		if b.PlanID != nil && !seen[*b.PlanID] {
+			if _, known := parents[*b.PlanID]; !known {
+				planIDs = append(planIDs, *b.PlanID)
+			}
+			seen[*b.PlanID] = true
 		}
-		v = model.ProjectPlanBatch(p, v)
 	}
-	rows, err := batchTasks(s.DB, v.ID)
-	if err != nil {
-		return v, err
+	if parents == nil {
+		parents = map[uint64]model.Plan{}
 	}
-	v.Execution, err = projectBatchExecution(s.DB, v, rows, time.Now().UTC())
-	return v, err
+	if len(planIDs) > 0 {
+		var plans []model.Plan
+		if e := s.DB.Where("id IN ?", planIDs).Find(&plans).Error; e != nil {
+			return nil, e
+		}
+		for _, p := range plans {
+			parents[p.ID] = p
+		}
+	}
+	var tasks []model.Task
+	if e := s.DB.Where("batch_id IN ?", ids).Order("batch_id,task_order,id").Find(&tasks).Error; e != nil {
+		return nil, e
+	}
+	byBatch := map[uint64][]model.Task{}
+	for _, t := range tasks {
+		if t.BatchID != nil {
+			byBatch[*t.BatchID] = append(byBatch[*t.BatchID], t)
+		}
+	}
+	pausedTasks := []model.Task{}
+	for _, b := range rows {
+		if b.Pause != nil && b.ExecutionStatus == model.BatchPaused {
+			pausedTasks = append(pausedTasks, byBatch[b.ID]...)
+		}
+	}
+	attempts, e := batchExceptionAttempts(s.DB, pausedTasks)
+	if e != nil {
+		return nil, e
+	}
+	now := s.planNow(time.Now().UTC())
+	for i, b := range rows {
+		if b.PlanID != nil {
+			p, ok := parents[*b.PlanID]
+			if !ok {
+				return nil, ErrNotFound
+			}
+			b = model.ProjectPlanBatch(p, b)
+		}
+		exceptions := []model.BatchException{}
+		if b.Pause != nil && b.ExecutionStatus == model.BatchPaused {
+			exceptions, _, e = batchExceptionsFromAttempts(byBatch[b.ID], attempts)
+			if e != nil {
+				return nil, e
+			}
+		}
+		b.Execution, e = projectBatchExecutionFacts(b, byBatch[b.ID], now, exceptions)
+		if e != nil {
+			return nil, e
+		}
+		rows[i] = b
+	}
+	return rows, nil
 }
 
 type batchResumeReceipt struct {
