@@ -77,7 +77,9 @@ function fixture() {
   };
 }
 let started = 0;
-for (const role of (process.env.WT_PLAN_CREATE_ONLY ? [] : ["operator", "senior_operator", "admin"])) {
+for (const role of process.env.WT_PLAN_CREATE_ONLY
+  ? []
+  : ["operator", "senior_operator", "admin"]) {
   const page = await browser.newPage({
     viewport: { width: role === "admin" ? 1024 : 1440, height: 1000 },
   });
@@ -251,7 +253,10 @@ for (const role of (process.env.WT_PLAN_CREATE_ONLY ? [] : ["operator", "senior_
       .click();
     await page.getByRole("dialog", { name: "发布批次详情" }).waitFor();
     assert.equal(
-      await page.getByRole("dialog").getByText("正式发布任务 0 条").count(),
+      await page
+        .getByRole("dialog")
+        .getByText("正式发布任务", { exact: true })
+        .count(),
       1,
     );
     await page
@@ -404,23 +409,36 @@ for (const role of (process.env.WT_PLAN_CREATE_ONLY ? [] : ["operator", "senior_
     return send({ items: [], total: 0 });
   });
   await page.goto(base + "/publish-plans?view=create");
-  await page.getByLabel("计划名称", { exact: true }).last().fill("关闭仍保留的计划");
+  await page
+    .getByLabel("计划名称", { exact: true })
+    .last()
+    .fill("关闭仍保留的计划");
   await page.getByRole("button", { name: "返回", exact: true }).click();
   await page.getByRole("button", { name: "确认离开", exact: true }).click();
   await page.getByRole("button", { name: "新建发布计划", exact: true }).click();
-  let recovery = page.locator(".t-dialog").filter({ hasText: "发现未完成的发布计划配置" });
+  let recovery = page
+    .locator(".t-dialog")
+    .filter({ hasText: "发现未完成的发布计划配置" });
   await recovery.locator(".t-dialog__close").click();
   assert.equal(new URL(page.url()).searchParams.has("view"), false);
   await page.getByRole("button", { name: "新建发布计划", exact: true }).click();
   await page.getByRole("button", { name: "继续编辑", exact: true }).click();
-  assert.equal(await page.getByLabel("计划名称", { exact: true }).last().inputValue(), "关闭仍保留的计划");
+  assert.equal(
+    await page.getByLabel("计划名称", { exact: true }).last().inputValue(),
+    "关闭仍保留的计划",
+  );
   await page.getByRole("button", { name: "返回", exact: true }).click();
   await page.getByRole("button", { name: "新建发布计划", exact: true }).click();
   await page.getByRole("button", { name: "重新开始", exact: true }).click();
-  assert.equal(await page.getByLabel("计划名称", { exact: true }).last().inputValue(), "");
+  assert.equal(
+    await page.getByLabel("计划名称", { exact: true }).last().inputValue(),
+    "",
+  );
   await page.getByLabel("计划名称", { exact: true }).last().fill("新周期计划");
-  await page.getByLabel("开始日期").fill("2026-11-25");
-  await page.getByLabel("结束日期").fill("2026-11-26");
+  await page.getByPlaceholder("开始日期", { exact: true }).fill("2026-11-25");
+  await page.getByPlaceholder("结束日期", { exact: true }).fill("2026-11-26");
+  await page.getByPlaceholder("结束日期", { exact: true }).press("Enter");
+  await page.getByRole("heading", { name: "基础信息", exact: true }).click();
   await page.getByLabel("发布类目", { exact: true }).click();
   await page.getByText("三角洲行动", { exact: true }).last().click();
   await page.keyboard.press("Escape");

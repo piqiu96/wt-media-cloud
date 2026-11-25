@@ -6,14 +6,16 @@ import {
   onBeforeRouteLeave,
   onBeforeRouteUpdate,
 } from "vue-router";
-import ResourcePageHeader from "../../../shared/ui/resource/ResourcePageHeader.vue";
 import ResourceDetailPage from "../../../shared/ui/resource/ResourceDetailPage.vue";
 import ResourceEditorPage from "../../../shared/ui/resource/ResourceEditorPage.vue";
 import ResourceCard from "../../../shared/ui/resource/ResourceCard.vue";
 import ResourceSection from "../../../shared/ui/resource/ResourceSection.vue";
 import ResourceDescriptions from "../../../shared/ui/resource/ResourceDescriptions.vue";
-import ResourceFilterBar from "../../../shared/ui/resource/ResourceFilterBar.vue";
 import ResourceOverlay from "../../../shared/ui/resource/ResourceOverlay.vue";
+import ResourceStatGrid from "../../../shared/ui/resource/ResourceStatGrid.vue";
+import ResourceStatusBadge from "../../../shared/ui/resource/ResourceStatusBadge.vue";
+import ResourceNotice from "../../../shared/ui/resource/ResourceNotice.vue";
+import ResourceRowActions from "../../../shared/ui/resource/ResourceRowActions.vue";
 import ResourceProgress from "../../../shared/ui/resource/ResourceProgress.vue";
 import FeedbackAlert from "../../../shared/ui/feedback/FeedbackAlert.vue";
 import { feedback } from "../../../shared/ui/feedback/index.js";
@@ -25,6 +27,7 @@ import { createComposeClient } from "../../../shared/api/compose.js";
 import { cloudResourceURL } from "../../../shared/api/http.js";
 import { canRunLocalAgent } from "../../../utils.js";
 import { choosePublicationDraft } from "../draftRecovery.js";
+import PlanList from "../components/PlanList.vue";
 import PlanWorkbench from "../components/PlanWorkbench.vue";
 import BatchReadonlyBody from "../components/BatchReadonlyBody.vue";
 import BatchExecutionControls from "../components/BatchExecutionControls.vue";
@@ -105,7 +108,10 @@ const plan = computed(() => detail.value?.plan),
     () => canRunLocalAgent(actor.value) && !!actor.value?.team_id,
   ),
   dirty = computed(
-    () => !["list", "detail"].includes(mode.value) && form.value && JSON.stringify(form.value) !== baseline.value,
+    () =>
+      !["list", "detail"].includes(mode.value) &&
+      form.value &&
+      JSON.stringify(form.value) !== baseline.value,
   );
 const count = computed(
   () => plan.value?.goals.reduce((n, g) => n + g.target_count, 0) || 0,
@@ -115,6 +121,59 @@ const rate = computed(() =>
     ? Math.round((plan.value.published_count / count.value) * 10000) / 100
     : 0,
 );
+const batchFacts = computed(() =>
+  mode.value === "edit"
+    ? Object.fromEntries(
+        (detail.value?.batches || []).map((r) => [
+          r.batch_id,
+          {
+            configured: r.configured,
+            fixed:
+              !!r.batch.execution?.first_started_at ||
+              r.batch.execution_status !== "not_started",
+          },
+        ]),
+      )
+    : {},
+);
+const pendingBatchCount = (b) =>
+  ["awaiting_human", "uncertain", "reviewing", "failed"].reduce(
+    (n, k) => n + Number(b.execution?.task_counts?.[k] || 0),
+    0,
+  );
+const endedLabel = (p) =>
+  ({
+    achieved: "目标达成",
+    unmet: "保留目标缺口",
+    cancelled: "已终止",
+    terminated: "已终止",
+  })[p.end_reason] || "—";
+const planStats = computed(() => [
+  { key: "target", label: "计划目标", value: count.value, unit: "条" },
+  {
+    key: "published",
+    label: "发布成功",
+    value: plan.value?.published_count || 0,
+    unit: "条",
+    tone: "success",
+  },
+  {
+    key: "gap",
+    label: "目标缺口",
+    value: plan.value?.goal_results.reduce((n, g) => n + g.shortfall, 0) || 0,
+    unit: "条",
+    tone: "warning",
+  },
+  {
+    key: "batches",
+    label: "批次进度",
+    value:
+      (plan.value?.processed_batch_count || 0) +
+      " / " +
+      (plan.value?.batch_count || 0),
+    unit: "批",
+  },
+]);
 const categoryName = (id) =>
   categories.value.find((c) => String(c.id) === id)?.name || "原类目暂不可用";
 const progressLabel = (p) =>
@@ -135,16 +194,6 @@ const listQuery = () =>
       typeof route.query[k] === "string" ? [[k, route.query[k]]] : [],
     ),
   );
-const columns = [
-  { colKey: "id", title: "计划ID", width: 130 },
-  { colKey: "name", title: "计划名称", width: 210 },
-  { colKey: "status", title: "计划状态", width: 110 },
-  { colKey: "progress", title: "当前进展", width: 220 },
-  { colKey: "published", title: "发布进度", width: 150 },
-  { colKey: "batch", title: "批次进度", width: 110 },
-  { colKey: "period", title: "执行周期", width: 200 },
-  { colKey: "actions", title: "操作", width: 230, fixed: "right" },
-];
 function humanError(e) {
   return (
     e?.details?.issues
@@ -502,10 +551,28 @@ async function recommend(instruction) {
     busy.value = false;
   }
 }
-function adopt() {
+async function adopt() {
   if (recommendation.value?.basis !== JSON.stringify(form.value)) {
     error.value = "输入已变化，请重新生成建议";
     return;
+  }
+  if (Object.values(batchFacts.value).some((f) => f.fixed)) {
+    error.value = "存在已终止固定批次，不能整体替换拆批安排";
+    return;
+  }
+  if (form.value.batches.length) {
+    const basis = JSON.stringify(form.value);
+    const accepted = await feedback.confirmWarning({
+      title: "替换批次安排？",
+      message:
+        "采用建议会替换当前批次规划。已有候选资源配置需要重新检查；目标数量保持不变。",
+      confirmText: "采用并替换",
+    });
+    if (!accepted) return;
+    if (basis !== JSON.stringify(form.value)) {
+      error.value = "输入已变化，请重新生成建议";
+      return;
+    }
   }
   form.value.batches = clone(recommendation.value.batches);
   recommendation.value = null;
@@ -766,127 +833,25 @@ onBeforeUnmount(() => {
       >返回发布计划列表</t-button
     >
     <p v-if="loading" role="status">正在读取发布计划</p>
-    <template v-if="mode === 'list'"
-      ><ResourcePageHeader title="发布计划"
-        ><template #actions
-          ><t-button v-if="canPrepare" @click="open('create')"
-            >新建发布计划</t-button
-          ></template
-        ></ResourcePageHeader
-      ><ResourceCard
-        ><ResourceFilterBar
-          ><label class="wt-filter-field"
-            ><span class="wt-filter-field__label">综合搜索</span
-            ><t-input
-              v-model="filters.search"
-              placeholder="计划名称或ID"
-              aria-label="综合搜索" /></label
-          ><label class="wt-filter-field"
-            ><span class="wt-filter-field__label">计划状态</span
-            ><t-select
-              placeholder="全部"
-              v-model="filters.status"
-              clearable
-              :options="[
-                { value: 'not_started', label: '待执行' },
-                { value: 'running', label: '进行中' },
-                { value: 'stopping', label: '停止中' },
-                { value: 'ended', label: '已结束' },
-              ]"
-              aria-label="计划状态" /></label
-          ><label class="wt-filter-field"
-            ><span class="wt-filter-field__label">发布平台</span
-            ><t-select
-              placeholder="全部"
-              v-model="filters.platform"
-              clearable
-              :options="[{ value: 'baidu', label: '百家号' }]"
-              aria-label="发布平台" /></label
-          ><label class="wt-filter-field"
-            ><span class="wt-filter-field__label">发布类目</span
-            ><t-select
-              placeholder="全部"
-              v-model="filters.category_id"
-              filterable
-              clearable
-              :options="
-                categories.map((c) => ({ value: String(c.id), label: c.name }))
-              "
-              aria-label="发布类目"
-          /></label>
-          <div class="wt-filter-actions">
-            <t-button @click="search(1)">查询</t-button
-            ><t-button
-              variant="outline"
-              @click="
-                filters = {};
-                search(1);
-              "
-              >重置</t-button
-            >
-          </div></ResourceFilterBar
-        >
-        <div class="table-scroll-wrap resource-data-table">
-          <t-table
-            :columns="columns"
-            :data="list.items"
-            row-key="id"
-            :loading="loading"
-            :scroll="{ x: '1300px' }"
-            empty="暂无发布计划"
-            ><template #name="{ row }"
-              ><t-button variant="text" @click="open('detail', row.id)">{{
-                row.name
-              }}</t-button></template
-            ><template #status="{ row }">{{
-              planStates[row.status] || row.status
-            }}</template
-            ><template #progress="{ row }">{{ progressLabel(row) }}</template
-            ><template #published="{ row }"
-              >{{ row.published_count }} /
-              {{ row.goals.reduce((n, g) => n + g.target_count, 0) }}</template
-            ><template #batch="{ row }"
-              >{{ row.processed_batch_count }} / {{ row.batch_count }}</template
-            ><template #period="{ row }"
-              >{{ row.date_start }} ~ {{ row.date_end }}</template
-            ><template #actions="{ row }"
-              ><t-button variant="text" @click="open('detail', row.id)"
-                >详情</t-button
-              ><t-button
-                v-if="row.allowed_actions.includes('edit')"
-                variant="text"
-                @click="open('edit', row.id)"
-                >编辑</t-button
-              ><t-button
-                v-if="row.allowed_actions.includes('start')"
-                variant="text"
-                @click="open('detail', row.id)"
-                >执行</t-button
-              ><t-button
-                v-if="row.allowed_actions.includes('cancel')"
-                theme="danger"
-                variant="text"
-                @click="actionFromList(row, 'cancel')"
-                >终止</t-button
-              >
-              <t-button
-                v-if="row.allowed_actions.includes('copy')"
-                variant="text"
-                @click="open('copy', row.id)"
-                >复制</t-button
-              ></template
-            ></t-table
-          >
-        </div>
-        <div class="pagination-bar">
-          <t-pagination
-            :current="page"
-            :page-size="size"
-            :total="list.total"
-            :page-size-options="[10, 20, 50]"
-            @change="({ current, pageSize }) => search(current, pageSize)"
-          /></div></ResourceCard
-    ></template>
+    <PlanList
+      v-if="mode === 'list'"
+      :rows="list.items"
+      :filters="filters"
+      :categories="categories"
+      :page="page"
+      :page-size="size"
+      :total="list.total"
+      :loading="loading"
+      :can-create="canPrepare"
+      :progress-label="progressLabel"
+      @open="open"
+      @action="actionFromList"
+      @query="search"
+      @reset="
+        filters = {};
+        search(1);
+      "
+    />
     <ResourceEditorPage
       v-else-if="form && !loading && mode !== 'detail'"
       :title="mode === 'edit' ? '编辑发布计划' : '新建发布计划'"
@@ -899,6 +864,7 @@ onBeforeUnmount(() => {
       /><PlanWorkbench
         :form="form"
         :categories="categories"
+        :batch-facts="batchFacts"
         :disabled="busy || !!pendingCreate"
         @recommend="recommend"
       /><ResourceCard v-if="recommendation"
@@ -916,6 +882,11 @@ onBeforeUnmount(() => {
           ></ResourceSection
         ></ResourceCard
       ><template #footer
+        ><span class="resource-footer-status plan-muted">{{
+          form.goals.length && form.batches.length && !planProblem(form)
+            ? "目标与批次分配已匹配"
+            : "完成目标与批次分配后创建计划"
+        }}</span
         ><t-button
           v-if="draft?.persistent"
           variant="outline"
@@ -942,8 +913,8 @@ onBeforeUnmount(() => {
       back-label="返回发布计划列表"
       @back="back"
     >
-      <FeedbackAlert
-        :theme="
+      <ResourceNotice
+        :tone="
           [
             'waiting_tasks',
             'waiting_verification',
@@ -955,8 +926,31 @@ onBeforeUnmount(() => {
             ? 'warning'
             : 'info'
         "
-        :message="progressLabel(plan)"
-      />
+        :title="progressLabel(plan)"
+      >
+        {{
+          plan.end_note ||
+          (plan.started_at
+            ? "计划按批次顺序推进；需要处理时可使用当前批次的原操作入口。"
+            : "完成所有批次配置后，统一检查并执行计划。")
+        }}
+        <template v-if="plan.current_batch_id" #actions
+          ><t-button
+            theme="primary"
+            variant="text"
+            @click="
+              router.push(
+                batchRoute(
+                  detail.batches.find(
+                    (r) => r.batch_id === plan.current_batch_id,
+                  ),
+                ),
+              )
+            "
+            >去当前批次处理</t-button
+          ></template
+        >
+      </ResourceNotice>
       <ResourceCard
         ><ResourceSection title="计划信息"
           ><ResourceDescriptions
@@ -965,66 +959,70 @@ onBeforeUnmount(() => {
                 { label: '计划名称', value: plan.name },
                 { label: '计划编号', value: plan.id },
                 { label: '计划状态', value: planStates[plan.status] },
+                ...(plan.status === 'ended'
+                  ? [{ label: '结束结果', value: endedLabel(plan) }]
+                  : []),
+                { label: '负责人 ID', value: plan.owner_id },
                 {
                   label: '执行周期',
                   value: plan.date_start + ' ~ ' + plan.date_end,
                 },
                 { label: '发布平台', value: '百家号' },
+                {
+                  label: '发布类目',
+                  value: [
+                    ...new Set(
+                      plan.goals.map((g) => categoryName(g.category_id)),
+                    ),
+                  ].join('、'),
+                },
+                { label: '规划批次', value: plan.batch_count + ' 个原始批次' },
+                {
+                  label: '创建时间',
+                  value: formatPublicationTime(plan.created_at),
+                },
+                {
+                  label: '最近更新',
+                  value: formatPublicationTime(plan.updated_at),
+                },
                 { label: '备注', value: plan.note || '—' },
               ]"
               :key="item.label"
               :label="item.label"
-              >{{ item.value }}</t-descriptions-item
+              ><ResourceStatusBadge
+                v-if="item.label === '计划状态'"
+                :label="item.value"
+                :tone="
+                  plan.status === 'ended'
+                    ? 'success'
+                    : plan.status === 'not_started'
+                      ? 'neutral'
+                      : 'info'
+                "
+              /><template v-else>{{
+                item.value
+              }}</template></t-descriptions-item
             ></ResourceDescriptions
           ></ResourceSection
         ></ResourceCard
       >
-      <FeedbackAlert
-        v-if="plan.status === 'ended'"
-        :theme="plan.end_reason === 'achieved' ? 'success' : 'info'"
-        :message="
-          {
-            achieved: '目标达成，计划已结束',
-            unmet: '保留目标缺口，计划已结束',
-            cancelled: '计划已终止',
-            terminated: '计划已终止',
-          }[plan.end_reason] || '计划已结束'
-        "
-      />
-      <p v-if="plan.status === 'ended' && plan.end_note" class="plan-muted">
-        {{ plan.end_note }}
-      </p>
       <ResourceCard
-        ><ResourceSection title="目标完成情况"
-          ><div class="plan-metrics">
-            <div>
-              计划目标<strong>{{ count }} 条</strong>
-            </div>
-            <div>
-              发布成功<strong>{{ plan.published_count }} 条</strong>
-            </div>
-            <div>
-              目标缺口<strong
-                >{{
-                  plan.goal_results.reduce((n, g) => n + g.shortfall, 0)
-                }}
-                条</strong
-              >
-            </div>
-            <div>
-              批次进度<strong
-                >{{ plan.processed_batch_count }} /
-                {{ plan.batch_count }} 批</strong
-              >
-            </div>
-          </div>
+        ><ResourceSection
+          title="目标完成情况"
+          description="仅最终确认发布成功的任务计入达成量"
+          ><ResourceStatGrid :items="planStats" />
           <ResourceProgress
             label="总体达成率"
             :value-text="plan.published_count + ' / ' + count + ' 条 · '"
             :percentage="rate"
           />
-          <h4>平台 × 类目完成矩阵</h4>
-          <div class="plan-table">
+          <div class="plan-detail-subtitle">平台 × 类目完成矩阵</div>
+          <div
+            class="plan-detail-table resource-data-table resource-embedded-table is-summary"
+            tabindex="0"
+            role="region"
+            aria-label="计划目标与批次表，可横向滚动"
+          >
             <table>
               <thead>
                 <tr>
@@ -1032,7 +1030,8 @@ onBeforeUnmount(() => {
                   <th>类目</th>
                   <th>目标数</th>
                   <th>发布成功</th>
-                  <th>目标缺口</th>
+                  <th class="resource-table-number">目标缺口</th>
+                  <th class="resource-table-number">完成率</th>
                 </tr>
               </thead>
               <tbody>
@@ -1044,7 +1043,27 @@ onBeforeUnmount(() => {
                   <td>{{ categoryName(g.category_id) }}</td>
                   <td>{{ g.target_count }}</td>
                   <td>{{ g.published_count }}</td>
-                  <td>{{ g.shortfall }}</td>
+                  <td class="resource-table-number">{{ g.shortfall }}</td>
+                  <td class="resource-table-number">
+                    {{
+                      g.target_count
+                        ? Math.round(
+                            (g.published_count / g.target_count) * 10000,
+                          ) / 100
+                        : 0
+                    }}%
+                  </td>
+                </tr>
+                <tr class="plan-detail-total">
+                  <td colspan="2">合计</td>
+                  <td class="resource-table-number">{{ count }}</td>
+                  <td class="resource-table-number">
+                    {{ plan.published_count }}
+                  </td>
+                  <td class="resource-table-number">
+                    {{ plan.goal_results.reduce((n, g) => n + g.shortfall, 0) }}
+                  </td>
+                  <td class="resource-table-number">{{ rate }}%</td>
                 </tr>
               </tbody>
             </table>
@@ -1056,7 +1075,12 @@ onBeforeUnmount(() => {
       >
       <ResourceCard
         ><ResourceSection title="批次推进"
-          ><div class="plan-table">
+          ><div
+            class="plan-detail-table resource-data-table resource-embedded-table is-summary"
+            tabindex="0"
+            role="region"
+            aria-label="计划目标与批次表，可横向滚动"
+          >
             <table>
               <thead>
                 <tr>
@@ -1066,6 +1090,8 @@ onBeforeUnmount(() => {
                   <th>目标数</th>
                   <th>资源配置</th>
                   <th>执行状态</th>
+                  <th class="resource-table-number">结果</th>
+                  <th>当前待办</th>
                   <th>操作</th>
                 </tr>
               </thead>
@@ -1122,6 +1148,30 @@ onBeforeUnmount(() => {
                           "等待状态更新"
                     }}
                   </td>
+                  <td class="resource-table-number">
+                    {{
+                      r.batch.execution?.first_started_at
+                        ? (r.batch.execution?.published_count || 0) +
+                          " / " +
+                          r.batch.targets.reduce(
+                            (n, t) => n + t.target_count,
+                            0,
+                          )
+                        : "—"
+                    }}
+                  </td>
+                  <td>
+                    <span
+                      :class="{
+                        'plan-detail-pending': pendingBatchCount(r.batch),
+                      }"
+                      >{{
+                        pendingBatchCount(r.batch)
+                          ? pendingBatchCount(r.batch) + " 条待处理"
+                          : "—"
+                      }}</span
+                    >
+                  </td>
                   <td>
                     <div class="plan-inline">
                       <t-button variant="text" @click="showBatch(r)"
@@ -1159,10 +1209,18 @@ onBeforeUnmount(() => {
       >
       <ResourceCard
         ><ResourceSection title="执行记录"
-          ><div v-for="r in records.items" :key="r.id" class="plan-record">
-            {{ formatPublicationTime(r.created_at) }} ·
-            {{ planRecordLabels[r.event] || "计划业务记录" }}
-          </div>
+          ><ol v-if="records.items.length" class="plan-detail-history">
+            <li v-for="r in records.items" :key="r.id">
+              <p>{{ planRecordLabels[r.event] || "计划业务记录" }}</p>
+              <span
+                >{{ formatPublicationTime(r.created_at)
+                }}<template v-if="r.actor_id">
+                  · 操作人 ID：{{ r.actor_id }}</template
+                ></span
+              >
+            </li>
+          </ol>
+          <ResourceNotice v-else>暂无执行记录</ResourceNotice>
           <t-pagination
             :current="recordPage"
             :page-size="10"
@@ -1208,6 +1266,7 @@ onBeforeUnmount(() => {
       @update:visible="closePreview"
       ><div v-if="preview" class="plan-stack">
         <BatchReadonlyBody
+          :key="preview.id"
           :batch="preview"
           :category-name="categoryName"
           :task-link="(id) => taskLink(preview, id)"

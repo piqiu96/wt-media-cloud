@@ -1,5 +1,6 @@
 <script setup>
 import { computed } from "vue";
+import ResourceStatGrid from "../../../shared/ui/resource/ResourceStatGrid.vue";
 import ResourceCard from "../../../shared/ui/resource/ResourceCard.vue";
 import ResourceSection from "../../../shared/ui/resource/ResourceSection.vue";
 import ResourceDescriptions from "../../../shared/ui/resource/ResourceDescriptions.vue";
@@ -35,6 +36,10 @@ const checkedCounts = computed(() => [
         <t-descriptions-item v-if="execution.next_group_at && !execution.stopped_at && !execution.ended_at" label="最早下一组">
           {{ formatPublicationTime(execution.next_group_at) }}
         </t-descriptions-item>
+        <t-descriptions-item label="并发数">{{batch.execution_setting.concurrency_limit}}</t-descriptions-item>
+        <t-descriptions-item label="组间发布间隔">{{batch.execution_setting.group_interval_seconds}} 秒</t-descriptions-item>
+        <t-descriptions-item label="组间处理">{{batch.execution_setting.between_group_policy==='auto_continue'?'自动继续':'异常暂停'}}</t-descriptions-item>
+        <t-descriptions-item label="异常任务上限">{{batch.execution_setting.exception_task_limit}}</t-descriptions-item>
         <t-descriptions-item label="正式发布任务">{{ counts.created }} 条</t-descriptions-item>
         <t-descriptions-item v-if="counts.creationShortfall != null" label="创建缺口">{{ counts.creationShortfall }} 条</t-descriptions-item>
         <t-descriptions-item label="待平台公开">{{ counts.reviewing }} 条</t-descriptions-item>
@@ -43,6 +48,12 @@ const checkedCounts = computed(() => [
       <FeedbackAlert v-if="execution.pause" theme="warning" :message="execution.pause.reason" />
       <FeedbackAlert v-if="execution.stopped_at" :message="execution.stop_reason || (phase === 'stopping' ? '后续派发已终止，在途任务等待原尝试结果。' : '后续派发已终止。')" />
       <FeedbackAlert v-if="execution.finish_reason" :message="execution.finish_reason" />
+      <ResourceStatGrid :items="[
+        {key:'target',label:'发布目标',value:counts.target},
+        {key:'published',label:'已发布',value:counts.published,tone:'success'},
+        {key:'failed',label:'发布失败',value:execution.task_counts?.failed||0,tone:execution.task_counts?.failed?'danger':'neutral'},
+        {key:'pending',label:'待处理',value:counts.exceptions+counts.reviewing,tone:counts.exceptions+counts.reviewing?'warning':'neutral'},
+      ]"/>
       <div v-if="execution.first_started_at" class="batch-execution-progress">
         <ResourceProgress label="公开发布率" :percentage="counts.rate"
           :value-text="counts.published + ' / ' + counts.target + ' ·'"

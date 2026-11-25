@@ -148,3 +148,77 @@
   width: 0;
   height: 0;
 }
+
+/* Shared production layout adapted from example PlanList / PlanDetail / plan editor. */
+.plan-page .resource-card {
+  margin-bottom: 0;
+}
+.plan-detail-subtitle {
+  margin: 24px 0 12px;
+  font-size: 14px;
+  font-weight: 500;
+}
+.plan-detail-table {
+  overflow-x: auto;
+  max-width: 100%;
+}
+.plan-detail-table:focus-visible {
+  outline: 2px solid var(--wt-primary);
+  outline-offset: 2px;
+}
+.plan-detail-table table {
+  width: 100%;
+  white-space: nowrap;
+}
+.plan-detail-table small {
+  display: block;
+  margin-top: 4px;
+  color: var(--wt-text-tertiary);
+  font-size: 12px;
+}
+.plan-detail-total {
+  background: var(--wt-color-bg-subtle);
+}
+.plan-detail-pending {
+  color: var(--wt-color-warning-text);
+}
+.plan-detail-history {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 0 8px;
+}
+.plan-detail-history li {
+  position: relative;
+  padding: 0 0 20px 20px;
+  border-left: 1px solid var(--wt-border);
+}
+.plan-detail-history li:last-child {
+  padding-bottom: 0;
+}
+.plan-detail-history li::before {
+  content: "";
+  position: absolute;
+  left: -4px;
+  top: 8px;
+  width: 7px;
+  height: 7px;
+  background: var(--wt-primary);
+  border-radius: 50%;
+}
+.plan-detail-history p {
+  margin: 0 0 4px;
+  overflow-wrap: anywhere;
+}
+.plan-detail-history span {
+  color: var(--wt-text-tertiary);
+  font-size: 12px;
+}
+.plan-section-tools {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: -44px;
+  margin-bottom: 12px;
+}
+.plan-editor-section {
+  padding: 24px;
+}

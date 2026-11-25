@@ -122,6 +122,7 @@ try {
   await button("添加类目").click();
   await input(`${category.name}发布目标`).fill("2");
   await button("载入可用资源").click();
+  await button("展开账号、成片与本批上限设置").click();
   await input("本批上限").fill("2");
   await button("按顺序自动配对").click();
   await page.getByText("已配对 2 条候选", { exact: true }).waitFor();

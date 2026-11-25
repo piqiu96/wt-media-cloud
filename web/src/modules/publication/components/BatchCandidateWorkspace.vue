@@ -16,12 +16,12 @@ import { createComposeClient } from "../../../shared/api/compose.js";
 import { publicObjectReadUrl } from "../../../shared/utils/objectReadUrl.js";
 import { createFilesClient } from "../../../shared/api/files.js";
 import { feedback } from "../../../shared/ui/feedback/index.js";
-import { batchAccountName, batchOutputID, batchOutputName } from "../useBatchResourceCatalog.js";
+import { batchAccountName, batchOutputID, batchOutputName, batchOutputProblem } from "../useBatchResourceCatalog.js";
 import { batchFormProblem, batchInput, coverProfiles, editCandidate, moveEntry, newCandidate, pairOf, replaceCandidatePair, reviewSelectedConfirmations } from "../batchPreparation.js";
 import { coverConfigFromReference, emptyCoverConfig } from "../coverPreparation.js";
 import { contentIssue } from "../eligibility.js";
 
-const props = defineProps({ form: Object, catalog: Object, categories: Array, actor: Object, recipes: Object, coverFiles: Object, focusKey: String, validationContext: Object, disabled: Boolean });
+const props = defineProps({ form: Object, catalog: Object, categories: Array, actor: Object, recipes: Object, coverFiles: Object, focusKey: String, validationContext: Object, disabled: Boolean, resourceOnly: Boolean });
 const emit = defineEmits(["work"]);
 const compose = createComposeClient();
 const batch = createPublicationBatchClient();
@@ -36,6 +36,10 @@ const pairError = ref("");
 const confirmationFeedback = ref(null);
 const confirmationRows = ref({});
 let previewSequence = 0;
+const resourceColumns = [
+ {colKey:'order',title:'序号',width:72},{colKey:'account',title:'发布账号',width:180},{colKey:'video',title:'成片资源',width:280},{colKey:'source',title:'匹配来源',width:110},{colKey:'resourceStatus',title:'资源检查',width:160},{colKey:'op',title:'操作',width:220,fixed:'right'},
+];
+const resourceIssue = row => !props.catalog.accounts.has(row.media_account_id) || !props.catalog.outputs.has(row.composite_output_id) ? '资源待核实' : props.catalog.accounts.get(row.media_account_id)?.eligible===false ? props.catalog.accounts.get(row.media_account_id)?.reason || '账号不可用' : batchOutputProblem(props.catalog.outputs.get(row.composite_output_id),row.category_id,props.actor.team_id);
 const rows = computed(() => props.form.config.candidates);
 const active = computed(() => rows.value.find(row => row.row_key === activeKey.value));
 const selected = computed(() => rows.value.filter(row => selection.value.includes(row.row_key)));
@@ -231,12 +235,12 @@ function applyBulk(key, patch, covers) {
 
 <template>
   <ResourceCard>
-    <ResourceSection title="候选内容">
+    <ResourceSection :title="resourceOnly ? '账号与成片匹配' : '候选内容'">
       <div class="batch-inline batch-section-actions">
         <t-button theme="default" variant="outline" :disabled="disabled || !form.targets.length" @click="openPair()">添加候选</t-button>
-        <span class="batch-muted">{{ rows.length }} 条候选 · 需要核对文案、封面和声明</span>
+        <span v-if="!resourceOnly" class="batch-muted">{{ rows.length }} 条候选 · 需要核对文案、封面和声明</span><template v-else><ResourceStatusBadge :label="'已匹配 '+rows.length+' / '+form.targets.reduce((n,t)=>n+t.target_count,0)"/><span class="batch-muted">账号 {{new Set(rows.map(r=>r.media_account_id)).size}} 个 · 成片 {{rows.length}} 条</span></template>
       </div>
-      <ResourceSelectionToolbar :count="selected.length" unit="条候选"
+      <ResourceSelectionToolbar v-if="!resourceOnly" :count="selected.length" unit="条候选"
         :hint="pendingConfirmations.length && confirmationProblem ? '请先在结果总览填写执行设置，再检查并确认所选内容。' : ''"
         @clear="selection = []">
         <t-button size="small" :disabled="disabled" @click="bulk = true">批量配置</t-button>
@@ -245,7 +249,7 @@ function applyBulk(key, patch, covers) {
       </ResourceSelectionToolbar>
       <FeedbackAlert v-if="confirmationFeedback" :theme="confirmationFeedback.theme" :message="confirmationFeedback.message" />
       <div class="table-scroll-wrap resource-data-table">
-        <t-table class="wt-resource-table" :data="rows" :columns="columns" row-key="row_key" :selected-row-keys="selection"
+        <t-table class="wt-resource-table" :data="rows" :columns="resourceOnly?resourceColumns:columns" row-key="row_key" :selected-row-keys="selection"
           :scroll="{ x: '1102px' }" empty="暂无候选，可添加候选或返回资源配置配对"
           @select-change="selection = $event">
           <template #video="{ row }">
@@ -258,6 +262,9 @@ function applyBulk(key, patch, covers) {
               </div>
             </div>
           </template>
+          <template #order="{rowIndex}">{{rowIndex+1}}</template>
+          <template #source="{row}"><ResourceStatusBadge :label="isManual(row)?'人工指定':'系统匹配'" :tone="isManual(row)?'info':'neutral'"/></template>
+          <template #resourceStatus="{row}"><ResourceStatusBadge :label="resourceIssue(row)||'有效'" :tone="resourceIssue(row)?'warning':'success'"/></template>
           <template #account="{ row }">{{ accountName(row) }}</template>
           <template #category="{ row }">{{ categoryName(row.category_id) }}</template>
           <template #status="{ row }">
@@ -266,7 +273,7 @@ function applyBulk(key, patch, covers) {
             <small v-if="statusIssue(row)" class="batch-muted">{{ statusIssue(row).message }}</small>
           </template>
           <template #op="{ row, rowIndex }"><ResourceRowActions>
-            <t-button size="small" variant="text" :disabled="disabled" @click="activeKey = row.row_key">编辑内容</t-button>
+            <t-button v-if="!resourceOnly" size="small" variant="text" :disabled="disabled" @click="activeKey = row.row_key">编辑内容</t-button>
             <t-button size="small" variant="text" :disabled="disabled" @click="openPair(row)">调整配对</t-button>
             <t-button size="small" variant="text" :disabled="disabled || rowIndex === 0" @click="moveEntry(rows, rowIndex, -1)">上移</t-button>
             <t-button size="small" variant="text" :disabled="disabled || rowIndex === rows.length - 1" @click="moveEntry(rows, rowIndex, 1)">下移</t-button>
@@ -277,14 +284,14 @@ function applyBulk(key, patch, covers) {
     </ResourceSection>
   </ResourceCard>
 
-  <BatchCandidateEditor v-if="active" :key="`${active.row_key}:${active.input_revision}`" :row="active"
+  <BatchCandidateEditor v-if="active && !resourceOnly" :key="`${active.row_key}:${active.input_revision}`" :row="active"
     :output="outputFor(active) && { ...outputFor(active), id: active.composite_output_id }" :platform="form.platform"
     :output-name="outputName(active)" :account-name="accountName(active)" :recipes="recipes[active.row_key] || {}"
     :covers="activeCovers(active)" :disabled="disabled"
     @edit="edit(active.row_key, $event)" @recipe="(key, config) => storeRecipe(active.row_key, key, config)"
     @cover="(profile, file, render) => applyCover(active.row_key, profile, file, render)"
     @close="activeKey = ''" />
-  <BatchSelectedPreparation v-if="bulk" :rows="selected" :platform="form.platform" :output-for="outputFor" :label-for="rowLabel"
+  <BatchSelectedPreparation v-if="bulk && !resourceOnly" :rows="selected" :platform="form.platform" :output-for="outputFor" :label-for="rowLabel"
     @apply="applyBulk" @work="emit('work', $event)" @close="bulk = false" />
 
   <ResourceOverlay v-if="pairing" form-actions :visible="true" :title="pairing.row_key ? '调整候选配对' : '添加候选'"

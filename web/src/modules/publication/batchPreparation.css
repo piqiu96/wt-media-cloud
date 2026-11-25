@@ -175,3 +175,20 @@
   display: block;
   margin-block-start: 4px;
 }
+
+/* BatchManager prototype column slots, shared with the production resource table. */
+.batch-progress-title { display:flex;justify-content:space-between;gap:8px;margin-bottom:6px;font-size:12px;font-variant-numeric:tabular-nums; }
+.batch-progress-title span:last-child {color:var(--wt-text-tertiary);}
+.batch-target-value {font-size:14px;font-weight:500;}
+.batch-target-value span {font-size:12px;font-weight:400;}
+.batch-cell-text {display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere;}
+.batch-total-line {display:flex;align-items:center;justify-content:space-between;gap:16px;padding:16px 0;}
+.batch-total-line small {display:block;color:var(--wt-text-tertiary);font-size:12px;}
+.batch-total-line strong {display:block;margin-top:6px;font-size:24px;font-weight:600;line-height:30px;}
+.batch-total-line strong span {font-size:12px;font-weight:400;color:var(--wt-text-tertiary);}
+.batch-total-line p {font-size:13px;color:var(--wt-text-tertiary);}
+.batch-target-container {overflow:auto;}
+.batch-target-container table {width:100%;white-space:nowrap;}
+.batch-target-container .t-input-number {width:108px;}
+/* Keep TDesign fixed table cells inside the editor's content stacking context. */
+.batch-editor .table-scroll-wrap {position:relative;z-index:0;}
