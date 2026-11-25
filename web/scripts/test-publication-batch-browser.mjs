@@ -4,7 +4,7 @@ import { chromium } from "playwright";
 
 const base = process.env.WT_MEDIA_BROWSER_BASE_URL || "http://127.0.0.1:5173";
 const browser = await chromium.launch({ channel: process.env.WT_MEDIA_BROWSER_CHANNEL || "chrome", headless: true });
-const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+const page = await browser.newPage({ viewport: { width: Number(process.env.WT_MEDIA_VIEWPORT_WIDTH) || 1440, height: 1000 } });
 const exceptions = [];
 page.on("pageerror", error => exceptions.push(error.message));
 const recordedCalls = [];
@@ -123,10 +123,115 @@ try {
   await input(`${category.name}发布目标`).fill("2");
   await button("载入可用资源").click();
   await button("展开账号、成片与本批上限设置").click();
+  assert.ok(
+    Math.abs(
+      (
+        await page
+          .locator(".batch-resource-row .t-input-number")
+          .last()
+          .boundingBox()
+      ).width - 240,
+    ) < 2,
+  );
   await input("本批上限").fill("2");
   await button("按顺序自动配对").click();
   await page.getByText("已配对 2 条候选", { exact: true }).waitFor();
   await next();
+
+  const contentTable = page.getByRole("region", { name: "内容配置" });
+  for (const title of ["发布内容", "发布账号", "发布成片", "配置状态"])
+    await contentTable
+      .getByRole("columnheader", { name: title, exact: true })
+      .waitFor();
+  await page.locator('[aria-label="筛选候选类目"]').click();
+  await page
+    .locator(".t-select-option:visible")
+    .getByText(category.name, { exact: true })
+    .click();
+  await page.locator('[aria-label="筛选候选状态"]').click();
+  await page
+    .locator(".t-select-option:visible")
+    .getByText("待完善", { exact: true })
+    .click();
+  await button("查询内容").click();
+  assert.equal(await contentTable.locator("tbody tr").count(), 2);
+  await button("重置内容筛选").click();
+  assert.equal(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth > innerWidth,
+    ),
+    false,
+  );
+  assert.ok((await contentTable.locator(".batch-content-issues").count()) > 0);
+  await contentTable.locator(".batch-content-issues summary").first().click();
+  await page
+    .locator(
+      '[aria-label="搜索候选内容"] input,input[aria-label="搜索候选内容"]',
+    )
+    .first()
+    .fill(outputs[0].name);
+  await button("查询内容").click();
+  assert.equal(await contentTable.locator("tbody tr").count(), 1);
+  await contentTable.locator("tbody tr .t-checkbox").first().click();
+  await button("重置内容筛选").click();
+  assert.equal(await contentTable.locator("tbody tr").count(), 2);
+  assert.equal(
+    (
+      await page
+        .getByRole("region", { name: "批量操作" })
+        .locator("strong")
+        .innerText()
+    ).trim(),
+    "1",
+  );
+  await page
+    .locator(
+      '[aria-label="搜索候选内容"] input,input[aria-label="搜索候选内容"]',
+    )
+    .first()
+    .fill(outputs[1].name);
+  await button("查询内容").click();
+  await contentTable.locator("tbody tr .t-checkbox").first().click();
+  assert.equal(
+    (
+      await page
+        .getByRole("region", { name: "批量操作" })
+        .locator("strong")
+        .innerText()
+    ).trim(),
+    "2",
+  );
+  const filteredSecond = contentTable.locator("tbody tr").first();
+  await filteredSecond.locator(".batch-content-more summary").click();
+  assert.equal(
+    await filteredSecond
+      .getByRole("button", { name: "上移", exact: true })
+      .isDisabled(),
+    false,
+  );
+  assert.equal(
+    await filteredSecond
+      .getByRole("button", { name: "下移", exact: true })
+      .isDisabled(),
+    true,
+  );
+  await filteredSecond
+    .getByRole("button", { name: "上移", exact: true })
+    .click();
+  assert.equal(
+    await filteredSecond
+      .getByRole("button", { name: "上移", exact: true })
+      .isDisabled(),
+    true,
+  );
+  await filteredSecond
+    .getByRole("button", { name: "下移", exact: true })
+    .click();
+  await button("重置内容筛选").click();
+  await page
+    .getByRole("region", { name: "批量操作" })
+    .getByRole("button", { name: "取消选择", exact: true })
+    .click();
 
   const firstRow = tableRows().filter({ hasText: outputs[0].name });
   await firstRow.locator(".t-checkbox").click();
@@ -168,6 +273,58 @@ try {
   await button("确认已核对内容").click();
   await page.getByText("已确认 0 条，1 条待完善。请查看对应候选。", { exact: true }).waitFor();
   await next();
+  await page
+    .getByRole("region", { name: "准备结果" })
+    .getByLabel("复查批次名称")
+    .last()
+    .waitFor();
+  await input("复查批次名称").fill("复查一致性名称");
+  await button("上一步").click();
+  await button("上一步").click();
+  assert.equal(await input("批次名称").inputValue(), "复查一致性名称");
+  await input("批次名称").fill("浏览器批次");
+  await next();
+  await next();
+  assert.equal(await input("复查批次名称").inputValue(), "浏览器批次");
+  const settings = page.locator(".batch-settings-grid .t-input-number").first();
+  const settingsBox = await settings.boundingBox();
+  assert.ok(Math.abs(settingsBox.width - 240) < 2);
+  const reviewContents = page.getByRole("region", { name: "发布内容" });
+  assert.equal(await reviewContents.locator(".t-checkbox").count(), 0);
+  assert.equal(
+    await reviewContents.locator(".batch-content-filters").count(),
+    0,
+  );
+  assert.equal(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth > innerWidth,
+    ),
+    false,
+  );
+  assert.equal(
+    await reviewContents
+      .getByRole("button", { name: "调整配对", exact: true })
+      .count(),
+    0,
+  );
+  assert.equal(await reviewContents.locator(".batch-content-more").count(), 0);
+  await reviewContents.getByText("手动保留文案", { exact: true }).waitFor();
+  await reviewContents
+    .getByRole("button", { name: "编辑", exact: true })
+    .first()
+    .click();
+  const reviewingDescription = page.locator(
+    '[aria-label="发布文案"] textarea,textarea[aria-label="发布文案"]',
+  );
+  await reviewingDescription.fill("复查编辑后的文案");
+  await button("完成").click();
+  await reviewContents.getByText("复查编辑后的文案", { exact: true }).waitFor();
+  await reviewContents
+    .getByRole("button", { name: "编辑", exact: true })
+    .first()
+    .click();
+  await reviewingDescription.fill("手动保留文案");
+  await button("完成").click();
   await button("保存批次").click();
   await heading("浏览器批次").waitFor();
   await page.getByText("批次尚未开始，正式发布任务 0 条。", { exact: true }).waitFor();
@@ -188,6 +345,7 @@ try {
   await button("编辑配置").click();
   await heading("编辑批次 · 浏览器批次").waitFor();
   await next();
+  await tableRows().filter({ hasText: outputs[1].name }).locator(".batch-content-more summary").click();
   await tableRows().filter({ hasText: outputs[1].name }).getByRole("button", { name: "移除" }).click();
   await page.locator(".resource-feedback-dialog").getByRole("button", { name: "移除" }).click();
   await next();

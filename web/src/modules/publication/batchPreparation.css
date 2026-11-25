@@ -192,3 +192,11 @@
 .batch-target-container .t-input-number {width:108px;}
 /* Keep TDesign fixed table cells inside the editor's content stacking context. */
 .batch-editor .table-scroll-wrap {position:relative;z-index:0;}
+
+/* PublishComposer / batchCreation.css summary and settings geometry. */
+.batch-review-summary{display:grid;grid-template-columns:minmax(240px,2fr) minmax(140px,1fr) minmax(100px,.7fr) auto;gap:24px;align-items:start;margin-bottom:20px}
+.batch-review-summary>label,.batch-review-summary>div,.batch-settings-grid>label{display:flex;flex-direction:column;gap:8px;min-width:0}
+.batch-review-summary span{font-size:13px;color:var(--wt-text-tertiary)}.batch-review-summary strong{font-size:14px;line-height:36px;font-weight:400}
+.batch-settings-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:24px}
+.batch-settings-grid .t-input-number,.batch-form-grid .batch-resource-row .t-input-number{width:240px;max-width:100%}
+@media(max-width:680px){.batch-review-summary,.batch-settings-grid{grid-template-columns:minmax(0,1fr);gap:16px}}

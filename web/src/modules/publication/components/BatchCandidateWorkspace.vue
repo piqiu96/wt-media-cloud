@@ -1,5 +1,6 @@
 <script setup>
 import { computed, ref } from "vue";
+import ResourceFilterBar from "../../../shared/ui/resource/ResourceFilterBar.vue";
 import ResourceCard from "../../../shared/ui/resource/ResourceCard.vue";
 import ResourceSection from "../../../shared/ui/resource/ResourceSection.vue";
 import ResourceOverlay from "../../../shared/ui/resource/ResourceOverlay.vue";
@@ -19,10 +20,10 @@ import { feedback } from "../../../shared/ui/feedback/index.js";
 import { batchAccountName, batchOutputID, batchOutputName, batchOutputProblem } from "../useBatchResourceCatalog.js";
 import { batchFormProblem, batchInput, coverProfiles, editCandidate, moveEntry, newCandidate, pairOf, replaceCandidatePair, reviewSelectedConfirmations } from "../batchPreparation.js";
 import { coverConfigFromReference, emptyCoverConfig } from "../coverPreparation.js";
-import { contentIssue } from "../eligibility.js";
+import { contentIssue, contentIssues } from "../eligibility.js";
 
-const props = defineProps({ form: Object, catalog: Object, categories: Array, actor: Object, recipes: Object, coverFiles: Object, focusKey: String, validationContext: Object, disabled: Boolean, resourceOnly: Boolean });
-const emit = defineEmits(["work"]);
+const props = defineProps({ form: Object, catalog: Object, categories: Array, actor: Object, recipes: Object, coverFiles: Object, focusKey: String, validationContext: Object, disabled: Boolean, resourceOnly: Boolean, reviewOnly: Boolean, validationIssues: {type:Array,default:()=>[]} });
+const emit = defineEmits(["work", "changed"]);
 const compose = createComposeClient();
 const batch = createPublicationBatchClient();
 const files = createFilesClient();
@@ -50,14 +51,31 @@ const accountName = row => batchAccountName(props.catalog.accounts.get(row?.medi
 const categoryName = id => props.categories.find(item => item.value === id)?.label || "原类目暂不可用";
 const outputName = row => batchOutputName(outputFor(row));
 const rowLabel = row => `${outputName(row)} · ${accountName(row)}`;
-const columns = [
-  { colKey: "selected", type: "multiple", width: 52, fixed: "left" },
-  { colKey: "video", title: "候选成片", width: 260 },
-  { colKey: "account", title: "发布账号", width: 150 },
-  { colKey: "category", title: "类目", width: 120 },
-  { colKey: "status", title: "内容状态", width: 210 },
-  { colKey: "op", title: "操作", width: 310, fixed: "right" },
-];
+const search=ref(''),categoryFilter=ref(''),stateFilter=ref(''),applied=ref({}),page=ref(1),pageSize=ref(10);
+const rowIssues=row=>{
+ const messages=props.validationIssues.filter(issue=>issue.row_key===row.row_key).map(issue=>issue.message);
+ messages.push(...contentIssues({...row,content:{...row.content,cover_file_id:row.content.cover_file_id==='0'?'':row.content.cover_file_id,portrait_cover_file_id:row.content.portrait_cover_file_id==='0'?'':row.content.portrait_cover_file_id}}).map(issue=>issue.message));
+ const live=statusIssue(row);if(live)messages.unshift(live.message);
+ return [...new Set(messages.filter(Boolean))];
+};
+const rowState=row=>rowIssues(row).length ? rowIssues(row).every(v=>/确认/.test(v))?'待确认':'待完善' : '已就绪';
+const filteredRows=computed(()=>rows.value.filter(row=>
+ (!applied.value.search||[row.content.description,outputName(row),accountName(row),row.composite_output_id].join(' ').includes(applied.value.search))&&
+ (!applied.value.category||row.category_id===applied.value.category)&&(!applied.value.status||rowState(row)===applied.value.status)));
+function query(){applied.value={search:search.value.trim(),category:categoryFilter.value,status:stateFilter.value};page.value=1}
+const columns=computed(()=>[
+ ...(!props.reviewOnly?[{colKey:'selected',type:'multiple',width:52,fixed:'left'}]:[]),
+ {colKey:'content',title:'发布内容',width:300},
+ {colKey:'account',title:'发布账号',width:140},
+ {colKey:'video',title:'发布成片',width:200},
+ {colKey:'status',title:'配置状态',width:220},
+ {colKey:'op',title:'操作',width:props.reviewOnly?80:160,fixed:'right'},
+]);
+function candidateCover(row){
+ const file=props.coverFiles?.[row.row_key]?.horizontal;
+ try{return file?.fileId===row.content.cover_file_id?files.resourceURL(file):thumb(row)}catch{return thumb(row)}
+}
+
 function isManual(row) {
   return props.form.config.manual_pairs.some(pair => pair.composite_output_id === row.composite_output_id);
 }
@@ -164,7 +182,7 @@ async function remove(row) {
 }
 function edit(key, patch) {
   const index = rows.value.findIndex(row => row.row_key === key);
-  if (index >= 0) rows.value.splice(index, 1, editCandidate(rows.value[index], patch));
+  if (index >= 0) { rows.value.splice(index, 1, editCandidate(rows.value[index], patch)); emit("changed"); }
 }
 function storeRecipe(key, profileKey, config) {
   const profile = coverProfiles.find(item => item.key === profileKey);
@@ -235,29 +253,37 @@ function applyBulk(key, patch, covers) {
 
 <template>
   <ResourceCard>
-    <ResourceSection :title="resourceOnly ? '账号与成片匹配' : '候选内容'">
-      <div class="batch-inline batch-section-actions">
+    <ResourceSection :title="resourceOnly ? '账号与成片匹配' : reviewOnly ? '发布内容' : '内容配置'">
+      <div v-if="!reviewOnly" class="batch-inline batch-section-actions">
         <t-button theme="default" variant="outline" :disabled="disabled || !form.targets.length" @click="openPair()">添加候选</t-button>
         <span v-if="!resourceOnly" class="batch-muted">{{ rows.length }} 条候选 · 需要核对文案、封面和声明</span><template v-else><ResourceStatusBadge :label="'已匹配 '+rows.length+' / '+form.targets.reduce((n,t)=>n+t.target_count,0)"/><span class="batch-muted">账号 {{new Set(rows.map(r=>r.media_account_id)).size}} 个 · 成片 {{rows.length}} 条</span></template>
       </div>
-      <ResourceSelectionToolbar v-if="!resourceOnly" :count="selected.length" unit="条候选"
+      <ResourceSelectionToolbar v-if="!resourceOnly && !reviewOnly" :count="selected.length" unit="条候选"
         :hint="pendingConfirmations.length && confirmationProblem ? '请先在结果总览填写执行设置，再检查并确认所选内容。' : ''"
         @clear="selection = []">
         <t-button size="small" :disabled="disabled" @click="bulk = true">批量配置</t-button>
         <t-button size="small" variant="outline" theme="default"
           :disabled="disabled || !pendingConfirmations.length || !!confirmationProblem" @click="confirmSelected">确认内容</t-button>
       </ResourceSelectionToolbar>
+      <ResourceFilterBar v-if="!resourceOnly && !reviewOnly" class="batch-content-filters">
+        <label class="wt-filter-field wt-filter-field--wide"><span class="wt-filter-field__label">搜索内容</span><t-input v-model="search" aria-label="搜索候选内容" placeholder="发布文案、账号或成片" clearable @enter="query"/></label>
+        <label class="wt-filter-field"><span class="wt-filter-field__label">发布类目</span><t-select v-model="categoryFilter" :options="categories.filter(c=>form.targets.some(t=>t.category_id===c.value))" aria-label="筛选候选类目" placeholder="全部" clearable filterable/></label>
+        <label class="wt-filter-field"><span class="wt-filter-field__label">配置状态</span><t-select v-model="stateFilter" :options="['待完善','待确认','已就绪'].map(value=>({value,label:value}))" aria-label="筛选候选状态" placeholder="全部" clearable/></label>
+        <div class="wt-filter-actions"><t-button @click="query">查询内容</t-button><t-button variant="outline" @click="search='';categoryFilter='';stateFilter='';query()">重置内容筛选</t-button></div>
+      </ResourceFilterBar>
       <FeedbackAlert v-if="confirmationFeedback" :theme="confirmationFeedback.theme" :message="confirmationFeedback.message" />
       <div class="table-scroll-wrap resource-data-table">
-        <t-table class="wt-resource-table" :data="rows" :columns="resourceOnly?resourceColumns:columns" row-key="row_key" :selected-row-keys="selection"
-          :scroll="{ x: '1102px' }" empty="暂无候选，可添加候选或返回资源配置配对"
-          @select-change="selection = $event">
+        <t-table class="wt-resource-table" :data="resourceOnly?rows:filteredRows" :columns="resourceOnly?resourceColumns:columns" row-key="row_key" :selected-row-keys="selection" :reserve-selected-row-on-paginate="true" :pagination="resourceOnly?undefined:{current:page,pageSize,total:filteredRows.length,pageSizeOptions:[10,20,50],showJumper:false}" @page-change="value=>{page=value.current;pageSize=value.pageSize}"
+          :scroll="{ x: resourceOnly ? '1102px' : reviewOnly ? '940px' : '1072px' }" empty="暂无候选，可添加候选或返回资源配置配对"
+          @select-change="keys=>{const visible=new Set(filteredRows.map(row=>row.row_key));selection=[...new Set([...selection.filter(key=>!visible.has(key)),...keys])]}">
+          <template #content="{row}"><div class="batch-content-identity"><img v-if="candidateCover(row)" :src="candidateCover(row)" alt="发布封面"/><div><span class="batch-content-name" :title="row.content.description">{{row.content.description||'待填写发布文案'}}</span><small class="batch-muted">{{categoryName(row.category_id)}}</small></div></div></template>
           <template #video="{ row }">
             <div class="batch-video-cell">
-              <img v-if="thumb(row)" :src="thumb(row)" alt="" />
+              <img v-if="resourceOnly && thumb(row)" :src="thumb(row)" alt="" />
               <div>
-                <ResourceNameLink v-if="outputFor(row)" @click="showVideo(row)">{{ outputName(row) }}</ResourceNameLink>
-                <span v-else>{{ outputName(row) }}</span>
+                <ResourceNameLink v-if="outputFor(row)" :class="{'batch-content-asset':!resourceOnly}" :title="outputName(row)" @click="showVideo(row)">{{ outputName(row) }}</ResourceNameLink>
+                <span v-else :class="{'batch-content-asset':!resourceOnly}" :title="outputName(row)">{{ outputName(row) }}</span>
+                <small v-if="!resourceOnly" class="batch-muted batch-task-block">成片 ID：{{row.composite_output_id}} · 时长：—</small>
                 <small v-if="isManual(row)" class="batch-muted">人工配对</small>
               </div>
             </div>
@@ -265,19 +291,23 @@ function applyBulk(key, patch, covers) {
           <template #order="{rowIndex}">{{rowIndex+1}}</template>
           <template #source="{row}"><ResourceStatusBadge :label="isManual(row)?'人工指定':'系统匹配'" :tone="isManual(row)?'info':'neutral'"/></template>
           <template #resourceStatus="{row}"><ResourceStatusBadge :label="resourceIssue(row)||'有效'" :tone="resourceIssue(row)?'warning':'success'"/></template>
-          <template #account="{ row }">{{ accountName(row) }}</template>
+          <template #account="{ row }"><template v-if="resourceOnly">{{ accountName(row) }}</template><span v-else class="batch-content-asset" :title="accountName(row)">{{accountName(row)}}</span></template>
           <template #category="{ row }">{{ categoryName(row.category_id) }}</template>
-          <template #status="{ row }">
-            <ResourceStatusBadge :tone="statusIssue(row) ? 'warning' : 'success'"
-              :label="statusIssue(row)?.field === 'confirmation' ? '待确认' : statusIssue(row) ? '待完善' : '已确认'" />
-            <small v-if="statusIssue(row)" class="batch-muted">{{ statusIssue(row).message }}</small>
-          </template>
+          <template #status="{row}"><ResourceStatusBadge :tone="rowIssues(row).length?'warning':'success'" :label="rowState(row)"/><small v-if="rowIssues(row).length" class="batch-content-problem">{{rowIssues(row)[0]}}</small><details v-if="rowIssues(row).length>1" class="batch-content-issues"><summary>另 {{rowIssues(row).length-1}} 项</summary><ul><li v-for="message in rowIssues(row).slice(1)" :key="message">{{message}}</li></ul></details></template>
           <template #op="{ row, rowIndex }"><ResourceRowActions>
-            <t-button v-if="!resourceOnly" size="small" variant="text" :disabled="disabled" @click="activeKey = row.row_key">编辑内容</t-button>
-            <t-button size="small" variant="text" :disabled="disabled" @click="openPair(row)">调整配对</t-button>
-            <t-button size="small" variant="text" :disabled="disabled || rowIndex === 0" @click="moveEntry(rows, rowIndex, -1)">上移</t-button>
-            <t-button size="small" variant="text" :disabled="disabled || rowIndex === rows.length - 1" @click="moveEntry(rows, rowIndex, 1)">下移</t-button>
-            <t-button size="small" variant="text" theme="danger" :disabled="disabled" @click="remove(row)">移除</t-button>
+            <t-button v-if="!resourceOnly" size="small" variant="text" :disabled="disabled" @click="activeKey = row.row_key">{{reviewOnly?"编辑":"编辑内容"}}</t-button>
+            <template v-if="resourceOnly">
+            <t-button v-if="!reviewOnly" size="small" variant="text" :disabled="disabled" @click="openPair(row)">调整配对</t-button>
+            <t-button v-if="!reviewOnly" size="small" variant="text" :disabled="disabled || rows.indexOf(row) === 0" @click="moveEntry(rows, rows.indexOf(row), -1)">上移</t-button>
+            <t-button v-if="!reviewOnly" size="small" variant="text" :disabled="disabled || rows.indexOf(row) === rows.length - 1" @click="moveEntry(rows, rows.indexOf(row), 1)">下移</t-button>
+            <t-button v-if="!reviewOnly" size="small" variant="text" theme="danger" :disabled="disabled" @click="remove(row)">移除</t-button>
+            </template>
+            <details v-else-if="!reviewOnly" class="batch-content-more"><summary>更多</summary><div>
+            <t-button v-if="!reviewOnly" size="small" variant="text" :disabled="disabled" @click="openPair(row)">调整配对</t-button>
+            <t-button v-if="!reviewOnly" size="small" variant="text" :disabled="disabled || rows.indexOf(row) === 0" @click="moveEntry(rows, rows.indexOf(row), -1)">上移</t-button>
+            <t-button v-if="!reviewOnly" size="small" variant="text" :disabled="disabled || rows.indexOf(row) === rows.length - 1" @click="moveEntry(rows, rows.indexOf(row), 1)">下移</t-button>
+            <t-button v-if="!reviewOnly" size="small" variant="text" theme="danger" :disabled="disabled" @click="remove(row)">移除</t-button>
+            </div></details>
           </ResourceRowActions></template>
         </t-table>
       </div>
@@ -291,10 +321,10 @@ function applyBulk(key, patch, covers) {
     @edit="edit(active.row_key, $event)" @recipe="(key, config) => storeRecipe(active.row_key, key, config)"
     @cover="(profile, file, render) => applyCover(active.row_key, profile, file, render)"
     @close="activeKey = ''" />
-  <BatchSelectedPreparation v-if="bulk && !resourceOnly" :rows="selected" :platform="form.platform" :output-for="outputFor" :label-for="rowLabel"
+  <BatchSelectedPreparation v-if="bulk && !resourceOnly && !reviewOnly" :rows="selected" :platform="form.platform" :output-for="outputFor" :label-for="rowLabel"
     @apply="applyBulk" @work="emit('work', $event)" @close="bulk = false" />
 
-  <ResourceOverlay v-if="pairing" form-actions :visible="true" :title="pairing.row_key ? '调整候选配对' : '添加候选'"
+  <ResourceOverlay v-if="pairing && !reviewOnly" form-actions :visible="true" :title="pairing.row_key ? '调整候选配对' : '添加候选'"
     :width="640" @update:visible="!$event && (pairing = null)">
     <div class="batch-stack">
       <FeedbackAlert v-if="pairError" theme="error" :message="pairError" />
@@ -313,7 +343,7 @@ function applyBulk(key, patch, covers) {
     </div>
     <template #footer><t-button theme="primary" :disabled="!pairing.category_id || !pairing.media_account_id || !pairing.composite_output_id" @click="acceptPair">应用配对</t-button></template>
   </ResourceOverlay>
-  <PublishingResourcePicker v-if="picker && pairing" batch visible :kind="picker" :platform="form.platform"
+  <PublishingResourcePicker v-if="picker && pairing && !reviewOnly" batch visible :kind="picker" :platform="form.platform"
     :category="pairing.category_id" :team-id="String(actor.team_id || '')" :excluded-ids="picker === 'output' ? blockedOutputIds : []"
     @selected="choosePairResource" @update:visible="picker = ''" />
   <ResourceOverlay v-if="preview" visible :title="preview.label" :width="880" :footer="false" @update:visible="!$event && closePreview()">
@@ -322,3 +352,9 @@ function applyBulk(key, patch, covers) {
     <video v-else-if="preview.url" :src="preview.url" class="batch-preview-video" controls preload="metadata" @error="preview.error = '成片暂时无法读取'" />
   </ResourceOverlay>
 </template>
+
+<style scoped>
+.batch-content-identity{display:flex;align-items:center;gap:12px;min-width:0}.batch-content-identity>div{min-width:0}.batch-content-identity>img{width:64px;height:48px;object-fit:contain;border:1px solid var(--wt-border);border-radius:4px}.batch-content-name,.batch-content-problem{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere}.batch-content-name{font-weight:500}.batch-content-problem,.batch-content-issues{font-size:12px;line-height:20px;color:var(--wt-text-tertiary)}.batch-content-issues summary{cursor:pointer;color:var(--wt-primary)}.batch-content-filters{margin-top:16px}.batch-content-filters :deep(.wt-filter-field--wide){flex:1.6 1 280px;max-width:none}
+.batch-content-more summary{cursor:pointer;list-style:none;color:var(--wt-primary);font-size:13px}.batch-content-more>div{display:flex;flex-direction:column;align-items:flex-start}
+.batch-content-asset{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere;font-weight:400;text-align:left}
+</style>

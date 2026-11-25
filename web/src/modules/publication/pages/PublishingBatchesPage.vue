@@ -728,10 +728,11 @@ onBeforeUnmount(() => {
          :actor="actor" :recipes="recipes" :cover-files="coverFiles" :validation-context="validationContext" :inherited-targets="!!detail?.plan_id" :disabled="freeze" @work="preparing = $event" />
       <BatchCandidateWorkspace v-if="step === 1" :form="form" :catalog="catalog" :categories="categoryOptions"
         :actor="actor" :recipes="recipes" :cover-files="coverFiles" :disabled="freeze" :focus-key="issueRowKey"
-        :validation-context="validationContext" @work="preparing = $event" />
+        :validation-context="validationContext" :validation-issues="readiness?.issues || []" @changed="review = null" @work="preparing = $event" />
       <template v-if="step === 2">
         <ResourceCard>
           <ResourceSection title="准备结果">
+            <div class="batch-review-summary"><label>批次名称<t-input v-model="form.name" aria-label="复查批次名称" :disabled="freeze" :maxlength="100"/></label><div><span>发布平台</span><strong>{{platformLabel(form.platform)}}</strong></div><div><span>候选配置</span><strong>{{form.config.candidates.length}} 条</strong></div></div>
             <ul class="batch-categories">
               <li v-for="entry in candidateShortfalls(form)" :key="entry.category_id">
                 <strong>{{ categoryName(entry.category_id) }}</strong>
@@ -756,8 +757,8 @@ onBeforeUnmount(() => {
           </ResourceSection>
         </ResourceCard>
         <ResourceCard>
-          <ResourceSection title="执行设置">
-            <div class="batch-form-grid">
+          <ResourceSection title="发布设置">
+            <div class="batch-settings-grid">
               <label>并发数<t-input-number v-model="form.execution_setting.concurrency_limit" :min="1" :decimal-places="0"
                 aria-label="并发数" :disabled="freeze" @change="review = null" /></label>
               <label>组间发布间隔（秒）<t-input-number v-model="form.execution_setting.group_interval_seconds" :min="0" :decimal-places="0"
@@ -771,6 +772,7 @@ onBeforeUnmount(() => {
             </div>
           </ResourceSection>
         </ResourceCard>
+        <BatchCandidateWorkspace review-only :form="form" :catalog="catalog" :categories="categoryOptions" :actor="actor" :recipes="recipes" :cover-files="coverFiles" :disabled="freeze" :validation-context="validationContext" :validation-issues="readiness?.issues || []" @changed="review=null" @work="preparing=$event"/>
       </template>
     </div>
     <template #footer>
