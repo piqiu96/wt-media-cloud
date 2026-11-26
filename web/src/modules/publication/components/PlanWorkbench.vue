@@ -42,12 +42,21 @@ async function platformScope(values) {
   if (!values.length) { error.value = '请至少保留一个发布平台'; return; }
   const removed = props.form.batches.filter(b => !values.includes(b.platform));
   if (removed.some(immutable)) { error.value = '已固定批次的平台范围不可移除'; return; }
+  const remaining = props.form.batches.filter(b => values.includes(b.platform));
+  const proposed = clone({ batches: remaining });
+  reorder(proposed);
+  if (remaining.some((b,index) => immutable(b) &&
+      (b.group_order !== proposed.batches[index].group_order || b.batch_order !== proposed.batches[index].batch_order))) {
+    error.value = '已固定批次的分组与顺序不可改变，请保留原平台范围';
+    return;
+  }
   await mutate(() => {
     const categories = [...selected.value];
     props.form.goals = props.form.goals.filter(g => values.includes(g.platform));
     for (const platform of values) for (const category_id of categories)
       if (!goal(platform,category_id)) props.form.goals.push({ platform, category_id, target_count:1 });
     props.form.batches = props.form.batches.filter(b => values.includes(b.platform));
+    reorder(props.form);
     selectedPlatforms.value = values;
   }, removed, removed.length ? { title:'调整发布平台？', message:'移除平台对应的目标与批次安排会被清除，请保存后重新核对。', confirmText:'确认调整' } : null);
 }

@@ -39,3 +39,29 @@ it('cannot remove a platform containing a fixed batch', async () => {
   expect(form.batches).toHaveLength(1);
   expect(state.error.value).toContain('不可移除');
 });
+const mixedPlan = () => ({ goals: ['baidu','bilibili'].map(platform => ({ platform, category_id:'1', target_count:2 })),
+  batches: ['baidu','bilibili'].flatMap((platform,index) => [1,2].map(order => ({ row_key:platform+order,
+    batch_id:platform+order, platform, group_order:index+1, batch_order:order,
+    targets:[{category_id:'1',target_count:1}] }))) });
+it('renumbers surviving platform groups and preserves batch order after removal', async () => {
+  const { state, form } = await setup(mixedPlan());
+  await state.platformScope(['bilibili']);
+  expect(form.batches.map(b => [b.row_key,b.group_order,b.batch_order])).toEqual([
+    ['bilibili1',1,1],['bilibili2',1,2],
+  ]);
+});
+it('refuses platform removal that would renumber a surviving fixed batch', async () => {
+  const initial = mixedPlan();
+  const { state, form } = await setup(initial, { bilibili1:{fixed:true} });
+  await state.platformScope(['bilibili']);
+  expect(form.batches).toHaveLength(4);
+  expect(form.goals).toHaveLength(2);
+  expect(state.error.value).toContain('固定');
+});
+it('can remove a later platform without moving an earlier fixed batch', async () => {
+  const { state, form } = await setup(mixedPlan(), { baidu1:{fixed:true} });
+  await state.platformScope(['baidu']);
+  expect(form.batches.map(b => [b.row_key,b.group_order,b.batch_order])).toEqual([
+    ['baidu1',1,1],['baidu2',1,2],
+  ]);
+});
