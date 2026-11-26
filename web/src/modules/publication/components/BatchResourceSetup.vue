@@ -15,6 +15,7 @@ import FeedbackAlert from "../../../shared/ui/feedback/FeedbackAlert.vue";
 import PublishingResourcePicker from "./PublishingResourcePicker.vue";
 import { batchAccountName, batchOutputID, batchOutputName, batchOutputProblem } from "../useBatchResourceCatalog.js";
 import { batchInput, candidateShortfalls, displayAvailability, moveEntry, reconcileAllocation, snapshot } from "../batchPreparation.js";
+import { usePublicationPlatforms } from '../usePublicationPlatforms.js';
 
 const props = defineProps({
   form: { type: Object, required: true },
@@ -30,6 +31,18 @@ const props = defineProps({
 const emit = defineEmits(["allocated", "work"]);
 const batch = createPublicationBatchClient();
 const publication = createPublicationClient();
+const platforms = usePublicationPlatforms();
+async function changePlatform(platform) {
+  if (fixed.value || props.inheritedTargets || platform === props.form.platform) return;
+  if (props.form.config.accounts.length || props.form.config.output_ids.length || props.form.config.candidates.length) {
+    const accepted = await feedback.confirmWarning({ title: '切换发布平台？', message: '切换后需要重新选择账号、成片和候选内容，类目目标保持不变。', confirmText: '切换平台' });
+    if (!accepted || fixed.value) return;
+  }
+  props.form.platform = platform;
+  props.form.config = { accounts: [], output_ids: [], manual_pairs: [], candidates: [] };
+  for (const map of [props.recipes, props.coverFiles]) if (map) for (const key of Object.keys(map)) delete map[key];
+  outcome.value = '';
+}
 const picker = ref("");
 const outputCategory = ref("");
 const inventory = ref({});
@@ -108,7 +121,7 @@ async function recommend() {
     if(!targets.some(t=>t.target_count>0)){outcome.value='当前无可匹配资源，原目标与候选保持不变。请补充成片或检查本人账号。';return;}
     const result=await batch.allocate(snapshot({...allocation,targets}));
     props.form.targets=targets;
-    props.form.config.candidates=reconcileAllocation(props.form.config.candidates,result.config.candidates||[]);
+    props.form.config.candidates=reconcileAllocation(props.form.config.candidates,result.config.candidates||[],props.form.platform,platforms.ruleFor(props.form.platform));
     outcome.value='已采用系统推荐，可继续调整类目数量和匹配。';
     emit('allocated');
   });
@@ -129,7 +142,7 @@ async function inspect() {
     resourceLoading.value = false;
   }
 }
-watch(() => props.form.targets.map(row => row.category_id).join(","), inspect, { immediate: true });
+watch(() => props.form.platform+":"+props.form.targets.map(row => row.category_id).join(","), inspect, { immediate: true });
 
 function removeTarget(index) {
   const id = props.form.targets[index].category_id;
@@ -197,7 +210,7 @@ function loadAvailable(targets = props.form.targets) {
       await pageResources(publication.outputs, { platform, category_id: target.category_id }, output => {
         props.catalog.remember("output", output);
         const id = batchOutputID(output);
-        if (!foundOutputs.has(id) && !batchOutputProblem(output, target.category_id, props.actor.team_id)) {
+        if (!foundOutputs.has(id) && !batchOutputProblem(output, target.category_id, props.actor.team_id,props.form.platform)) {
           foundOutputs.add(id);
           count++;
         }
@@ -214,7 +227,7 @@ function allocate() {
     const { platform, targets, config } = props.form;
     const { accounts, output_ids, manual_pairs } = config;
     const data = await batch.allocate(snapshot({ platform, targets, accounts, output_ids, manual_pairs }));
-    props.form.config.candidates = reconcileAllocation(config.candidates, data.config.candidates || []);
+    props.form.config.candidates = reconcileAllocation(config.candidates, data.config.candidates || [],platform,platforms.ruleFor(platform));
     outcome.value = `已配对 ${props.form.config.candidates.length} 条候选`;
     emit("allocated");
   });
@@ -226,7 +239,7 @@ function allocate() {
     <BatchSetupSection number="01" title="发布范围" help="选择单个平台与参与分配的类目。">
       <div class="batch-form-grid batch-scope-grid">
         <label><span><em>*</em> 批次名称</span><t-input v-model="form.name" aria-label="批次名称" :maxlength="100" :disabled="fixed" placeholder="请输入批次名称"/></label>
-        <label><span><em>*</em> 发布平台</span><t-select :value="form.platform" :options="[{label:'百家号',value:'baidu'}]" aria-label="批次发布平台" disabled/></label>
+        <FeedbackAlert v-if="platforms.error.value" theme="error" :message="platforms.error.value" /><label><span><em>*</em> 发布平台</span><t-select :value="form.platform" :options="platforms.options.value" aria-label="批次发布平台" :disabled="fixed || inheritedTargets || platforms.loading.value" @change="changePlatform"/></label>
       </div>
       <div class="batch-category-field"><label><span><em>*</em> 发布类目</span></label><t-checkbox-group :value="selectedCategories" :disabled="fixed||inheritedTargets" @change="changeCategories"><t-checkbox v-for="c in categories" :key="c.value" :value="c.value" class="batch-category-chip" :disabled="hasCandidates(c.value)">{{c.label}}</t-checkbox></t-checkbox-group><small v-if="form.targets.some(t=>hasCandidates(t.category_id))" class="batch-muted">已有候选的类目需先移除对应候选再取消选择。</small></div>
     </BatchSetupSection>
@@ -267,7 +280,7 @@ function allocate() {
                 :draggable="false" :remove-disabled="fixed || form.config.manual_pairs.some(row => row.composite_output_id === id)" @move="!fixed && moveEntry(outputs, index, $event)" @remove="outputs.splice(index, 1)">
                 {{ batchOutputName(catalog.outputs.get(id)) }}
               </ResourceReorderActions>
-              <small v-if="catalog.outputs.has(id)" class="batch-muted">{{ batchOutputProblem(catalog.outputs.get(id), undefined, actor.team_id) }}</small>
+              <small v-if="catalog.outputs.has(id)" class="batch-muted">{{ batchOutputProblem(catalog.outputs.get(id), undefined, actor.team_id,form.platform) }}</small>
             </div>
           </div>
         </div>

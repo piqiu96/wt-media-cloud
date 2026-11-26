@@ -7,8 +7,10 @@ import PublishingCoverEditor from "./PublishingCoverEditor.vue";
 import { createImageClient } from "../../../shared/api/image.js";
 import { createFilesClient } from "../../../shared/api/files.js";
 import { createPublicationBatchClient } from "../../../shared/api/publication.js";
-import { coverMatchesRatio, coverReference, coverRenderInput, coverResultMatches, emptyCoverConfig } from "../coverPreparation.js";
-import { coverProfiles, generationFields, generationInput, matchesCandidateField, publicContentPatch } from "../batchPreparation.js";
+import { coverMatchesRatio, coverMatchesProfile, selectMatchingCover, coverReference, coverRenderInput, coverResultMatches, emptyCoverConfig } from "../coverPreparation.js";
+import { generationInput, matchesCandidateField, publicContentPatch } from "../batchPreparation.js";
+
+import { generationValues, parseBilibiliTags, platformCoverProfiles, platformGenerationFields } from '../platformContent.js';
 
 const props = defineProps({
   rows: { type: Array, required: true },
@@ -21,7 +23,9 @@ const image = createImageClient();
 const batch = createPublicationBatchClient();
 const files = createFilesClient();
 const chosen = ref([]);
-const defaults = ref({ description: "", topics: "", cover_title: "" });
+const generationFields = platformGenerationFields(props.platform);
+const coverProfiles = platformCoverProfiles(props.platform);
+const defaults = ref(Object.fromEntries(Object.keys(generationFields).map(field => [field, ''])));
 const overwrite = ref(false);
 const fields = ref(Object.keys(generationFields));
 const instruction = ref("");
@@ -53,7 +57,7 @@ const canApply = computed(() => review.value.some(({ row, info }) => {
 }));
 
 function valueFor(row, field) {
-  return field === "cover_title" ? row.cover_title : row.content[field];
+  return generationValues(props.platform,row.content,row.cover_title)[field];
 }
 function fieldsAllowed(row, keys) {
   return keys.filter(key => overwrite.value || !valueFor(row, key)?.trim());
@@ -104,7 +108,7 @@ async function prepare(onlyKeys) {
       const appliedCovers = sameInput ? prior.appliedCovers : [];
       const generationKeys = chosen.value.includes("ai")
         ? fieldsAllowed(row, fields.value).filter(field => !(field in priorValues) && !appliedFields.includes(field)) : [];
-      const publicPatch = chosen.value.includes("public") ? publicContentPatch(row, defaults.value, overwrite.value) : {};
+      const publicPatch = chosen.value.includes("public") ? publicContentPatch(row, defaults.value, overwrite.value, props.platform) : {};
       const values = { ...Object.fromEntries(Object.entries(publicPatch).filter(([field]) => !appliedFields.includes(field))), ...priorValues };
       const newCovers = requestedCovers.filter(profile => !(profile.key in priorCovers) && !appliedCovers.includes(profile.key));
       const coverFields = requestedCovers.flatMap(profile => [profile.file, profile.render]);
@@ -127,13 +131,11 @@ async function prepare(onlyKeys) {
           } else {
             const key = `${row.category_id}:${profile.key}`;
             if (!imageSelections.has(key)) {
-              imageSelections.set(key, image.selectImageAsset({
-                usage: "cover", category_id: row.category_id, aspect: profile.aspect.join(":"),
-              }));
+              imageSelections.set(key, selectMatchingCover(image,row.category_id,profile,props.platform));
             }
             const file = await imageSelections.get(key);
             if (controller.signal.aborted) break;
-            if (!file?.file_id || !coverMatchesRatio(file, ...profile.aspect) || !fileURL(file))
+            if (!file?.file_id || !coverMatchesProfile(file,profile,props.platform) || !fileURL(file))
               throw new Error("没有符合规格的可用现成封面");
             stored.covers[profile.key] = { file, profile };
             stored.result = true;
@@ -150,14 +152,15 @@ async function prepare(onlyKeys) {
         info.errors.push(data.message || "文案生成失败");
         return;
       }
-      const limits = { description: 1000, topics: 200, cover_title: 100 };
+      const limits = { title:80, description: props.platform === 'bilibili' ? 2000 : 1000, tags:209, topics:200, cover_title:100 };
       for (const field of Object.keys(data.field_revisions)) {
         const value = data.result?.content?.[field];
-        if (typeof value !== "string" || [...value].length > limits[field] ||
+        if (typeof value !== "string" || (props.platform === 'bilibili' && field !== 'cover_title' ? value.length : [...value].length) > limits[field] ||
           (!value.trim() && field !== "topics") || data.result.field_revisions?.[field] !== data.field_revisions[field]) {
           info.errors.push(`${generationFields[field]}生成结果不完整`);
           continue;
         }
+        if (field === 'tags') { try { parseBilibiliTags(value); } catch(failure) { info.errors.push(failure.message); continue; } }
         info.values[field] = value;
         info.result = true;
       }
@@ -171,7 +174,7 @@ async function prepare(onlyKeys) {
           const title = coverTitle.value.trim() || info.values.cover_title?.trim() || row.cover_title || "";
           const { row_key, input_revision, ...spec } = coverRenderInput({ ...coverConfig.value[profile.key], title },
             output && { ...output, id: row.composite_output_id }, row.row_key, row.input_revision);
-          specs.push({ ...spec, specification: profile.key === "horizontal" ? "landscape" : "portrait" });
+          specs.push({ ...spec, specification: props.platform === 'bilibili' ? (profile.key === 'horizontal' ? 'recommendation' : 'space') : (profile.key === 'horizontal' ? 'landscape' : 'portrait') });
         } catch (failure) {
           info.errors.push(`${profile.label} · ${failure.message}`);
         }
@@ -190,9 +193,9 @@ async function prepare(onlyKeys) {
       const request = renders.find(item => item.row_key === data.row_key);
       for (const spec of request.specs) {
         const result = data.result?.artworks?.find(item => item.specification === spec.specification);
-        const profile = coverProfiles.find(item => item.key === (spec.specification === "landscape" ? "horizontal" : "portrait"));
+        const profile = coverProfiles.find(item => item.key === (spec.specification === 'landscape' || spec.specification === 'recommendation' ? 'horizontal' : spec.specification === 'space' ? 'space' : 'portrait'));
         if (!coverResultMatches(result, { ...spec, row_key: request.row_key, input_revision: request.input_revision }) ||
-          !coverMatchesRatio(result.file, ...profile.aspect) || !fileURL(result.file)) {
+          !coverMatchesProfile(result.file,profile,props.platform) || !fileURL(result.file)) {
           info.errors.push(`${profile.label}生成结果不匹配`);
           continue;
         }
@@ -226,6 +229,10 @@ function currentChanges(row, info) {
 function apply(row, info) {
   const { patch, covers } = currentChanges(row, info);
   if (!Object.keys(patch).length && !covers.length) return;
+  if (Object.hasOwn(patch,'tags')) {
+    try { parseBilibiliTags(patch.tags); }
+    catch (failure) { info.errors.push(failure.message); return; }
+  }
   emit("apply", row.row_key, patch, covers);
   for (const field of Object.keys(patch)) {
     info.appliedFields.push(field);
@@ -249,8 +256,8 @@ function applyAll() {
       <ResourceSection v-if="chosen.includes('public')" title="公共设置">
         <div class="batch-form-grid">
           <label v-for="option in fieldOptions" :key="option.value">{{ option.label }}
-            <t-input v-model="defaults[option.value]" :aria-label="`公共${option.label}`" placeholder="留空则保留原值"
-              :maxlength="option.value === 'description' ? 1000 : option.value === 'topics' ? 200 : 100" />
+            <t-textarea v-model="defaults[option.value]" :aria-label="`公共${option.label}`" placeholder="留空则保留原值"
+              :maxlength="option.value === 'title' ? 80 : option.value === 'description' ? (platform === 'bilibili' ? 2000 : 1000) : option.value === 'tags' ? 209 : option.value === 'topics' ? 200 : 100" />
           </label>
         </div>
       </ResourceSection>
@@ -286,8 +293,8 @@ function applyAll() {
           <template v-if="info">
             <label v-for="(value, field) in info.values" :key="field" class="batch-result-field">
               {{ generationFields[field] }}
-              <t-input v-model="info.values[field]" :disabled="busy || !matchesCandidateField(row, info.basis, field)"
-                :maxlength="field === 'description' ? 1000 : field === 'topics' ? 200 : 100" />
+              <t-textarea v-model="info.values[field]" :disabled="busy || !matchesCandidateField(row, info.basis, field)"
+                :maxlength="field === 'title' ? 80 : field === 'description' ? (platform === 'bilibili' ? 2000 : 1000) : field === 'tags' ? 209 : field === 'topics' ? 200 : 100" />
               <small v-if="!matchesCandidateField(row, info.basis, field)" class="batch-muted">当前输入已变化，此项需重新生成</small>
             </label>
             <div v-if="Object.keys(info.covers).length" class="batch-inline">

@@ -4,6 +4,7 @@ import {
   coverReference,
   coverRenderInput,
   coverResultMatches,
+  selectMatchingCover,
 } from "./coverPreparation.js";
 const config = {
   method: "template",
@@ -88,4 +89,16 @@ it("requires actual matching dimensions and refuses an oversized cover",()=>{
  expect(coverMatchesRatio({width:1280,height:720},3,4)).toBe(false);
  expect(coverMatchesRatio({metadata:{width:1280,height:720},size_bytes:5242881},16,9)).toBe(false);
  expect(coverMatchesRatio({},16,9)).toBe(false);
+});
+
+it('selects the exact ratio and accepted format across image-library pages',async()=>{
+ const calls=[];
+ const client={listImageAsset:async input=>{calls.push(input);return {total:101,items:input.page===1?[
+  {file_id:'1',resource_path:'/wrong',width:1600,height:900,format:'png',category_ids:['1']},
+  {file_id:'2',resource_path:'/webp',width:1200,height:900,format:'webp',category_ids:['1']},
+ ]:[{file_id:'3',resource_path:'/correct',width:1200,height:900,format:'png',category_ids:['1']}]}}};
+ const selected=await selectMatchingCover(client,'1',{aspect:[4,3]},'bilibili');
+ expect(selected.file_id).toBe('3');
+ expect(calls.map(c=>c.page)).toEqual([1,2]);
+ expect(calls.every(c=>c.aspect==='landscape')).toBe(true);
 });

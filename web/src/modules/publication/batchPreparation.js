@@ -1,3 +1,5 @@
+import { generationValues, generationPatch, initialPlatformContent, platformCoverProfiles, platformGenerationFields, publicationContentInput } from './platformContent.js';
+
 export const generationFields = {
   description: "发布文案",
   topics: "话题",
@@ -55,7 +57,7 @@ export function batchInput(form) {
     targets: form.targets,
     config: {
       ...form.config,
-      candidates: form.config.candidates.map((row, order) => ({ ...row, order })),
+      candidates: form.config.candidates.map((row, order) => ({ ...row, order, content: publicationContentInput(form.platform,row.content) })),
     },
     execution_setting: form.execution_setting,
   });
@@ -74,11 +76,11 @@ export function pairOf(row) {
 
 const pairKey = (pair) => Object.values(pairOf(pair)).join(":");
 
-export function newCandidate(pair) {
-  return { ...pairOf(pair), row_key: crypto.randomUUID(), input_revision: "1", field_revisions: {}, content: {}, order: 0 };
+export function newCandidate(pair, platform = 'baidu', rule) {
+  return { ...pairOf(pair), row_key: crypto.randomUUID(), input_revision: "1", field_revisions: {}, content: platform === 'bilibili' ? initialPlatformContent(platform, rule) : {}, order: 0 };
 }
 
-export function reconcileAllocation(previous, suggested) {
+export function reconcileAllocation(previous, suggested, platform = 'baidu', rule) {
   const available = new Map(suggested.map(row => [row.composite_output_id, row]));
   const rows = [];
   for (const row of previous) {
@@ -86,7 +88,9 @@ export function reconcileAllocation(previous, suggested) {
     if (match) rows.push(replaceCandidatePair(row, match));
     available.delete(row.composite_output_id);
   }
-  rows.push(...Array.from(available.values(), row => ({ ...row, row_key: crypto.randomUUID() })));
+  rows.push(...Array.from(available.values(), row => ({ ...row, row_key: crypto.randomUUID(),
+    content: platform === 'bilibili' ? { ...initialPlatformContent(platform, rule), ...row.content,
+      bilibili: row.content?.bilibili || initialPlatformContent(platform, rule).bilibili } : row.content })));
   return rows;
 }
 
@@ -94,7 +98,7 @@ export function replaceCandidatePair(row, pair) {
   if (pairKey(row) === pairKey(pair)) return row;
   const content = { ...row.content, confirmed: false };
   if (row.composite_output_id !== pair.composite_output_id || row.category_id !== pair.category_id) {
-    for (const profile of coverProfiles) {
+    for (const profile of [...coverProfiles, ...platformCoverProfiles('bilibili')]) {
       delete content[profile.file];
       delete content[profile.render];
     }
@@ -102,7 +106,11 @@ export function replaceCandidatePair(row, pair) {
   return { ...row, ...pairOf(pair), input_revision: nextRevision(row.input_revision), content };
 }
 
-export function editCandidate(row, patch) {
+export function editCandidate(row, patch, platform = 'baidu') {
+  if (platform === 'bilibili' && Object.hasOwn(patch, 'tags')) {
+    const { tags, ...rest } = patch;
+    patch = { ...rest, ...generationPatch(platform, row.content, 'tags', tags) };
+  }
   const content = { ...row.content };
   const field_revisions = { ...row.field_revisions };
   let cover_title = row.cover_title;
@@ -115,9 +123,11 @@ export function editCandidate(row, patch) {
     else content[field] = value;
     field_revisions[field] = nextRevision(field_revisions[field]);
     if (field !== "confirmed") changed = true;
+    if (field === 'bilibili' && JSON.stringify(row.content.bilibili?.tags) !== JSON.stringify(value?.tags))
+      field_revisions.tags = nextRevision(field_revisions.tags);
   }
   if (cover_title !== row.cover_title) {
-    for (const profile of coverProfiles) {
+    for (const profile of [...coverProfiles, ...platformCoverProfiles('bilibili')]) {
       if (!content[profile.render] || content[profile.render].title === cover_title?.trim()) continue;
       for (const field of [profile.file, profile.render]) {
         delete content[field];
@@ -140,7 +150,6 @@ export function candidateShortfalls(form) {
 }
 
 export function generationInput(row, platform, fields, instruction) {
-  const keys = Object.keys(generationFields);
   return {
     row_key: row.row_key,
     input_revision: row.input_revision,
@@ -149,7 +158,7 @@ export function generationInput(row, platform, fields, instruction) {
     composite_output_id: row.composite_output_id,
     fields,
     field_revisions: Object.fromEntries(fields.map(field => [field, row.field_revisions[field] || "0"])),
-    content: Object.fromEntries(keys.map(field => [field, (field === "cover_title" ? row.cover_title : row.content[field]) || ""])),
+    content: generationValues(platform, row.content, row.cover_title || ''),
     instruction,
   };
 }
@@ -198,9 +207,10 @@ export async function sendNewBatch(api, input, { retry = false } = {}) {
   }
 }
 
-export function publicContentPatch(row, values, overwrite = false) {
+export function publicContentPatch(row, values, overwrite = false, platform = 'baidu') {
+  const current = generationValues(platform, row.content, row.cover_title);
   return Object.fromEntries(Object.entries(values).filter(([field, value]) =>
-    value?.trim() && (overwrite || !(field === "cover_title" ? row.cover_title : row.content[field])?.trim())));
+    Object.hasOwn(platformGenerationFields(platform), field) && value?.trim() && (overwrite || !current[field]?.trim())));
 }
 
 export function batchResourceProblem(form, { requireName = true } = {}) {

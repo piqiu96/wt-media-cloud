@@ -1,4 +1,5 @@
 <script setup>
+import { platformCoverProfiles } from '../platformContent.js';
 import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from "vue-router";
 import ResourcePageHeader from "../../../shared/ui/resource/ResourcePageHeader.vue";
@@ -29,7 +30,7 @@ import { platformLabel } from "../../../shared/utils/platforms.js";
 import { formatPublicationTime } from "../dateTime.js";
 import { batchAccountName, batchOutputName, useBatchResourceCatalog } from "../useBatchResourceCatalog.js";
 import {
-  batchFormProblem, batchResourceProblem, batchInput, candidateShortfalls, configurationLabels, coverProfiles, emptyBatch, executionLabels, groupPolicies,
+  batchFormProblem, batchResourceProblem, batchInput, candidateShortfalls, configurationLabels, emptyBatch, executionLabels, groupPolicies,
   savedBatchForRequest, sendNewBatch, snapshot,
 } from "../batchPreparation.js";
 import BatchResourceSetup from "../components/BatchResourceSetup.vue";
@@ -259,8 +260,8 @@ function updateCoverResources(configuration, resources) {
   for (const entry of resources || []) {
     const row = configuration.config.candidates.find(item => item.row_key === entry.row_key);
     if (!row) continue;
-    for (const profile of coverProfiles) {
-      const resource_path = entry[profile.key === "horizontal" ? "cover_resource_path" : "portrait_cover_resource_path"];
+    for (const profile of platformCoverProfiles(configuration.platform)) {
+      const resource_path = entry[profile.file.replace("_file_id", "_resource_path")];
       if (resource_path) {
         coverFiles.value[row.row_key] = {
           ...coverFiles.value[row.row_key],
@@ -271,6 +272,7 @@ function updateCoverResources(configuration, resources) {
   }
 }
 function savedCoverURL(row, profile) {
+  if (!profile) return undefined;
   const selected = coverFiles.value[row.row_key]?.[profile.key];
   try { return selected?.fileId === row.content[profile.file] ? files.resourceURL(selected) : undefined; }
   catch { return undefined; }
@@ -709,7 +711,7 @@ onBeforeUnmount(() => {
 
   <ResourceDetailPage v-else-if="view === 'detail' && detail" :title="detail.name" :busy="executionBusy" @back="back">
     <FeedbackAlert v-if="resourceError" theme="warning" :message="resourceError" />
-    <BatchReadonlyBody :batch="detail" :category-name="categoryName" :task-link="taskLink" :resource-catalog="catalog" :coverURL="(row,key)=>savedCoverURL(row,coverProfiles.find(p=>p.key===(key==='cover_resource_path'?'horizontal':'portrait')))" @tasks="showTaskStatus">
+    <BatchReadonlyBody :batch="detail" :category-name="categoryName" :task-link="taskLink" :resource-catalog="catalog" :coverURL="(row,key)=>savedCoverURL(row,platformCoverProfiles(detail.platform).find(p=>p.file.replace('_file_id','_resource_path')===key))" @tasks="showTaskStatus">
       <template #tasks><div ref="taskPanel">          <BatchFormalTasks ref="taskTable" :batch="detail" :account-options="taskAccountOptions" :account-name="accountName" :output-name="outputName"
             :task-link="taskLink" :scope="taskScope" active @scope="taskScope = $event"
             @refresh-summary="syncExecutionDetail(null, false, false)" />

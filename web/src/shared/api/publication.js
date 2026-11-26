@@ -5,6 +5,7 @@ export function createPublicationClient({
 } = {}) {
   const api = createApiClient({ base, fetchImpl: fetch });
   return {
+    platformRules: () => api.get("/publication/platform-rules"),
     generate: (input, options) => api.stream("/publication/generate", input, options),
     list: (params) => api.get("/publication", params),
     outputs: (params) => api.get("/publication/output", params),

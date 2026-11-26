@@ -44,8 +44,12 @@ const receipt = computed(() => props.attempt.evidence?.evidence?.receipt_id || p
         <Field v-if="content.title" label="标题" full>{{ content.title }}</Field>
         <Field :label="content.title ? '正文 / 简介' : '发布标题'" full>{{ content.description || '—' }}</Field>
         <Field label="发布封面" full><img v-if="content.cover" :src="content.cover" alt="发布封面" class="attempt-cover-image" /><span v-if="!content.cover || content.cover_file_id" class="attempt-cover"><ImageIcon aria-hidden="true" />{{ executionCoverName(attempt, task) }}</span></Field>
-        <Field label="话题" full>{{ content.topics || '—' }}</Field>
-        <Field label="创作声明" full>{{ content.declaration || '—' }}</Field>
+        <Field v-if="!content.bilibili" label="话题" full>{{ content.topics || '—' }}</Field>
+        <Field label="创作声明" full>{{ content.bilibili?.statement || content.declaration || '—' }}</Field>
+        <Field v-if="content.bilibili" label="标签" full>{{ content.bilibili.tags?.join('，') || '—' }}</Field>
+        <Field v-if="content.bilibili" label="分区" full>{{ content.bilibili.partition_name || '—' }}</Field>
+        <Field v-if="content.bilibili" label="可见范围" full>{{ content.bilibili.visibility === 'public' ? '公开可见' : '仅自己可见' }}</Field>
+        <Field v-if="content.bilibili?.source" label="转载来源" full>{{ content.bilibili.source }}</Field>
         <Field v-if="content.visibility" label="可见范围" full>{{ content.visibility }}</Field>
         <Field v-if="content.partition" label="分区" full>{{ content.partition }}</Field>
       </ResourceDescriptions>

@@ -1,6 +1,8 @@
 <script setup>
 // Structure adapted from PlanBasicForm, PlanGoalScope and plan/app.js; all data use the formal clients.
-import { computed, ref } from "vue";
+import { computed, ref, watch } from "vue";
+import { platformLabel } from '../../../shared/utils/platforms.js';
+import { usePublicationPlatforms } from '../usePublicationPlatforms.js';
 import ResourceCard from "../../../shared/ui/resource/ResourceCard.vue";
 import ResourceSection from "../../../shared/ui/resource/ResourceSection.vue";
 import ResourceDateRange from "../../../shared/ui/resource/ResourceDateRange.vue";
@@ -17,13 +19,38 @@ const props = defineProps({
   batchFacts: { type: Object, default: () => ({}) },
 });
 const emit = defineEmits(["recommend"]);
+const platforms = usePublicationPlatforms();
+const selectedPlatforms = ref([...new Set(props.form.goals.map(g => g.platform))]);
+if (!selectedPlatforms.value.length) selectedPlatforms.value = ['baidu'];
+watch(() => props.form, value => {
+  const names = [...new Set(value.goals.map(g => g.platform))];
+  selectedPlatforms.value = names.length ? names : ['baidu'];
+});
 const instruction = ref(""),
   error = ref(""),
   confirming = ref(false);
 const fixed = computed(() => props.disabled || confirming.value);
 const categoryName = (id) =>
   props.categories.find((c) => String(c.id) === id)?.name || "类目 ID：" + id;
-const selected = computed(() => props.form.goals.map((g) => g.category_id));
+const selected = computed(() => [...new Set(props.form.goals.map((g) => g.category_id))]);
+const goalColumns = computed(() => selected.value.map(category_id => ({ category_id })));
+const platformGoals = platform => props.form.goals.filter(g => g.platform === platform);
+const goal = (platform, category) => props.form.goals.find(g => g.platform === platform && g.category_id === category);
+const platformTotal = platform => platformGoals(platform).reduce((n,g) => n + g.target_count,0);
+const categoryTotal = category => props.form.goals.filter(g => g.category_id === category).reduce((n,g) => n + g.target_count,0);
+async function platformScope(values) {
+  if (!values.length) { error.value = '请至少保留一个发布平台'; return; }
+  const removed = props.form.batches.filter(b => !values.includes(b.platform));
+  if (removed.some(immutable)) { error.value = '已固定批次的平台范围不可移除'; return; }
+  await mutate(() => {
+    const categories = [...selected.value];
+    props.form.goals = props.form.goals.filter(g => values.includes(g.platform));
+    for (const platform of values) for (const category_id of categories)
+      if (!goal(platform,category_id)) props.form.goals.push({ platform, category_id, target_count:1 });
+    props.form.batches = props.form.batches.filter(b => values.includes(b.platform));
+    selectedPlatforms.value = values;
+  }, removed, removed.length ? { title:'调整发布平台？', message:'移除平台对应的目标与批次安排会被清除，请保存后重新核对。', confirmText:'确认调整' } : null);
+}
 const total = computed(() =>
   props.form.goals.reduce((n, g) => n + g.target_count, 0),
 );
@@ -89,10 +116,10 @@ async function scope(values) {
       props.form.goals = props.form.goals.filter((g) =>
         values.includes(g.category_id),
       );
-      for (const id of values)
-        if (!props.form.goals.some((g) => g.category_id === id))
+      for (const platform of selectedPlatforms.value) for (const id of values)
+        if (!props.form.goals.some((g) => g.category_id === id && g.platform === platform))
           props.form.goals.push({
-            platform: "baidu",
+            platform,
             category_id: id,
             target_count: 1,
           });
@@ -116,21 +143,20 @@ function distribute() {
     return;
   }
   mutate(() => {
-    props.form.batches = [
-      {
+    props.form.batches = selectedPlatforms.value.map((platform,index) => ({
         row_key: crypto.randomUUID(),
-        name: "批次 01",
-        platform: "baidu",
+        name: "批次 " + String(index+1).padStart(2,'0'),
+        platform,
         group_order: 1,
         batch_order: 1,
         targets: clone(
-          props.form.goals.map(({ category_id, target_count }) => ({
+          platformGoals(platform).map(({ category_id, target_count }) => ({
             category_id,
             target_count,
           })),
         ),
-      },
-    ];
+      }));
+    reorder(props.form);
   }, props.form.batches);
 }
 function add() {
@@ -138,7 +164,7 @@ function add() {
   props.form.batches.push({
     row_key: crypto.randomUUID(),
     name: "批次 " + String(props.form.batches.length + 1).padStart(2, "0"),
-    platform: "baidu",
+    platform: selectedPlatforms.value[0],
     targets: [],
   });
   reorder(props.form);
@@ -266,10 +292,10 @@ function remove(i) {
         <label
           ><span><i>*</i>发布平台</span
           ><t-select
-            :value="['baidu']"
+            :value="selectedPlatforms"
             multiple
-            disabled
-            :options="[{ value: 'baidu', label: '百家号' }]"
+            :disabled="fixed || platforms.loading.value"
+            :options="platforms.options.value" @change="platformScope"
             aria-label="发布平台" /></label
         ><label
           ><span><i>*</i>发布类目</span
@@ -302,7 +328,7 @@ function remove(i) {
             <tr>
               <th>平台 / 类目</th>
               <th
-                v-for="g in form.goals"
+                v-for="g in goalColumns"
                 :key="g.category_id"
                 class="resource-table-number"
               >
@@ -313,32 +339,32 @@ function remove(i) {
             </tr>
           </thead>
           <tbody>
-            <tr>
-              <td>百家号</td>
+            <tr v-for="platform in selectedPlatforms" :key="platform">
+              <td>{{platformLabel(platform)}}</td>
               <td
-                v-for="g in form.goals"
+                v-for="g in goalColumns"
                 :key="g.category_id"
                 class="resource-table-number"
               >
                 <t-input-number
-                  v-model="g.target_count"
+                  :value="goal(platform,g.category_id)?.target_count || 0" @change="value => { const target=goal(platform,g.category_id); if(target) target.target_count=value; }"
                   :disabled="fixed"
                   :min="1"
                   :decimal-places="0"
                   :aria-label="categoryName(g.category_id) + '目标数'"
                 />
               </td>
-              <td class="resource-table-number">{{ total }}</td>
+              <td class="resource-table-number">{{ platformTotal(platform) }}</td>
               <td>待逐批配置核实</td>
             </tr>
             <tr class="plan-detail-total">
               <td>类目合计</td>
               <td
-                v-for="g in form.goals"
+                v-for="g in goalColumns"
                 :key="g.category_id"
                 class="resource-table-number"
               >
-                {{ g.target_count }}
+                {{ categoryTotal(g.category_id) }}
               </td>
               <td class="resource-table-number">{{ total }}</td>
               <td>计划目标 {{ total }} 条</td>
@@ -403,7 +429,7 @@ function remove(i) {
               <th class="plan-batch-name">批次名称</th>
               <th>平台</th>
               <th
-                v-for="g in form.goals"
+                v-for="g in goalColumns"
                 :key="g.category_id"
                 class="resource-table-number"
               >
@@ -455,9 +481,9 @@ function remove(i) {
                   :aria-label="'批次' + (i + 1) + '名称'"
                 />
               </td>
-              <td>百家号</td>
+              <td><t-select :value="b.platform" :options="platforms.options.value.filter(item=>selectedPlatforms.includes(item.value))" :disabled="fixed || immutable(b)" :aria-label="b.name+'平台'" @change="value=>mutate(()=>{b.platform=value;b.targets=[]},[b])" /></td>
               <td
-                v-for="g in form.goals"
+                v-for="g in goalColumns"
                 :key="g.category_id"
                 class="resource-table-number"
               >

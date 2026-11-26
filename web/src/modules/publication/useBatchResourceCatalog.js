@@ -7,9 +7,9 @@ export const batchOutputID = row => String(row.composite_output_id ?? row.id);
 export const batchOutputName = row => row?.name || row?.file_name || row?.material_title || "成片名称暂不可用";
 export const batchAccountName = row => row?.name || row?.platform_name || row?.platform_account_id || "账号名称暂不可用";
 
-export function batchOutputProblem(row, category, teamId) {
+export function batchOutputProblem(row, category, teamId, platform = 'baidu') {
   if (typeof row.occupied !== "boolean") return "占用状态未知";
-  return outputUnavailable(row, category || row.category_id, teamId ? { team_id: teamId } : null);
+  return outputUnavailable(row, category || row.category_id, teamId ? { team_id: teamId } : null, platform);
 }
 
 export function useBatchResourceCatalog() {

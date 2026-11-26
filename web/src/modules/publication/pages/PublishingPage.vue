@@ -46,9 +46,12 @@ import {
 } from "../eligibility.js";
 import { PublicationStatus, publicationStatuses } from "../status.js";
 import { publicationTitleForOutput } from "../title.js";
+import BilibiliContentFields from '../components/BilibiliContentFields.vue';
+import { usePublicationPlatforms } from '../usePublicationPlatforms.js';
+import { generationValues as platformGenerationValues, generationPatch, initialPlatformContent, platformCoverProfiles, publicationTitle, titleField, publicationContentInput } from '../platformContent.js';
 import PublicationContentGenerator from "../components/PublicationContentGenerator.vue";
 import PublishingCoverEditor from "../components/PublishingCoverEditor.vue";
-import { emptyCoverConfig, coverConfigFromReference, coverReference, coverMatchesRatio } from "../coverPreparation.js";
+import { emptyCoverConfig, coverConfigFromReference, coverReference, coverMatchesRatio, coverMatchesProfile } from "../coverPreparation.js";
 import PublishingExecutionHistory from "../components/PublishingExecutionHistory.vue";
 import PublishingResourcePicker from "../components/PublishingResourcePicker.vue";
 import PublishingRecoveryDialog from "../components/PublishingRecoveryDialog.vue";
@@ -142,14 +145,36 @@ const view = ref("list"),
   baseline = ref(""),
   pendingRequest = ref(null);
 const coverConfig = ref(emptyCoverConfig());
+const platforms = usePublicationPlatforms();
+const primaryProfile = computed(() => platformCoverProfiles(form.value?.platform)[0]);
+const secondaryProfile = computed(() => platformCoverProfiles(form.value?.platform)[1]);
+const secondaryPrefix = computed(() => form.value?.platform === 'bilibili' ? 'space' : 'portrait');
 const portraitCover=ref(null), portraitCoverConfig=ref(emptyCoverConfig()), coverTarget=ref("horizontal");
 const generationContext = computed(() => ({ rowKey: form.value?.request_key || String(editing.value?.id || ''), platform: form.value?.platform, categoryId: form.value?.category_id, outputId: form.value?.composite_output_id, identityKey: JSON.stringify([form.value?.media_account_id,coverConfig.value.method,coverConfig.value.template_id,coverConfig.value.published_revision]) }));
-const generationValues = computed(() => ({ description: form.value?.content.description || '', topics: form.value?.content.topics || '', cover_title: coverConfig.value.title || '' }));
+const generationValues = computed(() => platformGenerationValues(form.value?.platform,form.value?.content,coverConfig.value.title || ''));
+function patchContent(patch) {
+  if (frozen.value || !form.value) return;
+  form.value.content = { ...form.value.content, ...patch };
+  invalidate();
+}
+async function changePlatform(platform) {
+  if (editing.value || frozen.value || platform === form.value.platform) return;
+  if (form.value.media_account_id || publicationTitle(form.value.platform,form.value.content)) {
+    const accepted = await feedback.confirmWarning({ title: '切换发布平台？', message: '账号和发布内容需要按新平台重新配置。', confirmText: '切换平台' });
+    if (!accepted || frozen.value) return;
+  }
+  const category = form.value.category_id, previousOutput = output.value;
+  form.value = emptyForm(platform);
+  form.value.category_id = category;
+  account.value = null; output.value = null; cover.value = null; portraitCover.value = null;
+  coverConfig.value = emptyCoverConfig(); portraitCoverConfig.value = emptyCoverConfig();
+  draftResourceIssue.value = {}; formError.value = ''; validationField.value = '';
+  if (previousOutput?.platforms?.includes(platform)) setOutput(previousOutput);
+}
 function adoptGeneratedContent(field,value) {
  if (frozen.value || !form.value) return;
  if (field === 'cover_title') { updateCoverConfig({ ...coverConfig.value, title: value }); return; }
- if (!['description','topics'].includes(field) || form.value.content[field] === value) return;
- form.value.content[field] = value; invalidate();
+ try { patchContent(generationPatch(form.value.platform,form.value.content,field,value)); } catch(failure) { formError.value=failure.message; }
 }
 
 const videoVisible = ref(false), videoURL = ref(""), videoLoading = ref(false), videoError = ref("");
@@ -214,9 +239,9 @@ const dirty = computed(
 const statusLabel = (v) => publicationStatuses[v] || v;
 const categoryName = (id) =>
   categories.value.find((c) => String(c.id) === String(id))?.name || "—";
-const emptyForm = () => ({
+const emptyForm = (platform = 'baidu') => ({
   request_key: crypto.randomUUID(),
-  platform: "baidu",
+  platform,
   category_id: "",
   media_account_id: "",
   composite_output_id: "",
@@ -227,6 +252,7 @@ const emptyForm = () => ({
     topics: "",
     declaration: "",
     confirmed: false,
+    ...(platform === 'bilibili' ? initialPlatformContent(platform,platforms.ruleFor(platform)) : {}),
   },
 });
 let loadSequence = 0;
@@ -278,7 +304,7 @@ async function changeCategory(category) {
       return;
   }
   draftResourceIssue.value = {};
-  form.value = emptyForm();
+  form.value = emptyForm(form.value.platform);
   form.value.category_id = category;
   account.value = null;
   output.value = null;
@@ -348,9 +374,7 @@ async function openCreate(sourceOutput = null, copyInput = null, copyUserId = nu
     else if (copyInput) {
       form.value.platform = copyInput.platform;
       form.value.category_id = String(copyInput.category_id);
-      form.value.content.description = copyInput.content.description;
-      form.value.content.topics = copyInput.content.topics;
-      form.value.content.declaration = copyInput.content.declaration;
+      form.value.content = { ...form.value.content, ...initialPlatformContent(copyInput.platform,platforms.ruleFor(copyInput.platform)), ...JSON.parse(JSON.stringify(copyInput.content)), confirmed: false };
       feedback.toast.info("已复制文案、话题和声明；请重新选择账号、成片和封面，并核对确认内容。");
     } else if (sourceOutput?.id) {
       source.value = true;
@@ -368,10 +392,10 @@ async function openCreate(sourceOutput = null, copyInput = null, copyUserId = nu
   } finally { busy.value = false; }
 }
 async function restoreDraft(payload) {
-  if (!payload?.form?.content || !payload.form.request_key || payload.form.platform !== "baidu") throw new Error("续编输入无法读取，请保留原草稿后核对");
+  if (!payload?.form?.content || !payload.form.request_key || !['baidu','bilibili'].includes(payload.form.platform)) throw new Error("续编输入无法读取，请保留原草稿后核对");
   form.value = capturePublicationDraft(payload.form, payload.schedule, null, null).form;
   coverConfig.value = payload.cover_config || (form.value.content.cover_render ? coverConfigFromReference(form.value.content.cover_render) : emptyCoverConfig());
-  portraitCoverConfig.value=payload.portrait_cover_config || emptyCoverConfig();
+  portraitCoverConfig.value=payload[secondaryPrefix.value+'_cover_config'] || emptyCoverConfig();
   schedule.value = String(payload.schedule || "");
   pendingRequest.value = payload.pending_request || null;
   // Restoring user input never re-confirms resources or replaces human text.
@@ -385,8 +409,8 @@ async function restoreDraft(payload) {
   const [a, o, c, artwork] = results.map(result => result.status === "fulfilled" ? result.value : null);
   account.value = a;
   output.value = o?.output || null;
-  if (form.value.media_account_id) draftResourceIssue.value.account = !a ? "原账号不可用，请恢复原账号或重新选择" : accountUnavailable(a, form.value.category_id, currentUser.value?.id);
-  if (form.value.composite_output_id) draftResourceIssue.value.output = !output.value ? "原成片不可用，填写内容已保留" : outputUnavailable(output.value, form.value.category_id, a);
+  if (form.value.media_account_id) draftResourceIssue.value.account = !a ? "原账号不可用，请恢复原账号或重新选择" : accountUnavailable(a, form.value.category_id, currentUser.value?.id,form.value.platform);
+  if (form.value.composite_output_id) draftResourceIssue.value.output = !output.value ? "原成片不可用，填写内容已保留" : outputUnavailable(output.value, form.value.category_id, a,form.value.platform);
   if (form.value.content.cover_file_id) {
     cover.value = { id: form.value.content.cover_file_id, image_asset_id: String(payload.image_asset_id || ""), origin: String(payload.cover_origin || ""), output_id: String(payload.cover_output_id || ""), name: "原封面暂不可用" };
     const thumbnail = output.value?.thumbnail;
@@ -406,20 +430,20 @@ async function restoreDraft(payload) {
 }
 async function restorePortraitCover(payload) {
   portraitCover.value = null;
-  const id = form.value.content.portrait_cover_file_id;
+  const id = form.value.content[secondaryProfile.value.file];
   if (!id) return;
   try {
-    const ref = form.value.content.portrait_cover_render;
+    const ref = form.value.content[secondaryProfile.value.render];
     if (ref) {
       const item = await createImageClient().getCover(id);
       if (JSON.stringify(coverReference(item)) !== JSON.stringify(ref))
         throw new Error();
       portraitCover.value = { ...item.file, origin: "template" };
       portraitCoverConfig.value =
-        payload.portrait_cover_config ||
+        payload[secondaryPrefix.value+'_cover_config'] ||
         coverConfigFromReference(ref, item.snapshot);
     } else if (
-      payload.portrait_cover_origin === "output" &&
+      payload[secondaryPrefix.value+'_cover_origin'] === "output" &&
       String(output.value?.thumbnail?.file_id) === id
     ) {
       portraitCover.value = {
@@ -430,7 +454,7 @@ async function restorePortraitCover(payload) {
       };
     } else {
       const item = await createImageClient().getImageAsset(
-        payload.portrait_image_asset_id,
+        payload[secondaryPrefix.value+'_image_asset_id'],
       );
       if (
         String(item.file_id) !== id ||
@@ -447,7 +471,7 @@ async function restorePortraitCover(payload) {
         image_asset_id: item.id,
       };
     }
-    if (!coverMatchesRatio(portraitCover.value, 3, 4)) throw new Error();
+    if (!coverMatchesRatio(portraitCover.value,...secondaryProfile.value.aspect)) throw new Error();
   } catch {
     draftResourceIssue.value.portrait_cover =
       "原竖版封面不可用，请重新选择或生成";
@@ -455,7 +479,7 @@ async function restorePortraitCover(payload) {
 }
 watch([form, schedule, pendingRequest, coverConfig,portraitCoverConfig], () => {
   if (draftReady.value && draftClient && view.value === "form" && !editing.value && !busy.value) {
-    const hasInput = form.value.category_id || form.value.media_account_id || form.value.composite_output_id || form.value.content.description || schedule.value;
+    const hasInput = form.value.category_id || form.value.media_account_id || form.value.composite_output_id || publicationTitle(form.value.platform,form.value.content) || schedule.value;
     draftClient.remember(hasInput ? draftPayload() : null);
   }
 }, { deep: true });
@@ -743,8 +767,10 @@ async function edit(row) {
     };
     coverConfig.value = v.content.cover_render ? coverConfigFromReference(v.content.cover_render,v.resources.cover_render) : emptyCoverConfig();
     if(v.content.cover_render) cover.value.origin="template";
-    portraitCover.value={id:v.content.portrait_cover_file_id,name:v.resources.portrait_cover_name,resource_path:v.resources.portrait_cover_resource_path};
-    portraitCoverConfig.value=v.content.portrait_cover_render ? coverConfigFromReference(v.content.portrait_cover_render,v.resources.portrait_cover_render) : emptyCoverConfig();
+    const secondary = platformCoverProfiles(v.platform)[1];
+    const prefix=v.platform === 'bilibili' ? 'space_cover' : 'portrait_cover';
+    portraitCover.value={id:v.content[secondary.file],name:v.resources[prefix+'_name'],resource_path:v.resources[prefix+'_resource_path']};
+    portraitCoverConfig.value=v.content[secondary.render] ? coverConfigFromReference(v.content[secondary.render],v.resources[secondary.render]) : emptyCoverConfig();
     form.value = {
       request_key: v.request_key,
       platform: v.platform,
@@ -771,7 +797,8 @@ async function edit(row) {
 }
 function setOutput(row) {
   const backgroundChanged=String(output.value?.id || "")!==String(row?.id || "") || String(output.value?.thumbnail?.file_id || "")!==String(row?.thumbnail?.file_id || "");
-  form.value.content.description = publicationTitleForOutput(form.value.content.description, output.value, row);
+  const field=titleField(form.value.platform);
+  form.value.content[field] = publicationTitleForOutput(form.value.content[field] || '', output.value, row);
   output.value = row;
   if(portraitCoverConfig.value.method==="template" && portraitCoverConfig.value.background_mode==="business" && portraitCoverConfig.value.background_source==="output" && backgroundChanged)clearPortraitCover();
   else if(portraitCover.value?.origin==="output" && backgroundChanged)clearPortraitCover();
@@ -780,7 +807,7 @@ function setOutput(row) {
     clearRenderedCover();
   } else if (coverConfig.value.method === "image" && (!cover.value || cover.value.origin === "output")) {
     const thumbnail = row?.thumbnail;
-    cover.value = thumbnail?.file_id && coverMatchesRatio(thumbnail,16,9) ? { ...thumbnail, id: String(thumbnail.file_id), origin: "output", output_id: String(row.id), name: "成片封面" } : null;
+    cover.value = thumbnail?.file_id && coverMatchesRatio(thumbnail,...primaryProfile.value.aspect) ? { ...thumbnail, id: String(thumbnail.file_id), origin: "output", output_id: String(row.id), name: "成片封面" } : null;
     form.value.content.cover_file_id = cover.value ? cover.value.id : "";
     delete draftResourceIssue.value.cover;
   }
@@ -799,7 +826,7 @@ function updateCoverConfig(config) {
   if(config.method==="image")useOutputCover();
 }
 function useOutputCover() {
-  if(frozen.value || !output.value?.thumbnail?.file_id || !coverMatchesRatio(output.value.thumbnail,16,9))return;
+  if(frozen.value || !output.value?.thumbnail?.file_id || !coverMatchesRatio(output.value.thumbnail,...primaryProfile.value.aspect))return;
   const thumbnail=output.value.thumbnail;
   const previous=reviewedInput();
   cover.value={...thumbnail,id:String(thumbnail.file_id),origin:"output",output_id:String(output.value.id),name:"成片封面"};
@@ -817,12 +844,13 @@ function useRenderedCover(artwork) {
   invalidate();
 }
 function reviewedInput() {
-  return JSON.stringify({ platform: form.value.platform, category: form.value.category_id, account: form.value.media_account_id, output: form.value.composite_output_id, description: form.value.content.description, topics: form.value.content.topics, declaration: form.value.content.declaration, cover: form.value.content.cover_file_id, cover_render:form.value.content.cover_render,portrait_cover:form.value.content.portrait_cover_file_id,portrait_cover_render:form.value.content.portrait_cover_render });
+  const { confirmed, ...content } = form.value.content;
+  return JSON.stringify({ platform: form.value.platform, category: form.value.category_id, account: form.value.media_account_id, output: form.value.composite_output_id, content });
 }
 function clearPortraitCover() {
   portraitCover.value = null;
-  form.value.content.portrait_cover_file_id = "";
-  delete form.value.content.portrait_cover_render;
+  form.value.content[secondaryProfile.value.file] = "";
+  delete form.value.content[secondaryProfile.value.render];
   delete draftResourceIssue.value.portrait_cover;
   invalidate();
 }
@@ -838,7 +866,7 @@ function updatePortraitConfig(config) {
 }
 function usePortraitOutput() {
   const image = output.value?.thumbnail;
-  if (frozen.value || !image?.file_id || !coverMatchesRatio(image, 3, 4))
+  if (frozen.value || !image?.file_id || !coverMatchesRatio(image,...secondaryProfile.value.aspect))
     return;
   portraitCover.value = {
     ...image,
@@ -846,16 +874,16 @@ function usePortraitOutput() {
     origin: "output",
     output_id: String(output.value.id),
   };
-  form.value.content.portrait_cover_file_id = String(image.file_id);
-  delete form.value.content.portrait_cover_render;
+  form.value.content[secondaryProfile.value.file] = String(image.file_id);
+  delete form.value.content[secondaryProfile.value.render];
   delete draftResourceIssue.value.portrait_cover;
   invalidate();
 }
 function usePortraitArtwork(item) {
   if (frozen.value || portraitCoverConfig.value.method !== "template") return;
   portraitCover.value = { ...item.file, origin: "template" };
-  form.value.content.portrait_cover_file_id = String(item.file.id);
-  form.value.content.portrait_cover_render = coverReference(item);
+  form.value.content[secondaryProfile.value.file] = String(item.file.id);
+  form.value.content[secondaryProfile.value.render] = coverReference(item);
   delete draftResourceIssue.value.portrait_cover;
   invalidate();
 }
@@ -880,14 +908,14 @@ function picked(row) {
     delete draftResourceIssue.value.output;
     setOutput(row);
   } else if(coverTarget.value==="portrait") {
-    if(!coverMatchesRatio(row,3,4)){feedback.toast.error("请选择3:4且不超过5MB的竖版封面");return;}
+    if(!coverMatchesProfile(row,secondaryProfile.value,form.value.platform)){feedback.toast.error(form.value.platform === 'bilibili' ? '请选择16:9、PNG或JPEG且不超过5MB的个人空间封面' : '请选择3:4且不超过5MB的竖版封面');return;}
     portraitCover.value=row;
     portraitCoverConfig.value={...portraitCoverConfig.value,method:"image"};
-    form.value.content.portrait_cover_file_id=String(row.id);
-    delete form.value.content.portrait_cover_render;
+    form.value.content[secondaryProfile.value.file]=String(row.id);
+    delete form.value.content[secondaryProfile.value.render];
     delete draftResourceIssue.value.portrait_cover;
   } else {
-    if(!coverMatchesRatio(row,16,9)){feedback.toast.error("请选择16:9且不超过5MB的横版封面");return;}
+    if(!coverMatchesProfile(row,primaryProfile.value,form.value.platform)){feedback.toast.error(form.value.platform === 'bilibili' ? '请选择4:3、PNG或JPEG且不超过5MB的首页推荐封面' : '请选择16:9且不超过5MB的横版封面');return;}
     delete draftResourceIssue.value.cover;
     delete form.value.content.cover_render;
     coverConfig.value = {...coverConfig.value,method:"image"};
@@ -938,10 +966,10 @@ async function submit() {
       (editing.value
         ? {
             expected_revision: editing.value.revision,
-            content: { ...form.value.content },
+            content: publicationContentInput(form.value.platform,form.value.content),
             not_before,
           }
-        : { ...form.value, content: { ...form.value.content }, not_before });
+        : { ...form.value, content: publicationContentInput(form.value.platform,form.value.content), not_before });
     pendingRequest.value = payload;
     if (!editing.value) await draftClient.save(draftPayload());
     sent = true;
@@ -1168,7 +1196,7 @@ onMounted(async () => {
                   class="publication-thumbnail"
                 />
                 <div class="publication-content">
-                  <strong>{{ row.content.description }}</strong
+                  <strong>{{ publicationTitle(row.platform,row.content) }}</strong
                   ><small>成片 {{ row.composite_output_id }}</small>
                 </div>
               </div></template
@@ -1212,7 +1240,7 @@ onMounted(async () => {
       :back-label="source ? '返回成片管理' : '返回发布任务列表'"
       @back="back"
     >
-      <FeedbackAlert v-if="formError && !validationField" theme="error" :message="formError" />
+      <FeedbackAlert v-if="formError && (!validationField || form?.platform === 'bilibili')" theme="error" :message="formError" />
       <t-button v-if="draftConflict" theme="default" variant="outline" :disabled="busy" @click="reloadDraft">读取最新草稿</t-button>
       <div class="quick-publish">
         <section class="resource-editor-section quick-block">
@@ -1224,9 +1252,9 @@ onMounted(async () => {
           <div class="quick-resource-grid">
             <label
               ><ResourceRequiredLabel>发布平台</ResourceRequiredLabel><t-select
-                value="baidu"
-                :options="[{ label: '百度（百家号）', value: 'baidu' }]"
-                disabled /></label
+                :value="form.platform"
+                :options="platforms.options.value"
+                :disabled="!!editing || frozen || platforms.loading.value" @change="changePlatform" /></label
             ><label
               ><ResourceRequiredLabel>发布类目</ResourceRequiredLabel><t-select
                 :value="form.category_id"
@@ -1274,7 +1302,8 @@ onMounted(async () => {
         <section v-if="output || form.composite_output_id" class="resource-editor-section quick-block">
           <div class="quick-content-heading"><h3><span>02</span>发布内容</h3><PublicationContentGenerator :context="generationContext" :values="generationValues" :template="coverConfig.method === 'template'" :disabled="frozen" @adopt="adoptGeneratedContent" /></div>
           <div class="quick-copy-fields">
-          <label
+          <BilibiliContentFields v-if="form.platform === 'bilibili'" :content="form.content" :disabled="frozen" @patch="patchContent" />
+          <label v-else
             ><ResourceRequiredLabel>发布标题</ResourceRequiredLabel><t-textarea
               v-model="form.content.description"
               aria-label="发布标题"
@@ -1287,23 +1316,23 @@ onMounted(async () => {
           /></label>
           <FormError id="publication-text-error" v-if="validationField === 'text'" :message="formError" />
           <div class="quick-cover-field">
-            <label class="quick-field-heading"><ResourceRequiredLabel>发布封面</ResourceRequiredLabel><ResourceFieldHelp label="发布封面" content="使用现成图片或选择模板添加文字。默认使用成片真实封面；百度需要16:9横版和3:4竖版封面，单张不超过5MB；分别选择图片或匹配模板生成。" /></label>
-            <h4>横版封面 · 16:9</h4>
+            <label class="quick-field-heading"><ResourceRequiredLabel>发布封面</ResourceRequiredLabel><ResourceFieldHelp label="发布封面" :content="form.platform === 'bilibili' ? 'B站需要4:3首页推荐封面和16:9个人空间封面；PNG或JPEG，每张不超过5MB。' : '百度需要16:9横版和3:4竖版封面，每张不超过5MB。'" /></label>
+            <h4>{{primaryProfile.label}}</h4>
             <FormError id="publication-cover-error" v-if="validationField === 'cover'" :message="formError" />
             <FeedbackAlert v-if="draftResourceIssue.cover" theme="error" :message="draftResourceIssue.cover" />
             <div class="quick-cover-workspace">
               <div class="publication-cover-preview"><button v-if="cover?.resource_path" type="button" class="publication-image-button" aria-label="预览发布封面" @click="previewImage(cover.resource_path, cover.name)"><img :src="files.resourceURL(cover)" alt="当前发布封面" /><span>预览封面</span></button><div v-else class="publication-cover-empty">请选择图片或生成封面</div></div>
-              <PublishingCoverEditor :config="coverConfig" :output="output" :category="form.category_id" :disabled="frozen" @update:config="updateCoverConfig" @rendered="useRenderedCover" @choose-image="chooseCoverImage('horizontal')" @use-output="useOutputCover" />
+              <PublishingCoverEditor :config="coverConfig" :aspect="primaryProfile.aspect" :output="output" :category="form.category_id" :disabled="frozen" @update:config="updateCoverConfig" @rendered="useRenderedCover" @choose-image="chooseCoverImage('horizontal')" @use-output="useOutputCover" />
             </div>
-            <h4>竖版封面 · 3:4</h4>
+            <h4>{{secondaryProfile.label}}</h4>
             <FormError id="publication-portrait-error" v-if="validationField === 'portrait'" :message="formError" />
             <FeedbackAlert v-if="draftResourceIssue.portrait_cover" theme="error" :message="draftResourceIssue.portrait_cover" />
             <div class="quick-cover-workspace">
-              <div class="publication-cover-preview"><button v-if="portraitCover?.resource_path" type="button" class="publication-image-button" aria-label="预览竖版封面" @click="previewImage(portraitCover.resource_path, portraitCover.name)"><img :src="files.resourceURL(portraitCover)" alt="当前竖版封面" /><span>预览封面</span></button><div v-else class="publication-cover-empty">请选择图片或生成竖版封面</div></div>
-              <PublishingCoverEditor :config="portraitCoverConfig" :aspect="[3,4]" :output="output" :category="form.category_id" :disabled="frozen" @update:config="updatePortraitConfig" @rendered="usePortraitArtwork" @choose-image="chooseCoverImage('portrait')" @use-output="usePortraitOutput" />
+              <div class="publication-cover-preview"><button v-if="portraitCover?.resource_path" type="button" class="publication-image-button" :aria-label="'预览'+secondaryProfile.label" @click="previewImage(portraitCover.resource_path, portraitCover.name)"><img :src="files.resourceURL(portraitCover)" :alt="secondaryProfile.label" /><span>预览封面</span></button><div v-else class="publication-cover-empty">请选择图片或生成{{secondaryProfile.label}}</div></div>
+              <PublishingCoverEditor :config="portraitCoverConfig" :aspect="secondaryProfile.aspect" :output="output" :category="form.category_id" :disabled="frozen" @update:config="updatePortraitConfig" @rendered="usePortraitArtwork" @choose-image="chooseCoverImage('portrait')" @use-output="usePortraitOutput" />
             </div>
           </div>
-          <label
+          <label v-if="form.platform === 'baidu'"
             >话题<t-input
               v-model="form.content.topics"
               aria-label="话题" :aria-describedby="validationField === 'text' && formError ? 'publication-text-error' : undefined"
@@ -1311,7 +1340,7 @@ onMounted(async () => {
               :disabled="frozen"
               @change="invalidate"
           /><small>标题与话题合计 {{ publicationTextLength(form.content.description, form.content.topics) }}/50 字（含分隔空格）</small></label>
-          <label
+          <label v-if="form.platform === 'baidu'"
             ><ResourceRequiredLabel>创作声明</ResourceRequiredLabel><t-select
               v-model="form.content.declaration"
               aria-label="创作声明"
@@ -1374,16 +1403,20 @@ onMounted(async () => {
       </ResourceSection></ResourceCard>
       <ResourceCard class="detail-card"><ResourceSection title="发布内容">
         <ResourceDescriptions>
-          <t-descriptions-item label="发布标题" full><span class="publication-description">{{ detail.content.description }}</span></t-descriptions-item>
+          <t-descriptions-item label="发布标题" full><span class="publication-description">{{ publicationTitle(detail.platform,detail.content) }}</span></t-descriptions-item>
           <t-descriptions-item label="发布封面" full>
             <div class="publication-cover-summary">
               <button v-if="detail.resources.cover_resource_path" type="button" class="publication-image-button" aria-label="预览最终发布封面" @click="previewImage(detail.resources.cover_resource_path, detail.resources.cover_name)"><img :src="files.resourceURL({ resource_path: detail.resources.cover_resource_path })" alt="最终发布封面" /><span>预览封面</span></button>
               <span>{{ detail.resources.cover_name || detail.content.cover_file_id }}</span>
             </div>
           </t-descriptions-item>
-          <t-descriptions-item label="话题" full>{{ detail.content.topics || "—" }}</t-descriptions-item>
-          <t-descriptions-item label="竖版封面" full><button v-if="detail.resources.portrait_cover_resource_path" type="button" class="publication-image-button" @click="previewImage(detail.resources.portrait_cover_resource_path,detail.resources.portrait_cover_name)"><img :src="files.resourceURL({resource_path:detail.resources.portrait_cover_resource_path})" alt="竖版封面" /><span>预览封面</span></button><span>{{detail.resources.portrait_cover_name || '—'}}</span></t-descriptions-item>
-          <t-descriptions-item label="创作声明">{{ detail.content.declaration }}</t-descriptions-item>
+          <t-descriptions-item v-if="detail.platform === 'baidu'" label="话题" full>{{ detail.content.topics || "—" }}</t-descriptions-item>
+          <t-descriptions-item :label="detail.platform === 'bilibili' ? '个人空间封面' : '竖版封面'" full><button v-if="detail.resources[detail.platform === 'bilibili' ? 'space_cover_resource_path' : 'portrait_cover_resource_path']" type="button" class="publication-image-button" @click="previewImage(detail.resources[detail.platform === 'bilibili' ? 'space_cover_resource_path' : 'portrait_cover_resource_path'],detail.resources[detail.platform === 'bilibili' ? 'space_cover_name' : 'portrait_cover_name'])"><img :src="files.resourceURL({resource_path:detail.resources[detail.platform === 'bilibili' ? 'space_cover_resource_path' : 'portrait_cover_resource_path']})" alt="竖版封面" /><span>预览封面</span></button><span>{{detail.resources[detail.platform === 'bilibili' ? 'space_cover_name' : 'portrait_cover_name'] || '—'}}</span></t-descriptions-item>
+          <t-descriptions-item label="创作声明">{{ detail.platform === 'bilibili' ? detail.content.bilibili?.statement : detail.content.declaration }}</t-descriptions-item>
+          <t-descriptions-item v-if="detail.platform === 'bilibili'" label="简介" full>{{detail.content.description || '—'}}</t-descriptions-item>
+          <t-descriptions-item v-if="detail.platform === 'bilibili'" label="分区">{{detail.content.bilibili?.partition_name}}</t-descriptions-item>
+          <t-descriptions-item v-if="detail.platform === 'bilibili'" label="标签">{{detail.content.bilibili?.tags?.join('，')}}</t-descriptions-item>
+          <t-descriptions-item v-if="detail.platform === 'bilibili'" label="可见范围">{{detail.content.bilibili?.visibility === 'public' ? '公开可见' : '仅自己可见'}}</t-descriptions-item>
         </ResourceDescriptions>
       </ResourceSection></ResourceCard>
       <ResourceCard class="detail-card"><ResourceSection title="发布设置">
@@ -1419,7 +1452,8 @@ onMounted(async () => {
       :visible="!!picker"
       :kind="picker"
       :user-id="currentUser?.id"
-      :aspect="picker==='image' ? (coverTarget==='portrait' ? [3,4] : [16,9]) : undefined"
+      :platform="form?.platform || 'baidu'"
+      :aspect="picker==='image' ? (coverTarget==='portrait' ? secondaryProfile.aspect : primaryProfile.aspect) : undefined"
       :category="form?.category_id"
       :account="account"
       @update:visible="!$event && (picker = '')"

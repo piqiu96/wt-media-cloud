@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue';
 import ResourceStatusBadge from '../../../shared/ui/resource/ResourceStatusBadge.vue';
 import { formatDurationMs } from '../../../shared/utils/units.js';
 import { batchAccountName, batchOutputName, batchOutputProblem } from '../useBatchResourceCatalog.js';
+import { publicationTitle } from '../platformContent.js';
 import { contentIssues } from '../eligibility.js';
 import { localContentIssue, presentBatchIssues } from '../batchIssuePresentation.js';
 
@@ -26,15 +27,15 @@ function issues(row){
   else if(account(row).eligible===false||account(row).enabled===false)current.push({message:account(row).reason||'账号当前不可用'});
   if(!output(row))current.push({message:'成片信息暂不可用'});
   else{
-    const message=batchOutputProblem(output(row),row.category_id,props.batch.team_id);
+    const message=batchOutputProblem(output(row),row.category_id,props.batch.team_id,props.batch.platform);
     if(message)current.push({field:'composite_output_id',code:output(row).occupied?'output_occupied':undefined,message});
   }
   current.push(...(props.batch.readiness?.issues||[]).filter(issue=>issue.row_key===row.row_key));
-  current.push(...contentIssues({...row,content:{...row.content,
+  current.push(...contentIssues({...row,platform:props.batch.platform,content:{...row.content,
     cover_file_id:row.content?.cover_file_id==='0'?'':row.content?.cover_file_id,
     portrait_cover_file_id:row.content?.portrait_cover_file_id==='0'?'':row.content?.portrait_cover_file_id,
   }}).map(issue=>localContentIssue(issue,row.row_key)));
-  return presentBatchIssues(current);
+  return presentBatchIssues(current,props.batch.platform);
 }
 function state(row){
   const problems=issues(row);
@@ -50,7 +51,7 @@ function state(row){
     <t-table row-key="row_key" :data="rows" :columns="columns" table-layout="fixed" :scroll="{x:'860px'}"
       :pagination="rows.length>10?{current:page,pageSize,total:rows.length,pageSizeOptions:[10,20,50],showJumper:false}:undefined"
       @page-change="value=>{page=value.current;pageSize=value.pageSize}">
-      <template #content="{row}"><span class="batch-readonly-title" :title="row.content?.description">{{row.content?.description||'待填写发布文案'}}</span><small>{{categoryName(row.category_id)}}</small></template>
+      <template #content="{row}"><span class="batch-readonly-title" :title="publicationTitle(batch.platform,row.content)">{{publicationTitle(batch.platform,row.content)||'待填写发布文案'}}</span><small>{{categoryName(row.category_id)}}</small></template>
       <template #account="{row}"><span class="batch-readonly-text" :title="accountName(row)">{{accountName(row)}}</span></template>
       <template #output="{row}"><span class="batch-readonly-text batch-readonly-output" :title="outputName(row)">{{outputName(row)}}</span><small>成片 ID：{{row.composite_output_id}} · 时长：{{formatDurationMs(output(row)?.media?.duration_ms)}}</small></template>
       <template #configuration="{row}"><ResourceStatusBadge :label="state(row)" :tone="state(row)==='已就绪'?'success':'warning'"/><small v-if="issues(row).length" class="batch-readonly-text">{{issues(row)[0].message}}</small><details v-if="issues(row).length>1" class="batch-readonly-issues"><summary>另 {{issues(row).length-1}} 项</summary><ul><li v-for="(issue,index) in issues(row).slice(1)" :key="index">{{issue.message}}</li></ul></details></template>

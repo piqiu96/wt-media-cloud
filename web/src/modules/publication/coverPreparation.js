@@ -103,3 +103,25 @@ export function coverMatchesRatio(file, width, height) {
     (!file?.size_bytes || Number(file.size_bytes) <= 5 * 1024 * 1024)
   );
 }
+
+export function coverMatchesProfile(file, profile, platform = 'baidu') {
+  if (!coverMatchesRatio(file, ...profile.aspect)) return false;
+  return platform !== 'bilibili' || ['png', 'jpeg'].includes((file?.metadata || file)?.format);
+}
+
+export async function selectMatchingCover(client, category, profile, platform) {
+  let general = null;
+  for (let page = 1; page <= 1000; page++) {
+    const result = await client.listImageAsset({ usage: 'cover', enabled: true, category_id: category,
+      aspect: profile.aspect[0] > profile.aspect[1] ? 'landscape' : 'portrait', page, page_size: 100 });
+    if (!Array.isArray(result?.items) || !Number.isSafeInteger(Number(result.total))) throw new Error('图片列表返回不完整');
+    for (const file of result.items) {
+      if (!file.file_id || !file.resource_path || !coverMatchesProfile(file, profile, platform)) continue;
+      if ((file.category_ids || []).map(String).includes(String(category))) return file;
+      if (!(file.category_ids || []).length && !general) general = file;
+    }
+    if (page * 100 >= result.total) return general;
+    if (!result.items.length) throw new Error('图片列表分页不完整，请重试');
+  }
+  throw new Error('符合规格的图片未能完整核实，请从图片库手动选择');
+}

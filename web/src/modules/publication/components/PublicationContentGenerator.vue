@@ -5,10 +5,11 @@ import FeedbackAlert from '../../../shared/ui/feedback/FeedbackAlert.vue';
 import { createPublicationClient } from '../../../shared/api/publication.js';
 import { createSessionClient } from '../../../shared/api/session.js';
 import { usePublicationGeneration } from '../usePublicationGeneration.js';
+import { platformGenerationFields } from '../platformContent.js';
 const props = defineProps({ context: { type: Object, required: true }, values: { type: Object, required: true }, template: Boolean, disabled: Boolean });
 const emit = defineEmits(['adopt']);
-const labels = { description: '发布标题', cover_title: '封面短标题', topics: '话题' };
-const fields = computed(() => props.template ? ['description', 'cover_title', 'topics'] : ['description', 'topics']);
+const labels = computed(() => platformGenerationFields(props.context.platform));
+const fields = computed(() => Object.keys(labels.value).filter(field => props.template || field !== 'cover_title'));
 const client = createPublicationClient(), session = createSessionClient();
 const { visible, selected, instruction, busy, error, suggestion, stage, start, cancel, canAdopt, apply } = usePublicationGeneration({ context: toRef(props, 'context'), values: toRef(props, 'values'), fields, disabled: toRef(props, 'disabled'), generate: client.generate, getIdentity: async () => String((await session.me()).id), adopt: (field, value) => emit('adopt', field, value) });
 function open() { if (props.disabled) return; selected.value = [...fields.value]; visible.value = true; }

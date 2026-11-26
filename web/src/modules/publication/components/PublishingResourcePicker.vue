@@ -65,7 +65,7 @@ async function load() {
     if (props.batch && props.kind === "account")
       data = await createPublicationBatchClient().accounts({ ...params, platform: props.platform, category_id: props.category });
     else if (props.kind === "account")
-      data = await accounts.listPage({ ...params, platform: "baidu", user_id: props.userId });
+      data = await accounts.listPage({ ...params, platform: props.platform, user_id: props.userId });
     else if (props.kind === "output")
       data = await publication.outputs({ ...params, platform: props.platform || "baidu", ...(props.batch && { category_id: props.category }) });
     else data = await images.listImageAsset({ ...params, usage: props.usage, enabled: true, category_id: props.category });
@@ -91,15 +91,16 @@ function reason(row) {
   }
   if (props.batch && props.kind === "output") {
     if (props.excludedIds.includes(batchOutputID(row))) return "已选择该成片";
-    return batchOutputProblem(row, props.category, props.teamId);
+    return batchOutputProblem(row, props.category, props.teamId, props.platform);
   }
   return props.kind === "account"
-    ? accountUnavailable(row, props.category, props.userId)
+    ? accountUnavailable(row, props.category, props.userId, props.platform)
     : props.kind === "output"
-      ? outputUnavailable(row, props.category, props.account)
+      ? outputUnavailable(row, props.category, props.account, props.platform)
       : row.deleted_at
         ? "文件正在删除"
-        : props.usage === "cover" && props.aspect && !coverMatchesRatio(row,...props.aspect) ? `需要${props.aspect.join(":")}且不超过5MB的图片` : "";
+        : props.usage === "cover" && props.aspect && !coverMatchesRatio(row,...props.aspect) ? `需要${props.aspect.join(":")}且不超过5MB的图片`
+          : props.usage === 'cover' && props.platform === 'bilibili' && !['png','jpeg'].includes((row.metadata || row).format) ? 'B站封面仅支持PNG或JPEG图片' : '';
 }
 function select(row) {
   if (busy.value || reason(row)) return;
