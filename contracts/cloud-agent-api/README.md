@@ -18,8 +18,8 @@ and an Agent Token is not accepted on user business API.
 
 ## Publication admission revision 2026.11.25.2
 
-Cloud advertises `2026.11.25.2` for both the current contract and the minimum
-Agent revision. Only a current session with the new capacity-bearing request
+Revision `2026.11.25.2` remains the minimum Baidu Agent revision; the current
+provider revision is listed in the Bilibili section below. Only a current session with the capacity-bearing request
 can obtain a new publish or check claim or resume an original scene. Older
 publication report and completion packets retain original-attempt ReportSafe
 settlement, original claim inspection/replay and result acknowledgement. A
