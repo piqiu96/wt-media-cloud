@@ -1,0 +1,51 @@
+openapi: 3.1.0
+info:
+  title: WT Media Work Metrics
+  version: 2026.11.27.1
+  description: Additive owner-only read-only platform metric collection. No browser, CK or publication mutation. IDs are strings.
+paths:
+  /api/v1/cloud-agent/work-metrics/claim:
+    post:
+      security: [{agentToken: []}]
+      description: Strict current Desktop session. Claim one enabled owner's authorized-category Bilibili work whose metrics are missing or due. One 90-second random lease per work; no work returns null. Agent polls every 30 seconds. Never returns credentials or arbitrary URLs.
+      responses:
+        '200': {description: 'Standard envelope data null or {work_id,platform_work_id,platform_account_uid,lease_token}; aid is canonical decimal, UID must match response owner.mid.'}
+  /api/v1/cloud-agent/work-metrics/{id}/report:
+    post:
+      security: [{agentToken: []}]
+      parameters:
+        - {in: path, name: id, required: true, schema: {type: string, pattern: '^[1-9][0-9]*$'}}
+      description: Report-safe token plus matching owner, work, unexpired lease_token and aid/UID. Success requires all six nonnegative JS-safe integer counts. Failure requires counts null and bounded error code. Last success preserved on failure. Consumed/expired leases return 409 and never overwrite newer metrics. Success next due in 1 hour; failure backoff 5/10/20/40/60 minutes.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [lease_token, platform_work_id, platform_account_uid]
+              properties:
+                lease_token: {type: string, pattern: '^[a-f0-9]{64}$'}
+                platform_work_id: {type: string}
+                platform_account_uid: {type: string}
+                counts: {$ref: '#/components/schemas/Counts'}
+                error: {type: string, enum: ['', unavailable, rate_limited, identity_mismatch, invalid_response]}
+      responses:
+        '200': {description: Standard envelope data Metrics.}
+        '400': {description: Invalid counts or payload.}
+        '409': {description: Lease lost, expired or source identity mismatch.}
+components:
+  securitySchemes:
+    agentToken: {type: http, scheme: bearer}
+  schemas:
+    Counts:
+      type: object
+      additionalProperties: false
+      required: [view, like, favorite, coin, reply, danmaku]
+      properties:
+        view: {type: integer, minimum: 0, maximum: 9007199254740991}
+        like: {type: integer, minimum: 0, maximum: 9007199254740991}
+        favorite: {type: integer, minimum: 0, maximum: 9007199254740991}
+        coin: {type: integer, minimum: 0, maximum: 9007199254740991}
+        reply: {type: integer, minimum: 0, maximum: 9007199254740991}
+        danmaku: {type: integer, minimum: 0, maximum: 9007199254740991}

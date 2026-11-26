@@ -7,6 +7,7 @@ import (
 	"github.com/cloudwego/hertz/pkg/app/server"
 	"github.com/cloudwego/hertz/pkg/protocol/consts"
 	"github.com/wt-media/wt-media-cloud/internal/middleware"
+	"github.com/wt-media/wt-media-cloud/internal/modules/localagent"
 	"github.com/wt-media/wt-media-cloud/internal/modules/work/service"
 	api "github.com/wt-media/wt-media-cloud/internal/shared/api"
 	"github.com/wt-media/wt-media-cloud/internal/shared/errcode"
@@ -15,6 +16,9 @@ import (
 )
 
 func RegisterRoutes(h *server.Hertz) {
+	h.POST("/api/v1/work/:id/metrics/refresh", RefreshMetrics)
+	h.POST("/api/v1/cloud-agent/work-metrics/claim", localagent.RequireAgent(localagent.StrictMode), ClaimMetrics)
+	h.POST("/api/v1/cloud-agent/work-metrics/:id/report", localagent.RequireAgent(localagent.ReportSafeMode), ReportMetrics)
 	h.GET("/api/v1/work", List)
 	h.GET("/api/v1/work/summary", Summary)
 	h.GET("/api/v1/work/:id", Get)

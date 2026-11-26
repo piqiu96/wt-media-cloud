@@ -8,6 +8,9 @@ const mocks = vi.hoisted(() => ({
 vi.mock("../../../shared/api/work.js", () => ({
   createWorkClient: () => mocks.work,
 }));
+vi.mock("../../../shared/ui/feedback/index.js", () => ({
+  feedback: { toast: { success: vi.fn() } },
+}));
 vi.mock("vue-router", () => ({
   useRoute: () => ({ query: mocks.query }),
   useRouter: () => mocks.router,
@@ -134,4 +137,94 @@ it("restores the list scroll position after returning from a shorter detail", as
   await nextTick();
   await nextTick();
   expect(host.scrollTop).toBe(720);
+});
+
+it("distinguishes real zero, missing counters and unsupported platforms", () => {
+  expect(
+    state.metricValue({ platform: "bilibili", metrics: { view: 0 } }, "view"),
+  ).toBe("0");
+  expect(state.metricValue({ platform: "bilibili" }, "view")).toBe("—");
+  expect(
+    state.metricValue({ platform: "baidu", metrics: { view: 5 } }, "view"),
+  ).toBe("—");
+  expect(
+    state.metricStatus({
+      platform: "bilibili",
+      metrics: { status: "failed", last_error: "identity_mismatch" },
+    }),
+  ).toContain("不匹配");
+});
+it("queues refresh without discarding counters and reports Cloud failure", async () => {
+  const old = {
+    view: 7,
+    collected_at: "2026-11-27T00:00:00Z",
+    status: "ready",
+  };
+  const row = { id: "16", platform: "bilibili", metrics: old };
+  state.rows.value = [row];
+  state.detail.value = row;
+  mocks.work.refreshMetrics = vi
+    .fn()
+    .mockResolvedValue({ ...old, status: "queued" });
+  await state.refreshMetrics(row);
+  expect(state.rows.value[0].metrics.view).toBe(7);
+  expect(state.detail.value.metrics.status).toBe("queued");
+  mocks.work.refreshMetrics.mockRejectedValue(new Error("暂时无法更新"));
+  await state.refreshMetrics(row);
+  expect(state.detail.value.metrics.view).toBe(7);
+  expect(state.error.value).toBe("暂时无法更新");
+  expect(state.refreshing.value).toEqual([]);
+});
+it("polls the current work while rejecting a delayed previous detail", async () => {
+  let finish;
+  state.detail.value = { id: "16", platform: "bilibili" };
+  mocks.work.get.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  const pending = state.pollMetrics();
+  state.back();
+  finish({ id: "16", metrics: { view: 7 } });
+  await pending;
+  expect(state.detail.value).toBe(null);
+});
+
+it("preserves detail scroll when automatic or manual metrics refresh replaces the same work", async () => {
+  const host = { scrollTop: 720 };
+  state.pageRoot.value = { closest: () => host };
+  state.detail.value = { id: "16", platform: "bilibili" };
+  await nextTick();
+  await nextTick();
+  host.scrollTop = 360;
+  mocks.work.get.mockResolvedValue({
+    id: "16",
+    platform: "bilibili",
+    metrics: { view: 7 },
+  });
+  await state.pollMetrics();
+  await nextTick();
+  await nextTick();
+  expect(host.scrollTop).toBe(360);
+  mocks.work.refreshMetrics = vi
+    .fn()
+    .mockResolvedValue({ status: "queued", view: 7 });
+  await state.refreshMetrics(state.detail.value);
+  await nextTick();
+  await nextTick();
+  expect(host.scrollTop).toBe(360);
+});
+
+it("returns the latest detail counters and refresh status to the cached list", () => {
+  state.rows.value = [
+    { id: "16", platform: "bilibili", metrics: { view: 7, status: "queued" } },
+  ];
+  state.detail.value = {
+    id: "16",
+    platform: "bilibili",
+    metrics: { view: 8, status: "ready" },
+  };
+  state.back();
+  expect(state.rows.value[0].metrics).toEqual({ view: 8, status: "ready" });
 });

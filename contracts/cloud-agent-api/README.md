@@ -93,3 +93,4 @@ inputs freeze the platform and the independent space-cover digest/size; reports
 and completions must match that digest. Baidu canonical input JSON and original
 ReportSafe settlement remain unchanged. Deployment availability remains closed
 by default until the complete live acceptance is verified.
+- `v1/work-metrics.openapi.yaml`: additive owner-scoped six-counter public Bilibili collection; strict claims, report-safe lease results, 90-second leases, hourly success interval and failure backoff. No CK, browser scene or publication mutation. Deploy matching Local/Sidecar support for automatic/manual requests; old or offline Agents leave refresh queued.
