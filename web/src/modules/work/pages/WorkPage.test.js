@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock("../../../shared/api/work.js", () => ({
   createWorkClient: () => mocks.work,
 }));
+vi.mock("../../../shared/ui/feedback/index.js", () => ({ feedback: { toast: { success: vi.fn() } } }));
 vi.mock("vue-router", () => ({
   useRoute: () => ({ query: mocks.query }),
   useRouter: () => mocks.router,
@@ -186,4 +187,29 @@ it("polls the current work while rejecting a delayed previous detail", async () 
   finish({ id: "16", metrics: { view: 7 } });
   await pending;
   expect(state.detail.value).toBe(null);
+});
+
+it("preserves detail scroll when automatic or manual metrics refresh replaces the same work", async () => {
+  const host = { scrollTop: 720 };
+  state.pageRoot.value = { closest: () => host };
+  state.detail.value = { id: "16", platform: "bilibili" };
+  await nextTick();
+  await nextTick();
+  host.scrollTop = 360;
+  mocks.work.get.mockResolvedValue({
+    id: "16",
+    platform: "bilibili",
+    metrics: { view: 7 },
+  });
+  await state.pollMetrics();
+  await nextTick();
+  await nextTick();
+  expect(host.scrollTop).toBe(360);
+  mocks.work.refreshMetrics = vi
+    .fn()
+    .mockResolvedValue({ status: "queued", view: 7 });
+  await state.refreshMetrics(state.detail.value);
+  await nextTick();
+  await nextTick();
+  expect(host.scrollTop).toBe(360);
 });

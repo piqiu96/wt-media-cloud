@@ -31,6 +31,7 @@ import ResourceRowActions from "../../../shared/ui/resource/ResourceRowActions.v
 import ResourceDetailPage from "../../../shared/ui/resource/ResourceDetailPage.vue";
 import ResourceSection from "../../../shared/ui/resource/ResourceSection.vue";
 import ResourceDescriptions from "../../../shared/ui/resource/ResourceDescriptions.vue";
+import { feedback } from "../../../shared/ui/feedback/index.js";
 import FeedbackAlert from "../../../shared/ui/feedback/FeedbackAlert.vue";
 import MediaPreview from "../../../shared/ui/media/MediaPreview.vue";
 import AccountSummaryDialog from "../../accounts/components/AccountSummaryDialog.vue";
@@ -65,6 +66,7 @@ const pageRoot = ref(null),
   requestedDetailId = ref("");
 let listScroll = 0;
 watch(detail, async (next, previous) => {
+  if (next && previous && String(next.id) === String(previous.id)) return;
   const container = pageRoot.value?.closest(".content-area");
   if (!previous) listScroll = container?.scrollTop || 0;
   await nextTick();
@@ -127,7 +129,8 @@ function metricStatus(row) {
   if (!m || m.status === "queued") return "等待更新（需负责人本机服务在线）";
   if (m.status === "refreshing")
     return Date.now() - new Date(m.last_attempt_at).getTime() > 120000
-      ? "等待重试（需负责人本机服务在线）" : "更新中";
+      ? "等待重试（需负责人本机服务在线）"
+      : "更新中";
   if (m.status === "failed")
     return (
       {
@@ -146,6 +149,11 @@ async function refreshMetrics(row) {
   try {
     const metrics = await client.refreshMetrics(id);
     if (disposed) return;
+    feedback.toast.success(
+      metrics.status === "ready"
+        ? "刚刚已更新，30 秒内复用本次结果"
+        : "已请求更新，负责人本机服务在线时自动获取",
+    );
     rows.value = rows.value.map((r) =>
       String(r.id) === id ? { ...r, metrics } : r,
     );
