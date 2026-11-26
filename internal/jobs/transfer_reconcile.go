@@ -7,6 +7,7 @@ import (
 
 	"github.com/wt-media/wt-media-cloud/internal/infra/logger"
 	transferrepo "github.com/wt-media/wt-media-cloud/internal/modules/filetransfer/repository"
+	productionservice "github.com/wt-media/wt-media-cloud/internal/modules/production/service"
 )
 
 // RunTransferReconcile finishes transfer tasks whose executor stopped reporting.
@@ -38,8 +39,12 @@ func RunTransferReconcile(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("reconcile completed dependencies: %w", err)
 	}
-	if cancelled+exhausted+attached > 0 {
-		logger.Job().Infof("transfer reconcile finished %d cancelled, %d exhausted, %d dependencies attached", cancelled, exhausted, attached)
+	restored, err := productionservice.ReconcileCancelledMaterialPreparations(time.Now())
+	if err != nil {
+		return fmt.Errorf("reconcile cancelled material preparations: %w", err)
+	}
+	if cancelled+exhausted+attached+restored > 0 {
+		logger.Job().Infof("transfer reconcile finished %d cancelled, %d exhausted, %d dependencies attached, %d materials restored", cancelled, exhausted, attached, restored)
 	}
 	return nil
 }
