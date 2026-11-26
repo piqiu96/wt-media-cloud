@@ -706,6 +706,9 @@ func copyCandidateContent(c model.Content) model.Content {
 	if c.Bilibili != nil {
 		b := *c.Bilibili
 		b.Tags = append([]string(nil), b.Tags...)
+		// A copy is a new publication, governed by the confirmed ordinary mode.
+		// The source task and its frozen statement remain unchanged.
+		b.Statement, b.Source = "内容无需标注", ""
 		out.Bilibili = &b
 	}
 	return out

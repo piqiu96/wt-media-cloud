@@ -138,3 +138,15 @@ func TestBaiduRejectsForeignContentWithoutRelaxingItsLimits(t *testing.T) {
 		t.Fatal("cross-platform content accepted")
 	}
 }
+
+func TestBilibiliCopyUsesOrdinaryStatementWithoutChangingHistoricalContent(t *testing.T) {
+	original := model.Content{Title: "历史标题", Bilibili: &model.BilibiliContent{Statement: "内容含营销信息", Source: "历史来源", Tags: []string{"三角洲行动"}}}
+	copied := copyCandidateContent(original)
+	if copied.Bilibili.Statement != "内容无需标注" || copied.Bilibili.Source != "" || copied.Confirmed {
+		t.Fatalf("new copy retained old statement: %+v", copied)
+	}
+	copied.Bilibili.Tags[0] = "新标签"
+	if original.Bilibili.Statement != "内容含营销信息" || original.Bilibili.Source != "历史来源" || original.Bilibili.Tags[0] != "三角洲行动" {
+		t.Fatal("copy mutated historical content")
+	}
+}

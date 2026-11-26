@@ -45,7 +45,7 @@ func TestBilibiliBatchCoversKeepBothIndependentResourcePaths(t *testing.T) {
 func TestCopyBilibiliCandidateDropsFormalProductsAndOwnsOptions(t *testing.T) {
 	c := biliContentFixture()
 	copy := copyCandidateContent(c)
-	if copy.Title != c.Title || copy.Description != c.Description || copy.Bilibili == nil || copy.Bilibili.Statement != c.Bilibili.Statement || copy.Confirmed || copy.CoverFileID != 0 || copy.SpaceCoverFileID != 0 || copy.CoverRender != nil || copy.SpaceCoverRender != nil {
+	if copy.Title != c.Title || copy.Description != c.Description || copy.Bilibili == nil || copy.Bilibili.Statement != "内容无需标注" || copy.Bilibili.Source != "" || copy.Confirmed || copy.CoverFileID != 0 || copy.SpaceCoverFileID != 0 || copy.CoverRender != nil || copy.SpaceCoverRender != nil {
 		t.Fatalf("copied execution products or lost text: %+v", copy)
 	}
 	copy.Bilibili.Tags[0] = "changed"

@@ -195,3 +195,31 @@ func TestGenerationUsesDistinctPlatformStyleAndRejectsInventedGameContext(t *tes
 		})
 	}
 }
+
+func TestGenerationUsesMaterialBodyWithoutInheritedHashtagCampaigns(t *testing.T) {
+	s, a, _ := fixture()
+	source := s.Output
+	s.Output = func(a identity.PublicUser, id int64) (production.ComposeOutputDetail, error) {
+		d, e := source(a, id)
+		d.Output.MaterialTitle = "三角洲跳拉操作集锦 #双子星 #三角洲S12 #抖音精选app"
+		return d, e
+	}
+	s.GenerateJSON = func(_ context.Context, system, user string) (string, error) {
+		if !strings.Contains(user, "三角洲跳拉操作集锦") {
+			t.Error("lost material body")
+		}
+		for _, tag := range []string{"双子星", "三角洲S12", "抖音精选app"} {
+			if strings.Contains(user, tag) {
+				t.Errorf("inherited unverified campaign %s", tag)
+			}
+		}
+		return `{"description":"三角洲跳拉操作集锦","topics":""}`, nil
+	}
+	run, e := s.PreparePublicationGeneration(a, generationInput())
+	if e != nil {
+		t.Fatal(e)
+	}
+	if _, e = run(context.Background()); e != nil {
+		t.Fatal(e)
+	}
+}
