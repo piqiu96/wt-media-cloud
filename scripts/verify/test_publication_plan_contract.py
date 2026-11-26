@@ -54,6 +54,20 @@ class PublicationPlanContractTest(unittest.TestCase):
         self.assertFalse(schema.is_valid({**bili, "bilibili": {**bili["bilibili"], "creation_type": "original"}}))
         self.assertFalse(schema.is_valid({**bili, "bilibili": {**bili["bilibili"], "statement": "内容为转载"}}))
 
+    def test_agent_publication_contracts_validate_and_legacy_defaults_remain_baidu(self):
+        for filename in ["publications.openapi.yaml", "compatibility.openapi.yaml"]:
+            path = ROOT / "contracts/cloud-agent-api/v1" / filename
+            doc = yaml.safe_load(path.read_text())
+            with self.subTest(filename=filename):
+                OpenAPIV31SpecValidator(SchemaPath.from_dict(doc, base_uri=path.as_uri())).validate()
+            if filename == "publications.openapi.yaml":
+                capabilities = doc["components"]["schemas"]["SupportedPlatforms"]
+                self.assertEqual(capabilities["default"], ["baidu"])
+                validator = Draft202012Validator(capabilities)
+                self.assertTrue(validator.is_valid(["baidu", "bilibili"]))
+                for invalid in [[], ["bilibili", "bilibili"], ["xiaohongshu"]]:
+                    self.assertFalse(validator.is_valid(invalid))
+
     def test_running_list_filter_includes_manual_paused_without_changing_stored_states(self):
         parameters = self.plan["paths"]["/api/v1/publication-plan"]["get"]["parameters"]
         status = next(item for item in parameters if item["name"] == "status")
