@@ -34,6 +34,9 @@ func TestPlatformRulesDefaultsAreCopiedAndNeverClaimOriginality(t *testing.T) {
 	if cfg.Bilibili.Tags[0] != "游戏" || platformRules(cfg).Platforms[1].Defaults["tags"].([]string)[0] != "游戏" {
 		t.Fatal("returned rules mutated configured defaults")
 	}
+	if bili.Defaults["statement"] != "内容无需标注" {
+		t.Fatal("new Bilibili content must use the confirmed ordinary statement")
+	}
 	if _, exists := bili.Defaults["rights_reserved"]; exists {
 		t.Fatal("must require an explicit authorship choice")
 	}

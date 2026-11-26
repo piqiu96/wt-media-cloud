@@ -2,7 +2,7 @@ package service
 
 import "github.com/wt-media/wt-media-cloud/internal/config"
 
-const platformRulesRevision = "2026.11.26.2"
+const platformRulesRevision = "2026.11.27.1"
 
 var bilibiliStatements = []string{"内容无需标注", "含AI生成内容", "含虚构演绎内容", "内容含营销信息", "个人观点，仅供参考", "内容为转载"}
 
@@ -78,7 +78,7 @@ func platformRules(cfg config.PublicationPlatformsConfig) PlatformRules {
 		{Platform: "bilibili", Name: "B站", Enabled: cfg.BilibiliEnabled, TitleMaxLength: 80, DescriptionMaxLength: 2000, TagsMaxCount: 10, TagMaxLength: 20, LengthUnit: "utf16_code_units",
 			StatementOptions: append([]string{}, bilibiliStatements...), PartitionOptions: bilibiliPartitions(), SourceMaxLength: 200, SourceRequiredStatement: "内容为转载", VisibilityOptions: []string{"public", "private"},
 			Cover: cover("cover_file_id", 4, 3), SecondaryCover: cover("space_cover_file_id", 16, 9),
-			Defaults: map[string]any{"partition_id": cfg.Bilibili.PartitionID, "partition_name": cfg.Bilibili.PartitionName, "tags": tags, "visibility": visibility}},
+			Defaults: map[string]any{"partition_id": cfg.Bilibili.PartitionID, "partition_name": cfg.Bilibili.PartitionName, "tags": tags, "visibility": visibility, "statement": "内容无需标注"}},
 	}}
 }
 

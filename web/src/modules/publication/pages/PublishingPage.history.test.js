@@ -58,7 +58,7 @@ it('keeps the Bilibili platform when changing category and clears old content', 
   expect(state.form.value.platform).toBe('bilibili');
   expect(state.form.value.category_id).toBe('2');
   expect(state.form.value.content.title).toBe('');
-  expect(state.form.value.content.bilibili.statement).toBe('');
+  expect(state.form.value.content.bilibili.statement).toBe('内容无需标注');
   expect(state.form.value.content.confirmed).toBe(false);
 });
 

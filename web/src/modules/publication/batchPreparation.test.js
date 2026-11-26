@@ -17,7 +17,7 @@ describe("batch configuration", () => {
     const rows = batch.reconcileAllocation([saved], [pair('3','4'),pair('5','6')], 'bilibili', rule);
     expect(rows[0]).toBe(saved);
     expect(rows[1].content.bilibili.tags).toEqual(['默认']);
-    expect(rows[1].content.bilibili.statement).toBe('');
+    expect(rows[1].content.bilibili.statement).toBe('内容无需标注');
     rows[1].content.bilibili.tags.push('独立');
     expect(rule.defaults.tags).toEqual(['默认']);
   });

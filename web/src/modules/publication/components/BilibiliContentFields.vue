@@ -15,6 +15,11 @@ watch(() => JSON.stringify(options.value.tags || []), value => {
   lastTags = value;
 });
 function change(patch) { emit('patch', { bilibili: { ...options.value, ...patch } }); }
+// An older unfinished draft may have no statement. Complete that editable
+// input through the normal patch path, without rewriting a saved choice.
+watch(() => [props.disabled, options.value.statement], () => {
+  if (!props.disabled && !options.value.statement) change({ statement: '内容无需标注' });
+}, { immediate: true });
 function tags(value) {
   tagsText.value = value;
   const next = value.split('\n').map(tag => tag.trim()).filter(Boolean);
@@ -24,9 +29,6 @@ function tags(value) {
 function partition(id) {
   const selected = rule.value?.partition_options?.find(row => row.id === Number(id));
   change({ partition_id: selected?.id || 0, partition_name: selected?.name || '' });
-}
-function statement(value) {
-  change({ statement: value || '', ...(value === '内容为转载' ? { rights_reserved: false } : { source: '' }) });
 }
 </script>
 
@@ -61,9 +63,9 @@ function statement(value) {
         :autosize="{ minRows: 2, maxRows: 5 }" @change="tags" />
     </label>
     <label>创作声明
-      <t-select :value="options.statement || ''" aria-label="B站创作声明" :disabled="disabled || platforms.loading.value"
-        :options="(rule?.statement_options || []).map(value => ({ value, label: value }))" clearable
-        placeholder="按内容事实选择" @change="statement" />
+      <t-input :value="options.statement || '内容无需标注'" aria-label="B站创作声明" readonly />
+      <small v-if="!options.statement || options.statement === '内容无需标注'">普通发布固定使用“内容无需标注”。</small>
+      <small v-else>保留已保存内容的原声明。</small>
     </label>
     <label class="batch-form-wide" v-if="options.statement === '内容为转载'">转载来源说明
       <t-textarea :value="options.source || ''" aria-label="B站转载来源" :maxlength="200" :disabled="disabled"

@@ -160,3 +160,38 @@ func TestGenerationRejectsSeniorOutsidePublicationCategoryBeforeProviders(t *tes
 		t.Fatalf("mismatched source category: result=%v source_calls=%d model_calls=%d", err, sourceCalls, modelCalls)
 	}
 }
+
+func TestGenerationUsesDistinctPlatformStyleAndRejectsInventedGameContext(t *testing.T) {
+	for _, platform := range []string{"baidu", "bilibili"} {
+		t.Run(platform, func(t *testing.T) {
+			s, a, _ := fixture()
+			s.PlatformSettings.BilibiliEnabled = true
+			in := generationInput()
+			in.Platform = platform
+			in.Fields = []string{"description"}
+			in.FieldRevisions = map[string]string{"description": "1"}
+			in.Content = map[string]string{"description": ""}
+			s.GenerateJSON = func(_ context.Context, system, user string) (string, error) {
+				for _, requirement := range []string{"游戏名称", "不编造", "赛季", "手游", "引流", "插入广告"} {
+					if !strings.Contains(system, requirement) {
+						t.Errorf("%s prompt lacks game context constraint %s", platform, requirement)
+					}
+				}
+				if platform == "bilibili" && (!strings.Contains(system, "玩家口吻") || !strings.Contains(system, "不重复标题")) {
+					t.Error("missing Bilibili title/description style")
+				}
+				if platform == "baidu" && (!strings.Contains(system, "信息明确") || !strings.Contains(system, "事件")) {
+					t.Error("missing Baidu informative style")
+				}
+				return `{"description":"三角洲行动实战片段"}`, nil
+			}
+			run, err := s.PreparePublicationGeneration(a, in)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err = run(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}

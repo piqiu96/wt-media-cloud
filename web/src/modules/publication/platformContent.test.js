@@ -7,7 +7,7 @@ it('keeps Baidu title meaning and initializes only explicitly new Bilibili conte
   const content = initialPlatformContent('bilibili', rule);
   content.bilibili.tags.push('演示');
   expect(rule.defaults.tags).toEqual(['游戏']);
-  expect(content.bilibili.statement).toBe('');
+  expect(content.bilibili.statement).toBe('内容无需标注');
   expect(content.bilibili.rights_reserved).toBe(false);
   expect(publicationTitle('baidu', { description: '旧标题', title: 'foreign' })).toBe('旧标题');
   expect(publicationTitle('bilibili', { title: '新标题', description: '简介' })).toBe('新标题');
@@ -21,7 +21,7 @@ it('adopts reviewed Bilibili tags without inventing a statement or confirming co
   const patch = generationPatch('bilibili', content, 'tags', '游戏\n画中画');
   expect(patch.bilibili.tags).toEqual(['游戏', '画中画']);
   expect(content.bilibili.tags).toEqual([]);
-  expect(patch.bilibili.statement).toBe('');
+  expect(patch.bilibili.statement).toBe('内容无需标注');
   expect(generationValues('bilibili', { ...content, ...patch }).tags).toBe('游戏\n画中画');
   for (const value of ['游戏,原创', '重复\n重复', 'a\n'.repeat(11), '😀'.repeat(11)])
     expect(() => parseBilibiliTags(value)).toThrow();

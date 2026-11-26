@@ -14,7 +14,7 @@ export function initialPlatformContent(platform, rule) {
   return { title: '', description: '', bilibili: {
     partition_id: defaults.partition_id || 0, partition_name: defaults.partition_name || '',
     tags: [...(defaults.tags || [])], visibility: defaults.visibility || 'public',
-    statement: '', rights_reserved: false, source: '',
+    statement: defaults.statement || '内容无需标注', rights_reserved: false, source: '',
   }, confirmed: false };
 }
 export const platformGenerationFields = platform => isBilibili(platform)
