@@ -212,7 +212,11 @@ async function batchPlatform(b, value) {
     b.platform = value;
     b.targets = [];
     reorder(props.form);
-  }, [b]);
+  }, [b], fact(b).configured ? {
+    title: '切换已配置批次的平台？',
+    message: '保存计划后将清空该批次原平台的账号、成片、文案和封面配置。请按新平台重新配置；其他批次不受影响。',
+    confirmText: '确认切换',
+  } : null);
 }
 function move(i, d) {
   const j = i + d;

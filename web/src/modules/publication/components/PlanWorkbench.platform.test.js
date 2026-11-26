@@ -86,3 +86,15 @@ it('refuses a batch platform change that splits one platform into noncontiguous 
   expect(form.batches[0].platform).toBe('baidu');
   expect(state.error.value).toContain('连续');
 });
+
+it('explains the resource reset and preserves a configured batch when platform change is cancelled', async () => {
+  const { feedback } = await import('../../../shared/ui/feedback/index.js');
+  const { state, form } = await setup(mixedPlan(), { baidu2: { configured: true } });
+  feedback.confirmWarning.mockResolvedValueOnce(false);
+  await state.batchPlatform(form.batches[1], 'bilibili');
+  expect(feedback.confirmWarning).toHaveBeenLastCalledWith(expect.objectContaining({
+    title: '切换已配置批次的平台？', message: expect.stringContaining('账号、成片、文案和封面'),
+  }));
+  expect(form.batches[1].platform).toBe('baidu');
+  expect(form.batches[1].targets).toEqual([{ category_id: '1', target_count: 1 }]);
+});

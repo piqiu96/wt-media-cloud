@@ -280,6 +280,17 @@ func (s Store) writePlanRows(tx *gorm.DB, p model.Plan, old []model.Batch, rows 
 			for i := range b.Config.Candidates {
 				b.Config.Candidates[i].Content.Confirmed = false
 			}
+			if b.Platform != r.Platform {
+				b.Config = model.BatchConfig{Candidates: []model.BatchCandidate{}}
+				b.Readiness = model.BatchReadiness{
+					Issues:         []model.BatchIssue{{Field: "platform", Code: "plan_scope_changed", Message: "发布平台已变化，请重新选择账号、成片并准备内容"}},
+					CoverResources: []model.BatchCoverResource{}, Shortfalls: []model.BatchShortfall{},
+				}
+				for _, target := range r.Targets {
+					b.Readiness.Shortfalls = append(b.Readiness.Shortfalls, model.BatchShortfall{CategoryID: target.CategoryID, TargetCount: target.TargetCount, Shortfall: target.TargetCount})
+				}
+				changes["candidates_count"] = 0
+			}
 			changes["configuration_status"] = model.BatchIncomplete
 			changes["plan_configured_at"] = nil
 			changes["readiness_json"] = mustJSON(b.Readiness)
