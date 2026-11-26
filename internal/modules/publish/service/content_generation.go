@@ -166,7 +166,7 @@ func (s *Service) PreparePublicationGeneration(a identity.PublicUser, in Generat
 	}
 	system += "必须重新组织标题，不能复制原题或只替换近义词；剔除括号中的评论、点赞、互关动员。不要沿用‘换做是你’‘你能做到吗’‘你能破局吗’等互动问句，不用提问代替具体看点。封面短标题不重复整句标题。"
 	if in.Platform == "bilibili" {
-		system += "简介只有在存在超出标题、且有输入事实支持的有效补充时才写；没有有效补充时description必须返回空字符串，尤其输入仅有素材标题时留空。不要重复标题、泛泛介绍视频内容或凑观看提示，不自动添加素材来源、作者名称或来源署名。"
+		system += "简介只有在存在超出标题、且有输入事实支持的有效补充时才写；没有有效补充时description必须返回空字符串，尤其输入仅有素材标题时留空。不要重复标题、泛泛介绍视频内容或凑观看提示，不自动添加素材来源、作者名称或来源署名。当前已填简介只是待评审草稿，不构成标题之外的新素材证据；换句话重写旧简介不算有效补充。默认description留空；仅当本次instruction明确提供标题之外可直接使用的具体补充信息时，才写非空简介。"
 	}
 	limits := generationLimits(in.Platform)
 	return func(ctx context.Context) (GenerationResult, error) {
