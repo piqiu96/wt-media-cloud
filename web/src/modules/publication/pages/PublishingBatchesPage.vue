@@ -755,7 +755,7 @@ onBeforeUnmount(() => {
       </p>
       <ResourceCard><ResourceWizardSteps :steps="steps" :current="step" /></ResourceCard>
       <BatchResourceSetup v-if="step === 0" :form="form" :catalog="catalog" :categories="categoryOptions"
-         :actor="actor" :recipes="recipes" :cover-files="coverFiles" :validation-context="validationContext" :inherited-targets="!!detail?.plan_id" :disabled="freeze || !!resourceReview" @work="preparing = $event" />
+         :actor="actor" :recipes="recipes" :cover-files="coverFiles" :validation-context="validationContext" :inherited-targets="!!detail?.plan_id" :platform-locked="view === 'edit'" :disabled="freeze || !!resourceReview" @work="preparing = $event" />
       <BatchCandidateWorkspace v-if="step === 1" :form="form" :catalog="catalog" :categories="categoryOptions"
         :actor="actor" :recipes="recipes" :cover-files="coverFiles" :disabled="freeze" :resources-locked="resourcesConfirmed" :focus-key="issueRowKey"
         :validation-context="validationContext" :validation-issues="readiness?.issues || []" @changed="review = null" @work="preparing = $event" />

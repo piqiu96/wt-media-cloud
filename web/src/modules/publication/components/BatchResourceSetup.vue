@@ -24,6 +24,7 @@ const props = defineProps({
   actor: { type: Object, required: true },
   disabled: Boolean,
   inheritedTargets: Boolean,
+  platformLocked: Boolean,
   recipes: Object,
   coverFiles: Object,
   validationContext: Object,
@@ -33,10 +34,10 @@ const batch = createPublicationBatchClient();
 const publication = createPublicationClient();
 const platforms = usePublicationPlatforms();
 async function changePlatform(platform) {
-  if (fixed.value || props.inheritedTargets || platform === props.form.platform) return;
+  if (platformFixed.value || platform === props.form.platform) return;
   if (props.form.config.accounts.length || props.form.config.output_ids.length || props.form.config.candidates.length) {
     const accepted = await feedback.confirmWarning({ title: '切换发布平台？', message: '切换后需要重新选择账号、成片和候选内容，类目目标保持不变。', confirmText: '切换平台' });
-    if (!accepted || fixed.value) return;
+    if (!accepted || platformFixed.value) return;
   }
   props.form.platform = platform;
   props.form.config = { accounts: [], output_ids: [], manual_pairs: [], candidates: [] };
@@ -62,6 +63,7 @@ const accounts = computed(() => props.form.config.accounts);
 const outputs = computed(() => props.form.config.output_ids);
 // Read-only inventory can overlap category edits; inspect() discards obsolete responses.
 const fixed = computed(() => props.disabled || loading.value);
+const platformFixed = computed(() => fixed.value || props.inheritedTargets || props.platformLocked);
 
 function showResources(kind, categoryId) {
   outputCategory.value = categoryId;
@@ -239,7 +241,7 @@ function allocate() {
     <BatchSetupSection number="01" title="发布范围" help="选择单个平台与参与分配的类目。">
       <div class="batch-form-grid batch-scope-grid">
         <label><span><em>*</em> 批次名称</span><t-input v-model="form.name" aria-label="批次名称" :maxlength="100" :disabled="fixed" placeholder="请输入批次名称"/></label>
-        <FeedbackAlert v-if="platforms.error.value" theme="error" :message="platforms.error.value" /><label><span><em>*</em> 发布平台</span><t-select :value="form.platform" :options="platforms.options.value" aria-label="批次发布平台" :disabled="fixed || inheritedTargets || platforms.loading.value" @change="changePlatform"/></label>
+        <FeedbackAlert v-if="platforms.error.value" theme="error" :message="platforms.error.value" /><label><span><em>*</em> 发布平台</span><t-select :value="form.platform" :options="platforms.options.value" aria-label="批次发布平台" :disabled="platformFixed || platforms.loading.value" @change="changePlatform"/></label>
       </div>
       <div class="batch-category-field"><label><span><em>*</em> 发布类目</span></label><t-checkbox-group :value="selectedCategories" :disabled="fixed||inheritedTargets" @change="changeCategories"><t-checkbox v-for="c in categories" :key="c.value" :value="c.value" class="batch-category-chip" :disabled="hasCandidates(c.value)">{{c.label}}</t-checkbox></t-checkbox-group><small v-if="form.targets.some(t=>hasCandidates(t.category_id))" class="batch-muted">已有候选的类目需先移除对应候选再取消选择。</small></div>
     </BatchSetupSection>
