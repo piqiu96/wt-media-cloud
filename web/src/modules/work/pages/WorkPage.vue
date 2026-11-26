@@ -205,10 +205,9 @@ const columns = [
   { colKey: "id", title: "作品 ID", width: 90 },
   { colKey: "title", title: "作品", width: 320 },
   { colKey: "platform", title: "平台", width: 100 },
+  { colKey: "metrics", title: "作品指标", width: 250 },
   { colKey: "account", title: "发布账号", width: 180 },
   { colKey: "category", title: "内容类目", width: 130 },
-  { colKey: "metrics", title: "作品指标", width: 230 },
-  { colKey: "metrics_updated", title: "指标更新时间", width: 230 },
   { colKey: "published_at", title: "平台发布时间", width: 180 },
   {
     colKey: "op",
@@ -524,20 +523,17 @@ onMounted(() => {
             categoryName(row.category_id)
           }}</template>
           <template #metrics="{ row }">
-            <div v-if="row.platform === 'bilibili'" class="work-metrics-grid">
-              <span v-for="col in metricColumns" :key="col.colKey"
-                ><span class="work-metrics-label">{{ col.title }}</span>
-                {{ metricValue(row, col.colKey) }}</span
-              >
-            </div>
-            <span v-else>—</span>
-          </template>
-          <template #metrics_updated="{ row }">
             <template v-if="row.platform === 'bilibili'">
-              <div>
+              <div class="work-metrics-grid">
+                <span v-for="col in metricColumns" :key="col.colKey"
+                  ><span class="work-metrics-label">{{ col.title }}</span>
+                  {{ metricValue(row, col.colKey) }}</span
+                >
+              </div>
+              <div class="work-metrics-status">
                 {{
                   row.metrics?.collected_at
-                    ? date(row.metrics.collected_at)
+                    ? `更新于 ${date(row.metrics.collected_at)}`
                     : "尚未获取"
                 }}
               </div>
