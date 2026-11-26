@@ -1,5 +1,6 @@
 <script setup>
 import { computed, ref, watch, onBeforeUnmount } from "vue";
+import { platformLabel } from "../../../shared/utils/platforms.js";
 import ResourceCard from "../../../shared/ui/resource/ResourceCard.vue";
 import ResourceSection from "../../../shared/ui/resource/ResourceSection.vue";
 import ResourceNotice from "../../../shared/ui/resource/ResourceNotice.vue";
@@ -118,7 +119,7 @@ onBeforeUnmount(() => generation++);
           <tbody>
             <tr v-for="g in all" :key="key(g)">
               <td>
-                百家号<small>{{ categoryName(g.category_id) }}</small>
+                {{ platformLabel(g.platform) }}<small>{{ categoryName(g.category_id) }}</small>
               </td>
               <template v-if="known(g.resource)"
                 ><td class="resource-table-number">

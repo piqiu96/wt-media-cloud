@@ -994,7 +994,7 @@ onBeforeUnmount(() => {
                   label: '执行周期',
                   value: plan.date_start + ' ~ ' + plan.date_end,
                 },
-                { label: '发布平台', value: '百家号' },
+                { label: '发布平台', value: [...new Set(plan.goals.map(g => g.platform))].map(platformLabel).join('、') || '—' },
                 {
                   label: '发布类目',
                   value: [
