@@ -173,7 +173,7 @@ func (s Store) query(f Filter) *gorm.DB {
 		q = q.Where("status=?", f.Status)
 	}
 	if f.Search != "" {
-		q = q.Where("CAST(id AS CHAR)=? OR JSON_UNQUOTE(JSON_EXTRACT(content_json,'$.description')) LIKE ?", f.Search, "%"+f.Search+"%")
+		q = q.Where("CAST(id AS CHAR)=? OR JSON_UNQUOTE(JSON_EXTRACT(content_json,'$.description')) LIKE ? OR (platform='bilibili' AND JSON_UNQUOTE(JSON_EXTRACT(content_json,'$.title')) LIKE ?)", f.Search, "%"+f.Search+"%", "%"+f.Search+"%")
 	}
 	return q
 }
