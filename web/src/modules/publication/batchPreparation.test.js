@@ -158,3 +158,11 @@ it("lets explicit confirmation proceed only for selected rows with no other serv
     confirmable: ["ready"], blocked: [{ rowKey: "blocked", message: "请选择所需规格的封面" }],
   });
 });
+
+it('can explicitly clear a Bilibili description in overwrite mode without clearing Baidu titles',()=>{
+ const row={content:{title:'标题',description:'旧简介',bilibili:{tags:['游戏']}}};
+ expect(batch.publicContentPatch(row,{description:''},true,'bilibili')).toEqual({description:''});
+ expect(batch.publicContentPatch(row,{description:''},false,'bilibili')).toEqual({});
+ expect(batch.publicContentPatch(row,{description:''},true,'baidu')).toEqual({});
+ expect(batch.publicContentPatch(row,{title:''},true,'bilibili')).toEqual({});
+});

@@ -156,7 +156,7 @@ async function prepare(onlyKeys) {
       for (const field of Object.keys(data.field_revisions)) {
         const value = data.result?.content?.[field];
         if (typeof value !== "string" || (props.platform === 'bilibili' && field !== 'cover_title' ? value.length : [...value].length) > limits[field] ||
-          (!value.trim() && field !== "topics") || data.result.field_revisions?.[field] !== data.field_revisions[field]) {
+          (!value.trim() && field !== "topics" && !(props.platform === "bilibili" && field === "description")) || data.result.field_revisions?.[field] !== data.field_revisions[field]) {
           info.errors.push(`${generationFields[field]}生成结果不完整`);
           continue;
         }

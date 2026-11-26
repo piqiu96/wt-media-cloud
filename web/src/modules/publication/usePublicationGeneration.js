@@ -42,7 +42,7 @@ export function usePublicationGeneration({ context, values, fields, disabled, ge
       }
       const length = (field,value) => basis.platform === 'bilibili' && field !== 'cover_title' ? value.length : [...value].length;
       const limit = field => basis.platform === 'bilibili' && field === 'description' ? 2000 : limits[field];
-      if (!result?.content || !result.field_revisions || Object.keys(result.content).length !== chosen.length || Object.keys(result.field_revisions).length !== chosen.length || chosen.some(field => typeof result.content[field] !== 'string' || length(field,result.content[field]) > limit(field) || field !== 'topics' && !result.content[field].trim() || result.field_revisions[field] !== fieldRevisions[field])) throw new Error('生成结果不完整，请重新生成');
+      if (!result?.content || !result.field_revisions || Object.keys(result.content).length !== chosen.length || Object.keys(result.field_revisions).length !== chosen.length || chosen.some(field => typeof result.content[field] !== 'string' || length(field,result.content[field]) > limit(field) || field !== 'topics' && !(basis.platform === 'bilibili' && field === 'description') && !result.content[field].trim() || result.field_revisions[field] !== fieldRevisions[field])) throw new Error('生成结果不完整，请重新生成');
       if (basis.platform === 'bilibili' && chosen.includes('tags')) parseBilibiliTags(result.content.tags);
       const next = { ...suggestion.value };
       for (const field of chosen) next[field] = { value: result.content[field], fieldRevision: fieldRevisions[field], request, revision, identityId, adopted: false };

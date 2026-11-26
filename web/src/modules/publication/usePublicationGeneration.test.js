@@ -54,3 +54,13 @@ it('adoption checks the exact suggestion clicked before asynchronous identity ve
  let resolveIdentity,delay=false,n=0;const {state,adopt,scope}=fixture(async input=>({content:{description:'suggestion-'+(++n),topics:'#topic'},field_revisions:input.field_revisions}),()=>delay?new Promise(resolve=>{resolveIdentity=resolve}):Promise.resolve('A'));
  await state.start();delay=true;const pending=state.apply('description');expect(adopt).not.toHaveBeenCalled();delay=false;await state.start();resolveIdentity('A');await pending;expect(adopt).not.toHaveBeenCalled();scope.stop();
 });
+
+it('allows explicit adoption of an empty Bilibili description without clearing unselected input',async()=>{
+ const scope=effectScope(), context=ref({rowKey:'empty-intro',platform:'bilibili',categoryId:'1',outputId:'153'});
+ const values=reactive({title:'已填标题',description:'待精简的简介'}), adopt=vi.fn((field,value)=>{values[field]=value});
+ const state=scope.run(()=>usePublicationGeneration({context,values:computed(()=>({...values})),fields:computed(()=>['title','description']),disabled:ref(false),getIdentity:async()=> '9',adopt,
+ generate:async input=>({content:{description:''},field_revisions:input.field_revisions})}));
+ state.visible.value=true;state.selected.value=['description'];await state.start();
+ expect(state.error.value).toBe('');expect(state.canAdopt('description')).toBe(true);expect(values.description).toBe('待精简的简介');
+ await state.apply('description');expect(adopt).toHaveBeenCalledWith('description','');expect(values.description).toBe('');expect(values.title).toBe('已填标题');scope.stop();
+});

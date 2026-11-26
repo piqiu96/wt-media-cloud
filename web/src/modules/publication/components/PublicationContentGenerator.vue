@@ -25,7 +25,7 @@ function open() { if (props.disabled) return; selected.value = [...fields.value]
       <p v-if="stage" role="status">{{ stage }}</p>
       <section v-for="(item, field) in suggestion" :key="field" class="publication-suggestion">
         <div><strong>{{ labels[field] }}</strong><t-button size="small" variant="text" :disabled="!canAdopt(field)" @click="apply(field)">{{ item.adopted ? '已采用' : canAdopt(field) ? '采用' : '内容已变化，请重新生成' }}</t-button></div>
-        <p>{{ item.value || '不添加话题' }}</p>
+        <p>{{ item.value || (field === 'description' && context.platform === 'bilibili' ? '不填写简介' : '不添加话题') }}</p>
       </section>
     </div>
     <template #footer>

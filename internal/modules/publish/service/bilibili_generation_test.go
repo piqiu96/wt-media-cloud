@@ -53,3 +53,30 @@ func TestBilibiliGenerationSeparatesTitleDescriptionAndTagsWithoutAdopting(t *te
 		}
 	}
 }
+
+func TestBilibiliGenerationAcceptsEmptyOptionalDescriptionAndRequiresTitle(t *testing.T) {
+	s, a, _ := fixture()
+	s.PlatformSettings.BilibiliEnabled = true
+	in := GenerationInput{RowKey: "empty-intro", InputRevision: "1", Platform: "bilibili", CategoryID: 1, CompositeOutputID: 42, Fields: []string{"title", "description"}, FieldRevisions: map[string]string{"title": "0", "description": "0"}, Content: map[string]string{}}
+	raw := `{"title":"三角洲行动跳拉操作","description":""}`
+	s.GenerateJSON = func(_ context.Context, system, user string) (string, error) {
+		if !strings.Contains(system, "没有有效补充") || !strings.Contains(system, "空字符串") || !strings.Contains(system, "素材来源") {
+			t.Error("missing optional-description policy")
+		}
+		return raw, nil
+	}
+	run, e := s.PreparePublicationGeneration(a, in)
+	if e != nil {
+		t.Fatal(e)
+	}
+	result, e := run(context.Background())
+	if e != nil || result.Content["description"] != "" || result.Content["title"] == "" {
+		t.Fatalf("empty optional description rejected: %+v %v", result, e)
+	}
+	for _, invalid := range []string{`{"title":"","description":""}`, `{"title":"有效标题"}`, `{"title":"有效标题","description":null}`} {
+		raw = invalid
+		if _, e = run(context.Background()); e == nil {
+			t.Fatalf("incomplete output accepted: %s", raw)
+		}
+	}
+}

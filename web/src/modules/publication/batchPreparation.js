@@ -210,7 +210,7 @@ export async function sendNewBatch(api, input, { retry = false } = {}) {
 export function publicContentPatch(row, values, overwrite = false, platform = 'baidu') {
   const current = generationValues(platform, row.content, row.cover_title);
   return Object.fromEntries(Object.entries(values).filter(([field, value]) =>
-    Object.hasOwn(platformGenerationFields(platform), field) && value?.trim() && (overwrite || !current[field]?.trim())));
+    Object.hasOwn(platformGenerationFields(platform), field) && (value?.trim() || platform === 'bilibili' && field === 'description' && typeof value === 'string') && (overwrite || !current[field]?.trim())));
 }
 
 export function batchResourceProblem(form, { requireName = true } = {}) {

@@ -43,7 +43,7 @@ function partition(id) {
       <small>{{ (content.title || '').length }}/80 字</small>
     </label>
     <label class="batch-form-wide">简介（选填）
-      <t-textarea :value="content.description || ''" aria-label="B站简介" :maxlength="2000" :disabled="disabled"
+      <t-textarea :value="content.description || ''" aria-label="B站简介" placeholder="没有补充说明可留空，不必重复标题或填写素材来源" :maxlength="2000" :disabled="disabled"
         :autosize="{ minRows: 3, maxRows: 8 }" @change="emit('patch', { description: $event })" />
       <small>{{ (content.description || '').length }}/2000 字</small>
     </label>
