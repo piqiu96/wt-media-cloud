@@ -1,6 +1,7 @@
 package repository_test
 
 import (
+	"errors"
 	identity "github.com/wt-media/wt-media-cloud/internal/modules/identity/service"
 	"github.com/wt-media/wt-media-cloud/internal/modules/publish/model"
 	repo "github.com/wt-media/wt-media-cloud/internal/modules/publish/repository"
@@ -9,6 +10,43 @@ import (
 	"testing"
 	"time"
 )
+
+func TestPlanBatchPauseNamesQueuedWaitWithoutMaskingInFlightWork(t *testing.T) {
+	for _, inFlight := range []bool{false, true} {
+		t.Run(map[bool]string{false: "queued", true: "in-flight"}[inFlight], func(t *testing.T) {
+			s, p, bs, start, tasks := preparedPlan(t)
+			now := time.Now().UTC().Truncate(time.Microsecond)
+			if _, e := s.StartPlan(p.ID, 9, start, "pause-projection", tasks[bs[0].ID], now); e != nil {
+				t.Fatal(e)
+			}
+			if inFlight {
+				acceptanceClaim(t, s, "pause-in-flight", now)
+			}
+			b, e := s.GetBatch(bs[0].ID)
+			if e != nil {
+				t.Fatal(e)
+			}
+			if _, e = s.ControlBatch(b.ID, 9, repo.BatchCommand{Action: "pause", ExpectedRevision: b.Revision, Reason: "批次独立暂停"}, now); e != nil {
+				t.Fatal(e)
+			}
+			state, e := s.PlanProgress(p.ID, now)
+			if e != nil {
+				t.Fatal(e)
+			}
+			want := "batch_paused"
+			if inFlight {
+				want = "waiting_tasks"
+			}
+			if state.Progress != want {
+				t.Fatalf("progress=%s want=%s", state.Progress, want)
+			}
+			in := model.PlanAdvanceInput{RequestKey: "paused-handoff", ExpectedRevision: state.Plan.Revision, CurrentBatchID: b.ID, NextBatchID: bs[1].ID, ExpectedBasisFingerprint: state.Basis.Fingerprint}
+			if _, e = s.AdvancePlan(p.ID, 9, in, "paused-handoff", tasks[bs[1].ID], true, now); !errors.Is(e, repo.ErrUnresolved) {
+				t.Fatalf("paused or in-flight batch advanced: %v", e)
+			}
+		})
+	}
+}
 
 func TestPlanFinalReviewWaitsForAllPrefixPublicFactsWithoutFinishPermission(t *testing.T) {
 	s, p, bs, start, tasks := preparedPlan(t)

@@ -205,6 +205,7 @@ func planProgress(tx *gorm.DB, p model.Plan, rows []model.Batch, now time.Time) 
 		fingerprint = append(fingerprint, []any{b.ID, b.Revision, b.HandedOffAt, b.ExecutionStatus, b.Pause})
 	}
 	unresolved := false
+	unresolvedInFlight := false
 	verification := false
 	reviewing := false
 	for _, t := range out.Tasks {
@@ -213,6 +214,7 @@ func planProgress(tx *gorm.DB, p model.Plan, rows []model.Batch, now time.Time) 
 		fingerprint = append(fingerprint, []any{t.ID, t.Revision, t.Status, t.CurrentAttemptID, t.CheckStoppedAt, t.AcceptedAt, t.LatestManualVerification, requires})
 		if planTaskUnresolved(t, now) {
 			unresolved = true
+			unresolvedInFlight = unresolvedInFlight || (t.Status != model.StatusPending && t.Status != model.StatusQueued)
 		}
 		if requires {
 			verification = true
@@ -230,6 +232,7 @@ func planProgress(tx *gorm.DB, p model.Plan, rows []model.Batch, now time.Time) 
 		}
 	}
 	out.Basis.Fingerprint = planDigest(fingerprint)
+	batchPaused := out.Current != nil && out.Current.ExecutionStatus == model.BatchPaused
 	switch {
 	case p.EndedAt != nil || p.Status == "ended":
 		out.Progress = "ended"
@@ -241,9 +244,9 @@ func planProgress(tx *gorm.DB, p model.Plan, rows []model.Batch, now time.Time) 
 		out.Progress = "manual_paused"
 	case verification:
 		out.Progress = "waiting_verification"
-	case unresolved:
+	case unresolved && (!batchPaused || unresolvedInFlight):
 		out.Progress = "waiting_tasks"
-	case out.Current != nil && out.Current.ExecutionStatus == model.BatchPaused:
+	case batchPaused:
 		out.Progress = "batch_paused"
 	case out.Next == nil && reviewing:
 		out.Progress = "awaiting_finish"
