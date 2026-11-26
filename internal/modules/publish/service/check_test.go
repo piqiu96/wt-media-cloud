@@ -24,7 +24,7 @@ func (f *checkFake) ObservePublication(v model.Task, user int64, in model.Public
 	return model.PublicCheckAcknowledgement{}, nil
 }
 func TestPublicCheckRequiresOriginalOwnerAndRejectsFailureConclusion(t *testing.T) {
-	f := &checkFake{task: model.Task{ID: 1, OperatorID: 9}}
+	f := &checkFake{task: model.Task{ID: 1, Platform: "baidu", OperatorID: 9}}
 	s := PublicCheckService{Repo: f}
 	in := model.PublicCheckReport{Generation: 1, Observation: model.ResultResolution{AttemptID: 2, ExpectedRevision: 3, Conclusion: model.StatusUncertain, Evidence: model.VerificationEvidence{PlatformUID: "original", Reason: "暂时不可访问", Basis: "指定稿件尚未核实匿名公开，保留审核中"}}}
 	if _, err := s.Claim(0); !errors.Is(err, ErrInvalid) {

@@ -15,3 +15,14 @@ observation_fresh_for = '2m'
 model = 'deepseek-flash'
 base_url = 'https://api.deepseek.com'
 timeout = '170s'
+
+# Keep production closed until this deployment combination has passed real Bilibili acceptance.
+[publication_platforms]
+bilibili_enabled = false
+
+# New-content defaults only; no implicit statement or authorship assertion.
+[publication_platforms.bilibili]
+partition_id = 0
+partition_name = ''
+tags = []
+visibility = 'public'

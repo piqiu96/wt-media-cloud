@@ -82,6 +82,7 @@ func (c PublicationExecutionConfig) WithDefaults() PublicationExecutionConfig {
 }
 
 type AppConfig struct {
+	PublicationPlatforms  PublicationPlatformsConfig  `toml:"publication_platforms"`
 	PublicationExecution  PublicationExecutionConfig  `toml:"publication_execution"`
 	PublicationBatch      PublicationBatchConfig      `toml:"publication_batch"`
 	PublicationGeneration PublicationGenerationConfig `toml:"publication_generation"`
@@ -89,6 +90,20 @@ type AppConfig struct {
 	Server                ServerConfig                `toml:"server"`
 	InitialAdmin          InitialAdminConfig          `toml:"initial_admin"`
 	BitBrowser            BitBrowserConfig            `toml:"bitbrowser"`
+}
+
+// PublicationPlatformsConfig controls deployment availability and new-content
+// defaults only. Saved publication content is never rewritten by these values.
+type PublicationPlatformsConfig struct {
+	BilibiliEnabled bool                        `toml:"bilibili_enabled"`
+	Bilibili        BilibiliPublicationDefaults `toml:"bilibili"`
+}
+
+type BilibiliPublicationDefaults struct {
+	PartitionID   int64    `toml:"partition_id"`
+	PartitionName string   `toml:"partition_name"`
+	Tags          []string `toml:"tags"`
+	Visibility    string   `toml:"visibility"`
 }
 
 type ServerConfig struct {
@@ -462,6 +477,9 @@ func LoadFromDir(root string) (Config, error) {
 }
 
 func (c Config) Validate() error {
+	if err := c.App.PublicationPlatforms.Validate(); err != nil {
+		return err
+	}
 	if limits := c.App.PublicationBatch; limits.MaxCandidates < 0 || limits.MaxCandidates > 10000 ||
 		limits.MaxConcurrency < 0 || limits.MaxConcurrency > 10000 || limits.MaxGroupIntervalSeconds < 0 ||
 		int64(limits.MaxGroupIntervalSeconds) > 4294967295 {
@@ -791,6 +809,7 @@ func loadCloudFile(path string) (pkgconfig.File, error) {
 
 func clone(source Config) Config {
 	cloned := source
+	cloned.App.PublicationPlatforms.Bilibili.Tags = append([]string(nil), source.App.PublicationPlatforms.Bilibili.Tags...)
 	if source.Compose.Templates != nil {
 		raw, _ := json.Marshal(source.Compose.Templates)
 		cloned.Compose.Templates = nil

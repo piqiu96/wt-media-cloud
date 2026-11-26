@@ -1,8 +1,8 @@
 openapi: 3.1.0
 info:
   title: WT Media Cloud-Agent Compatibility API
-  version: 2026.11.25.2
-  description: Cloud-owned compatibility metadata. Revision 2026.11.25.2 is the minimum for new publication claims, original-scene resume and Profile-coordinated check claims. An older Agent may finish an already claimed original attempt through the existing ReportSafe contract.
+  version: 2026.11.26.2
+  description: Current provider revision 2026.11.26.2 adds explicitly advertised Bilibili capability; omitted supported_platforms permits Baidu only. Cloud-owned compatibility metadata. Revision 2026.11.25.2 is the minimum for new publication claims, original-scene resume and Profile-coordinated check claims. An older Agent may finish an already claimed original attempt through the existing ReportSafe contract.
 paths:
   /api/v1/cloud-agent/compatibility:
     get:
@@ -40,7 +40,7 @@ components:
           const: v1
         contract_revision:
           type: string
-          const: 2026.11.25.2
+          const: 2026.11.26.2
         minimum_agent_contract_revision:
           type: string
           const: 2026.11.25.2

@@ -81,3 +81,15 @@ authorization and executed no external action.
 - `v1/execution-preflight.openapi.yaml` and `v1/sensitive-profile-guard.openapi.yaml`: sensitive permit/task admission is removed with the generic task model.
 - `v1/runtime-binding.openapi.yaml`: the device/node binding and secret-safe runtime report model is gone; runtime facts now travel with each admission request.
 - `v1/registration-heartbeat.openapi.yaml`: unauthenticated agent registration and heartbeat are gone; the Agent proves itself with the Agent Token.
+
+
+## Bilibili capability revision 2026.11.26.2
+
+The provider revision is `2026.11.26.2`; the minimum Baidu consumer remains
+`2026.11.25.2`. Publish/check admission accepts `supported_platforms`, omitted
+as Baidu-only, and filters both fixed-group preparation and task selection.
+Only an explicitly capable consumer receives new Bilibili work. New Bilibili
+inputs freeze the platform and the independent space-cover digest/size; reports
+and completions must match that digest. Baidu canonical input JSON and original
+ReportSafe settlement remain unchanged. Deployment availability remains closed
+by default until the complete live acceptance is verified.

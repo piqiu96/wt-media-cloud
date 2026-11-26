@@ -37,7 +37,7 @@ func ValidatePlanStructure(p model.Plan, rows []model.PlanStructureBatch) error 
 	cell := func(platform string, category int64) string { return fmt.Sprintf("%s/%d", platform, category) }
 	for _, g := range p.Goals {
 		key := cell(g.Platform, g.CategoryID)
-		if g.Platform != "baidu" || g.CategoryID <= 0 || g.TargetCount <= 0 || goals[key] != 0 {
+		if g.Platform != "baidu" && g.Platform != "bilibili" || g.CategoryID <= 0 || g.TargetCount <= 0 || goals[key] != 0 {
 			return ErrConflict
 		}
 		goals[key] = g.TargetCount

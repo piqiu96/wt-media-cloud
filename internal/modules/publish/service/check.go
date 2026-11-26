@@ -22,7 +22,7 @@ func (s *PublicCheckService) Claim(user int64) (*model.PublicCheckClaim, error) 
 	return s.Repo.ClaimPublicCheck(user, time.Now().UTC())
 }
 func (s *PublicCheckService) Observe(user int64, id uint64, in model.PublicCheckReport) (model.PublicCheckAcknowledgement, error) {
-	if user <= 0 || id == 0 || !in.Valid() {
+	if user <= 0 || id == 0 {
 		return model.PublicCheckAcknowledgement{}, ErrInvalid
 	}
 	v, err := s.Repo.Get(id)
@@ -32,10 +32,16 @@ func (s *PublicCheckService) Observe(user int64, id uint64, in model.PublicCheck
 	if v.OperatorID != user {
 		return model.PublicCheckAcknowledgement{}, ErrNotFound
 	}
+	if !in.ValidFor(v.Platform) {
+		return model.PublicCheckAcknowledgement{}, ErrInvalid
+	}
 	return s.Repo.ObservePublication(v, user, in, time.Now().UTC())
 }
 
 func (s *PublicCheckService) ClaimV2(actor model.CheckActor, in model.CheckClaimInput) (any, error) {
+	if _, ok := model.SupportedPublicationPlatforms(in.SupportedPlatforms); !ok {
+		return nil, ErrInvalid
+	}
 	if actor.UserID <= 0 || !validKey(in.RequestKey) {
 		return nil, ErrInvalid
 	}

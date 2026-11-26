@@ -1,9 +1,35 @@
 openapi: 3.1.0
 info:
   title: WT Media Publication Task
-  version: 2026.11.25.4
+  version: 2026.11.26.2
   description: Administrators manage Cloud records only. Senior operators execute and copy only their own tasks and create with their own accounts. Managers may cancel unclaimed tasks; stopping a claimed scene or verifying an uncertain scene belongs to the task operator. Managers supplement reviewing results or abandon failed tasks only against the exact original recorded safe disposition, checked by the existing transaction. Task platform_submission_id/target_url contain original receipts; platform_work_id/work_url/work_id only identify verified public work (ADR-0035). Standalone creation requires separate revision-bound start authorization. Batch tasks receive formal authorization at first batch start and dispatch only through their current fixed group and parent control. Baidu task preparation is available. IDs and revisions are decimal strings; timestamps RFC3339. Uses errcode/message/data/logid.
 paths:
+  /api/v1/publication/platform-rules:
+    get:
+      operationId: getPublicationPlatformRules
+      security: [{sessionCookie: []}]
+      description: Fixed provider-owned rules and deployment availability. Defaults apply only to new content, never overwrite drafts or saved explicit values. Bilibili remains disabled by default until explicitly enabled in the acceptance deployment; availability is also checked by write and execution services.
+      responses:
+        '200':
+          description: Rules in the standard response envelope.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [errcode, message, data, logid]
+                properties:
+                  errcode: {type: integer}
+                  message: {type: string}
+                  logid: {type: string}
+                  data:
+                    type: object
+                    required: [revision, platforms]
+                    properties:
+                      revision: {type: string}
+                      platforms:
+                        type: array
+                        items: {$ref: '#/components/schemas/PlatformRule'}
+        '401': {description: Authentication required.}
   /api/v1/publication/generate:
     post:
       operationId: generatePublicationContent
@@ -75,7 +101,7 @@ paths:
               required: [request_key, platform, category_id, media_account_id, composite_output_id, content]
               properties:
                 request_key: {type: string, minLength: 1, maxLength: 64}
-                platform: {type: string, enum: [baidu]}
+                platform: {type: string, enum: [baidu, bilibili]}
                 category_id: {$ref: '#/components/schemas/ID'}
                 media_account_id: {$ref: '#/components/schemas/ID'}
                 composite_output_id: {$ref: '#/components/schemas/ID'}
@@ -241,6 +267,8 @@ paths:
                           description: {type: string}
                           topics: {type: string}
                           declaration: {type: string}
+                          title: {type: string}
+                          bilibili: {$ref: '#/components/schemas/BilibiliOptions'}
         '409': {description: 'Stale revision, unsafe original attempt or state that cannot be copied.'}
 components:
   securitySchemes:
@@ -253,12 +281,12 @@ components:
       properties:
         row_key: {type: string, minLength: 1, maxLength: 64}
         input_revision: {type: string, pattern: '^[1-9][0-9]*$'}
-        platform: {type: string, enum: [baidu]}
+        platform: {type: string, enum: [baidu, bilibili]}
         category_id: {$ref: '#/components/schemas/ID'}
         composite_output_id: {$ref: '#/components/schemas/ID'}
-        fields: {type: array, minItems: 1, maxItems: 3, uniqueItems: true, items: {type: string, enum: [description, cover_title, topics]}}
+        fields: {type: array, minItems: 1, maxItems: 4, uniqueItems: true, items: {type: string, enum: [title, description, cover_title, topics, tags]}, description: Baidu allows description/cover_title/topics. Bilibili allows title/description/cover_title/tags. No statements, source or rights generation.}
         field_revisions: {type: object, additionalProperties: {type: string, pattern: '^(0|[1-9][0-9]*)$'}, description: Exactly the selected fields.}
-        content: {type: object, additionalProperties: false, properties: {description: {type: string, maxLength: 1000}, cover_title: {type: string, maxLength: 2000}, topics: {type: string, maxLength: 200}}}
+        content: {type: object, additionalProperties: false, properties: {title: {type: string, maxLength: 1000}, description: {type: string, maxLength: 2000}, cover_title: {type: string, maxLength: 2000}, topics: {type: string, maxLength: 200}, tags: {type: string, maxLength: 2000, description: Bilibili tags use newline-separated strings for generation only. Adoption parses into the Content.bilibili.tags array after validation; never split or truncate silently.}}}
         instruction: {type: string, maxLength: 500}
     ResultResolution:
       type: object
@@ -373,7 +401,76 @@ components:
         background_image_asset_id: {type: string, pattern: '^(0|[1-9][0-9]*)$'}
         background_output_id: {type: string, pattern: '^(0|[1-9][0-9]*)$'}
         render_input_hash: {type: string, pattern: '^[a-f0-9]{64}$'}
+    PlatformRule:
+      type: object
+      additionalProperties: false
+      required: [platform, name, enabled, title_max_length, description_max_length, tags_max_count, tag_max_length, length_unit, statement_options, source_max_length, visibility_options, cover, secondary_cover, defaults]
+      properties:
+        platform: {type: string, enum: [baidu, bilibili]}
+        name: {type: string}
+        enabled: {type: boolean}
+        title_max_length: {type: integer, minimum: 1}
+        description_max_length: {type: integer, minimum: 0}
+        tags_max_count: {type: integer, minimum: 0}
+        tag_max_length: {type: integer, minimum: 0}
+        length_unit: {type: string, enum: [unicode_code_points, utf16_code_units], description: Baidu keeps Unicode code-point counting; Bilibili upload input bounds count UTF-16 code units. Neither client nor Agent may silently truncate confirmed values.}
+        statement_options: {type: array, minItems: 1, uniqueItems: true, items: {type: string}}
+        source_max_length: {type: integer, minimum: 0}
+        source_required_statement: {type: string}
+        visibility_options: {type: array, minItems: 1, uniqueItems: true, items: {type: string, enum: [public, private]}}
+        cover: {$ref: '#/components/schemas/CoverRule'}
+        secondary_cover: {$ref: '#/components/schemas/CoverRule'}
+        defaults:
+          type: object
+          description: Only safe new-content defaults. No implicit originality, authorship, marketing declaration or source claim.
+          additionalProperties: true
+    CoverRule:
+      type: object
+      additionalProperties: false
+      required: [field, width_ratio, height_ratio, max_bytes, required]
+      properties:
+        field: {type: string, enum: [cover_file_id, portrait_cover_file_id, space_cover_file_id]}
+        width_ratio: {type: integer, minimum: 1}
+        height_ratio: {type: integer, minimum: 1}
+        max_bytes: {type: integer, minimum: 1}
+        required: {type: boolean}
     Content:
+      oneOf:
+        - {$ref: '#/components/schemas/BaiduContent'}
+        - {$ref: '#/components/schemas/BilibiliContent'}
+      description: Platform is taken from the enclosing task or batch. Baidu retains the original description-as-title semantics and portrait cover. Bilibili uses title plus optional description and a separate space cover. Cross-platform field combinations are invalid.
+    BilibiliContent:
+      type: object
+      additionalProperties: false
+      required: [title, description, cover_file_id, space_cover_file_id, bilibili, confirmed]
+      properties:
+        title: {type: string, minLength: 1, maxLength: 80}
+        description: {type: string, maxLength: 2000}
+        cover_file_id: {$ref: '#/components/schemas/ID'}
+        cover_render: {$ref: '#/components/schemas/CoverRender'}
+        space_cover_file_id: {$ref: '#/components/schemas/ID'}
+        space_cover_render: {$ref: '#/components/schemas/CoverRender'}
+        portrait_cover_file_id: {type: string, const: '0', description: Legacy serialization field; never a Bilibili resource.}
+        topics: {type: string, const: ''}
+        declaration: {type: string, const: ''}
+        bilibili: {$ref: '#/components/schemas/BilibiliOptions'}
+        confirmed: {type: boolean, const: true}
+    BilibiliOptions:
+      type: object
+      additionalProperties: false
+      required: [partition_id, partition_name, tags, statement, visibility]
+      properties:
+        partition_id: {type: integer, minimum: 1}
+        partition_name: {type: string, minLength: 1, maxLength: 100}
+        tags: {type: array, minItems: 1, maxItems: 10, uniqueItems: true, items: {type: string, minLength: 1, maxLength: 20}}
+        rights_reserved: {type: boolean, default: false, description: Explicit optional self-made/non-reproduction rights assertion. Never inferred or AI generated.}
+        source: {type: string, maxLength: 200, description: Source/time/place explanation when statement is 内容为转载; empty for other statements.}
+        statement: {type: string, enum: [内容无需标注, 含AI生成内容, 含虚构演绎内容, 内容含营销信息, 个人观点，仅供参考, 内容为转载], description: Explicit content statement, independent of rights choice. Current acceptance profile must verify available labels before enabling.}
+        visibility: {type: string, enum: [public, private], description: Private submissions never count as verified public work.}
+      allOf:
+        - if: {properties: {statement: {const: 内容为转载}}}
+          then: {required: [source], properties: {source: {type: string, minLength: 1, maxLength: 200}, rights_reserved: {const: false}}}
+    BaiduContent:
       type: object
       additionalProperties: false
       description: Baidu description plus one separating space plus nonempty topics must fit 50 Unicode characters. Never truncate confirmed text.

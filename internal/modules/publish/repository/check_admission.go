@@ -59,6 +59,10 @@ func releaseCheckUse(tx *gorm.DB, use *model.ProfileUse, disposition string, has
 }
 
 func (s ExecutionStore) ClaimPublicCheckV2(actor model.CheckActor, in model.CheckClaimInput, now time.Time) (any, error) {
+	supported, valid := model.SupportedPublicationPlatforms(in.SupportedPlatforms)
+	if !valid {
+		return nil, ErrConflict
+	}
 	if actor.UserID <= 0 || actor.SessionID == "" {
 		return nil, ErrNotFound
 	}
@@ -157,8 +161,8 @@ func (s ExecutionStore) ClaimPublicCheckV2(actor model.CheckActor, in model.Chec
 				return errNoCheck
 			}
 			rows := []model.Task{}
-			query := tx.Where("operator_id=? AND status=? AND platform='baidu' AND next_check_at<=? AND check_stopped_at IS NULL AND accepted_at>?",
-				actor.UserID, model.StatusReviewing, now, now.Add(-publicCheckLifetime)).Where(`
+			query := tx.Where("operator_id=? AND status=? AND platform IN ? AND next_check_at<=? AND check_stopped_at IS NULL AND accepted_at>?",
+				actor.UserID, model.StatusReviewing, supported, now, now.Add(-publicCheckLifetime)).Where(`
 				NOT EXISTS (
 					SELECT 1 FROM publication_attempt a
 					JOIN publication_profile_use p
@@ -243,7 +247,7 @@ func (s ExecutionStore) ClaimPublicCheckV2(actor model.CheckActor, in model.Chec
 }
 
 func eligibleCheck(v model.Task, user int64, now time.Time) bool {
-	return v.OperatorID == user && v.Status == model.StatusReviewing && v.Platform == "baidu" && v.CurrentAttemptID != nil &&
+	return v.OperatorID == user && v.Status == model.StatusReviewing && (v.Platform == "baidu" || v.Platform == "bilibili") && v.CurrentAttemptID != nil &&
 		v.PlatformSubmissionID != nil && v.NextCheckAt != nil && !v.NextCheckAt.After(now) && v.CheckStoppedAt == nil &&
 		v.AcceptedAt != nil && now.Before(v.AcceptedAt.Add(publicCheckLifetime))
 }

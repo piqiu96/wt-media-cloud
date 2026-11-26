@@ -38,5 +38,6 @@ func (s *RecoveryService) Copy(actor identity.PublicUser, id, revision uint64) (
 	default:
 		return model.PublicationCopy{}, ErrConflict
 	}
-	return model.PublicationCopy{Platform: v.Platform, CategoryID: v.CategoryID, Content: model.CopyContent{Description: v.Content.Description, Topics: v.Content.Topics, Declaration: v.Content.Declaration}}, nil
+	c := copyCandidateContent(v.Content)
+	return model.PublicationCopy{Platform: v.Platform, CategoryID: v.CategoryID, Content: model.CopyContent{Title: c.Title, Bilibili: c.Bilibili, Description: c.Description, Topics: c.Topics, Declaration: c.Declaration}}, nil
 }

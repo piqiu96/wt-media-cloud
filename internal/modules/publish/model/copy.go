@@ -8,7 +8,9 @@ type PublicationCopy struct {
 	Content    CopyContent `json:"content"`
 }
 type CopyContent struct {
-	Description string `json:"description"`
-	Topics      string `json:"topics"`
-	Declaration string `json:"declaration"`
+	Title       string           `json:"title,omitempty"`
+	Bilibili    *BilibiliContent `json:"bilibili,omitempty"`
+	Description string           `json:"description"`
+	Topics      string           `json:"topics"`
+	Declaration string           `json:"declaration"`
 }

@@ -77,7 +77,7 @@ func (s Store) Create(v model.Task) (model.Task, error) {
 		if s.LockFiles == nil {
 			return errors.New("file reference locking unavailable")
 		}
-		if err := s.LockFiles(tx, []int64{v.CoverFileID, v.Content.PortraitCoverFileID}); err != nil {
+		if err := s.LockFiles(tx, taskCoverIDs(v)); err != nil {
 			return err
 		}
 		if err := tx.Create(&v).Error; err != nil {
@@ -129,6 +129,9 @@ func (s Store) Edit(v model.Task, revision uint64) (model.Task, error) {
 		}
 		if v.Content.PortraitCoverFileID != old.Content.PortraitCoverFileID {
 			ids = append(ids, v.Content.PortraitCoverFileID)
+		}
+		if v.Content.SpaceCoverFileID > 0 && v.Content.SpaceCoverFileID != old.Content.SpaceCoverFileID {
+			ids = append(ids, v.Content.SpaceCoverFileID)
 		}
 		if err := s.LockFiles(tx, ids); err != nil {
 			return err
@@ -220,11 +223,11 @@ func mustJSON(v any) string { b, _ := json.Marshal(v); return string(b) }
 // FileReferenced is read while the caller holds the operations file row lock.
 func FileReferenced(tx *gorm.DB, fileID int64) (bool, error) {
 	var count int64
-	err := tx.Model(&model.Task{}).Where("cover_file_id=? OR JSON_UNQUOTE(JSON_EXTRACT(content_json,'$.portrait_cover_file_id'))=?", fileID, strconv.FormatInt(fileID, 10)).Count(&count).Error
+	err := tx.Model(&model.Task{}).Where("cover_file_id=? OR JSON_UNQUOTE(JSON_EXTRACT(content_json,'$.portrait_cover_file_id'))=? OR JSON_UNQUOTE(JSON_EXTRACT(content_json,'$.space_cover_file_id'))=?", fileID, strconv.FormatInt(fileID, 10), strconv.FormatInt(fileID, 10)).Count(&count).Error
 	if err != nil || count > 0 {
 		return count > 0, err
 	}
-	err = tx.Model(&model.Attempt{}).Where("JSON_UNQUOTE(JSON_EXTRACT(input_snapshot_json,'$.content.cover_file_id'))=? OR JSON_UNQUOTE(JSON_EXTRACT(input_snapshot_json,'$.content.portrait_cover_file_id'))=?", strconv.FormatInt(fileID, 10), strconv.FormatInt(fileID, 10)).Count(&count).Error
+	err = tx.Model(&model.Attempt{}).Where("JSON_UNQUOTE(JSON_EXTRACT(input_snapshot_json,'$.content.cover_file_id'))=? OR JSON_UNQUOTE(JSON_EXTRACT(input_snapshot_json,'$.content.portrait_cover_file_id'))=? OR JSON_UNQUOTE(JSON_EXTRACT(input_snapshot_json,'$.content.space_cover_file_id'))=?", strconv.FormatInt(fileID, 10), strconv.FormatInt(fileID, 10), strconv.FormatInt(fileID, 10)).Count(&count).Error
 	if err != nil || count > 0 {
 		return count > 0, err
 	}
@@ -241,10 +244,10 @@ func ListFileReference(db *gorm.DB, a identity.PublicUser, id int64) ([]FileRefe
 	out := []FileReference{}
 	var taskIDs, attemptIDs []uint64
 	allowed := (Store{DB: db}).query(Filter{Actor: a}).Select("id")
-	if e := db.Model(&model.Task{}).Where("id IN (?)", allowed).Where("cover_file_id=? OR JSON_UNQUOTE(JSON_EXTRACT(content_json,'$.portrait_cover_file_id'))=?", id, strconv.FormatInt(id, 10)).Pluck("id", &taskIDs).Error; e != nil {
+	if e := db.Model(&model.Task{}).Where("id IN (?)", allowed).Where("cover_file_id=? OR JSON_UNQUOTE(JSON_EXTRACT(content_json,'$.portrait_cover_file_id'))=? OR JSON_UNQUOTE(JSON_EXTRACT(content_json,'$.space_cover_file_id'))=?", id, strconv.FormatInt(id, 10), strconv.FormatInt(id, 10)).Pluck("id", &taskIDs).Error; e != nil {
 		return nil, e
 	}
-	if e := db.Model(&model.Attempt{}).Where("publication_id IN (?)", allowed).Where("JSON_UNQUOTE(JSON_EXTRACT(input_snapshot_json,'$.content.cover_file_id'))=? OR JSON_UNQUOTE(JSON_EXTRACT(input_snapshot_json,'$.content.portrait_cover_file_id'))=?", strconv.FormatInt(id, 10), strconv.FormatInt(id, 10)).Pluck("id", &attemptIDs).Error; e != nil {
+	if e := db.Model(&model.Attempt{}).Where("publication_id IN (?)", allowed).Where("JSON_UNQUOTE(JSON_EXTRACT(input_snapshot_json,'$.content.cover_file_id'))=? OR JSON_UNQUOTE(JSON_EXTRACT(input_snapshot_json,'$.content.portrait_cover_file_id'))=? OR JSON_UNQUOTE(JSON_EXTRACT(input_snapshot_json,'$.content.space_cover_file_id'))=?", strconv.FormatInt(id, 10), strconv.FormatInt(id, 10), strconv.FormatInt(id, 10)).Pluck("id", &attemptIDs).Error; e != nil {
 		return nil, e
 	}
 	for _, id := range taskIDs {
@@ -255,4 +258,14 @@ func ListFileReference(db *gorm.DB, a identity.PublicUser, id int64) ([]FileRefe
 	}
 	batch, err := listBatchFileReferences(db, a, id)
 	return append(out, batch...), err
+}
+
+func taskCoverIDs(v model.Task) []int64 {
+	ids := []int64{v.CoverFileID}
+	for _, id := range []int64{v.Content.PortraitCoverFileID, v.Content.SpaceCoverFileID} {
+		if id > 0 && id != v.CoverFileID {
+			ids = append(ids, id)
+		}
+	}
+	return ids
 }

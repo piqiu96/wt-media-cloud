@@ -42,6 +42,7 @@ type Repository interface {
 	Edit(model.Task, uint64) (model.Task, error)
 }
 type Service struct {
+	PlatformSettings   config.PublicationPlatformsConfig
 	PlanExecutionRepo  PlanExecutionRepository
 	PlanRepo           PlanRepository
 	PlanResourceCounts func(context.Context, identity.PublicUser, string, int64) (BatchResource, error)
@@ -62,7 +63,7 @@ type Service struct {
 
 func Wired() *Service {
 	store := repository.Store{DB: database.DB(), LockFiles: files.LockAvailable}
-	return &Service{PlanExecutionRepo: ExecutionStore(), PlanRepo: store, BatchRepo: store, BatchExecutionRepo: ExecutionStore(), BatchCategory: identity.ResolveCategory, BatchAccounts: accounts.ListAccountPage,
+	return &Service{PlatformSettings: config.Get().App.PublicationPlatforms, PlanExecutionRepo: ExecutionStore(), PlanRepo: store, BatchRepo: store, BatchExecutionRepo: ExecutionStore(), BatchCategory: identity.ResolveCategory, BatchAccounts: accounts.ListAccountPage,
 		BatchLimits: config.Get().App.PublicationBatch, GenerateJSON: func(ctx context.Context, system, user string) (string, error) {
 			return deepseek.Get().CompleteJSON(ctx, system, user)
 		}, OutputPage: func(ctx context.Context, a identity.PublicUser, in production.ListComposeOutputsInput) (OutputPage, error) {
@@ -204,13 +205,13 @@ func (s *Service) Summary(a identity.PublicUser, f Filter) (map[string]int64, er
 }
 
 func contentValid(c model.Content) bool {
-	return strings.TrimSpace(c.Description) != "" && publicationTextLength(c.Description, c.Topics) <= 50 && c.CoverFileID > 0 && c.PortraitCoverFileID > 0 && c.Declaration == "无需声明" && utf8.RuneCountInString(c.Topics) <= 200 && c.Confirmed
+	return contentValidFor("baidu", c)
 }
 func (s *Service) Create(ctx context.Context, a identity.PublicUser, in CreateInput) (model.Task, error) {
 	if !canExecutePublication(a) {
 		return model.Task{}, ErrNotFound
 	}
-	if len(in.RequestKey) < 1 || len(in.RequestKey) > 64 || strings.TrimSpace(in.RequestKey) != in.RequestKey || in.CategoryID <= 0 || in.MediaAccountID == 0 || in.CompositeOutputID <= 0 || !contentValid(in.Content) {
+	if len(in.RequestKey) < 1 || len(in.RequestKey) > 64 || strings.TrimSpace(in.RequestKey) != in.RequestKey || in.CategoryID <= 0 || in.MediaAccountID == 0 || in.CompositeOutputID <= 0 || !contentValidFor(in.Platform, in.Content) {
 		return model.Task{}, ErrInvalid
 	}
 	bytes, _ := json.Marshal(in)
@@ -238,7 +239,7 @@ func (s *Service) prepareTask(ctx context.Context, a identity.PublicUser, in Cre
 	if s.Account == nil || s.Output == nil || s.File == nil {
 		return model.Task{}, errors.New("publication resource provider unavailable")
 	}
-	if in.Platform != "baidu" {
+	if !s.platformEnabled(in.Platform) {
 		return model.Task{}, ErrClosed
 	}
 	account, err := s.Account(a, fmt.Sprint(in.MediaAccountID))
@@ -272,10 +273,10 @@ func (s *Service) prepareTask(ctx context.Context, a identity.PublicUser, in Cre
 	if cover.Type != "image" || cover.SizeBytes <= 0 || len(cover.SHA256) != 64 || previewCover(cover) {
 		return model.Task{}, ErrInvalid
 	}
-	if err := verifyCoverSpec(cover, 16, 9); err != nil {
+	if err := verifyPrimaryCover(in.Platform, cover); err != nil {
 		return model.Task{}, err
 	}
-	portrait, portraitSnapshot, err := s.preparePortraitCover(ctx, a, in.Content, in.CategoryID, in.CompositeOutputID, saved)
+	portrait, portraitSnapshot, err := s.prepareSecondaryCover(ctx, a, in.Platform, in.Content, in.CategoryID, in.CompositeOutputID, saved)
 	if err != nil {
 		return model.Task{}, err
 	}
@@ -283,7 +284,9 @@ func (s *Service) prepareTask(ctx context.Context, a identity.PublicUser, in Cre
 	if err != nil {
 		return model.Task{}, err
 	}
-	snapshot, _ := json.Marshal(map[string]any{"portrait_cover_render": portraitSnapshot, "portrait_cover_sha256": portrait.SHA256, "portrait_cover_name": portrait.Name, "portrait_cover_resource_path": "/api/v1/file-resources/" + portrait.ResourceToken, "cover_render": coverSnapshot, "account_name": account.PlatformName, "account_owner": account.UserName, "browser_profile_id": account.BrowserProfileID, "output_name": o.Name, "video_sha256": o.SHA256, "video_size": o.FileSizeBytes, "cover_sha256": cover.SHA256, "cover_name": cover.Name, "cover_resource_path": "/api/v1/file-resources/" + cover.ResourceToken})
+	snapshotValues := map[string]any{"cover_render": coverSnapshot, "account_name": account.PlatformName, "account_owner": account.UserName, "browser_profile_id": account.BrowserProfileID, "output_name": o.Name, "video_sha256": o.SHA256, "video_size": o.FileSizeBytes, "cover_sha256": cover.SHA256, "cover_name": cover.Name, "cover_resource_path": "/api/v1/file-resources/" + cover.ResourceToken}
+	setSecondaryCoverSnapshot(snapshotValues, in.Platform, portrait, portraitSnapshot)
+	snapshot, _ := json.Marshal(snapshotValues)
 	now := time.Now().UTC()
 	v := model.Task{TeamID: int64(*account.TeamID), OperatorID: int64(account.UserID), Platform: in.Platform, CategoryID: in.CategoryID, MediaAccountID: in.MediaAccountID, CompositeOutputID: in.CompositeOutputID, PlatformAccountUID: account.PlatformAccountID, CoverFileID: cover.ID, ResourceSnapshot: snapshot, Content: in.Content, Status: model.StatusPending, NotBefore: in.NotBefore, Revision: 1, CreatedBy: int64(a.ID), RequestKey: in.RequestKey, CreatedAt: now, UpdatedAt: now}
 	return v, nil
@@ -293,10 +296,13 @@ func (s *Service) Edit(ctx context.Context, a identity.PublicUser, id uint64, in
 	if err != nil {
 		return v, err
 	}
+	if !s.platformEnabled(v.Platform) {
+		return model.Task{}, ErrClosed
+	}
 	if v.Status != model.StatusPending || v.CurrentAttemptID != nil || v.AuthorizedAt != nil || v.Revision != in.ExpectedRevision {
 		return model.Task{}, &ConflictError{TaskID: v.ID, Revision: v.Revision}
 	}
-	if !contentValid(in.Content) {
+	if !contentValidFor(v.Platform, in.Content) {
 		return model.Task{}, ErrInvalid
 	}
 	var cover filemodel.File
@@ -311,10 +317,12 @@ func (s *Service) Edit(ctx context.Context, a identity.PublicUser, id uint64, in
 	if cover.Type != "image" || cover.SizeBytes <= 0 || len(cover.SHA256) != 64 || previewCover(cover) {
 		return model.Task{}, ErrInvalid
 	}
-	if err := verifyCoverSpec(cover, 16, 9); err != nil {
+	if err := verifyPrimaryCover(v.Platform, cover); err != nil {
 		return model.Task{}, err
 	}
-	portrait, portraitSnapshot, err := s.preparePortraitCover(ctx, a, in.Content, v.CategoryID, v.CompositeOutputID, in.Content.PortraitCoverFileID == v.Content.PortraitCoverFileID)
+	secondaryID, _, _, _, _ := secondaryCover(v.Platform, in.Content)
+	oldSecondaryID, _, _, _, _ := secondaryCover(v.Platform, v.Content)
+	portrait, portraitSnapshot, err := s.prepareSecondaryCover(ctx, a, v.Platform, in.Content, v.CategoryID, v.CompositeOutputID, secondaryID == oldSecondaryID)
 	if err != nil {
 		return model.Task{}, err
 	}
@@ -326,10 +334,7 @@ func (s *Service) Edit(ctx context.Context, a identity.PublicUser, id uint64, in
 	if err := json.Unmarshal(v.ResourceSnapshot, &snapshot); err != nil {
 		return model.Task{}, err
 	}
-	snapshot["portrait_cover_render"] = portraitSnapshot
-	snapshot["portrait_cover_sha256"] = portrait.SHA256
-	snapshot["portrait_cover_name"] = portrait.Name
-	snapshot["portrait_cover_resource_path"] = "/api/v1/file-resources/" + portrait.ResourceToken
+	setSecondaryCoverSnapshot(snapshot, v.Platform, portrait, portraitSnapshot)
 	snapshot["cover_render"] = coverSnapshot
 	snapshot["cover_sha256"] = cover.SHA256
 	snapshot["cover_name"] = cover.Name

@@ -40,7 +40,19 @@ class PublicationPlanContractTest(unittest.TestCase):
         for name in ["publication-plan.openapi.yaml", "publication-batch.openapi.yaml", "publication.openapi.yaml"]:
             with self.subTest(name=name):
                 OpenAPIV31SpecValidator(SchemaPath.from_dict(self.docs[name], base_uri=(API / name).as_uri())).validate()
-                self.assertEqual(self.docs[name]["info"]["version"], "2026.11.25.4")
+                self.assertEqual(self.docs[name]["info"]["version"], "2026.11.26.2")
+
+    def test_bilibili_content_is_independent_and_baidu_is_compatible(self):
+        schema = self.schema("Content", "publication.openapi.yaml")
+        baidu = {"description": "既有标题", "cover_file_id": "5", "portrait_cover_file_id": "6", "topics": "", "declaration": "无需声明", "confirmed": True}
+        self.assertTrue(schema.is_valid(baidu))
+        bili = {"title": "游戏画中画演示", "description": "独立简介", "cover_file_id": "5", "space_cover_file_id": "7", "confirmed": True,
+                "bilibili": {"partition_id": 17, "partition_name": "游戏", "tags": ["游戏"], "statement": "内容含营销信息", "visibility": "public", "rights_reserved": False}}
+        self.assertTrue(schema.is_valid(bili))
+        self.assertFalse(schema.is_valid({**bili, "portrait_cover_file_id": "6"}))
+        self.assertFalse(schema.is_valid({**baidu, "bilibili": bili["bilibili"]}))
+        self.assertFalse(schema.is_valid({**bili, "bilibili": {**bili["bilibili"], "creation_type": "original"}}))
+        self.assertFalse(schema.is_valid({**bili, "bilibili": {**bili["bilibili"], "statement": "内容为转载"}}))
 
     def test_running_list_filter_includes_manual_paused_without_changing_stored_states(self):
         parameters = self.plan["paths"]["/api/v1/publication-plan"]["get"]["parameters"]

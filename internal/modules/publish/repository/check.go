@@ -32,11 +32,11 @@ func missingCheckDelay(count uint32) time.Duration {
 	return low + time.Duration(rand.Int64N(int64((high-low)/time.Second)+1))*time.Second
 }
 func (s ExecutionStore) SchedulePublicCheck(now time.Time) error {
-	base := s.DB.Model(&model.Task{}).Where("status=? AND platform=? AND check_stopped_at IS NULL AND accepted_at IS NOT NULL", model.StatusReviewing, "baidu")
+	base := s.DB.Model(&model.Task{}).Where("status=? AND platform IN ? AND check_stopped_at IS NULL AND accepted_at IS NOT NULL", model.StatusReviewing, []string{"baidu", "bilibili"})
 	if err := base.Session(&gorm.Session{}).Where("accepted_at<=?", now.Add(-publicCheckLifetime)).UpdateColumns(map[string]any{"check_stopped_at": now, "next_check_at": nil, "last_check_message": "已超过24小时自动核验期限，请人工核实或补录结果"}).Error; err != nil {
 		return err
 	}
-	return s.DB.Model(&model.Task{}).Where("status=? AND platform=? AND current_attempt_id IS NOT NULL AND platform_submission_id IS NOT NULL AND platform_submission_id<>'' AND next_check_at IS NULL AND check_stopped_at IS NULL AND accepted_at>?", model.StatusReviewing, "baidu", now.Add(-publicCheckLifetime)).UpdateColumn("next_check_at", now).Error
+	return s.DB.Model(&model.Task{}).Where("status=? AND platform IN ? AND current_attempt_id IS NOT NULL AND platform_submission_id IS NOT NULL AND platform_submission_id<>'' AND next_check_at IS NULL AND check_stopped_at IS NULL AND accepted_at>?", model.StatusReviewing, []string{"baidu", "bilibili"}, now.Add(-publicCheckLifetime)).UpdateColumn("next_check_at", now).Error
 }
 
 func (s ExecutionStore) ClaimPublicCheck(user int64, now time.Time) (*model.PublicCheckClaim, error) {
@@ -47,7 +47,7 @@ func (s ExecutionStore) ClaimPublicCheck(user int64, now time.Time) (*model.Publ
 		return nil, ErrNotFound
 	}
 	var candidates []model.Task
-	if err := s.DB.Where("operator_id=? AND status=? AND platform=? AND next_check_at<=? AND check_stopped_at IS NULL AND accepted_at>?", user, model.StatusReviewing, "baidu", now, now.Add(-publicCheckLifetime)).Order("next_check_at,id").Limit(20).Find(&candidates).Error; err != nil {
+	if err := s.DB.Where("operator_id=? AND status=? AND platform IN ? AND next_check_at<=? AND check_stopped_at IS NULL AND accepted_at>?", user, model.StatusReviewing, []string{"baidu"}, now, now.Add(-publicCheckLifetime)).Order("next_check_at,id").Limit(20).Find(&candidates).Error; err != nil {
 		return nil, err
 	}
 	for _, candidate := range candidates {
@@ -104,7 +104,7 @@ func (s ExecutionStore) ClaimPublicCheck(user int64, now time.Time) (*model.Publ
 
 func (s ExecutionStore) ObservePublication(candidate model.Task, user int64, r model.PublicCheckReport, now time.Time) (model.PublicCheckAcknowledgement, error) {
 	var ack model.PublicCheckAcknowledgement
-	if !r.Valid() {
+	if !r.ValidFor(candidate.Platform) {
 		return ack, ErrConflict
 	}
 	raw, err := json.Marshal(r.Observation)
@@ -134,6 +134,12 @@ func (s ExecutionStore) ObservePublication(candidate model.Task, user int64, r m
 		v, err := taskSnapshot(tx, candidate.ID)
 		if err != nil {
 			return err
+		}
+		if !sameCandidate(v, candidate) || !r.ValidFor(v.Platform) {
+			return ErrConflict
+		}
+		if r.Observation.Conclusion == model.StatusPublished && v.Platform == "bilibili" && (v.Content.Bilibili == nil || v.Content.Bilibili.Visibility != "public") {
+			return ErrConflict
 		}
 		if v.OperatorID != user {
 			return ErrNotFound

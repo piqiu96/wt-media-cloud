@@ -38,7 +38,7 @@ func (s *Service) PreparePlanRecommendation(ctx context.Context, a identity.Publ
 	counts := []map[string]any{}
 	asof := time.Now().UTC()
 	for _, g := range in.Goals {
-		if g.Platform != "baidu" || g.TargetCount <= 0 || g.TargetCount > maxSafeTarget {
+		if !s.platformEnabled(g.Platform) || g.TargetCount <= 0 || g.TargetCount > maxSafeTarget {
 			return nil, ErrInvalid
 		}
 		if e := s.checkBatchCategory(a, g.CategoryID); e != nil {

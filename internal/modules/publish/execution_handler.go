@@ -58,14 +58,15 @@ func Claim(ctx context.Context, c *app.RequestContext) {
 		return
 	}
 	var in struct {
-		Key      string                  `json:"request_key"`
-		Capacity model.ExecutionCapacity `json:"capacity"`
+		Key                string                  `json:"request_key"`
+		SupportedPlatforms []string                `json:"supported_platforms"`
+		Capacity           model.ExecutionCapacity `json:"capacity"`
 	}
 	if e := decode(c, &in); e != nil {
 		fail(c, e)
 		return
 	}
-	v, e := service.WiredExecution().ClaimWithCapacity(ctx, auth.Claims.UserID, in.Key, in.Capacity)
+	v, e := service.WiredExecution().ClaimWithPlatforms(ctx, auth.Claims.UserID, in.Key, in.Capacity, in.SupportedPlatforms)
 	if e != nil {
 		fail(c, e)
 		return

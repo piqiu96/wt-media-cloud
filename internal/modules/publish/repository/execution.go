@@ -44,7 +44,7 @@ func currentTransaction(db *gorm.DB, work func(*gorm.DB) error) error {
 }
 
 func sameCandidate(v, old model.Task) bool {
-	return v.ID == old.ID && v.Revision == old.Revision && v.OperatorID == old.OperatorID && v.PlatformAccountUID == old.PlatformAccountUID && v.MediaAccountID == old.MediaAccountID && v.CompositeOutputID == old.CompositeOutputID && v.CoverFileID == old.CoverFileID
+	return v.ID == old.ID && v.Platform == old.Platform && v.Revision == old.Revision && v.OperatorID == old.OperatorID && v.PlatformAccountUID == old.PlatformAccountUID && v.MediaAccountID == old.MediaAccountID && v.CompositeOutputID == old.CompositeOutputID && v.CoverFileID == old.CoverFileID
 }
 func (s ExecutionStore) Start(candidate model.Task, revision uint64, actor int64, now time.Time) (model.Task, error) {
 	e := currentTransaction(s.DB, func(tx *gorm.DB) error {
@@ -134,6 +134,14 @@ func (s ExecutionStore) Claim(user int64, key string, now time.Time) (*model.Cla
 }
 
 func (s ExecutionStore) ClaimWithCapacity(user int64, key string, agent model.ExecutionCapacity, now time.Time) (*model.Claim, error) {
+	return s.ClaimWithPlatforms(user, key, agent, nil, now)
+}
+
+func (s ExecutionStore) ClaimWithPlatforms(user int64, key string, agent model.ExecutionCapacity, platforms []string, now time.Time) (*model.Claim, error) {
+	supported, valid := model.SupportedPublicationPlatforms(platforms)
+	if !valid {
+		return nil, ErrConflict
+	}
 	if prior, e := s.prior(user, key); e != nil || prior != nil {
 		return prior, e
 	}
@@ -144,7 +152,7 @@ func (s ExecutionStore) ClaimWithCapacity(user int64, key string, agent model.Ex
 		return nil, e
 	}
 	cap := s.localCapacity(agent)
-	if e := s.prepareBatchGroups(user, cap, now); e != nil {
+	if e := s.prepareBatchGroups(user, cap, supported, now); e != nil {
 		return nil, e
 	}
 	var after uint64
@@ -153,7 +161,7 @@ func (s ExecutionStore) ClaimWithCapacity(user int64, key string, agent model.Ex
 		if e := s.DB.Where(`operator_id=? AND status=? AND authorized_at IS NOT NULL AND cancel_requested_at IS NULL AND (not_before IS NULL OR not_before<=?)
   AND (batch_id IS NULL OR EXISTS (SELECT 1 FROM publication_batch b WHERE b.id=publication_task.batch_id AND b.execution_status='running'
    AND b.stopped_at IS NULL AND b.group_ended_at IS NULL AND b.execution_group_no=publication_task.execution_group_no))`,
-			user, model.StatusQueued, now).Where("id>?", after).Order("id").Limit(100).Find(&candidates).Error; e != nil {
+			user, model.StatusQueued, now).Where("platform IN ?", supported).Where("id>?", after).Order("id").Limit(100).Find(&candidates).Error; e != nil {
 			return nil, e
 		}
 		for _, candidate := range candidates {

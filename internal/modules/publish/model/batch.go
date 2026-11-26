@@ -63,6 +63,7 @@ type BatchShortfall struct {
 }
 
 type BatchCoverResource struct {
+	SpaceCoverResourcePath    string `json:"space_cover_resource_path,omitempty"`
 	RowKey                    string `json:"row_key"`
 	CoverResourcePath         string `json:"cover_resource_path,omitempty"`
 	PortraitCoverResourcePath string `json:"portrait_cover_resource_path,omitempty"`

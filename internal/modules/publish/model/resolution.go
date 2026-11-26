@@ -29,6 +29,17 @@ type ResultResolution struct {
 }
 
 func (r ResultResolution) Valid() bool {
+	return r.ValidFor("baidu")
+}
+
+func (r ResultResolution) ValidFor(platform string) bool {
+	if platform != "baidu" && platform != "bilibili" {
+		return false
+	}
+	targetURL, workURL := ExactBaiduTargetURL, ExactBaiduWorkURL
+	if platform == "bilibili" {
+		targetURL, workURL = ExactBilibiliWorkURL, ExactBilibiliWorkURL
+	}
 	e := r.Evidence
 	if r.AttemptID == 0 || r.ExpectedRevision == 0 || strings.TrimSpace(e.PlatformUID) == "" || len(e.PlatformUID) > 255 || strings.TrimSpace(e.Reason) == "" || utf8.RuneCountInString(e.Reason) > 200 || utf8.RuneCountInString(strings.TrimSpace(e.Basis)) < 10 || utf8.RuneCountInString(e.Basis) > 2000 {
 		return false
@@ -39,11 +50,19 @@ func (r ResultResolution) Valid() bool {
 	case StatusUncertain:
 		return r.PlatformSubmissionID == "" && r.TargetURL == "" && r.PlatformWorkID == "" && r.WorkURL == "" && r.PublishedAt == nil
 	case StatusReviewing:
-		return e.SceneClosed && e.WorkMatched && decimalIdentity(r.PlatformSubmissionID) && (r.TargetURL == "" || ExactBaiduTargetURL(r.PlatformSubmissionID, r.TargetURL)) && r.PlatformWorkID == "" && r.WorkURL == "" && r.PublishedAt == nil && !e.NoPublishableWork
+		return e.SceneClosed && e.WorkMatched && decimalIdentity(r.PlatformSubmissionID) && (r.TargetURL == "" || targetURL(r.PlatformSubmissionID, r.TargetURL)) && r.PlatformWorkID == "" && r.WorkURL == "" && r.PublishedAt == nil && !e.NoPublishableWork
 	case StatusPublished:
-		return e.SceneClosed && e.WorkMatched && e.PubliclyAccessible && !e.NoPublishableWork && decimalIdentity(r.PlatformSubmissionID) && (r.TargetURL == "" || ExactBaiduTargetURL(r.PlatformSubmissionID, r.TargetURL)) && ExactBaiduWorkURL(r.PlatformWorkID, r.WorkURL) && r.PublishedAt != nil && !r.PublishedAt.IsZero() && !r.PublishedAt.After(time.Now())
+		return e.SceneClosed && e.WorkMatched && e.PubliclyAccessible && !e.NoPublishableWork && decimalIdentity(r.PlatformSubmissionID) && (r.TargetURL == "" || targetURL(r.PlatformSubmissionID, r.TargetURL)) && workURL(r.PlatformWorkID, r.WorkURL) && (platform != "bilibili" || r.PlatformWorkID == r.PlatformSubmissionID) && r.PublishedAt != nil && !r.PublishedAt.IsZero() && !r.PublishedAt.After(time.Now())
 	}
 	return false
+}
+
+func ExactBilibiliWorkURL(id, raw string) bool {
+	if !decimalIdentity(id) {
+		return false
+	}
+	u, err := url.Parse(raw)
+	return err == nil && len(raw) <= 2048 && u.Scheme == "https" && u.Host == "www.bilibili.com" && u.User == nil && u.RawQuery == "" && !u.ForceQuery && u.Fragment == "" && u.RawPath == "" && (u.Path == "/video/av"+id || u.Path == "/video/av"+id+"/")
 }
 
 type OriginalAttemptState struct {

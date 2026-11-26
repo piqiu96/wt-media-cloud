@@ -14,6 +14,7 @@ import (
 )
 
 type ExecutionReport struct {
+	SpaceCoverSHA256    string       `json:"space_cover_sha256,omitempty"`
 	SceneParked         bool         `json:"scene_parked,omitempty"`
 	PortraitCoverSHA256 string       `json:"portrait_cover_sha256,omitempty"`
 	AttemptID           uint64       `json:"attempt_id,string"`
@@ -31,6 +32,7 @@ type Completion struct {
 	Result     json.RawMessage `json:"result"`
 }
 type ResultEvidence struct {
+	SpaceCoverSHA256    string `json:"space_cover_sha256,omitempty"`
 	PortraitCoverSHA256 string `json:"portrait_cover_sha256,omitempty"`
 	PlatformUID         string `json:"platform_uid,omitempty"`
 	BitProfileID        string `json:"bit_profile_id,omitempty"`

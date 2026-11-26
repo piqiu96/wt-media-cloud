@@ -70,7 +70,7 @@ func (s *Service) Summary(a identity.PublicUser, f Filter, now time.Time) (Summa
 // verified exact original-attempt evidence before entering this transaction.
 func RecordPublication(tx *gorm.DB, v model.Work) (model.Work, error) {
 	hash, err := hex.DecodeString(v.VideoSHA256)
-	if v.Platform != "baidu" || strings.TrimSpace(v.PlatformWorkID) == "" || len(v.PlatformWorkID) > 255 || v.WorkURL == "" || len(v.WorkURL) > 2048 || v.PlatformAccountUID == "" || v.MediaAccountID == 0 || v.OperatorID <= 0 || v.TeamID <= 0 || v.CategoryID <= 0 || v.PublicationID == 0 || v.AttemptID == 0 || v.CompositeOutputID <= 0 || strings.TrimSpace(v.Title) == "" || utf8.RuneCountInString(v.Title) > 1000 || v.CoverFileID <= 0 || err != nil || len(hash) != 32 || v.PublishedAt.IsZero() || v.FirstObservedAt.IsZero() || v.PublishedAt.After(v.FirstObservedAt) {
+	if v.Platform != "baidu" && v.Platform != "bilibili" || strings.TrimSpace(v.PlatformWorkID) == "" || len(v.PlatformWorkID) > 255 || v.WorkURL == "" || len(v.WorkURL) > 2048 || v.PlatformAccountUID == "" || v.MediaAccountID == 0 || v.OperatorID <= 0 || v.TeamID <= 0 || v.CategoryID <= 0 || v.PublicationID == 0 || v.AttemptID == 0 || v.CompositeOutputID <= 0 || strings.TrimSpace(v.Title) == "" || utf8.RuneCountInString(v.Title) > 1000 || v.CoverFileID <= 0 || err != nil || len(hash) != 32 || v.PublishedAt.IsZero() || v.FirstObservedAt.IsZero() || v.PublishedAt.After(v.FirstObservedAt) {
 		return model.Work{}, ErrInvalid
 	}
 	if err := files.LockAvailable(tx, []int64{v.CoverFileID}); err != nil {
