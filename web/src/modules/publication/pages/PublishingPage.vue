@@ -1208,7 +1208,7 @@ onMounted(async () => {
             >
             <template #status="{ row }"
               ><BusinessStatus
-                :status="row.status" :label="statusLabel(row.status)" /><small v-if="row.cancel_requested_at && row.status === PublicationStatus.Running" class="publication-sub">已请求安全停止，等待确认</small></template
+                :status="row.status" :label="statusLabel(row.status)" /><small v-if="row.verification_required" class="publication-sub">公开结果需人工核实</small><small v-if="row.cancel_requested_at && row.status === PublicationStatus.Running" class="publication-sub">已请求安全停止，等待确认</small></template
             ><template #created_at="{ row }">{{
               formatDateTime(row.created_at)
             }}</template>
@@ -1386,7 +1386,7 @@ onMounted(async () => {
       <ResourceCard class="detail-card"><ResourceSection title="任务信息">
         <ResourceDescriptions>
           <t-descriptions-item label="任务 ID">{{ detail.id }}</t-descriptions-item>
-          <t-descriptions-item label="任务状态"><BusinessStatus :status="detail.status" :label="statusLabel(detail.status)" /><small v-if="detail.cancel_requested_at && detail.status === PublicationStatus.Running" class="publication-sub">已请求安全停止，等待确认</small></t-descriptions-item>
+          <t-descriptions-item label="任务状态"><BusinessStatus :status="detail.status" :label="statusLabel(detail.status)" /><small v-if="detail.verification_required" class="publication-sub">公开结果需人工核实</small><small v-if="detail.cancel_requested_at && detail.status === PublicationStatus.Running" class="publication-sub">已请求安全停止，等待确认</small></t-descriptions-item>
           <t-descriptions-item label="发布平台">{{ platformLabel(detail.platform) }}</t-descriptions-item>
           <t-descriptions-item v-if="detail.execution_group_no" label="执行组">第 {{ detail.execution_group_no }} 组</t-descriptions-item>
           <t-descriptions-item label="内容类目">{{ categoryName(detail.category_id) }}</t-descriptions-item>
