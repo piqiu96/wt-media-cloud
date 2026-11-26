@@ -39,7 +39,7 @@ func (s Store) RequestMetrics(id uint64, now time.Time) (out model.Metrics, err 
 		if e != nil {
 			return e
 		}
-		if v.LeaseUntil != nil && v.LeaseUntil.After(now) || v.LastAttemptAt != nil && now.Sub(*v.LastAttemptAt) < 30*time.Second {
+		if v.LeaseUntil != nil && v.LeaseUntil.After(now) {
 			out = v
 			return nil
 		}

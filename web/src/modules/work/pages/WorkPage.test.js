@@ -8,7 +8,9 @@ const mocks = vi.hoisted(() => ({
 vi.mock("../../../shared/api/work.js", () => ({
   createWorkClient: () => mocks.work,
 }));
-vi.mock("../../../shared/ui/feedback/index.js", () => ({ feedback: { toast: { success: vi.fn() } } }));
+vi.mock("../../../shared/ui/feedback/index.js", () => ({
+  feedback: { toast: { success: vi.fn() } },
+}));
 vi.mock("vue-router", () => ({
   useRoute: () => ({ query: mocks.query }),
   useRouter: () => mocks.router,

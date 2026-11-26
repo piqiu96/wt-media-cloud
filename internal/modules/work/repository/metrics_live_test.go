@@ -158,11 +158,11 @@ func TestLiveMetricsLifecycleAndLease(t *testing.T) {
 	if e != nil || len(rows) != 1 || rows[0].Metrics == nil {
 		t.Fatal("list preload", rows, e)
 	}
-	if v, e := s.ClaimMetrics(a, now.Add(time.Minute)); e != nil || v != nil {
+	if v, e := s.ClaimMetrics(a, now.Add(2*time.Second)); e != nil || v != nil {
 		t.Fatal("not due claimed", v, e)
 	}
-	s.RequestMetrics(1, now.Add(time.Minute))
-	c, e = s.ClaimMetrics(a, now.Add(time.Minute))
+	s.RequestMetrics(1, now.Add(3*time.Second))
+	c, e = s.ClaimMetrics(a, now.Add(3*time.Second))
 	if e != nil || c == nil {
 		t.Fatal(c, e)
 	}

@@ -149,11 +149,7 @@ async function refreshMetrics(row) {
   try {
     const metrics = await client.refreshMetrics(id);
     if (disposed) return;
-    feedback.toast.success(
-      metrics.status === "ready"
-        ? "刚刚已更新，30 秒内复用本次结果"
-        : "已请求更新，负责人本机服务在线时自动获取",
-    );
+    feedback.toast.success("已请求更新，负责人本机服务在线时自动获取");
     rows.value = rows.value.map((r) =>
       String(r.id) === id ? { ...r, metrics } : r,
     );

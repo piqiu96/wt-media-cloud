@@ -41,7 +41,7 @@ paths:
       security: [{sessionCookie: []}]
       parameters:
         - {in: path, name: id, required: true, schema: {type: string, pattern: '^[1-9][0-9]*$'}}
-      description: Same read scope as work. Bilibili only. Queue one refresh for owner Agent; duplicate/in-flight requests coalesce, minimum 30-second request interval. Offline owner waits; no synchronous platform call. Does not change publication status.
+      description: Same read scope as work. Bilibili only. Queue one refresh for owner Agent; duplicate/in-flight requests coalesce; Agent polling bounds external reads to one claim per 30 seconds. Offline owner waits; no synchronous platform call. Does not change publication status.
       responses:
         '200': {description: Standard envelope data Metrics.}
         '404': {description: Not readable or missing.}
