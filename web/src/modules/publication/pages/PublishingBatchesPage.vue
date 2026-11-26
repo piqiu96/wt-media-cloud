@@ -695,7 +695,7 @@ onBeforeUnmount(() => {
           <template #state="{row}"><ResourceStatusBadge :label="executionState(row)" :tone="batchPending(row)?'warning':row.execution_status==='running'?'info':'neutral'"/><small v-if="row.execution_status==='not_started'" class="batch-muted batch-task-block">{{configState(row)}}</small><small v-if="['running','paused','stopping'].includes(row.execution_status) && row.execution?.phase && row.execution.phase!==row.execution_status && batchPhases[row.execution.phase]!==executionState(row)" class="batch-muted batch-task-block">{{batchPhases[row.execution.phase]}}</small><small v-if="row.execution?.stopped_at && !['ended','cancelled'].includes(row.execution_status)" class="batch-muted batch-task-block">已终止后续派发</small></template>
           <template #pending="{row}"><span v-if="batchPending(row) === null" class="batch-muted">待刷新</span><t-button v-else-if="batchPending(row)>0" theme="warning" variant="text" @click="open('detail',row)">{{batchPending(row)}} 项</t-button><span v-else>—</span></template>
           <template #updated_at="{ row }">{{ formatPublicationTime(row.updated_at) }}</template>
-          <template #op="{ row }"><ResourceRowActions>
+          <template #op="{ row }"><ResourceRowActions class="batch-list-actions">
             <t-button v-for="(action,index) in rowActions(row)" :key="action" variant="text" size="small"
               :class="{ 'is-primary': index === 0, 'is-danger': action === 'stop' }"
               @click="rowAction(row,action)">{{batchActionLabel(action,row)}}</t-button>
