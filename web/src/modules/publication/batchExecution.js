@@ -91,8 +91,8 @@ export function batchPendingCount(batch) {
   if (!execution) return batch.execution_status === "not_started" ? 0 : null;
   const verification = execution.verification_required_count;
   if (!Number.isSafeInteger(verification) || verification < 0) return null;
-  // Once ended, explicit failures are historical results; unresolved observations still need handling.
-  const pendingStatuses = ["awaiting_human", "uncertain", ...(["ended", "cancelled"].includes(batch.execution_status) ? [] : ["failed"])];
+  // Ended or handed-off failures are historical; unresolved observations still need handling.
+  const pendingStatuses = ["awaiting_human", "uncertain", ...(["ended", "cancelled"].includes(batch.execution_status) || batch.handed_off_at ? [] : ["failed"])];
   return pendingStatuses.reduce(
     (sum, status) => sum + (execution.task_counts?.[status] || 0), verification,
   );

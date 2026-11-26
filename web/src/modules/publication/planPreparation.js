@@ -10,7 +10,7 @@ export const planProgressLabels = {
   preparing: "待完成批次配置",
   running: "按批次顺序自动发布",
   manual_paused: "计划已暂停",
-  waiting_tasks: "当前有待处理任务",
+  waiting_tasks: "等待当前批次完成",
   waiting_verification: "待人工核实",
   waiting_continue: "失败率超过10%，等待确认",
   waiting_skip: "无明确结果，等待确认跳过",
