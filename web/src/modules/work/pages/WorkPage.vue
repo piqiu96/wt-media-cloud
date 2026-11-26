@@ -31,6 +31,7 @@ import ResourceRowActions from "../../../shared/ui/resource/ResourceRowActions.v
 import ResourceDetailPage from "../../../shared/ui/resource/ResourceDetailPage.vue";
 import ResourceSection from "../../../shared/ui/resource/ResourceSection.vue";
 import ResourceDescriptions from "../../../shared/ui/resource/ResourceDescriptions.vue";
+import { feedback } from "../../../shared/ui/feedback/index.js";
 import FeedbackAlert from "../../../shared/ui/feedback/FeedbackAlert.vue";
 import MediaPreview from "../../../shared/ui/media/MediaPreview.vue";
 import AccountSummaryDialog from "../../accounts/components/AccountSummaryDialog.vue";
@@ -65,6 +66,7 @@ const pageRoot = ref(null),
   requestedDetailId = ref("");
 let listScroll = 0;
 watch(detail, async (next, previous) => {
+  if (next && previous && String(next.id) === String(previous.id)) return;
   const container = pageRoot.value?.closest(".content-area");
   if (!previous) listScroll = container?.scrollTop || 0;
   await nextTick();
@@ -98,23 +100,117 @@ onBeforeUnmount(() => {
   listSequence++;
   detailSequence++;
   accountSequence++;
+  clearInterval(metricsTimer);
 });
 const categoryOptions = computed(() =>
   categories.value.map((c) => ({ label: c.name, value: String(c.id) })),
 );
 const categoryName = (id) =>
   categories.value.find((c) => String(c.id) === String(id))?.name || "—";
+const metricColumns = [
+  { colKey: "view", title: "播放量", width: 90 },
+  { colKey: "like", title: "点赞", width: 80 },
+  { colKey: "favorite", title: "收藏", width: 80 },
+  { colKey: "coin", title: "投币", width: 80 },
+  { colKey: "reply", title: "评论", width: 80 },
+  { colKey: "danmaku", title: "弹幕", width: 80 },
+];
+const refreshing = ref([]);
+let metricsTimer;
+function metricValue(row, key) {
+  const value = row.platform === "bilibili" ? row.metrics?.[key] : null;
+  return Number.isSafeInteger(value) && value >= 0
+    ? value.toLocaleString("zh-CN")
+    : "—";
+}
+function metricStatus(row) {
+  if (row.platform !== "bilibili") return "暂不支持";
+  const m = row.metrics;
+  if (!m || m.status === "queued") return "等待更新（负责人需登录桌面端）";
+  if (m.status === "refreshing")
+    return Date.now() - new Date(m.last_attempt_at).getTime() > 120000
+      ? "等待重试（负责人需登录桌面端）"
+      : "更新中";
+  if (m.status === "failed")
+    return (
+      {
+        rate_limited: "平台请求受限，稍后自动重试",
+        identity_mismatch: "作品或账号不匹配，更新失败",
+        invalid_response: "平台数据不完整，更新失败",
+      }[m.last_error] || "更新失败，稍后自动重试"
+    );
+  return "";
+}
+async function refreshMetrics(row) {
+  const id = String(row.id);
+  if (refreshing.value.includes(id)) return;
+  refreshing.value = [...refreshing.value, id];
+  error.value = "";
+  try {
+    const metrics = await client.refreshMetrics(id);
+    if (disposed) return;
+    feedback.toast.success("已请求更新，负责人登录桌面端后自动获取");
+    rows.value = rows.value.map((r) =>
+      String(r.id) === id ? { ...r, metrics } : r,
+    );
+    if (String(detail.value?.id) === id)
+      detail.value = { ...detail.value, metrics };
+  } catch (e) {
+    if (!disposed) error.value = e.message;
+  } finally {
+    refreshing.value = refreshing.value.filter((key) => key !== id);
+  }
+}
+async function pollMetrics() {
+  if (
+    disposed ||
+    loading.value ||
+    detailLoading.value ||
+    (typeof document !== "undefined" && document.hidden)
+  )
+    return;
+  if (detail.value) {
+    if (detail.value.platform !== "bilibili") return;
+    const id = String(detail.value.id),
+      sequence = detailSequence;
+    try {
+      const item = await client.get(id);
+      if (
+        !disposed &&
+        sequence === detailSequence &&
+        String(detail.value?.id) === id
+      )
+        detail.value = item;
+    } catch {
+      /* Keep the last successful page; explicit refresh still reports errors. */
+    }
+  } else if (rows.value.some((r) => r.platform === "bilibili")) {
+    const sequence = ++listSequence;
+    try {
+      const data = await client.list(params());
+      if (!disposed && sequence === listSequence && !detail.value) {
+        rows.value = data.items;
+        total.value = data.total;
+      }
+    } catch {
+      /* Preserve visible counters during a transient Cloud outage. */
+    }
+  }
+}
 const columns = [
   { colKey: "id", title: "作品 ID", width: 90 },
   { colKey: "title", title: "作品", width: 320 },
   { colKey: "platform", title: "平台", width: 100 },
+  { colKey: "metrics", title: "作品指标", width: 250 },
   { colKey: "account", title: "发布账号", width: 180 },
   { colKey: "category", title: "内容类目", width: 130 },
   { colKey: "published_at", title: "平台发布时间", width: 180 },
   {
     colKey: "op",
     title: "操作",
-    width: opColumnWidth(["详情", "打开作品", "原任务"], { variant: "text" }),
+    width: opColumnWidth(["详情", "刷新指标", "打开作品", "原任务"], {
+      variant: "text",
+    }),
     fixed: "right",
   },
 ];
@@ -207,6 +303,12 @@ function retryDetail() {
     return openDetail({ id: requestedDetailId.value });
 }
 function back() {
+  if (detail.value) {
+    const item = detail.value;
+    rows.value = rows.value.map((row) =>
+      String(row.id) === String(item.id) ? item : row,
+    );
+  }
   detailSequence++;
   requestedDetailId.value = "";
   detailError.value = "";
@@ -264,6 +366,7 @@ watch(
   },
 );
 onMounted(() => {
+  metricsTimer = setInterval(pollMetrics, 15000);
   load();
   loadCatalog();
   searchAccount();
@@ -369,7 +472,8 @@ onMounted(() => {
             /></label>
           </div>
         </ResourceFilterBar>
-        <t-table class="resource-data-table"
+        <t-table
+          class="resource-data-table"
           row-key="id"
           :data="rows"
           :columns="columns"
@@ -420,6 +524,33 @@ onMounted(() => {
           <template #category="{ row }">{{
             categoryName(row.category_id)
           }}</template>
+          <template #metrics="{ row }">
+            <template v-if="row.platform === 'bilibili'">
+              <div class="work-metrics-grid">
+                <span v-for="col in metricColumns" :key="col.colKey"
+                  ><span class="work-metrics-label">{{ col.title }}</span>
+                  {{ metricValue(row, col.colKey) }}</span
+                >
+              </div>
+              <div class="work-metrics-status">
+                {{
+                  row.metrics?.collected_at
+                    ? `更新于 ${date(row.metrics.collected_at)}`
+                    : "尚未获取"
+                }}
+              </div>
+              <div
+                v-if="metricStatus(row)"
+                class="work-metrics-status"
+                :class="{
+                  'work-field-error': row.metrics?.status === 'failed',
+                }"
+              >
+                {{ metricStatus(row) }}
+              </div>
+            </template>
+            <span v-else>—</span>
+          </template>
           <template #published_at="{ row }">{{
             date(row.published_at)
           }}</template>
@@ -427,6 +558,13 @@ onMounted(() => {
             ><ResourceRowActions
               ><t-button variant="text" size="small" @click="openDetail(row)"
                 >详情</t-button
+              ><t-button
+                v-if="row.platform === 'bilibili'"
+                variant="text"
+                size="small"
+                :loading="refreshing.includes(String(row.id))"
+                @click="refreshMetrics(row)"
+                >刷新指标</t-button
               ><t-button
                 v-if="publicURL(row)"
                 variant="text"
@@ -520,6 +658,39 @@ onMounted(() => {
           </ResourceDescriptions></ResourceSection
         ></ResourceCard
       >
+      <ResourceCard v-if="detail.platform === 'bilibili'" class="detail-card">
+        <ResourceSection title="作品指标">
+          <ResourceStatGrid
+            :items="
+              metricColumns.map((col) => ({
+                key: col.colKey,
+                label: col.title,
+                value: metricValue(detail, col.colKey),
+              }))
+            "
+          />
+          <ResourceDescriptions>
+            <t-descriptions-item label="最后更新">{{
+              detail.metrics?.collected_at
+                ? date(detail.metrics.collected_at)
+                : "尚未获取"
+            }}</t-descriptions-item>
+            <t-descriptions-item label="更新状态">{{
+              metricStatus(detail) || "已更新"
+            }}</t-descriptions-item>
+          </ResourceDescriptions>
+          <p class="work-metrics-status">
+            B站公开累计数据，可能有延迟；播放量不等于观看人数。
+          </p>
+          <t-button
+            theme="default"
+            variant="outline"
+            :loading="refreshing.includes(String(detail.id))"
+            @click="refreshMetrics(detail)"
+            >刷新指标</t-button
+          >
+        </ResourceSection>
+      </ResourceCard>
       <ResourceCard class="detail-card"
         ><ResourceSection title="来源信息"
           ><ResourceDescriptions>
@@ -579,6 +750,19 @@ onMounted(() => {
   max-height: 280px;
   object-fit: contain;
   border-radius: var(--wt-radius, 6px);
+}
+.work-metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px 12px;
+  font-variant-numeric: tabular-nums;
+}
+.work-metrics-label {
+  color: var(--wt-color-text-secondary, #64748b);
+}
+.work-metrics-status {
+  font-size: 12px;
+  color: var(--wt-color-text-secondary, #64748b);
 }
 .work-field-error {
   font-size: 12px;

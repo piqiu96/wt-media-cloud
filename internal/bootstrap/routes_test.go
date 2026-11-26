@@ -47,6 +47,9 @@ func TestRegisterModuleRoutesReachesEveryModule(t *testing.T) {
 		method string
 		path   string
 	}{
+		{"work", consts.MethodPost, "/api/v1/work/1/metrics/refresh"},
+		{"workmetrics", consts.MethodPost, "/api/v1/cloud-agent/work-metrics/claim"},
+		{"workmetrics", consts.MethodPost, "/api/v1/cloud-agent/work-metrics/1/report"},
 		{"work", consts.MethodGet, "/api/v1/work"},
 		{"work", consts.MethodGet, "/api/v1/work/summary"},
 		{"work", consts.MethodGet, "/api/v1/work/1"},

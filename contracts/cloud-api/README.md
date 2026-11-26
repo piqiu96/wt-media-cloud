@@ -14,7 +14,7 @@ Cloud-owned public HTTPS JSON API contracts for Web and Desktop consumers.
 
 - `v1/publication.openapi.yaml`: Revision `2026.11.25.2` enforces batch control on standalone task actions and adds associated batch, row and execution-group fields. Prior retained capabilities include separate validated 16:9 / 3:4 cover files and frozen render references (ADR-0036), complete single-row and multi-row DeepSeek suggestions over SSE with separate field adoption, original creation-result lookup, publish-owned production output candidates with platform occupancy, formal single-task preparation, scoped read-back, revision-checked edits and separate execution authorization/attempt history, four-conclusion result verification and reviewing supplement, exact receipt/public identity separation (ADR-0035), canonical public-work association, safe same-task retry, unclaimed cancellation retaining occupancy, verified failure abandonment releasing occupancy, immutable template cover input checks, and recent original-submission observation details.
 
-- `v1/work.openapi.yaml`: Permission-scoped read-only work list/detail and actual-publication-time summary, backed by platform-work identity deduplication.
+- `v1/work.openapi.yaml`: Revision `2026.11.27.1` adds nullable six-counter Bilibili metrics, refresh requests and last-success status. Permission-scoped read-only work list/detail and actual-publication-time summary, backed by platform-work identity deduplication.
 
 - `v1/image.openapi.yaml`: CHG106 singular image-asset registration, scoped queries, revision-checked maintenance and category-first selection; files retain provider-owned upload and access.
 

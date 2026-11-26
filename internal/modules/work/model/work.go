@@ -3,6 +3,7 @@ package model
 import "time"
 
 type Work struct {
+	Metrics            *Metrics  `json:"metrics" gorm:"foreignKey:WorkID;references:ID"`
 	AccountName        string    `json:"account_name"`
 	CoverResourcePath  string    `json:"cover_resource_path"`
 	ID                 uint64    `json:"id,string"`
