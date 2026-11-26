@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: WT Media Work
-  version: 2026.11.21.2
+  version: 2026.11.27.1
   description: Canonical verified public work. Singular entity names. IDs are decimal strings. No public creation or deletion. Publication resolution owns evidence and atomic association. Scope matches publication owner/team/category. Timestamps RFC3339, today uses actual platform published_at in Asia/Shanghai.
 paths:
   /api/v1/work:
@@ -18,7 +18,7 @@ paths:
         - {in: query, name: published_from, schema: {type: string, format: date-time}}
         - {in: query, name: published_before, schema: {type: string, format: date-time}}
       responses:
-        '200': {description: 'Standard envelope data {items:[Work],total,page,page_size}. Work contains id, platform, platform_work_id, work_url, platform_account_uid, media_account_id, operator_id, team_id, category_id, publication_id, attempt_id, composite_output_id, title, account_name, cover_resource_path, cover_file_id, published_at, first_observed_at. No credentials or private execution evidence.'}
+        '200': {description: 'Standard envelope data {items:[Work],total,page,page_size}. Work contains id, platform, platform_work_id, work_url, platform_account_uid, media_account_id, operator_id, team_id, category_id, publication_id, attempt_id, composite_output_id, title, account_name, cover_resource_path, cover_file_id, published_at, first_observed_at. metrics is null before collection or for unsupported platforms; otherwise {view,like,favorite,coin,reply,danmaku,collected_at,last_attempt_at,status,last_error,source}. Counts/time nullable before first success; status queued/refreshing/ready/failed. Failed refresh retains old counts. source bilibili_public_api. No credentials or private execution evidence.'}
         '400': {description: Invalid filters.}
   /api/v1/work/summary:
     get:
@@ -36,6 +36,16 @@ paths:
       responses:
         '200': {description: Standard envelope data Work.}
         '404': {description: Missing or outside current user/team/category scope.}
+  /api/v1/work/{id}/metrics/refresh:
+    post:
+      security: [{sessionCookie: []}]
+      parameters:
+        - {in: path, name: id, required: true, schema: {type: string, pattern: '^[1-9][0-9]*$'}}
+      description: Same read scope as work. Bilibili only. Queue one refresh for owner Agent; duplicate/in-flight requests coalesce, minimum 30-second request interval. Offline owner waits; no synchronous platform call. Does not change publication status.
+      responses:
+        '200': {description: Standard envelope data Metrics.}
+        '404': {description: Not readable or missing.}
+        '400': {description: Platform unsupported.}
 components:
   securitySchemes:
     sessionCookie: {type: apiKey, in: cookie, name: wt_media_session}

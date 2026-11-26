@@ -81,7 +81,7 @@ func (s Store) query(f Filter) *gorm.DB {
 }
 func (s Store) Get(id uint64) (model.Work, error) {
 	var v model.Work
-	err := s.DB.First(&v, id).Error
+	err := s.DB.Preload("Metrics").First(&v, id).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		err = ErrNotFound
 	}
@@ -94,7 +94,7 @@ func (s Store) List(f Filter) ([]model.Work, int64, error) {
 		return nil, 0, err
 	}
 	out := []model.Work{}
-	err := q.Order("published_at DESC,id DESC").Offset((f.Page - 1) * f.PageSize).Limit(f.PageSize).Find(&out).Error
+	err := q.Order("published_at DESC,id DESC").Offset((f.Page - 1) * f.PageSize).Limit(f.PageSize).Preload("Metrics").Find(&out).Error
 	return out, total, err
 }
 func (s Store) Summary(f Filter, from, before time.Time) (Summary, error) {

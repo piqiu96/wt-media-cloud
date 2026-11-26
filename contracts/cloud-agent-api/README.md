@@ -81,3 +81,5 @@ authorization and executed no external action.
 - `v1/execution-preflight.openapi.yaml` and `v1/sensitive-profile-guard.openapi.yaml`: sensitive permit/task admission is removed with the generic task model.
 - `v1/runtime-binding.openapi.yaml`: the device/node binding and secret-safe runtime report model is gone; runtime facts now travel with each admission request.
 - `v1/registration-heartbeat.openapi.yaml`: unauthenticated agent registration and heartbeat are gone; the Agent proves itself with the Agent Token.
+
+- `v1/work-metrics.openapi.yaml`: additive owner-scoped six-counter public Bilibili collection; strict claims, report-safe lease results, 90-second leases, hourly success interval and failure backoff. No CK, browser scene or publication mutation. Deploy matching Local/Sidecar support for automatic/manual requests; old or offline Agents leave refresh queued.

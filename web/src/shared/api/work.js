@@ -7,6 +7,7 @@ export function createWorkClient({
   return {
     list: (params) => api.get("/work", params),
     get: (id) => api.get(`/work/${id}`),
+    refreshMetrics: (id) => api.post(`/work/${id}/metrics/refresh`, {}),
     summary: (params) => api.get("/work/summary", params),
   };
 }

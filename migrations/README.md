@@ -147,3 +147,12 @@ data preservation for rollback.
 ### 118 publication plan
 
 `20261125_118_publication_plan.sql` adds plan-owned structure, immutable future-start selection storage, batch handoff facts and the latest manual-verification task projection. Existing standalone batches retain NULL plan ownership and unchanged business facts. Plan skeleton creation creates neither tasks nor output occupancy; only the existing start core may do so. This is the existing forward-only migration system: rollback is tested by explicit reverse DDL in a disposable schema, not by adding a down SQL file that the normal loader would execute. Production reversal after plan execution is not automatic and must preserve plan/task history.
+
+## Migration 119 Safety
+
+`20261127_119_work_metrics.sql` adds independent latest and historical Bilibili
+counters. Apply before the new Work API; no existing work or publication columns
+are changed. Existing works remain metrics=null until collected. Roll application
+back before optionally removing the two new tables; snapshot removal loses only
+metric history. Deploy the matching Agent polling support for timed/manual
+refresh; an offline or old Agent leaves requests queued, preserving last values.
