@@ -38,3 +38,14 @@ func TestPlatformRulesDefaultsAreCopiedAndNeverClaimOriginality(t *testing.T) {
 		t.Fatal("must require an explicit authorship choice")
 	}
 }
+
+func TestCurrentBilibiliPartitionsKeepObservedIDsAndOwnReturnedValues(t *testing.T) {
+	options := platformRules(config.PublicationPlatformsConfig{}).Platforms[1].PartitionOptions
+	if len(options) != 30 || options[7].ID != 1008 || options[7].Name != "游戏" || options[27].ID != 1029 || options[29].Name != "生活经验" {
+		t.Fatalf("current type2 catalog changed: %+v", options)
+	}
+	options[7].Name = "changed"
+	if platformRules(config.PublicationPlatformsConfig{}).Platforms[1].PartitionOptions[7].Name != "游戏" {
+		t.Fatal("caller mutated platform catalog")
+	}
+}
