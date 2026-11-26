@@ -313,3 +313,19 @@ it("names platform-review wait and a paused current batch without implying finis
   expect(planProgressLabels.awaiting_finish).toBe("等待平台公开结果");
   expect(planProgressLabels.batch_paused).toBe("当前批次已暂停");
 });
+it('rejects balanced plans with stale platform group numbering before save', () => {
+  const p = { name:'双平台',date_start:'2026-11-26',date_end:'2026-11-27',
+    goals:[{platform:'baidu',category_id:'1',target_count:1},{platform:'bilibili',category_id:'1',target_count:2}],
+    batches:['baidu','bilibili','bilibili'].map((platform,index)=>({row_key:String(index),name:'批次'+index,
+      platform,group_order:index<2?1:2,batch_order:index<2?index+1:1,targets:[{category_id:'1',target_count:1}]})) };
+  expect(planProblem(p)).toContain('顺序');
+  p.batches[1].group_order=2;p.batches[1].batch_order=1;p.batches[2].batch_order=2;
+  expect(planProblem(p)).toBe('');
+});
+it('rejects balanced but noncontiguous platform groups before save', () => {
+  const p = { name:'双平台',date_start:'2026-11-26',date_end:'2026-11-27',
+    goals:[{platform:'baidu',category_id:'1',target_count:1},{platform:'bilibili',category_id:'1',target_count:2}],
+    batches:['bilibili','baidu','bilibili'].map((platform,index)=>({row_key:String(index),name:'批次'+index,
+      platform,group_order:index+1,batch_order:1,targets:[{category_id:'1',target_count:1}]})) };
+  expect(planProblem(p)).toContain('连续');
+});

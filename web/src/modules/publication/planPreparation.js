@@ -81,9 +81,21 @@ export function planProblem(p) {
     totals[k] = g.target_count;
   }
   const rowKeys = new Set();
+  const groups = new Set();
+  let platform, group = 0, order = 0;
   for (const b of p.batches) {
     if (!b.row_key || rowKeys.has(b.row_key)) return "批次标识重复或缺失";
     rowKeys.add(b.row_key);
+    if (b.platform !== platform) {
+      if (groups.has(b.platform)) return "同一平台的批次须连续排列";
+      groups.add(b.platform);
+      platform = b.platform;
+      group++;
+      order = 0;
+    }
+    order++;
+    if (b.group_order !== group || b.batch_order !== order)
+      return "批次分组或顺序无效，请重新整理批次安排";
     if (!b.targets.length) return "每个批次至少分配一项目标";
     const categoryKeys = new Set();
     if (!b.name.trim() || [...b.name].length > 100)

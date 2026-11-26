@@ -65,3 +65,24 @@ it('can remove a later platform without moving an earlier fixed batch', async ()
     ['baidu1',1,1],['baidu2',1,2],
   ]);
 });
+it('renumbers groups after changing a batch to its following platform', async () => {
+  const { state, form } = await setup(mixedPlan());
+  await state.batchPlatform(form.batches[1], 'bilibili');
+  expect(form.batches.map(b => [b.platform,b.group_order,b.batch_order])).toEqual([
+    ['baidu',1,1],['bilibili',2,1],['bilibili',2,2],['bilibili',2,3],
+  ]);
+  expect(form.batches[1].targets).toEqual([]);
+});
+it('refuses a batch platform change that moves a surviving fixed batch', async () => {
+  const { state, form } = await setup(mixedPlan(), { bilibili1:{fixed:true} });
+  await state.batchPlatform(form.batches[1], 'bilibili');
+  expect(form.batches[1].platform).toBe('baidu');
+  expect(form.batches[1].targets).toHaveLength(1);
+  expect(state.error.value).toContain('固定');
+});
+it('refuses a batch platform change that splits one platform into noncontiguous groups', async () => {
+  const { state, form } = await setup(mixedPlan());
+  await state.batchPlatform(form.batches[0], 'bilibili');
+  expect(form.batches[0].platform).toBe('baidu');
+  expect(state.error.value).toContain('连续');
+});

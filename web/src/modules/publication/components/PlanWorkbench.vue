@@ -188,6 +188,32 @@ function setCell(b, id, value) {
     if (value > 0) b.targets.push({ category_id: id, target_count: value });
   }, [b]);
 }
+async function batchPlatform(b, value) {
+  if (fixed.value || immutable(b) || b.platform === value || !selectedPlatforms.value.includes(value)) return;
+  const index = props.form.batches.indexOf(b);
+  if (index < 0) return;
+  const proposed = clone({ batches: props.form.batches });
+  proposed.batches[index].platform = value;
+  reorder(proposed);
+  const groups = new Set();
+  let previous;
+  for (const row of proposed.batches) {
+    if (row.platform === previous) continue;
+    if (groups.has(row.platform)) { error.value = '同一平台的批次需连续排列，请先调整批次位置'; return; }
+    groups.add(row.platform);
+    previous = row.platform;
+  }
+  if (props.form.batches.some((row,i) => immutable(row) &&
+      (row.group_order !== proposed.batches[i].group_order || row.batch_order !== proposed.batches[i].batch_order))) {
+    error.value = '已固定批次的分组与顺序不可改变';
+    return;
+  }
+  await mutate(() => {
+    b.platform = value;
+    b.targets = [];
+    reorder(props.form);
+  }, [b]);
+}
 function move(i, d) {
   const j = i + d;
   if (j < 0 || j >= props.form.batches.length) return;
@@ -490,7 +516,7 @@ function remove(i) {
                   :aria-label="'批次' + (i + 1) + '名称'"
                 />
               </td>
-              <td><t-select :value="b.platform" :options="platforms.options.value.filter(item=>selectedPlatforms.includes(item.value))" :disabled="fixed || immutable(b)" :aria-label="b.name+'平台'" @change="value=>mutate(()=>{b.platform=value;b.targets=[]},[b])" /></td>
+              <td><t-select :value="b.platform" :options="platforms.options.value.filter(item=>selectedPlatforms.includes(item.value))" :disabled="fixed || immutable(b)" :aria-label="b.name+'平台'" @change="value=>batchPlatform(b,value)" /></td>
               <td
                 v-for="g in goalColumns"
                 :key="g.category_id"
