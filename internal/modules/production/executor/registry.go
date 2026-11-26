@@ -90,4 +90,4 @@ func DeployedDefinition(code string, version uint32) (Definition, error) {
 }
 
 // DeployedDefinitions contains the current catalog; new templates register here.
-func DeployedDefinitions() []Definition { return []Definition{DynamicPIPEndingV1()} }
+func DeployedDefinitions() []Definition { return []Definition{DynamicPIPEndingV1(), AdPIPEndingV1()} }

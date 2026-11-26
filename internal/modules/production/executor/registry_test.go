@@ -95,7 +95,7 @@ func TestDeployedTemplateTaskEditabilityIsExplicitAndGuideURLLocked(t *testing.T
 
 func TestOnlyCurrentCompositionTemplateIsDeployed(t *testing.T) {
 	definitions := DeployedDefinitions()
-	if len(definitions) != 1 || definitions[0].Code != "dynamic_pip_ending" {
+	if len(definitions) != 2 || definitions[0].Code != "dynamic_pip_ending" || definitions[1].Code != "ad_pip_ending" {
 		t.Fatalf("retired templates are still executable: %+v", definitions)
 	}
 	for _, retired := range []string{"basic_cut", "guide_insert", "guide_pip"} {

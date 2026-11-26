@@ -25,10 +25,43 @@ const dynamicSchema = `{"type":"object","properties":{
  "transition_seconds":{"type":"number","minimum":0,"maximum":1,"title":"段落转场时长（秒）","editable":false}
  },"required":["intro_video_url","ad_video_url","start_seconds","end_seconds","max_duration_seconds","ad_start_min_seconds","ad_start_max_seconds","intro_pip_width","ad_pip_width","transition_seconds"],"additionalProperties":false}`
 
-type DynamicExecutor struct{}
+type DynamicExecutor struct{ omitIntro bool }
 
 func DynamicPIPEndingV1() Definition {
 	return Definition{Code: "dynamic_pip_ending", Version: 1, Schema: json.RawMessage(dynamicSchema), ExecutorID: "dynamic_pip_ending_v1", Executor: DynamicExecutor{}}
+}
+
+func AdPIPEndingV1() Definition {
+	var schema map[string]any
+	_ = json.Unmarshal([]byte(dynamicSchema), &schema)
+	properties := schema["properties"].(map[string]any)
+	delete(properties, "intro_video_url")
+	delete(properties, "intro_pip_width")
+	schema["description"] = "正片前段 → 广告画中画 → 从插入点继续正片 → 配乐片尾。广告以插入点起等长正片作模糊背景，仅播放广告声音；广告无音轨时该段静音。"
+	properties["ad_video_url"].(map[string]any)["title"] = "广告视频URL"
+	descriptions := map[string]string{
+		"ad_video_url":         "广告以前景画中画播放，广告无音轨时该段静音。",
+		"start_seconds":        "正片选段起点。广告结束后从其插入点继续正片。",
+		"end_seconds":          "正片选段终点，0表示自动选取。",
+		"max_duration_seconds": "包含广告、片尾及转场重叠的成片时长上限。",
+		"ad_start_min_seconds": "广告在成片中出现的最早时间。",
+		"ad_start_max_seconds": "广告在成片中出现的最晚时间。",
+		"ad_pip_width":         "广告前景相对于成片宽度的比例。",
+		"transition_seconds":   "相邻段落之间的淡入淡出重叠时长。",
+	}
+	for key, description := range descriptions {
+		properties[key].(map[string]any)["description"] = description
+	}
+	required := []string{}
+	for _, value := range schema["required"].([]any) {
+		key := value.(string)
+		if key != "intro_video_url" && key != "intro_pip_width" {
+			required = append(required, key)
+		}
+	}
+	schema["required"] = required
+	raw, _ := json.Marshal(schema)
+	return Definition{Code: "ad_pip_ending", Version: 1, Schema: raw, ExecutorID: "ad_pip_ending_v1", Executor: DynamicExecutor{omitIntro: true}}
 }
 
 type DynamicParams struct {
@@ -47,7 +80,10 @@ type DynamicPlan interface {
 	Plan
 	Timeline(source, intro, ad, tail float64, seed int64) (DynamicTimeline, error)
 }
-type dynamicPlan struct{ DynamicParams }
+type dynamicPlan struct {
+	DynamicParams
+	omitIntro bool
+}
 type Segment struct {
 	Name        string  `json:"name"`
 	Start       float64 `json:"start"`
@@ -94,7 +130,7 @@ func strictJSON(raw json.RawMessage, value any) error {
 	}
 	return nil
 }
-func (DynamicExecutor) ValidateParams(raw json.RawMessage) (Plan, error) {
+func (e DynamicExecutor) ValidateParams(raw json.RawMessage) (Plan, error) {
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &fields); err != nil || fields == nil {
 		return nil, errors.New("dynamic template parameters must be an object")
@@ -102,10 +138,22 @@ func (DynamicExecutor) ValidateParams(raw json.RawMessage) (Plan, error) {
 	var schema struct {
 		Required []string `json:"required"`
 	}
-	_ = json.Unmarshal([]byte(dynamicSchema), &schema)
+	schemaRaw := json.RawMessage(dynamicSchema)
+	if e.omitIntro {
+		schemaRaw = AdPIPEndingV1().Schema
+	}
+	_ = json.Unmarshal(schemaRaw, &schema)
 	for _, key := range schema.Required {
 		if len(fields[key]) == 0 || bytes.Equal(fields[key], []byte("null")) {
 			return nil, fmt.Errorf("missing parameter %s", key)
+		}
+	}
+	if e.omitIntro {
+		if _, exists := fields["intro_video_url"]; exists {
+			return nil, errors.New("intro is not supported by ad_pip_ending")
+		}
+		if _, exists := fields["intro_pip_width"]; exists {
+			return nil, errors.New("intro width is not supported by ad_pip_ending")
 		}
 	}
 	var p DynamicParams
@@ -117,16 +165,18 @@ func (DynamicExecutor) ValidateParams(raw json.RawMessage) (Plan, error) {
 			return nil, errors.New("non-finite template parameter")
 		}
 	}
-	if p.Start < 0 || p.End < 0 || (p.End > 0 && p.End <= p.Start) || p.MaxDuration < 1 || p.MaxDuration > 86400 || p.AdMin < 0 || p.AdMax < p.AdMin || p.AdMax >= p.MaxDuration || p.IntroWidth < .1 || p.IntroWidth > 1 || p.AdWidth < .1 || p.AdWidth > 1 || p.Transition < 0 || p.Transition > 1 {
+	if p.Start < 0 || p.End < 0 || (p.End > 0 && p.End <= p.Start) || p.MaxDuration < 1 || p.MaxDuration > 86400 || p.AdMin < 0 || p.AdMax < p.AdMin || p.AdMax >= p.MaxDuration || (!e.omitIntro && (p.IntroWidth < .1 || p.IntroWidth > 1)) || p.AdWidth < .1 || p.AdWidth > 1 || p.Transition < 0 || p.Transition > 1 {
 		return nil, errors.New("invalid range in dynamic template parameters")
 	}
-	if err := ValidateMediaURL(p.IntroURL); err != nil {
-		return nil, err
+	if !e.omitIntro {
+		if err := ValidateMediaURL(p.IntroURL); err != nil {
+			return nil, err
+		}
 	}
 	if err := ValidateMediaURL(p.AdURL); err != nil {
 		return nil, err
 	}
-	return dynamicPlan{p}, nil
+	return dynamicPlan{DynamicParams: p, omitIntro: e.omitIntro}, nil
 }
 func FileResourceToken(value string) (string, bool) {
 	u, err := url.Parse(value)
@@ -178,12 +228,24 @@ func (p dynamicPlan) Resources(raw json.RawMessage) ([]ResourceRequest, error) {
 	if err != nil {
 		return nil, err
 	}
-	return []ResourceRequest{{Name: "intro", URL: p.IntroURL}, {Name: "ad", URL: p.AdURL}, {Name: "ending", PoolIndexKey: c.EndingIndexKey}}, nil
+	resources := []ResourceRequest{{Name: "ad", URL: p.AdURL}, {Name: "ending", PoolIndexKey: c.EndingIndexKey}}
+	if !p.omitIntro {
+		resources = append([]ResourceRequest{{Name: "intro", URL: p.IntroURL}}, resources...)
+	}
+	return resources, nil
 }
 func (p dynamicPlan) Timeline(source, intro, ad, tail float64, seed int64) (DynamicTimeline, error) {
 	names := []string{"opening_pip", "source_before_ad", "ad_pip", "source_after_ad", "ending"}
+	if p.omitIntro {
+		names = names[1:]
+		intro = 0
+	}
 	t := DynamicTimeline{MainStart: p.Start, Overlap: p.Transition, Transitions: len(names) - 1}
-	for _, d := range []float64{source, intro, ad, tail} {
+	durations := []float64{source, ad, tail}
+	if !p.omitIntro {
+		durations = append(durations, intro)
+	}
+	for _, d := range durations {
 		if d <= 0 || math.IsNaN(d) || math.IsInf(d, 0) {
 			return t, errors.New("all video resources must have positive duration")
 		}
@@ -200,7 +262,14 @@ func (p dynamicPlan) Timeline(source, intro, ad, tail float64, seed int64) (Dyna
 	main := math.Min(available, budget)
 	t.AdStart = p.AdMin + rand.New(rand.NewSource(seed)).Float64()*(p.AdMax-p.AdMin)
 	t.Insert = t.AdStart - intro + 2*p.Transition
-	if main <= 0 || t.Insert <= 2*p.Transition || main-t.Insert <= 2*p.Transition {
+	if p.omitIntro {
+		t.Insert = t.AdStart + p.Transition
+	}
+	preOverlap := 2 * p.Transition
+	if p.omitIntro {
+		preOverlap = p.Transition
+	}
+	if main <= 0 || t.Insert <= preOverlap || main-t.Insert <= 2*p.Transition {
 		return t, errors.New("intro/ad placement leaves an invalid source segment")
 	}
 	if intro > available+.001 || t.Insert+ad > available+.001 {
@@ -208,6 +277,10 @@ func (p dynamicPlan) Timeline(source, intro, ad, tail float64, seed int64) (Dyna
 	}
 	lengths := []float64{intro, t.Insert, ad, main - t.Insert, tail}
 	sourceStarts := []float64{p.Start, p.Start, p.Start + t.Insert, p.Start + t.Insert, 0}
+	if p.omitIntro {
+		lengths = lengths[1:]
+		sourceStarts = sourceStarts[1:]
+	}
 	cursor := 0.0
 	for i, d := range lengths {
 		connections := 2

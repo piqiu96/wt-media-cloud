@@ -26,6 +26,7 @@ func run() error {
 		name       string
 	}{
 		{executor.DynamicPIPEndingV1(), "动态画中画与配乐片尾"},
+		{executor.AdPIPEndingV1(), "广告画中画＋片尾"},
 	} {
 		item, err := repository.PublishTemplate(entry.definition, entry.name)
 		if err != nil {

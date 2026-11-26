@@ -17,7 +17,7 @@ func (p dynamicPlan) Compile(input RenderInput) (RenderResult, error) {
 		return result, err
 	}
 	intro, ok := input.Resources["intro"]
-	if !ok {
+	if !ok && !p.omitIntro {
 		return result, errors.New("intro resource is required")
 	}
 	ad, ok := input.Resources["ad"]
@@ -28,7 +28,7 @@ func (p dynamicPlan) Compile(input RenderInput) (RenderResult, error) {
 	if !ok {
 		return result, errors.New("ending resource is required")
 	}
-	if !intro.HasAudio || !ad.HasAudio || !ending.HasAudio {
+	if (!p.omitIntro && (!intro.HasAudio || !ad.HasAudio)) || !ending.HasAudio {
 		return result, errors.New("intro, ad and ending must carry audio")
 	}
 	if math.Abs(ending.Duration-cfg.TailSeconds) > .15 {
@@ -38,12 +38,19 @@ func (p dynamicPlan) Compile(input RenderInput) (RenderResult, error) {
 	if err != nil {
 		return result, err
 	}
-	for _, media := range []MediaInput{input.Source, intro, ad, ending} {
+	resources := []MediaInput{input.Source, ad, ending}
+	if !p.omitIntro {
+		resources = append(resources, intro)
+	}
+	for _, media := range resources {
 		if media.Path == "" || media.Width < 2 || media.Height < 2 {
 			return result, errors.New("resource has no usable video")
 		}
 	}
 	graph := []string{"[0:v]split=4[source_intro][source_pre][source_ad][source_post]"}
+	if p.omitIntro {
+		graph[0] = "[0:v]split=3[source_pre][source_ad][source_post]"
+	}
 	if input.Source.HasAudio {
 		graph = append(graph, "[0:a]asplit=2[source_pre_audio][source_post_audio]")
 	}
@@ -80,15 +87,26 @@ func (p dynamicPlan) Compile(input RenderInput) (RenderResult, error) {
 		}
 		graph = append(graph, chain+"["+label+"v]")
 	}
-	pre, post := timeline.Segments[1], timeline.Segments[3]
-	pip("source_intro", "1:v", "intro", p.Start, intro.Duration, p.IntroWidth)
+	preIndex, postIndex := 1, 3
+	adIndex, tailIndex := 2, 3
+	if p.omitIntro {
+		preIndex, postIndex, adIndex, tailIndex = 0, 2, 1, 2
+	}
+	pre, post := timeline.Segments[preIndex], timeline.Segments[postIndex]
+	if !p.omitIntro {
+		pip("source_intro", "1:v", "intro", p.Start, intro.Duration, p.IntroWidth)
+		audio("1:a", "intro", 0, intro.Duration, false)
+	}
 	normal("source_pre", "pre", p.Start, pre.Duration, false)
-	pip("source_ad", "2:v", "ad", p.Start+timeline.Insert, ad.Duration, p.AdWidth)
+	pip("source_ad", fmt.Sprintf("%d:v", adIndex), "ad", p.Start+timeline.Insert, ad.Duration, p.AdWidth)
 	normal("source_post", "post", p.Start+timeline.Insert, post.Duration, false)
-	normal("3:v", "tail", 0, ending.Duration, true)
-	audio("1:a", "intro", 0, intro.Duration, false)
-	audio("2:a", "ad", 0, ad.Duration, false)
-	audio("3:a", "tail", 0, ending.Duration, true)
+	normal(fmt.Sprintf("%d:v", tailIndex), "tail", 0, ending.Duration, true)
+	if ad.HasAudio {
+		audio(fmt.Sprintf("%d:a", adIndex), "ad", 0, ad.Duration, false)
+	} else {
+		silent("ad", ad.Duration)
+	}
+	audio(fmt.Sprintf("%d:a", tailIndex), "tail", 0, ending.Duration, true)
 	if input.Source.HasAudio {
 		audio("source_pre_audio", "pre", p.Start, pre.Duration, false)
 		audio("source_post_audio", "post", p.Start+timeline.Insert, post.Duration, false)
@@ -97,13 +115,16 @@ func (p dynamicPlan) Compile(input RenderInput) (RenderResult, error) {
 		silent("post", post.Duration)
 	}
 	labels := []string{"intro", "pre", "ad", "post", "tail"}
-	videoLabel, audioLabel := "introv", "introa"
+	if p.omitIntro {
+		labels = labels[1:]
+	}
+	videoLabel, audioLabel := labels[0]+"v", labels[0]+"a"
 	if p.Transition == 0 {
 		pairs := ""
 		for _, label := range labels {
 			pairs += "[" + label + "v][" + label + "a]"
 		}
-		graph = append(graph, pairs+"concat=n=5:v=1:a=1[outv][outa]")
+		graph = append(graph, pairs+fmt.Sprintf("concat=n=%d:v=1:a=1[outv][outa]", len(labels)))
 		videoLabel, audioLabel = "outv", "outa"
 	} else {
 		for i := 1; i < len(labels); i++ {
@@ -113,7 +134,12 @@ func (p dynamicPlan) Compile(input RenderInput) (RenderResult, error) {
 			videoLabel, audioLabel = nextV, nextA
 		}
 	}
-	result.Arguments = []string{"-hide_banner", "-loglevel", "error", "-nostdin", "-protocol_whitelist", "file,pipe", "-i", input.Source.Path, "-i", intro.Path, "-i", ad.Path, "-i", ending.Path, "-filter_complex_threads", strconv.Itoa(cfg.FilterThreads), "-filter_complex", strings.Join(graph, ";"), "-map", "[" + videoLabel + "]", "-map", "[" + audioLabel + "]", "-t", seconds(timeline.Duration), "-c:v", "libx264", "-crf", strconv.Itoa(cfg.CRF), "-preset", cfg.Preset, "-pix_fmt", "yuv420p", "-c:a", "aac", "-movflags", "+faststart", "-map_metadata", "-1", "-y", input.OutputPath}
+	arguments := []string{"-hide_banner", "-loglevel", "error", "-nostdin", "-protocol_whitelist", "file,pipe", "-i", input.Source.Path}
+	if !p.omitIntro {
+		arguments = append(arguments, "-i", intro.Path)
+	}
+	arguments = append(arguments, "-i", ad.Path, "-i", ending.Path)
+	result.Arguments = append(arguments, []string{"-filter_complex_threads", strconv.Itoa(cfg.FilterThreads), "-filter_complex", strings.Join(graph, ";"), "-map", "[" + videoLabel + "]", "-map", "[" + audioLabel + "]", "-t", seconds(timeline.Duration), "-c:v", "libx264", "-crf", strconv.Itoa(cfg.CRF), "-preset", cfg.Preset, "-pix_fmt", "yuv420p", "-c:a", "aac", "-movflags", "+faststart", "-map_metadata", "-1", "-y", input.OutputPath}...)
 	result.DurationMS = int64(math.Round(timeline.Duration * 1000))
 	result.ToleranceMS = 100
 	result.RequireAudio = true
