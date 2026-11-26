@@ -9,6 +9,8 @@ import (
 	"github.com/wt-media/wt-media-cloud/internal/config"
 	filemodel "github.com/wt-media/wt-media-cloud/internal/modules/files/model"
 	identity "github.com/wt-media/wt-media-cloud/internal/modules/identity/service"
+	accounts "github.com/wt-media/wt-media-cloud/internal/modules/mediaaccount/service"
+	production "github.com/wt-media/wt-media-cloud/internal/modules/production/service"
 	"github.com/wt-media/wt-media-cloud/internal/modules/publish/model"
 )
 
@@ -71,5 +73,46 @@ func TestBilibiliPlanRequiresDeploymentAvailabilityAndConservesEachPlatform(t *t
 	in.Batches[1].Targets[0].TargetCount = 1
 	if err := s.validatePlan(a, in); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("cross-platform target leak: %v", err)
+	}
+}
+
+type preparedBiliExecution struct{ BatchExecutionRepository }
+
+func (preparedBiliExecution) ValidatePreparedTask(model.Task) error { return nil }
+
+func TestBilibiliExecutionPreviewUsesItsOwnContentRules(t *testing.T) {
+	s, a, _ := fixture()
+	s.PlatformSettings = config.PublicationPlatformsConfig{BilibiliEnabled: true}
+	s.Repo = batchOccupancyFixture{Repository: s.Repo}
+	s.BatchExecutionRepo = preparedBiliExecution{}
+	account, output, file := s.Account, s.Output, s.File
+	s.Account = func(a identity.PublicUser, id string) (accounts.Account, error) {
+		v, e := account(a, id)
+		v.Platform = "bilibili"
+		return v, e
+	}
+	s.Output = func(a identity.PublicUser, id int64) (production.ComposeOutputDetail, error) {
+		v, e := output(a, id)
+		v.Output.Platforms = []string{"bilibili"}
+		return v, e
+	}
+	s.File = func(ctx context.Context, a identity.PublicUser, id, cat int64) (filemodel.File, error) {
+		v, e := file(ctx, a, id, cat)
+		if id == 5 {
+			v.MetadataJSON = []byte(`{"width":1200,"height":900,"format":"png"}`)
+		}
+		return v, e
+	}
+	row := model.BatchCandidate{BatchPair: model.BatchPair{CategoryID: 1, MediaAccountID: 12, CompositeOutputID: 42}, RowKey: "bili", Content: biliContentFixture()}
+	b := model.Batch{Platform: "bilibili"}
+	got, tasks, e := s.prepareBatchExecution(context.Background(), a, b, []model.BatchCandidate{row}, nil)
+	if e != nil || !got.CanStart || len(tasks) != 1 {
+		t.Fatalf("valid Bilibili rejected: %+v tasks=%d err=%v", got, len(tasks), e)
+	}
+	row.Content.SpaceCoverRender = &model.CoverRender{Title: "old"}
+	row.CoverTitle = "new"
+	got, _, e = s.prepareBatchExecution(context.Background(), a, b, []model.BatchCandidate{row}, nil)
+	if e != nil || got.CanStart || len(got.Rows[0].Issues) != 1 || got.Rows[0].Issues[0].Code != "cover_outdated" {
+		t.Fatalf("stale space cover accepted: %+v %v", got, e)
 	}
 }

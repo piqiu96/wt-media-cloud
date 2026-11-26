@@ -204,9 +204,6 @@ func (s *Service) Summary(a identity.PublicUser, f Filter) (map[string]int64, er
 	return s.Repo.Summary(f)
 }
 
-func contentValid(c model.Content) bool {
-	return contentValidFor("baidu", c)
-}
 func (s *Service) Create(ctx context.Context, a identity.PublicUser, in CreateInput) (model.Task, error) {
 	if !canExecutePublication(a) {
 		return model.Task{}, ErrNotFound

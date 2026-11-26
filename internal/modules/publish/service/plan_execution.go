@@ -86,7 +86,7 @@ func (s *Service) StartPlan(ctx context.Context, a identity.PublicUser, id uint6
 			return empty, ErrConflict
 		}
 		for _, candidate := range row.Config.Candidates {
-			if !contentValid(candidate.Content) {
+			if !contentValidFor(row.Platform, candidate.Content) {
 				return empty, ErrConflict
 			}
 		}
