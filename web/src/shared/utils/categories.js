@@ -4,7 +4,8 @@ export const CATEGORY_TYPE_LABELS = {
   anime: '二次元',
 }
 
-export const CATEGORY_TYPE_OPTIONS = Object.entries(CATEGORY_TYPE_LABELS).map(([value, label]) => ({ value, label }))
+// Keep historical labels readable; new configuration only supports games.
+export const CATEGORY_TYPE_OPTIONS = [{ value: 'game', label: CATEGORY_TYPE_LABELS.game }]
 
 export function categoryTypeLabel(value, fallback = '—') {
   return CATEGORY_TYPE_LABELS[value] || fallback

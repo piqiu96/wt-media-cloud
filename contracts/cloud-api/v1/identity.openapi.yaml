@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: WT Media Cloud Identity API
-  version: 2026.10.29.1
+  version: 2026.11.26.2
 paths:
   /api/v1/auth/login:
     post:
@@ -463,6 +463,7 @@ components:
         updated_at: {type: string, format: date-time}
     CategoryType:
       type: string
+      description: Historical category types remain readable; new categories only accept game.
       enum: [game, ai, anime]
     Category:
       type: object
@@ -481,7 +482,7 @@ components:
       required: [type, name]
       additionalProperties: false
       properties:
-        type: {$ref: '#/components/schemas/CategoryType'}
+        type: {type: string, enum: [game], description: Only games can be created in the current catalog.}
         name: {type: string, minLength: 1, maxLength: 128}
         remark: {type: string, maxLength: 255, default: ''}
     CategoryUpdateRequest:

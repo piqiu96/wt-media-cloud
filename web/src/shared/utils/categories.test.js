@@ -22,8 +22,6 @@ describe('categories', () => {
   it('maps the code-owned category types to user-facing labels', () => {
     expect(CATEGORY_TYPE_OPTIONS).toEqual([
       { value: 'game', label: '游戏' },
-      { value: 'ai', label: 'AI' },
-      { value: 'anime', label: '二次元' },
     ])
     expect(categoryTypeLabel('game')).toBe('游戏')
     expect(categoryTypeLabel('unknown')).toBe('—')
