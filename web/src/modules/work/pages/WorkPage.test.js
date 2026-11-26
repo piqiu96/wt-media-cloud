@@ -215,3 +215,16 @@ it("preserves detail scroll when automatic or manual metrics refresh replaces th
   await nextTick();
   expect(host.scrollTop).toBe(360);
 });
+
+it("returns the latest detail counters and refresh status to the cached list", () => {
+  state.rows.value = [
+    { id: "16", platform: "bilibili", metrics: { view: 7, status: "queued" } },
+  ];
+  state.detail.value = {
+    id: "16",
+    platform: "bilibili",
+    metrics: { view: 8, status: "ready" },
+  };
+  state.back();
+  expect(state.rows.value[0].metrics).toEqual({ view: 8, status: "ready" });
+});

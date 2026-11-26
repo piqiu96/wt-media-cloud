@@ -126,10 +126,10 @@ function metricValue(row, key) {
 function metricStatus(row) {
   if (row.platform !== "bilibili") return "暂不支持";
   const m = row.metrics;
-  if (!m || m.status === "queued") return "等待更新（需负责人本机服务在线）";
+  if (!m || m.status === "queued") return "等待更新（负责人需登录桌面端）";
   if (m.status === "refreshing")
     return Date.now() - new Date(m.last_attempt_at).getTime() > 120000
-      ? "等待重试（需负责人本机服务在线）"
+      ? "等待重试（负责人需登录桌面端）"
       : "更新中";
   if (m.status === "failed")
     return (
@@ -149,7 +149,7 @@ async function refreshMetrics(row) {
   try {
     const metrics = await client.refreshMetrics(id);
     if (disposed) return;
-    feedback.toast.success("已请求更新，负责人本机服务在线时自动获取");
+    feedback.toast.success("已请求更新，负责人登录桌面端后自动获取");
     rows.value = rows.value.map((r) =>
       String(r.id) === id ? { ...r, metrics } : r,
     );
@@ -303,6 +303,12 @@ function retryDetail() {
     return openDetail({ id: requestedDetailId.value });
 }
 function back() {
+  if (detail.value) {
+    const item = detail.value;
+    rows.value = rows.value.map((row) =>
+      String(row.id) === String(item.id) ? item : row,
+    );
+  }
   detailSequence++;
   requestedDetailId.value = "";
   detailError.value = "";
