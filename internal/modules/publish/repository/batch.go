@@ -202,7 +202,7 @@ func (s Store) EditBatch(v model.Batch, revision uint64) (model.Batch, error) {
 func (s Store) replaceBatchFiles(tx *gorm.DB, v model.Batch) error {
 	var ids []int64
 	for _, row := range v.Config.Candidates {
-		for _, id := range []int64{row.Content.CoverFileID, row.Content.PortraitCoverFileID} {
+		for _, id := range []int64{row.Content.CoverFileID, row.Content.PortraitCoverFileID, row.Content.SpaceCoverFileID} {
 			if id > 0 {
 				ids = append(ids, id)
 			}

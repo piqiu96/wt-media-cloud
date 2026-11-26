@@ -396,6 +396,20 @@ func TestOnlyAdminManagesTeamsAndReferencedTeamCannotBeDeleted(t *testing.T) {
 	}
 }
 
+func TestCreateCategoryOnlyAllowsGame(t *testing.T) {
+	store := newCategoryMemoryStore()
+	svc := NewService(store)
+	admin, _ := svc.BootstrapAdmin("admin", "a-long-initial-password")
+	for _, typ := range []CategoryType{CategoryTypeAI, CategoryTypeAnime} {
+		if _, err := svc.CreateCategory(admin.ID, typ, "不再支持的一级类目", ""); !errors.Is(err, ErrInvalidInput) {
+			t.Fatalf("CreateCategory(%s) error = %v, want ErrInvalidInput", typ, err)
+		}
+	}
+	if _, err := svc.CreateCategory(admin.ID, CategoryTypeGame, "三角洲", ""); err != nil {
+		t.Fatalf("CreateCategory(game): %v", err)
+	}
+}
+
 func TestReferencedCategoryCannotBeDisabledOrDeleted(t *testing.T) {
 	store := newCategoryMemoryStore()
 	service := NewService(store)

@@ -18,8 +18,8 @@ and an Agent Token is not accepted on user business API.
 
 ## Publication admission revision 2026.11.25.2
 
-Cloud advertises `2026.11.25.2` for both the current contract and the minimum
-Agent revision. Only a current session with the new capacity-bearing request
+Revision `2026.11.25.2` remains the minimum Baidu Agent revision; the current
+provider revision is listed in the Bilibili section below. Only a current session with the capacity-bearing request
 can obtain a new publish or check claim or resume an original scene. Older
 publication report and completion packets retain original-attempt ReportSafe
 settlement, original claim inspection/replay and result acknowledgement. A
@@ -82,4 +82,15 @@ authorization and executed no external action.
 - `v1/runtime-binding.openapi.yaml`: the device/node binding and secret-safe runtime report model is gone; runtime facts now travel with each admission request.
 - `v1/registration-heartbeat.openapi.yaml`: unauthenticated agent registration and heartbeat are gone; the Agent proves itself with the Agent Token.
 
+
+## Bilibili capability revision 2026.11.26.2
+
+The provider revision is `2026.11.26.2`; the minimum Baidu consumer remains
+`2026.11.25.2`. Publish/check admission accepts `supported_platforms`, omitted
+as Baidu-only, and filters both fixed-group preparation and task selection.
+Only an explicitly capable consumer receives new Bilibili work. New Bilibili
+inputs freeze the platform and the independent space-cover digest/size; reports
+and completions must match that digest. Baidu canonical input JSON and original
+ReportSafe settlement remain unchanged. Deployment availability remains closed
+by default until the complete live acceptance is verified.
 - `v1/work-metrics.openapi.yaml`: additive owner-scoped six-counter public Bilibili collection; strict claims, report-safe lease results, 90-second leases, hourly success interval and failure backoff. No CK, browser scene or publication mutation. Deploy matching Local/Sidecar support for automatic/manual requests; old or offline Agents leave refresh queued.

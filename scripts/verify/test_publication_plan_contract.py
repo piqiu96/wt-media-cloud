@@ -37,10 +37,51 @@ class PublicationPlanContractTest(unittest.TestCase):
         )
 
     def test_changed_openapi_documents_validate(self):
-        for name in ["publication-plan.openapi.yaml", "publication-batch.openapi.yaml", "publication.openapi.yaml"]:
+        for name in ["publication-plan.openapi.yaml", "publication-batch.openapi.yaml", "publication.openapi.yaml", "cover-template.openapi.yaml"]:
             with self.subTest(name=name):
                 OpenAPIV31SpecValidator(SchemaPath.from_dict(self.docs[name], base_uri=(API / name).as_uri())).validate()
-                self.assertEqual(self.docs[name]["info"]["version"], "2026.11.25.4")
+                self.assertEqual(self.docs[name]["info"]["version"], "2026.11.26.2")
+
+    def test_batch_cover_specifications_are_platform_specific(self):
+        schema = self.schema('BatchRenderRow', 'cover-template.openapi.yaml')
+        row = {'row_key': 'a', 'input_revision': '1', 'field_revisions': {'cover_file_id': '0'},
+               'category_id': '1', 'platform': 'bilibili', 'specs': [{
+                   'specification': 'recommendation', 'template_id': '1', 'expected_published_revision': 1, 'title': '封面'}]}
+        self.assertTrue(schema.is_valid(row))
+        row['specs'][0]['specification'] = 'space'
+        self.assertTrue(schema.is_valid(row))
+        row['specs'][0]['specification'] = 'portrait'
+        self.assertFalse(schema.is_valid(row))
+        row['platform'] = 'baidu'
+        self.assertTrue(schema.is_valid(row))
+        row['specs'][0]['specification'] = 'recommendation'
+        self.assertFalse(schema.is_valid(row))
+
+    def test_bilibili_content_is_independent_and_baidu_is_compatible(self):
+        schema = self.schema("Content", "publication.openapi.yaml")
+        baidu = {"description": "既有标题", "cover_file_id": "5", "portrait_cover_file_id": "6", "topics": "", "declaration": "无需声明", "confirmed": True}
+        self.assertTrue(schema.is_valid(baidu))
+        bili = {"title": "游戏画中画演示", "description": "独立简介", "cover_file_id": "5", "space_cover_file_id": "7", "confirmed": True,
+                "bilibili": {"partition_id": 17, "partition_name": "游戏", "tags": ["游戏"], "statement": "内容含营销信息", "visibility": "public", "rights_reserved": False}}
+        self.assertTrue(schema.is_valid(bili))
+        self.assertFalse(schema.is_valid({**bili, "portrait_cover_file_id": "6"}))
+        self.assertFalse(schema.is_valid({**baidu, "bilibili": bili["bilibili"]}))
+        self.assertFalse(schema.is_valid({**bili, "bilibili": {**bili["bilibili"], "creation_type": "original"}}))
+        self.assertFalse(schema.is_valid({**bili, "bilibili": {**bili["bilibili"], "statement": "内容为转载"}}))
+
+    def test_agent_publication_contracts_validate_and_legacy_defaults_remain_baidu(self):
+        for filename in ["publications.openapi.yaml", "compatibility.openapi.yaml"]:
+            path = ROOT / "contracts/cloud-agent-api/v1" / filename
+            doc = yaml.safe_load(path.read_text())
+            with self.subTest(filename=filename):
+                OpenAPIV31SpecValidator(SchemaPath.from_dict(doc, base_uri=path.as_uri())).validate()
+            if filename == "publications.openapi.yaml":
+                capabilities = doc["components"]["schemas"]["SupportedPlatforms"]
+                self.assertEqual(capabilities["default"], ["baidu"])
+                validator = Draft202012Validator(capabilities)
+                self.assertTrue(validator.is_valid(["baidu", "bilibili"]))
+                for invalid in [[], ["bilibili", "bilibili"], ["xiaohongshu"]]:
+                    self.assertFalse(validator.is_valid(invalid))
 
     def test_running_list_filter_includes_manual_paused_without_changing_stored_states(self):
         parameters = self.plan["paths"]["/api/v1/publication-plan"]["get"]["parameters"]

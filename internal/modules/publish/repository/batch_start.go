@@ -190,7 +190,7 @@ func (s ExecutionStore) startBatchTx(tx *gorm.DB, v model.Batch, actor int64, in
 				!reflect.DeepEqual(task.Content, row.Content) || !equalSchedule(task.NotBefore, row.NotBefore) {
 				return BatchConflict(v, ErrConflict)
 			}
-			hold = append(hold, task.CoverFileID, task.Content.PortraitCoverFileID)
+			hold = append(hold, taskCoverIDs(task)...)
 		}
 		if s.LockFiles == nil {
 			return errors.New("publication file locking unavailable")

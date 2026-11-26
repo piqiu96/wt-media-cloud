@@ -15,6 +15,7 @@ const emit = defineEmits(["tasks"]);
 const execution = computed(() => props.batch.execution);
 const counts = computed(() => batchProgress(execution.value));
 const pendingCount = computed(() => batchPendingCount(props.batch));
+const handedOffSettled = computed(() => !!props.batch.handed_off_at && pendingCount.value === 0);
 const currentGroup = computed(() => execution.value?.group_task_ids?.length || 0);
 const phase = computed(() => execution.value?.phase);
 const checkedCounts = computed(() => [
@@ -28,13 +29,13 @@ const checkedCounts = computed(() => [
   <ResourceCard v-if="counts && (execution.first_started_at || execution.stopped_at)" class="detail-card">
     <ResourceSection title="执行情况">
       <ResourceDescriptions>
-        <t-descriptions-item v-if="!['ended','cancelled'].includes(batch.execution_status)" label="执行阶段"><ResourceStatusBadge :label="batchPhases[phase] || '等待状态更新'" /></t-descriptions-item>
+        <t-descriptions-item v-if="!['ended','cancelled'].includes(batch.execution_status)" label="执行阶段"><ResourceStatusBadge :label="handedOffSettled ? '已推进至后续批次' : batchPhases[phase] || '等待状态更新'" /></t-descriptions-item>
         <t-descriptions-item v-if="execution.stopped_at" label="终止时间">{{ formatPublicationTime(execution.stopped_at) }}</t-descriptions-item>
         <t-descriptions-item v-if="execution.first_started_at" label="首次开始">{{ formatPublicationTime(execution.first_started_at) }}</t-descriptions-item>
         <t-descriptions-item v-if="execution.execution_group_no" label="执行组">第 {{ execution.execution_group_no }} 组</t-descriptions-item>
         <t-descriptions-item v-if="currentGroup" label="本组已安排">{{ currentGroup }} 条</t-descriptions-item>
         <t-descriptions-item v-if="execution.group_ended_at" label="本组自动处理结束">{{ formatPublicationTime(execution.group_ended_at) }}</t-descriptions-item>
-        <t-descriptions-item v-if="execution.next_group_at && !execution.stopped_at && !execution.ended_at" label="最早下一组">
+        <t-descriptions-item v-if="execution.next_group_at && !execution.stopped_at && !execution.ended_at && !batch.handed_off_at" label="最早下一组">
           {{ formatPublicationTime(execution.next_group_at) }}
         </t-descriptions-item>
         <t-descriptions-item label="并发数">{{batch.execution_setting.concurrency_limit}}</t-descriptions-item>
@@ -62,7 +63,7 @@ const checkedCounts = computed(() => [
         <small class="batch-muted">公开目标差额 {{ counts.targetShortfall }} 条</small>
       </div>
     </ResourceSection>
-    <ResourceSection v-if="counts.exceptions && ['waiting_interval','awaiting_processing','paused','stopping'].includes(phase)" title="待处理任务">
+    <ResourceSection v-if="counts.exceptions && ['waiting_interval','awaiting_processing','paused','stopping'].includes(phase)" :title="handedOffSettled ? '历史异常结果' : '待处理任务'">
       <div class="batch-inline">
         <t-button v-for="item in checkedCounts.filter(row => row.count)" :key="item.status"
           theme="default" variant="outline" size="small" @click="emit('tasks', item.status)">

@@ -37,6 +37,8 @@ const env = computed(() => aggregateWorkEnv({
   tokenFacts: tokenFacts.value,
 }))
 
+const checking = computed(() => busy.value || checkedAt.value === null)
+
 const checkedTime = computed(() => {
   if (!checkedAt.value) return '—'
   return new Date(checkedAt.value).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
@@ -129,30 +131,30 @@ onBeforeUnmount(() => {
 
 <template>
   <t-popup trigger="click" placement="bottom-right">
-    <button type="button" class="work-env-pill" :class="env.workable ? 'is-ok' : 'is-warn'" aria-label="工作环境状态" @click="manualCheck">
+    <button type="button" class="work-env-pill" :class="checking ? 'is-checking' : env.workable ? 'is-ok' : 'is-warn'" :aria-busy="checking" aria-label="工作环境状态" @click="manualCheck">
       <span class="env-dot" />
-      <span class="env-text">{{ env.workable ? '工作环境' : '工作环境需检查' }}</span>
+      <span class="env-text">{{ checking ? '正在检查工作环境' : env.workable ? '工作环境' : '工作环境需检查' }}</span>
     </button>
     <template #content>
       <div class="env-panel">
         <header class="env-head">
           <div class="env-title">
-            <strong>{{ env.workable ? '这台电脑可以工作' : '这台电脑需要检查' }}</strong>
+            <strong>{{ checking ? '正在检查工作环境' : env.workable ? '这台电脑可以工作' : '这台电脑需要检查' }}</strong>
             <span class="env-checked">最近检查：{{ checkedTime }}</span>
           </div>
           <t-button size="small" variant="outline" :loading="busy" @click="manualCheck">重新检查</t-button>
         </header>
         <ul class="env-rows">
-          <li><span class="row-label">本机服务</span><span class="row-value">{{ env.page.serviceText }}</span></li>
-          <li><span class="row-label">比特浏览器</span><span class="row-value">{{ bitRowText }}</span></li>
-          <li><span class="row-label">执行凭证</span><span class="row-value">{{ env.page.credentialText }}</span></li>
+          <li><span class="row-label">本机服务</span><span class="row-value">{{ checking && !snapshot ? '检查中' : env.page.serviceText }}</span></li>
+          <li><span class="row-label">比特浏览器</span><span class="row-value">{{ checking && !snapshot ? '检查中' : bitRowText }}</span></li>
+          <li><span class="row-label">执行凭证</span><span class="row-value">{{ checking && !tokenFacts ? '检查中' : env.page.credentialText }}</span></li>
         </ul>
-        <template v-if="!env.workable">
+        <template v-if="!env.workable && !checking">
           <ul class="env-blockers">
             <li v-for="(reason, i) in env.blockers" :key="i">{{ reason }}</li>
           </ul>
         </template>
-        <FeedbackAlert v-if="error" :message="error" theme="error" style="margin-top:10px" />
+        <FeedbackAlert v-if="error && !checking" :message="error" theme="error" style="margin-top:10px" />
       </div>
     </template>
   </t-popup>
@@ -177,6 +179,8 @@ onBeforeUnmount(() => {
 .env-dot { width: 8px; height: 8px; border-radius: 50%; }
 .work-env-pill.is-ok .env-dot { background: #16a34a; }
 .work-env-pill.is-ok .env-text { color: #167e5c; }
+.work-env-pill.is-checking .env-dot { background: #94a3b8; }
+.work-env-pill.is-checking .env-text { color: #64748b; }
 .work-env-pill.is-warn .env-dot { background: #ea7d10; }
 .work-env-pill.is-warn .env-text { color: #b45309; }
 .env-panel { width: 320px; padding: 4px; }

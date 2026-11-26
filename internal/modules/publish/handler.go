@@ -29,6 +29,7 @@ func RegisterRoutes(h *server.Hertz) {
 	h.GET("/api/v1/publication", List)
 	h.GET("/api/v1/publication/output", OutputCandidates)
 	h.GET("/api/v1/publication/request", FindByRequest)
+	h.GET("/api/v1/publication/platform-rules", PlatformRules)
 	h.POST("/api/v1/publication", Create)
 	h.POST("/api/v1/publication/generate", GeneratePublicationContent)
 	h.GET("/api/v1/publication/:id", Get)
@@ -48,6 +49,13 @@ func RegisterRoutes(h *server.Hertz) {
 	h.POST("/api/v1/cloud-agent/publication-task/claim", localagent.RequireAgent(localagent.StrictMode), Claim)
 	h.POST("/api/v1/cloud-agent/publication-task/:id/report", localagent.RequireAgent(localagent.ReportSafeMode), Report)
 	h.POST("/api/v1/cloud-agent/publication-task/:id/complete", localagent.RequireAgent(localagent.ReportSafeMode), Complete)
+}
+
+func PlatformRules(_ context.Context, c *app.RequestContext) {
+	if _, ok := middleware.AuthenticateRequest(c); !ok {
+		return
+	}
+	api.Success(c, service.GetPlatformRules())
 }
 func fail(c *app.RequestContext, err error) {
 	if failBatchControl(c, err) {

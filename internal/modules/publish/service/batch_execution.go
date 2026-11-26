@@ -118,12 +118,13 @@ func (s *Service) prepareBatchExecution(ctx context.Context, a identity.PublicUs
 		switch {
 		case occupied[row.CompositeOutputID]:
 			preview.Issues = append(preview.Issues, batchIssue(row, "composite_output_id", "output_occupied", "成片已被当前平台的任务占用"))
-		case !contentValid(row.Content):
+		case !contentValidFor(b.Platform, row.Content):
 			preview.Issues = append(preview.Issues, batchIssue(row, "content", "content_incomplete", "请完成并确认文案、声明和全部封面"))
 		default:
 			title := strings.TrimSpace(row.CoverTitle)
 			if (row.Content.CoverRender != nil && row.Content.CoverRender.Title != title) ||
-				(row.Content.PortraitCoverRender != nil && row.Content.PortraitCoverRender.Title != title) {
+				(row.Content.PortraitCoverRender != nil && row.Content.PortraitCoverRender.Title != title) ||
+				(row.Content.SpaceCoverRender != nil && row.Content.SpaceCoverRender.Title != title) {
 				preview.Issues = append(preview.Issues, batchIssue(row, "cover_title", "cover_outdated", "当前封面短标题与已采用封面不匹配"))
 				break
 			}

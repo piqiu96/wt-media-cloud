@@ -63,12 +63,44 @@ func verifyCoverSpec(file filemodel.File, width, height int) error {
 }
 
 func (s *Service) preparePortraitCover(ctx context.Context, a identity.PublicUser, content model.Content, categoryID, outputID int64, saved bool) (filemodel.File, json.RawMessage, error) {
+	return s.prepareSecondaryCover(ctx, a, "baidu", content, categoryID, outputID, saved)
+}
+
+func secondaryCover(platform string, c model.Content) (int64, *model.CoverRender, int, int, string) {
+	if platform == "bilibili" {
+		return c.SpaceCoverFileID, c.SpaceCoverRender, 16, 9, "space_cover"
+	}
+	return c.PortraitCoverFileID, c.PortraitCoverRender, 3, 4, "portrait_cover"
+}
+
+func verifyPrimaryCover(platform string, f filemodel.File) error {
+	if platform == "bilibili" {
+		return verifyPlatformCoverSpec(platform, f, 4, 3)
+	}
+	return verifyCoverSpec(f, 16, 9)
+}
+
+func verifyPlatformCoverSpec(platform string, f filemodel.File, width, height int) error {
+	if err := verifyCoverSpec(f, width, height); err != nil {
+		return err
+	}
+	if platform == "bilibili" {
+		var metadata filemodel.ImageMetadata
+		if json.Unmarshal(f.MetadataJSON, &metadata) != nil || metadata.Format != "png" && metadata.Format != "jpeg" {
+			return fmt.Errorf("%w: B站封面仅支持PNG或JPEG", ErrInvalid)
+		}
+	}
+	return nil
+}
+
+func (s *Service) prepareSecondaryCover(ctx context.Context, a identity.PublicUser, platform string, content model.Content, categoryID, outputID int64, saved bool) (filemodel.File, json.RawMessage, error) {
+	id, ref, width, height, _ := secondaryCover(platform, content)
 	var file filemodel.File
 	var err error
 	if saved && s.SavedFile != nil {
-		file, err = s.SavedFile(ctx, content.PortraitCoverFileID)
+		file, err = s.SavedFile(ctx, id)
 	} else {
-		file, err = s.File(ctx, a, content.PortraitCoverFileID, categoryID)
+		file, err = s.File(ctx, a, id, categoryID)
 	}
 	if err != nil {
 		return file, nil, err
@@ -76,10 +108,17 @@ func (s *Service) preparePortraitCover(ctx context.Context, a identity.PublicUse
 	if len(file.SHA256) != 64 || previewCover(file) {
 		return file, nil, ErrInvalid
 	}
-	if err = verifyCoverSpec(file, 3, 4); err != nil {
+	if err = verifyPlatformCoverSpec(platform, file, width, height); err != nil {
 		return file, nil, err
 	}
-	ref := model.Content{CoverRender: content.PortraitCoverRender}
-	snapshot, err := verifyCoverRender(file, ref, outputID)
+	snapshot, err := verifyCoverRender(file, model.Content{CoverRender: ref}, outputID)
 	return file, snapshot, err
+}
+
+func setSecondaryCoverSnapshot(snapshot map[string]any, platform string, file filemodel.File, render json.RawMessage) {
+	_, _, _, _, key := secondaryCover(platform, model.Content{})
+	snapshot[key+"_render"] = render
+	snapshot[key+"_sha256"] = file.SHA256
+	snapshot[key+"_name"] = file.Name
+	snapshot[key+"_resource_path"] = "/api/v1/file-resources/" + file.ResourceToken
 }

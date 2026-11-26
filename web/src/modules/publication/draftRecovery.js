@@ -1,5 +1,6 @@
 import { emptyCoverConfig } from "./coverPreparation.js";
 import { DialogPlugin } from "tdesign-vue-next";
+import { publicationContentInput } from './platformContent.js';
 
 export function choosePublicationDraft(savedAt, { subject = "发布任务" } = {}) {
   const date = new Date(savedAt);
@@ -45,14 +46,24 @@ export function capturePublicationDraft(
   portraitConfig,
 ) {
   const text = (value) => String(value ?? "");
-  return {
+  const bili = form.platform === 'bilibili';
+  const secondary = bili ? 'space' : 'portrait';
+  const options = form.content.bilibili || {};
+  const result = {
     form: {
       request_key: text(form.request_key),
-      platform: "baidu",
+      platform: bili ? 'bilibili' : 'baidu',
       category_id: text(form.category_id),
       media_account_id: text(form.media_account_id),
       composite_output_id: text(form.composite_output_id),
       content: {
+        ...(bili ? { title: text(form.content.title), bilibili: {
+          partition_id: Number(options.partition_id || 0), partition_name: text(options.partition_name),
+          tags: Array.isArray(options.tags) ? options.tags.map(text) : [],
+          statement: text(options.statement), rights_reserved: options.rights_reserved === true,
+          source: text(options.source), visibility: text(options.visibility),
+        }, space_cover_file_id: text(form.content.space_cover_file_id),
+        ...(form.content.space_cover_render ? { space_cover_render: captureCoverReference(form.content.space_cover_render) } : {}) } : {}),
         description: text(form.content.description),
         cover_file_id: text(form.content.cover_file_id),
         portrait_cover_file_id: text(form.content.portrait_cover_file_id),
@@ -72,12 +83,12 @@ export function capturePublicationDraft(
       },
     },
     cover_config: config ? captureCoverConfig(config) : undefined,
-    portrait_cover_config: portraitConfig
+    [secondary + '_cover_config']: portraitConfig
       ? captureCoverConfig(portraitConfig)
       : undefined,
-    portrait_image_asset_id: text(portraitCover?.image_asset_id),
-    portrait_cover_origin: text(portraitCover?.origin),
-    portrait_cover_output_id: text(portraitCover?.output_id),
+    [secondary + '_image_asset_id']: text(portraitCover?.image_asset_id),
+    [secondary + '_cover_origin']: text(portraitCover?.origin),
+    [secondary + '_cover_output_id']: text(portraitCover?.output_id),
     schedule: text(schedule),
     image_asset_id: text(cover?.image_asset_id),
     cover_origin: text(cover?.origin),
@@ -86,6 +97,8 @@ export function capturePublicationDraft(
       ? JSON.parse(JSON.stringify(pendingRequest))
       : null,
   };
+  result.form.content = publicationContentInput(form.platform,result.form.content);
+  return result;
 }
 
 function captureCoverReference(ref) {

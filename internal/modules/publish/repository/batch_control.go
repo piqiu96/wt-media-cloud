@@ -541,7 +541,7 @@ func (s Store) BatchTaskPage(id uint64, f BatchTaskFilter) ([]model.Task, int64,
 	}
 	if f.Search != "" {
 		text := strings.NewReplacer("!", "!!", "%", "!%", "_", "!_").Replace(f.Search)
-		q = q.Where("(CAST(id AS CHAR)=? OR JSON_UNQUOTE(JSON_EXTRACT(content_json,'$.description')) LIKE ? ESCAPE '!')", f.Search, "%"+text+"%")
+		q = q.Where("(CAST(id AS CHAR)=? OR JSON_UNQUOTE(JSON_EXTRACT(content_json,'$.description')) LIKE ? ESCAPE '!' OR (platform='bilibili' AND JSON_UNQUOTE(JSON_EXTRACT(content_json,'$.title')) LIKE ? ESCAPE '!'))", f.Search, "%"+text+"%", "%"+text+"%")
 	}
 	var total int64
 	if err := q.Count(&total).Error; err != nil {

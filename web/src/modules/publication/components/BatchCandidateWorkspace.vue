@@ -19,14 +19,17 @@ import { publicObjectReadUrl } from "../../../shared/utils/objectReadUrl.js";
 import { createFilesClient } from "../../../shared/api/files.js";
 import { feedback } from "../../../shared/ui/feedback/index.js";
 import { batchAccountName, batchOutputID, batchOutputName, batchOutputProblem } from "../useBatchResourceCatalog.js";
-import { batchFormProblem, batchInput, coverProfiles, editCandidate, moveEntry, newCandidate, pairOf, replaceCandidatePair, reviewSelectedConfirmations } from "../batchPreparation.js";
+import { batchFormProblem, batchInput, editCandidate, moveEntry, newCandidate, pairOf, replaceCandidatePair, reviewSelectedConfirmations } from "../batchPreparation.js";
 import { coverConfigFromReference, emptyCoverConfig } from "../coverPreparation.js";
 import { presentBatchIssues, localContentIssue } from "../batchIssuePresentation.js";
+import { usePublicationPlatforms } from '../usePublicationPlatforms.js';
+import { platformCoverProfiles, publicationTitle } from '../platformContent.js';
 import { contentIssue, contentIssues } from "../eligibility.js";
 
 const props = defineProps({ form: Object, catalog: Object, categories: Array, actor: Object, recipes: Object, coverFiles: Object, focusKey: String, validationContext: Object, disabled: Boolean, resourcesLocked: Boolean, resourceOnly: Boolean, embedded:Boolean, reviewOnly: Boolean, validationIssues: {type:Array,default:()=>[]} });
 const emit = defineEmits(["work", "changed"]);
 const compose = createComposeClient();
+const platforms = usePublicationPlatforms();
 const batch = createPublicationBatchClient();
 const files = createFilesClient();
 const selection = ref([]);
@@ -47,8 +50,9 @@ const resourceRows=computed(()=>rows.value.filter(row=>row.category_id===activeR
 const resourceColumns = [
  {colKey:'order',title:'序号',width:72},{colKey:'account',title:'发布账号',width:180},{colKey:'video',title:'成片资源',width:280},{colKey:'source',title:'匹配来源',width:110},{colKey:'resourceStatus',title:'资源检查',width:160},{colKey:'op',title:'操作',width:220,fixed:'right'},
 ];
-const resourceIssue = row => !props.catalog.accounts.has(row.media_account_id) || !props.catalog.outputs.has(row.composite_output_id) ? '资源待核实' : props.catalog.accounts.get(row.media_account_id)?.eligible===false ? props.catalog.accounts.get(row.media_account_id)?.reason || '账号不可用' : props.catalog.accounts.get(row.media_account_id)?.eligible!==true ? '账号状态待核实' : batchOutputProblem(props.catalog.outputs.get(row.composite_output_id),row.category_id,props.actor.team_id);
+const resourceIssue = row => !props.catalog.accounts.has(row.media_account_id) || !props.catalog.outputs.has(row.composite_output_id) ? '资源待核实' : props.catalog.accounts.get(row.media_account_id)?.eligible===false ? props.catalog.accounts.get(row.media_account_id)?.reason || '账号不可用' : props.catalog.accounts.get(row.media_account_id)?.eligible!==true ? '账号状态待核实' : batchOutputProblem(props.catalog.outputs.get(row.composite_output_id),row.category_id,props.actor.team_id,props.form.platform);
 const rows = computed(() => props.form.config.candidates);
+const coverProfiles = computed(() => platformCoverProfiles(props.form.platform));
 const active = computed(() => rows.value.find(row => row.row_key === activeKey.value));
 const selected = computed(() => rows.value.filter(row => selection.value.includes(row.row_key)));
 const pendingConfirmations = computed(() => selected.value.filter(row => !row.content.confirmed));
@@ -63,13 +67,13 @@ const rowIssues=row=>{
  const issues=props.validationIssues.filter(issue=>issue.row_key===row.row_key);
  const resource=resourceIssue(row);
  if(resource) issues.push({row_key:row.row_key,field:'composite_output_id',code:resource==='该成片已被当前平台的任务占用'?'output_occupied':undefined,message:resource});
- issues.push(...contentIssues({...row,content:{...row.content,cover_file_id:row.content.cover_file_id==='0'?'':row.content.cover_file_id,portrait_cover_file_id:row.content.portrait_cover_file_id==='0'?'':row.content.portrait_cover_file_id}}).map(issue=>localContentIssue(issue,row.row_key)));
+ issues.push(...contentIssues({...row,platform:props.form.platform,content:{...row.content,cover_file_id:row.content.cover_file_id==='0'?'':row.content.cover_file_id,portrait_cover_file_id:row.content.portrait_cover_file_id==='0'?'':row.content.portrait_cover_file_id}}).map(issue=>localContentIssue(issue,row.row_key)));
  const live=statusIssue(row);if(live)issues.unshift(live.code ? {...live,row_key:row.row_key} : localContentIssue(live,row.row_key));
- return presentBatchIssues(issues).map(issue=>issue.message);
+ return presentBatchIssues(issues,props.form.platform).map(issue=>issue.message);
 };
 const rowState=row=>rowIssues(row).length ? rowIssues(row).every(v=>/确认/.test(v))?'待确认':'待完善' : '已就绪';
 const filteredRows=computed(()=>rows.value.filter(row=>
- (!applied.value.search||[row.content.description,outputName(row),accountName(row),row.composite_output_id].join(' ').includes(applied.value.search))&&
+ (!applied.value.search||[publicationTitle(props.form.platform,row.content),outputName(row),accountName(row),row.composite_output_id].join(' ').includes(applied.value.search))&&
  (!applied.value.category||row.category_id===applied.value.category)&&(!applied.value.status||rowState(row)===applied.value.status)));
 function query(){applied.value={search:search.value.trim(),category:categoryFilter.value,status:stateFilter.value};page.value=1}
 const columns=computed(()=>[
@@ -91,7 +95,7 @@ function isManual(row) {
 function statusIssue(row) {
   const serverIssue = confirmationRows.value[row.row_key];
   if (serverIssue?.version === JSON.stringify(row)) return serverIssue;
-  return contentIssue({ ...row, content: { ...row.content, description: row.content.description || "",
+  return contentIssue({ ...row, platform:props.form.platform, content: { ...row.content, description: row.content.description || "",
     ...(row.content.cover_file_id === "0" && { cover_file_id: "" }),
     ...(row.content.portrait_cover_file_id === "0" && { portrait_cover_file_id: "" }),
   } });
@@ -191,7 +195,7 @@ function acceptPair() {
   if (!config.output_ids.includes(pair.composite_output_id)) config.output_ids.push(pair.composite_output_id);
   config.manual_pairs = config.manual_pairs.filter(row => row.composite_output_id !== current?.composite_output_id);
   config.manual_pairs.push(pair);
-  if (!current) rows.value.push(newCandidate(pair));
+  if (!current) rows.value.push(newCandidate(pair,props.form.platform,platforms.ruleFor(props.form.platform)));
   else {
     const updated = replaceCandidatePair(current, pair);
     if (current.composite_output_id !== updated.composite_output_id || current.category_id !== updated.category_id) {
@@ -217,10 +221,10 @@ async function remove(row) {
 }
 function edit(key, patch) {
   const index = rows.value.findIndex(row => row.row_key === key);
-  if (index >= 0) { rows.value.splice(index, 1, editCandidate(rows.value[index], patch)); emit("changed"); }
+  if (index >= 0) { rows.value.splice(index, 1, editCandidate(rows.value[index], patch, props.form.platform)); emit("changed"); }
 }
 function storeRecipe(key, profileKey, config) {
-  const profile = coverProfiles.find(item => item.key === profileKey);
+  const profile = coverProfiles.value.find(item => item.key === profileKey);
   const row = rows.value.find(item => item.row_key === key);
   const old = props.recipes[key]?.[profileKey] || (row?.content[profile.render] ? coverConfigFromReference(row.content[profile.render]) : emptyCoverConfig());
   if (JSON.stringify(config) === JSON.stringify(old)) return;
@@ -237,7 +241,7 @@ function applyCover(key, profile, file, render) {
   props.coverFiles[key] = { ...props.coverFiles[key], [profile.key]: { fileId: id, resource_path: file.resource_path } };
 }
 function activeCovers(row) {
-  return Object.fromEntries(coverProfiles.map(profile => {
+  return Object.fromEntries(coverProfiles.value.map(profile => {
     const selected = props.coverFiles[row.row_key]?.[profile.key];
     return [profile.key, selected?.fileId === row.content[profile.file] ? selected : null];
   }));
@@ -314,7 +318,7 @@ function applyBulk(key, patch, covers) {
         <t-table class="wt-resource-table" :data="resourceOnly?resourceRows:filteredRows" :columns="resourceOnly?resourceColumns:columns" row-key="row_key" :selected-row-keys="selection" :reserve-selected-row-on-paginate="true" :pagination="resourceOnly?undefined:{current:page,pageSize,total:filteredRows.length,pageSizeOptions:[10,20,50],showJumper:false}" @page-change="value=>{page=value.current;pageSize=value.pageSize}"
           :scroll="{ x: resourceOnly ? '1102px' : reviewOnly ? '940px' : '1072px' }" :empty="resourcesLocked ? '暂无候选，可先保存批次，再从继续配置补充资源' : '暂无候选，可添加候选或返回资源配置配对'"
           @select-change="keys=>{const visible=new Set(filteredRows.map(row=>row.row_key));selection=[...new Set([...selection.filter(key=>!visible.has(key)),...keys])]}">
-          <template #content="{row}"><div class="batch-content-identity"><button v-if="candidateCover(row)" class="batch-cover-preview" type="button" :aria-label="'预览发布封面 · '+(row.content.description||outputName(row))" @click="preview={label:'发布封面',image:true,url:candidateCover(row)}"><img :src="candidateCover(row)" alt="发布封面"/></button><span v-else class="batch-content-cover-placeholder">{{row.content.cover_file_id && row.content.cover_file_id !== '0' ? '发布封面引用待核实' : '未选择发布封面'}}</span><div><span class="batch-content-name" :title="row.content.description">{{row.content.description||'待填写发布文案'}}</span><small class="batch-muted">{{categoryName(row.category_id)}}</small></div></div></template>
+          <template #content="{row}"><div class="batch-content-identity"><button v-if="candidateCover(row)" class="batch-cover-preview" type="button" :aria-label="'预览发布封面 · '+(publicationTitle(form.platform,row.content)||outputName(row))" @click="preview={label:'发布封面',image:true,url:candidateCover(row)}"><img :src="candidateCover(row)" alt="发布封面"/></button><span v-else class="batch-content-cover-placeholder">{{row.content.cover_file_id && row.content.cover_file_id !== '0' ? '发布封面引用待核实' : '未选择发布封面'}}</span><div><span class="batch-content-name" :title="publicationTitle(form.platform,row.content)">{{publicationTitle(form.platform,row.content)||'待填写发布文案'}}</span><small class="batch-muted">{{categoryName(row.category_id)}}</small></div></div></template>
           <template #video="{ row }">
             <div class="batch-video-cell">
               <img v-if="resourceOnly && thumb(row)" :src="thumb(row)" alt="" />

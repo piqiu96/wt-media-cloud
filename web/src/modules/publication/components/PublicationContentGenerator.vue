@@ -5,10 +5,11 @@ import FeedbackAlert from '../../../shared/ui/feedback/FeedbackAlert.vue';
 import { createPublicationClient } from '../../../shared/api/publication.js';
 import { createSessionClient } from '../../../shared/api/session.js';
 import { usePublicationGeneration } from '../usePublicationGeneration.js';
+import { platformGenerationFields } from '../platformContent.js';
 const props = defineProps({ context: { type: Object, required: true }, values: { type: Object, required: true }, template: Boolean, disabled: Boolean });
 const emit = defineEmits(['adopt']);
-const labels = { description: '发布标题', cover_title: '封面短标题', topics: '话题' };
-const fields = computed(() => props.template ? ['description', 'cover_title', 'topics'] : ['description', 'topics']);
+const labels = computed(() => platformGenerationFields(props.context.platform));
+const fields = computed(() => Object.keys(labels.value).filter(field => props.template || field !== 'cover_title'));
 const client = createPublicationClient(), session = createSessionClient();
 const { visible, selected, instruction, busy, error, suggestion, stage, start, cancel, canAdopt, apply } = usePublicationGeneration({ context: toRef(props, 'context'), values: toRef(props, 'values'), fields, disabled: toRef(props, 'disabled'), generate: client.generate, getIdentity: async () => String((await session.me()).id), adopt: (field, value) => emit('adopt', field, value) });
 function open() { if (props.disabled) return; selected.value = [...fields.value]; visible.value = true; }
@@ -24,7 +25,7 @@ function open() { if (props.disabled) return; selected.value = [...fields.value]
       <p v-if="stage" role="status">{{ stage }}</p>
       <section v-for="(item, field) in suggestion" :key="field" class="publication-suggestion">
         <div><strong>{{ labels[field] }}</strong><t-button size="small" variant="text" :disabled="!canAdopt(field)" @click="apply(field)">{{ item.adopted ? '已采用' : canAdopt(field) ? '采用' : '内容已变化，请重新生成' }}</t-button></div>
-        <p>{{ item.value || '不添加话题' }}</p>
+        <p>{{ item.value || (field === 'description' && context.platform === 'bilibili' ? '不填写简介' : '不添加话题') }}</p>
       </section>
     </div>
     <template #footer>

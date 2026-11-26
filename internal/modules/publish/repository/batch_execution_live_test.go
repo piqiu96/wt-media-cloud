@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"github.com/wt-media/wt-media-cloud/internal/modules/publish/model"
 	repo "github.com/wt-media/wt-media-cloud/internal/modules/publish/repository"
+	"gorm.io/gorm"
 	"reflect"
 	"testing"
 	"time"
@@ -327,5 +328,25 @@ func TestBatchStopAndSubmitCompeteWithoutReplayedPermission(t *testing.T) {
 	replay, err := s.Report(c.Task, 9, r, true, now)
 	if err != nil || replay.AllowSubmit || !replay.StopRequested {
 		t.Fatalf("post-stop replay: %+v %v", replay, err)
+	}
+}
+
+func TestBilibiliBatchTransactionLocksActualCoversNotMissingPortrait(t *testing.T) {
+	s, _ := executionStore(t)
+	v := task("normal-bili", 42, 1)
+	v.Platform = "bilibili"
+	v.Content = model.Content{Title: "游戏内容", CoverFileID: 1, SpaceCoverFileID: 2, Confirmed: true, Bilibili: &model.BilibiliContent{PartitionID: 1008, PartitionName: "游戏", Tags: []string{"游戏"}, Statement: "内容含营销信息", Visibility: "public"}}
+	row := model.BatchCandidate{BatchPair: model.BatchPair{CategoryID: 1, MediaAccountID: 12, CompositeOutputID: 42}, RowKey: "bili", Content: v.Content}
+	b, e := s.CreateBatch(model.Batch{TeamID: 7, OperatorID: 9, CreatedBy: 9, Name: "bili", Platform: "bilibili", Revision: 1, RequestKey: "bili", RequestHash: "bili", ConfigurationStatus: model.BatchReady, ExecutionStatus: model.BatchNotStarted, Targets: []model.BatchTarget{{CategoryID: 1, TargetCount: 1}}, Config: model.BatchConfig{Candidates: []model.BatchCandidate{row}}, ExecutionSetting: model.BatchExecutionSetting{ConcurrencyLimit: 1, ExceptionTaskLimit: 1, BetweenGroupPolicy: "auto_continue"}})
+	if e != nil {
+		t.Fatal(e)
+	}
+	v.RowKey = &row.RowKey
+	sentinel := errors.New("stop after proving file locks")
+	var held []int64
+	s.LockFiles = func(_ *gorm.DB, ids []int64) error { held = append([]int64(nil), ids...); return sentinel }
+	_, e = s.StartBatch(b.ID, 9, model.BatchStartInput{RequestKey: "start-bili", ExpectedRevision: b.Revision, IncludedRowKeys: []string{"bili"}, ExcludedRowKeys: []string{}, ExpectedShortfalls: []model.ExpectedShortfall{{CategoryID: 1, Shortfall: 0}}}, "digest", []model.Task{v}, time.Now())
+	if !errors.Is(e, sentinel) || !reflect.DeepEqual(held, []int64{1, 2}) {
+		t.Fatalf("wrong transaction cover locks: %v %v", held, e)
 	}
 }

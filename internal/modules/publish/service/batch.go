@@ -227,7 +227,7 @@ func (s *Service) batchTargets(a identity.PublicUser, platform string, targets [
 	if !canPrepareBatch(a) {
 		return nil, ErrNotFound
 	}
-	if platform != "baidu" {
+	if !s.platformEnabled(platform) {
 		return nil, ErrClosed
 	}
 	if len(targets) == 0 || len(targets) > 100 {
@@ -279,9 +279,9 @@ func validBatchCandidate(row model.BatchCandidate) bool {
 	if !validBatchKey(row.RowKey) || !validGenerationRevision(row.InputRevision, false) || row.FieldRevisions == nil ||
 		len(row.FieldRevisions) > 16 || row.CategoryID <= 0 || row.MediaAccountID == 0 || row.CompositeOutputID <= 0 ||
 		row.Order < 0 || row.Order > maxSafeTarget || c.CoverFileID < 0 || c.PortraitCoverFileID < 0 ||
-		utf8.RuneCountInString(row.CoverTitle) > 2000 || utf8.RuneCountInString(c.Description) > 1000 ||
+		utf8.RuneCountInString(row.CoverTitle) > 2000 || utf8.RuneCountInString(c.Description) > 2000 || utf8.RuneCountInString(c.Title) > 80 || c.SpaceCoverFileID < 0 ||
 		utf8.RuneCountInString(c.Topics) > 200 || utf8.RuneCountInString(c.Declaration) > 100 ||
-		!validBatchCoverReference(c.CoverRender, c.CoverFileID) || !validBatchCoverReference(c.PortraitCoverRender, c.PortraitCoverFileID) {
+		!validBatchCoverReference(c.CoverRender, c.CoverFileID) || !validBatchCoverReference(c.PortraitCoverRender, c.PortraitCoverFileID) || !validBatchCoverReference(c.SpaceCoverRender, c.SpaceCoverFileID) {
 		return false
 	}
 	for field, rev := range row.FieldRevisions {
@@ -322,17 +322,22 @@ func batchResourceMissing(err error) bool {
 		errors.Is(err, files.ErrNotFound) || errors.Is(err, files.ErrForbidden) || errors.Is(err, images.ErrNotFound)
 }
 
-func (s *Service) batchCandidateCovers(ctx context.Context, a identity.PublicUser, row model.BatchCandidate, retained map[int64]bool, save bool) ([]model.BatchIssue, model.BatchCoverResource, error) {
+func (s *Service) batchCandidateCovers(ctx context.Context, a identity.PublicUser, platform string, row model.BatchCandidate, retained map[int64]bool, save bool) ([]model.BatchIssue, model.BatchCoverResource, error) {
 	var issues []model.BatchIssue
 	resources := model.BatchCoverResource{RowKey: row.RowKey}
+	mainWidth, mainHeight := 16, 9
+	if platform == "bilibili" {
+		mainWidth, mainHeight = 4, 3
+	}
+	secondaryID, secondaryRef, secondaryWidth, secondaryHeight, secondaryKey := secondaryCover(platform, row.Content)
 	for _, cover := range []struct {
 		id            int64
 		ref           *model.CoverRender
 		width, height int
 		field         string
 	}{
-		{row.Content.CoverFileID, row.Content.CoverRender, 16, 9, "cover_file_id"},
-		{row.Content.PortraitCoverFileID, row.Content.PortraitCoverRender, 3, 4, "portrait_cover_file_id"},
+		{row.Content.CoverFileID, row.Content.CoverRender, mainWidth, mainHeight, "cover_file_id"},
+		{secondaryID, secondaryRef, secondaryWidth, secondaryHeight, secondaryKey + "_file_id"},
 	} {
 		if cover.id == 0 {
 			issues = append(issues, batchIssue(row, cover.field, "cover_missing", "请选择所需规格的封面"))
@@ -364,13 +369,15 @@ func (s *Service) batchCandidateCovers(ctx context.Context, a identity.PublicUse
 			continue
 		}
 		if file.ResourceToken != "" {
-			if cover.width == 16 {
+			if cover.field == "cover_file_id" {
 				resources.CoverResourcePath = files.ResourcePath(file.ResourceToken)
+			} else if platform == "bilibili" {
+				resources.SpaceCoverResourcePath = files.ResourcePath(file.ResourceToken)
 			} else {
 				resources.PortraitCoverResourcePath = files.ResourcePath(file.ResourceToken)
 			}
 		}
-		if len(file.SHA256) != 64 || verifyCoverSpec(file, cover.width, cover.height) != nil {
+		if len(file.SHA256) != 64 || verifyPlatformCoverSpec(platform, file, cover.width, cover.height) != nil {
 			issues = append(issues, batchIssue(row, cover.field, "cover_invalid", "封面必须是符合平台规格的正式图片"))
 			continue
 		}
@@ -408,7 +415,7 @@ func (s *Service) checkBatch(ctx context.Context, a identity.PublicUser, in Batc
 	ids := make([]int64, 0, len(in.Config.Candidates))
 	for _, row := range in.Config.Candidates {
 		_, targetExists := targets[row.CategoryID]
-		if !validBatchCandidate(row) || !targetExists || rows[row.RowKey] || outputs[row.CompositeOutputID] || order[row.Order] {
+		if !validBatchCandidate(row) || !validCandidatePlatform(in.Platform, row.Content) || !targetExists || rows[row.RowKey] || outputs[row.CompositeOutputID] || order[row.Order] {
 			return checks, batchRowError(row, "", "candidate_invalid", "候选身份、顺序或数据结构无效", ErrInvalid)
 		}
 		rows[row.RowKey], outputs[row.CompositeOutputID], order[row.Order] = true, true, true
@@ -474,11 +481,21 @@ func (s *Service) checkBatch(ctx context.Context, a identity.PublicUser, in Batc
 		} else if !outputReady(output) {
 			checks.Issues = append(checks.Issues, batchIssue(row, "composite_output_id", "output_unavailable", "成片状态不可发布"))
 		}
-		if strings.TrimSpace(row.Content.Description) == "" || publicationTextLength(row.Content.Description, row.Content.Topics) > 50 {
-			checks.Issues = append(checks.Issues, batchIssue(row, "description", "description_invalid", "请填写文案，描述与话题合计不超过50字"))
-		}
-		if row.Content.Declaration != "无需声明" {
-			checks.Issues = append(checks.Issues, batchIssue(row, "declaration", "declaration_required", "请确认创作声明"))
+		if in.Platform == "bilibili" {
+			probe := row.Content
+			probe.CoverFileID = 1
+			probe.SpaceCoverFileID = 2
+			probe.Confirmed = true
+			if !contentValidFor(in.Platform, probe) {
+				checks.Issues = append(checks.Issues, batchIssue(row, "bilibili", "content_invalid", "请补齐B站标题、分区、标签、声明及可见范围；转载须填写来源说明"))
+			}
+		} else {
+			if strings.TrimSpace(row.Content.Description) == "" || publicationTextLength(row.Content.Description, row.Content.Topics) > 50 {
+				checks.Issues = append(checks.Issues, batchIssue(row, "description", "description_invalid", "请填写文案，描述与话题合计不超过50字"))
+			}
+			if row.Content.Declaration != "无需声明" {
+				checks.Issues = append(checks.Issues, batchIssue(row, "declaration", "declaration_required", "请确认创作声明"))
+			}
 		}
 		if !row.Content.Confirmed {
 			checks.Issues = append(checks.Issues, batchIssue(row, "confirmed", "confirmation_required", "请确认当前内容"))
@@ -487,13 +504,14 @@ func (s *Service) checkBatch(ctx context.Context, a identity.PublicUser, in Batc
 		if old, found := retained[row.RowKey]; found && old.CategoryID == row.CategoryID {
 			savedFiles[old.Content.CoverFileID] = true
 			savedFiles[old.Content.PortraitCoverFileID] = true
+			savedFiles[old.Content.SpaceCoverFileID] = true
 		}
-		issues, resources, err := s.batchCandidateCovers(ctx, a, row, savedFiles, save)
+		issues, resources, err := s.batchCandidateCovers(ctx, a, in.Platform, row, savedFiles, save)
 		if err != nil {
 			return checks, err
 		}
 		checks.Issues = append(checks.Issues, issues...)
-		if resources.CoverResourcePath != "" || resources.PortraitCoverResourcePath != "" {
+		if resources.CoverResourcePath != "" || resources.PortraitCoverResourcePath != "" || resources.SpaceCoverResourcePath != "" {
 			checks.CoverResources = append(checks.CoverResources, resources)
 		}
 	}
@@ -670,7 +688,7 @@ func (s *Service) CopyBatch(ctx context.Context, a identity.PublicUser, id, revi
 		}
 		config.Candidates = append(config.Candidates, model.BatchCandidate{
 			BatchPair: row.BatchPair, RowKey: row.RowKey, InputRevision: "1", FieldRevisions: map[string]string{}, Order: row.Order, CoverTitle: row.CoverTitle,
-			Content: model.Content{Description: row.Content.Description, Topics: row.Content.Topics, Declaration: row.Content.Declaration},
+			Content: copyCandidateContent(row.Content),
 		})
 	}
 	in := BatchInput{Platform: v.Platform, Targets: v.Targets, Config: config, ExecutionSetting: v.ExecutionSetting}
@@ -679,4 +697,43 @@ func (s *Service) CopyBatch(ctx context.Context, a identity.PublicUser, id, revi
 		return out, err
 	}
 	return CopyBatchResult{BatchInput: in, Name: v.Name, SourceID: v.ID, SourceRevision: v.Revision, Readiness: readiness}, nil
+}
+
+// Copies text/options only. Authorization, confirmation and generated cover products
+// never survive a copy, including the platform-specific secondary cover.
+func copyCandidateContent(c model.Content) model.Content {
+	out := model.Content{Description: c.Description, Topics: c.Topics, Declaration: c.Declaration, Title: c.Title}
+	if c.Bilibili != nil {
+		b := *c.Bilibili
+		b.Tags = append([]string(nil), b.Tags...)
+		// A copy is a new publication, governed by the confirmed ordinary mode.
+		// The source task and its frozen statement remain unchanged.
+		b.Statement, b.Source = "内容无需标注", ""
+		out.Bilibili = &b
+	}
+	return out
+}
+
+func validCandidatePlatform(platform string, c model.Content) bool {
+	if platform == "baidu" {
+		return c.Bilibili == nil && c.Title == "" && c.SpaceCoverFileID == 0 && c.SpaceCoverRender == nil && utf8.RuneCountInString(c.Description) <= 1000
+	}
+	if platform != "bilibili" || c.PortraitCoverFileID != 0 || c.PortraitCoverRender != nil || c.Topics != "" || c.Declaration != "" {
+		return false
+	}
+	if c.Bilibili == nil {
+		return true
+	}
+	b := c.Bilibili
+	if b.PartitionID < 0 || utf8.RuneCountInString(b.PartitionName) > 100 || utf8.RuneCountInString(b.Statement) > 100 || platformTextLength("bilibili", b.Source) > 200 || b.Visibility != "" && b.Visibility != "public" && b.Visibility != "private" || len(b.Tags) > 10 {
+		return false
+	}
+	seen := map[string]bool{}
+	for _, tag := range b.Tags {
+		if tag == "" || strings.TrimSpace(tag) != tag || strings.ContainsAny(tag, ",，\r\n") || platformTextLength("bilibili", tag) > 20 || seen[tag] {
+			return false
+		}
+		seen[tag] = true
+	}
+	return true
 }

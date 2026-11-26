@@ -37,7 +37,7 @@ func ValidatePlanStructure(p model.Plan, rows []model.PlanStructureBatch) error 
 	cell := func(platform string, category int64) string { return fmt.Sprintf("%s/%d", platform, category) }
 	for _, g := range p.Goals {
 		key := cell(g.Platform, g.CategoryID)
-		if g.Platform != "baidu" || g.CategoryID <= 0 || g.TargetCount <= 0 || goals[key] != 0 {
+		if g.Platform != "baidu" && g.Platform != "bilibili" || g.CategoryID <= 0 || g.TargetCount <= 0 || goals[key] != 0 {
 			return ErrConflict
 		}
 		goals[key] = g.TargetCount
@@ -279,6 +279,17 @@ func (s Store) writePlanRows(tx *gorm.DB, p model.Plan, old []model.Batch, rows 
 			b.Readiness.Issues = []model.BatchIssue{{Field: "targets", Code: "plan_scope_changed", Message: "计划目标已变化，请重新检查候选配置"}}
 			for i := range b.Config.Candidates {
 				b.Config.Candidates[i].Content.Confirmed = false
+			}
+			if b.Platform != r.Platform {
+				b.Config = model.BatchConfig{Candidates: []model.BatchCandidate{}}
+				b.Readiness = model.BatchReadiness{
+					Issues:         []model.BatchIssue{{Field: "platform", Code: "plan_scope_changed", Message: "发布平台已变化，请重新选择账号、成片并准备内容"}},
+					CoverResources: []model.BatchCoverResource{}, Shortfalls: []model.BatchShortfall{},
+				}
+				for _, target := range r.Targets {
+					b.Readiness.Shortfalls = append(b.Readiness.Shortfalls, model.BatchShortfall{CategoryID: target.CategoryID, TargetCount: target.TargetCount, Shortfall: target.TargetCount})
+				}
+				changes["candidates_count"] = 0
 			}
 			changes["configuration_status"] = model.BatchIncomplete
 			changes["plan_configured_at"] = nil

@@ -114,6 +114,9 @@ func (s *Service) validatePlan(a identity.PublicUser, in PlanInput) error {
 		return ErrInvalid
 	}
 	for _, g := range in.Goals {
+		if !s.platformEnabled(g.Platform) {
+			return ErrClosed
+		}
 		if g.TargetCount > maxSafeTarget {
 			return ErrInvalid
 		}
@@ -367,7 +370,7 @@ func (s *Service) ListPlans(a identity.PublicUser, f repository.PlanFilter) (Bat
 	if a.ID <= 0 || a.Status != identity.UserStatusEnabled {
 		return out, ErrNotFound
 	}
-	if !validBatchPagination(f.Page, f.PageSize) || utf8.RuneCountInString(f.Search) > 100 || !validPlanStatus(f.Status) || f.Platform != "" && f.Platform != "baidu" {
+	if !validBatchPagination(f.Page, f.PageSize) || utf8.RuneCountInString(f.Search) > 100 || !validPlanStatus(f.Status) || f.Platform != "" && f.Platform != "baidu" && f.Platform != "bilibili" {
 		return out, ErrInvalid
 	}
 	f.Actor = a

@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: WT Media Publication Batch
-  version: 2026.11.25.4
+  version: 2026.11.26.2
   description: Plan first start freezes every attached configuration including future batches; direct configuration/task-content/start/retry/claim/resume and submitting permission respect plan ownership, position and permanent stop. Manual plan pause only stops later batch starts; batch exception pause remains independent. Original check/result settlement remains allowed. Session API using errcode/message/data/logid. Saves store candidate configuration and current file references atomically with audit. Incomplete content or candidate shortfalls may be saved. Account ownership, category scope and input structure are mandatory. Only first start creates formal tasks and output occupancy. Attempts are created by actual claim.
 security: [{sessionCookie: []}]
 paths:
@@ -64,7 +64,7 @@ paths:
             schema:
               allOf:
                 - {$ref: '#/components/schemas/Allocation'}
-                - {required: [platform, targets, accounts, output_ids], properties: {platform: {const: baidu}, targets: {$ref: '#/components/schemas/Targets'}}}
+                - {required: [platform, targets, accounts, output_ids], properties: {platform: {type: string, enum: [baidu, bilibili]}, targets: {$ref: '#/components/schemas/Targets'}}}
               unevaluatedProperties: false
       responses:
         '200':
@@ -477,13 +477,28 @@ components:
           type: object
           additionalProperties: false
           properties:
-            description: {type: string, maxLength: 1000}
+            description: {type: string, maxLength: 2000, description: Baidu draft max 1000; Bilibili introduction max 2000.}
             topics: {type: string, maxLength: 200}
             declaration: {type: string, maxLength: 100}
             cover_file_id: {$ref: '#/components/schemas/Revision'}
             portrait_cover_file_id: {$ref: '#/components/schemas/Revision'}
             cover_render: {$ref: 'publication.openapi.yaml#/components/schemas/CoverRender'}
             portrait_cover_render: {$ref: 'publication.openapi.yaml#/components/schemas/CoverRender'}
+            title: {type: string, maxLength: 80}
+            space_cover_file_id: {$ref: '#/components/schemas/Revision'}
+            space_cover_render: {$ref: 'publication.openapi.yaml#/components/schemas/CoverRender'}
+            bilibili:
+              type: object
+              additionalProperties: false
+              description: Partial content is saved without formal tasks or occupation. Complete platform fields and explicit confirmation are required by readiness and atomic start.
+              properties:
+                partition_id: {type: integer, minimum: 0}
+                partition_name: {type: string, maxLength: 100}
+                tags: {type: array, maxItems: 10, uniqueItems: true, items: {type: string, minLength: 1, maxLength: 20}}
+                source: {type: string, maxLength: 200}
+                statement: {type: string, maxLength: 100}
+                visibility: {type: string, enum: ['', public, private]}
+                rights_reserved: {type: boolean}
             confirmed: {type: boolean}
     ExecutionSetting:
       type: object
@@ -498,7 +513,7 @@ components:
       type: object
       required: [platform, targets, config, execution_setting]
       properties:
-        platform: {const: baidu}
+        platform: {type: string, enum: [baidu, bilibili]}
         targets: {$ref: '#/components/schemas/Targets'}
         config: {$ref: '#/components/schemas/Config'}
         execution_setting: {$ref: '#/components/schemas/ExecutionSetting'}
@@ -621,6 +636,7 @@ components:
               row_key: {type: string}
               cover_resource_path: {type: string}
               portrait_cover_resource_path: {type: string}
+              space_cover_resource_path: {type: string}
     AccountPage:
       allOf:
         - {$ref: '#/components/schemas/Page'}

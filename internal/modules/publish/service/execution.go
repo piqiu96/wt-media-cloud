@@ -36,8 +36,9 @@ type ExecutionRepository interface {
 	Complete(model.Task, int64, model.Completion, time.Time) (model.ExecutionFeedback, error)
 }
 type ExecutionService struct {
-	Repo  ExecutionRepository
-	Grant func(context.Context, model.Claim) (FileGrants, error)
+	PlatformSettings config.PublicationPlatformsConfig
+	Repo             ExecutionRepository
+	Grant            func(context.Context, model.Claim) (FileGrants, error)
 }
 type FileGrant struct {
 	URL    string `json:"url"`
@@ -45,9 +46,10 @@ type FileGrant struct {
 	Size   int64  `json:"size"`
 }
 type FileGrants struct {
-	PortraitCover FileGrant `json:"portrait_cover"`
-	Video         FileGrant `json:"video"`
-	Cover         FileGrant `json:"cover"`
+	PortraitCover *FileGrant `json:"portrait_cover,omitempty"`
+	SpaceCover    *FileGrant `json:"space_cover,omitempty"`
+	Video         FileGrant  `json:"video"`
+	Cover         FileGrant  `json:"cover"`
 }
 type GrantedClaim struct {
 	model.Claim
@@ -69,7 +71,7 @@ func NewExecutionStore(db *gorm.DB) repository.ExecutionStore {
 		if err := json.Unmarshal(v.ResourceSnapshot, &snapshot); err != nil {
 			return 0, err
 		}
-		w, err := work.RecordPublication(tx, workmodel.Work{AccountName: snapshot.AccountName, Platform: v.Platform, PlatformWorkID: in.PlatformWorkID, WorkURL: in.WorkURL, PlatformAccountUID: a.Input.PlatformUID, MediaAccountID: v.MediaAccountID, OperatorID: v.OperatorID, TeamID: v.TeamID, CategoryID: v.CategoryID, PublicationID: v.ID, AttemptID: a.ID, CompositeOutputID: v.CompositeOutputID, Title: a.Input.Content.Description, CoverFileID: a.Input.Content.CoverFileID, VideoSHA256: a.Input.VideoSHA256, PublishedAt: in.PublishedAt.UTC(), FirstObservedAt: now.UTC()})
+		w, err := work.RecordPublication(tx, workmodel.Work{AccountName: snapshot.AccountName, Platform: v.Platform, PlatformWorkID: in.PlatformWorkID, WorkURL: in.WorkURL, PlatformAccountUID: a.Input.PlatformUID, MediaAccountID: v.MediaAccountID, OperatorID: v.OperatorID, TeamID: v.TeamID, CategoryID: v.CategoryID, PublicationID: v.ID, AttemptID: a.ID, CompositeOutputID: v.CompositeOutputID, Title: a.Input.Content.PublicationTitle(v.Platform), CoverFileID: a.Input.Content.CoverFileID, VideoSHA256: a.Input.VideoSHA256, PublishedAt: in.PublishedAt.UTC(), FirstObservedAt: now.UTC()})
 		if errors.Is(err, work.ErrConflict) || errors.Is(err, work.ErrInvalid) {
 			err = repository.ErrConflict
 		}
@@ -77,7 +79,7 @@ func NewExecutionStore(db *gorm.DB) repository.ExecutionStore {
 	}}
 }
 func WiredExecution() *ExecutionService {
-	return &ExecutionService{Repo: ExecutionStore(), Grant: grantExecutionFiles}
+	return &ExecutionService{PlatformSettings: config.Get().App.PublicationPlatforms, Repo: ExecutionStore(), Grant: grantExecutionFiles}
 }
 func readExecutionInput(tx *gorm.DB, v model.Task) (model.ExecutionInput, error) {
 	var snap struct {
@@ -86,9 +88,10 @@ func readExecutionInput(tx *gorm.DB, v model.Task) (model.ExecutionInput, error)
 		VideoSize        int64  `json:"video_size"`
 		CoverSHA         string `json:"cover_sha256"`
 		PortraitCoverSHA string `json:"portrait_cover_sha256"`
+		SpaceCoverSHA    string `json:"space_cover_sha256"`
 	}
 	var out model.ExecutionInput
-	if json.Unmarshal(v.ResourceSnapshot, &snap) != nil || v.Platform != "baidu" || !contentValid(v.Content) {
+	if json.Unmarshal(v.ResourceSnapshot, &snap) != nil || !platformEnabled(v.Platform) || !contentValidFor(v.Platform, v.Content) {
 		return out, repository.ErrInputChanged
 	}
 	id, e := strconv.ParseUint(snap.Profile, 10, 64)
@@ -146,17 +149,29 @@ func readExecutionInput(tx *gorm.DB, v model.Task) (model.ExecutionInput, error)
 	if !found || !supported || o.TeamID != v.TeamID || int64(o.CategoryID) != v.CategoryID || o.PublishStatus == productionmodel.OutputPublishArchived || o.SHA256 != snap.VideoSHA || o.FileSizeBytes != snap.VideoSize || f.Type != "image" || f.SHA256 != snap.CoverSHA || f.SizeBytes <= 0 || len(o.SHA256) != 64 || len(f.SHA256) != 64 || o.FileSizeBytes <= 0 {
 		return out, repository.ErrInputChanged
 	}
-	portrait, e := files.ReadSavedReference(tx, v.Content.PortraitCoverFileID)
+	secondaryID, _, width, height, _ := secondaryCover(v.Platform, v.Content)
+	portrait, e := files.ReadSavedReference(tx, secondaryID)
 	if errors.Is(e, files.ErrNotFound) {
 		return out, repository.ErrInputChanged
 	}
 	if e != nil {
 		return out, e
 	}
-	if portrait.SHA256 != snap.PortraitCoverSHA || len(portrait.SHA256) != 64 || verifyCoverSpec(portrait, 3, 4) != nil || verifyCoverSpec(f, 16, 9) != nil {
+	secondarySHA := snap.PortraitCoverSHA
+	if v.Platform == "bilibili" {
+		secondarySHA = snap.SpaceCoverSHA
+	}
+	if portrait.SHA256 != secondarySHA || len(portrait.SHA256) != 64 || verifyPlatformCoverSpec(v.Platform, portrait, width, height) != nil || verifyPrimaryCover(v.Platform, f) != nil {
 		return out, repository.ErrInputChanged
 	}
-	return model.ExecutionInput{PortraitCoverSHA256: portrait.SHA256, PortraitCoverSize: portrait.SizeBytes, ProfileID: id, BitProfileID: p.BitProfileID, BitMainUserID: p.BitMainUserID, PlatformUID: v.PlatformAccountUID, Content: v.Content, VideoSHA256: o.SHA256, VideoSize: o.FileSizeBytes, CoverSHA256: f.SHA256, CoverSize: f.SizeBytes}, nil
+	out = model.ExecutionInput{ProfileID: id, BitProfileID: p.BitProfileID, BitMainUserID: p.BitMainUserID, PlatformUID: v.PlatformAccountUID, Content: v.Content, VideoSHA256: o.SHA256, VideoSize: o.FileSizeBytes, CoverSHA256: f.SHA256, CoverSize: f.SizeBytes}
+	if v.Platform == "bilibili" {
+		out.Platform = "bilibili"
+		out.SpaceCoverSHA256, out.SpaceCoverSize = portrait.SHA256, portrait.SizeBytes
+	} else {
+		out.PortraitCoverSHA256, out.PortraitCoverSize = portrait.SHA256, portrait.SizeBytes
+	}
+	return out, nil
 }
 func grantExecutionFiles(ctx context.Context, c model.Claim) (FileGrants, error) {
 	var out FileGrants
@@ -180,18 +195,30 @@ func grantExecutionFiles(ctx context.Context, c model.Claim) (FileGrants, error)
 	if e != nil {
 		return out, e
 	}
-	portrait, e := fsvc.ReadSavedReference(ctx, i.Content.PortraitCoverFileID)
+	secondaryID, _, _, _, _ := secondaryCover(c.Task.Platform, i.Content)
+	secondarySHA, secondarySize := i.PortraitCoverSHA256, i.PortraitCoverSize
+	if c.Task.Platform == "bilibili" {
+		secondarySHA, secondarySize = i.SpaceCoverSHA256, i.SpaceCoverSize
+	}
+	portrait, e := fsvc.ReadSavedReference(ctx, secondaryID)
 	if e != nil {
 		return out, e
 	}
-	if portrait.SHA256 != i.PortraitCoverSHA256 || portrait.SizeBytes != i.PortraitCoverSize {
+	if portrait.SHA256 != secondarySHA || portrait.SizeBytes != secondarySize {
 		return out, ErrConflict
 	}
 	portraitResource, e := fsvc.Resource(ctx, portrait.ResourceToken, true)
 	if e != nil {
 		return out, e
 	}
-	return FileGrants{PortraitCover: FileGrant{URL: portraitResource.URL, SHA256: i.PortraitCoverSHA256, Size: i.PortraitCoverSize}, Video: FileGrant{URL: video, SHA256: i.VideoSHA256, Size: i.VideoSize}, Cover: FileGrant{URL: cover.URL, SHA256: i.CoverSHA256, Size: i.CoverSize}}, nil
+	out = FileGrants{Video: FileGrant{URL: video, SHA256: i.VideoSHA256, Size: i.VideoSize}, Cover: FileGrant{URL: cover.URL, SHA256: i.CoverSHA256, Size: i.CoverSize}}
+	secondaryGrant := FileGrant{URL: portraitResource.URL, SHA256: secondarySHA, Size: secondarySize}
+	if c.Task.Platform == "bilibili" {
+		out.SpaceCover = &secondaryGrant
+	} else {
+		out.PortraitCover = &secondaryGrant
+	}
+	return out, nil
 }
 func (s *ExecutionService) readable(a identity.PublicUser, id uint64) (model.Task, error) {
 	v, e := s.Repo.Get(id)
@@ -211,7 +238,7 @@ func (s *ExecutionService) Start(a identity.PublicUser, id, revision uint64) (mo
 	if !ownsPublication(a, v) {
 		return model.Task{}, ErrNotFound
 	}
-	if v.Platform != "baidu" {
+	if !enabledPlatform(v.Platform, s.PlatformSettings) {
 		return model.Task{}, ErrClosed
 	}
 	if revision == 0 {
@@ -258,21 +285,36 @@ func (s *ExecutionService) Claim(ctx context.Context, user int64, key string) (*
 	return out, nil
 }
 func (s *ExecutionService) ClaimWithCapacity(ctx context.Context, user int64, key string, capacity model.ExecutionCapacity) (*GrantedClaim, error) {
+	return s.ClaimWithPlatforms(ctx, user, key, capacity, nil)
+}
+
+func (s *ExecutionService) ClaimWithPlatforms(ctx context.Context, user int64, key string, capacity model.ExecutionCapacity, platforms []string) (*GrantedClaim, error) {
+	supported, valid := model.SupportedPublicationPlatforms(platforms)
+	if !valid {
+		return nil, ErrInvalid
+	}
 	if user <= 0 || !validKey(key) {
 		return nil, ErrInvalid
 	}
-	repo, ok := s.Repo.(interface {
+	var c *model.Claim
+	var err error
+	if repo, ok := s.Repo.(interface {
+		ClaimWithPlatforms(int64, string, model.ExecutionCapacity, []string, time.Time) (*model.Claim, error)
+	}); ok {
+		c, err = repo.ClaimWithPlatforms(user, key, capacity, supported, time.Now().UTC())
+	} else if repo, ok := s.Repo.(interface {
 		ClaimWithCapacity(int64, string, model.ExecutionCapacity, time.Time) (*model.Claim, error)
-	})
-	if !ok {
-		return nil, errors.New("publication capacity admission provider unavailable")
+	}); ok && len(supported) == 1 && supported[0] == "baidu" {
+		c, err = repo.ClaimWithCapacity(user, key, capacity, time.Now().UTC())
+	} else {
+		return nil, errors.New("publication platform admission provider unavailable")
 	}
-	c, err := repo.ClaimWithCapacity(user, key, capacity, time.Now().UTC())
+
 	if err != nil || c == nil {
 		return nil, err
 	}
 	out := &GrantedClaim{Claim: *c}
-	if !capacity.Valid() || !c.Attempt.AdmissionV2 || c.Task.CancelRequestedAt != nil ||
+	if !slices.Contains(supported, c.Task.Platform) || !capacity.Valid() || !c.Attempt.AdmissionV2 || c.Task.CancelRequestedAt != nil ||
 		c.Task.Status != model.StatusRunning || c.Attempt.Status != model.AttemptStatusRunning || c.Attempt.Stage != model.AttemptStageClaimed {
 		return out, nil
 	}
@@ -325,12 +367,19 @@ func (s *ExecutionService) Complete(user int64, id uint64, in model.Completion) 
 		return model.ExecutionFeedback{}, ErrInvalid
 	}
 	result, e := model.ParseResult(in.Result)
-	if e != nil || !safePublicURL(result.WorkURL) || len(result.ErrorCode) > 64 || len(result.ErrorMessage) > 1000 || len(result.PlatformWorkID) > 128 {
+	if e != nil || len(result.ErrorCode) > 64 || len(result.ErrorMessage) > 1000 || len(result.PlatformWorkID) > 128 {
 		return model.ExecutionFeedback{}, ErrInvalid
 	}
 	v, e := s.Repo.Get(id)
 	if e != nil {
 		return model.ExecutionFeedback{}, e
+	}
+	if v.Platform == "bilibili" {
+		if result.WorkURL != "" && !model.ExactBilibiliWorkURL(result.PlatformWorkID, result.WorkURL) || result.Status == model.StatusReviewing && !model.ExactBilibiliWorkURL(result.PlatformWorkID, "https://www.bilibili.com/video/av"+result.PlatformWorkID) {
+			return model.ExecutionFeedback{}, ErrInvalid
+		}
+	} else if v.Platform != "baidu" || !safePublicURL(result.WorkURL) {
+		return model.ExecutionFeedback{}, ErrInvalid
 	}
 	return s.Repo.Complete(v, user, in, time.Now().UTC())
 }

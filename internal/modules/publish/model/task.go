@@ -15,15 +15,37 @@ type CoverRender struct {
 }
 
 type Content struct {
-	PortraitCoverFileID int64        `json:"portrait_cover_file_id,string"`
-	PortraitCoverRender *CoverRender `json:"portrait_cover_render,omitempty"`
-	CoverRender         *CoverRender `json:"cover_render,omitempty"`
-	Description         string       `json:"description"`
-	CoverFileID         int64        `json:"cover_file_id,string"`
-	Topics              string       `json:"topics"`
-	Declaration         string       `json:"declaration"`
-	Confirmed           bool         `json:"confirmed"`
+	PortraitCoverFileID int64            `json:"portrait_cover_file_id,string"`
+	PortraitCoverRender *CoverRender     `json:"portrait_cover_render,omitempty"`
+	CoverRender         *CoverRender     `json:"cover_render,omitempty"`
+	Description         string           `json:"description"`
+	CoverFileID         int64            `json:"cover_file_id,string"`
+	Topics              string           `json:"topics"`
+	Declaration         string           `json:"declaration"`
+	Confirmed           bool             `json:"confirmed"`
+	Title               string           `json:"title,omitempty"`
+	Bilibili            *BilibiliContent `json:"bilibili,omitempty"`
+	SpaceCoverFileID    int64            `json:"space_cover_file_id,string,omitempty"`
+	SpaceCoverRender    *CoverRender     `json:"space_cover_render,omitempty"`
 }
+
+type BilibiliContent struct {
+	PartitionID    int64    `json:"partition_id"`
+	PartitionName  string   `json:"partition_name"`
+	Tags           []string `json:"tags"`
+	RightsReserved bool     `json:"rights_reserved"`
+	Source         string   `json:"source,omitempty"`
+	Statement      string   `json:"statement"`
+	Visibility     string   `json:"visibility"`
+}
+
+func (c Content) PublicationTitle(platform string) string {
+	if platform == "bilibili" {
+		return c.Title
+	}
+	return c.Description
+}
+
 type Task struct {
 	LatestManualVerification *LatestManualVerification `json:"latest_manual_verification" gorm:"column:latest_manual_verification_json;serializer:json"`
 	VerificationRequired     bool                      `json:"verification_required" gorm:"-"`

@@ -34,6 +34,47 @@ const task = id => ({
 });
 const history = [{ id: 'attempt-A', attempt_no: 1, input_snapshot: { content: { description: '仅属于任务A的历史快照' } } }];
 let state;
+
+const bilibiliContent = () => ({ title:'B站独立标题', description:'独立简介', cover_file_id:'11', space_cover_file_id:'13', confirmed:true,
+  bilibili:{ partition_id:1008, partition_name:'游戏', tags:['游戏'], statement:'内容含营销信息', visibility:'public', rights_reserved:false } });
+
+it('saves a Bilibili task with separate title/options and space cover without Baidu fields', async () => {
+  const original = { ...task('B'), platform:'bilibili', content:{ ...bilibiliContent(), portrait_cover_file_id:'0', topics:'', declaration:'' } };
+  services.publication.get.mockResolvedValue(original);
+  await state.edit(original);
+  expect(state.primaryProfile.value.aspect).toEqual([4,3]);
+  expect(state.secondaryProfile.value.file).toBe('space_cover_file_id');
+  await state.submit();
+  const sent = services.publication.edit.mock.calls[0][1].content;
+  expect(sent).toEqual(bilibiliContent());
+  expect(state.formError.value).toBe('');
+});
+
+it('keeps the Bilibili platform when changing category and clears old content', async () => {
+  await state.openCreate();
+  state.form.value.platform='bilibili';
+  state.form.value.content=bilibiliContent();
+  await state.changeCategory('2');
+  expect(state.form.value.platform).toBe('bilibili');
+  expect(state.form.value.category_id).toBe('2');
+  expect(state.form.value.content.title).toBe('');
+  expect(state.form.value.content.bilibili.statement).toBe('内容无需标注');
+  expect(state.form.value.content.confirmed).toBe(false);
+});
+
+it('captures Bilibili draft references separately from old portrait cover metadata', async () => {
+  await state.openCreate();
+  state.form.value.platform='bilibili';
+  state.form.value.content={...bilibiliContent(),portrait_cover_file_id:'0'};
+  state.portraitCover.value={image_asset_id:'15',origin:'image',resource_path:'/private-read-url'};
+  const saved=state.draftPayload();
+  expect(saved.form.platform).toBe('bilibili');
+  expect(saved.form.content.space_cover_file_id).toBe('13');
+  expect(saved.form.content).not.toHaveProperty('portrait_cover_file_id');
+  expect(saved.space_image_asset_id).toBe('15');
+  expect(saved).not.toHaveProperty('portrait_image_asset_id');
+  expect(JSON.stringify(saved)).not.toContain('/private-read-url');
+});
 beforeEach(async () => {
   vi.clearAllMocks();
   services.session.me.mockResolvedValue({ id: '9', role: 'operator' });

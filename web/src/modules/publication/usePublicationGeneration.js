@@ -1,9 +1,10 @@
 import { onScopeDispose, ref, watch } from 'vue';
-const limits = { description: 1000, cover_title: 100, topics: 200 };
+import { parseBilibiliTags, platformGenerationFields } from './platformContent.js';
+const limits = { title: 80, description: 1000, cover_title: 100, topics: 200, tags: 209 };
 // Suggestions are transient. They never enter a draft until a separate adoption.
 export function usePublicationGeneration({ context, values, fields, disabled, generate, adopt, getIdentity }) {
   const visible = ref(false), selected = ref([]), instruction = ref(''), busy = ref(false), error = ref(''), suggestion = ref(null), stage = ref('');
-  const revisions = { description: 0, cover_title: 0, topics: 0 }, latest = {};
+  const revisions = Object.fromEntries(Object.keys(limits).map(field => [field, 0])), latest = {};
   let inputRevision = 1, sequence = 0, controller, disposed = false, knownIdentity = '';
   function cancel() { sequence++; controller?.abort(); controller = null; busy.value = false; stage.value = ''; }
   watch(() => JSON.stringify(context.value), () => { inputRevision++; cancel(); suggestion.value = null; error.value = ''; }, { flush: 'sync' });
@@ -15,13 +16,14 @@ export function usePublicationGeneration({ context, values, fields, disabled, ge
     const chosen = [...new Set(selected.value)].filter(field => fields.value.includes(field));
     if (!chosen.length) { error.value = '请选择需要生成的字段'; return; }
     const basis = context.value;
-    if (!basis.rowKey || !basis.categoryId || !basis.outputId || basis.platform !== 'baidu') { error.value = '请先选择平台、类目和成片'; return; }
+    if (!basis.rowKey || !basis.categoryId || !basis.outputId || !['baidu', 'bilibili'].includes(basis.platform)) { error.value = '请先选择平台、类目和成片'; return; }
     error.value = ''; busy.value = true; stage.value = '正在生成建议';
     const request = ++sequence, revision = inputRevision;
     controller = new AbortController();
     const fieldRevisions = Object.fromEntries(chosen.map(field => [field, String(revisions[field])]));
     for (const field of chosen) latest[field] = request;
-    const input = { row_key: basis.rowKey, input_revision: String(revision), platform: basis.platform, category_id: String(basis.categoryId), composite_output_id: String(basis.outputId), fields: chosen, field_revisions: fieldRevisions, content: Object.fromEntries(Object.keys(limits).map(field => [field, values.value[field] || ''])), instruction: instruction.value };
+    const platformKeys = Object.keys(platformGenerationFields(basis.platform));
+    const input = { row_key: basis.rowKey, input_revision: String(revision), platform: basis.platform, category_id: String(basis.categoryId), composite_output_id: String(basis.outputId), fields: chosen, field_revisions: fieldRevisions, content: Object.fromEntries(platformKeys.map(field => [field, values.value[field] || ''])), instruction: instruction.value };
     try {
       const identityId = String(await getIdentity());
       if (disposed || request !== sequence || !visible.value) return;
@@ -38,7 +40,10 @@ export function usePublicationGeneration({ context, values, fields, disabled, ge
         knownIdentity = currentIdentity;
         throw new Error('登录账号已变化，请重新打开发布内容');
       }
-      if (!result?.content || !result.field_revisions || Object.keys(result.content).length !== chosen.length || Object.keys(result.field_revisions).length !== chosen.length || chosen.some(field => typeof result.content[field] !== 'string' || [...result.content[field]].length > limits[field] || field !== 'topics' && !result.content[field].trim() || result.field_revisions[field] !== fieldRevisions[field])) throw new Error('生成结果不完整，请重新生成');
+      const length = (field,value) => basis.platform === 'bilibili' && field !== 'cover_title' ? value.length : [...value].length;
+      const limit = field => basis.platform === 'bilibili' && field === 'description' ? 2000 : limits[field];
+      if (!result?.content || !result.field_revisions || Object.keys(result.content).length !== chosen.length || Object.keys(result.field_revisions).length !== chosen.length || chosen.some(field => typeof result.content[field] !== 'string' || length(field,result.content[field]) > limit(field) || field !== 'topics' && !(basis.platform === 'bilibili' && field === 'description') && !result.content[field].trim() || result.field_revisions[field] !== fieldRevisions[field])) throw new Error('生成结果不完整，请重新生成');
+      if (basis.platform === 'bilibili' && chosen.includes('tags')) parseBilibiliTags(result.content.tags);
       const next = { ...suggestion.value };
       for (const field of chosen) next[field] = { value: result.content[field], fieldRevision: fieldRevisions[field], request, revision, identityId, adopted: false };
       suggestion.value = next; stage.value = '请审阅后逐项采用';

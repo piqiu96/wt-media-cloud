@@ -11,6 +11,39 @@ const candidate = { ...pair("3", "4"), row_key: "row-one", order: 0,
   content: { description: "人工内容", cover_file_id: "9", confirmed: true } };
 
 describe("batch configuration", () => {
+  it('keeps existing Bilibili input and applies defaults only to new allocation rows', () => {
+    const saved = { ...candidate, content:{ title:'已保存标题', description:'简介', bilibili:{ tags:['保留'], statement:'内容含营销信息' }, confirmed:true } };
+    const rule = { defaults:{ partition_id:1008, partition_name:'游戏', tags:['默认'], visibility:'public' } };
+    const rows = batch.reconcileAllocation([saved], [pair('3','4'),pair('5','6')], 'bilibili', rule);
+    expect(rows[0]).toBe(saved);
+    expect(rows[1].content.bilibili.tags).toEqual(['默认']);
+    expect(rows[1].content.bilibili.statement).toBe('内容无需标注');
+    rows[1].content.bilibili.tags.push('独立');
+    expect(rule.defaults.tags).toEqual(['默认']);
+  });
+  it('invalidates Bilibili tag suggestions and confirmation when manually editing tags', () => {
+    const original={...candidate,content:{title:'标题',bilibili:{tags:['旧标签'],statement:'内容含营销信息'},confirmed:true}};
+    const edited=batch.editCandidate(original,{bilibili:{...original.content.bilibili,tags:['新标签']}},'bilibili');
+    expect(edited.field_revisions.tags).toBe('1');
+    expect(edited.content.confirmed).toBe(false);
+    const generated=batch.editCandidate(edited,{tags:'游戏\n画中画'},'bilibili');
+    expect(generated.content.bilibili.tags).toEqual(['游戏','画中画']);
+    expect(generated.content.bilibili.statement).toBe('内容含营销信息');
+    expect(generated.content).not.toHaveProperty('tags');
+    expect(generated.field_revisions.tags).toBe('2');
+  });
+  it('freezes only Bilibili fields in batch input and clears both covers after a video change',()=>{
+    const row={...candidate,content:{title:'标题',description:'简介',bilibili:{tags:['游戏']},cover_file_id:'9',space_cover_file_id:'10',portrait_cover_file_id:'0',topics:'',confirmed:true}};
+    const form=batch.emptyBatch();form.platform='bilibili';form.config.candidates=[row];
+    const input=batch.batchInput(form).config.candidates[0].content;
+    expect(input).toHaveProperty('space_cover_file_id','10');
+    expect(input).not.toHaveProperty('portrait_cover_file_id');
+    expect(input).not.toHaveProperty('topics');
+    const next=batch.replaceCandidatePair(row,pair('3','8'));
+    expect(next.content).not.toHaveProperty('space_cover_file_id');
+    expect(next.content).not.toHaveProperty('cover_file_id');
+    expect(next.content.title).toBe('标题');
+  });
   it("preserves target count and identity when deleting and reordering candidates", () => {
     const config = batch.emptyBatch();
     config.targets = [{ category_id: "2", target_count: 60 }];
@@ -124,4 +157,12 @@ it("lets explicit confirmation proceed only for selected rows with no other serv
   expect(batch.reviewSelectedConfirmations(rows, issues)).toEqual({
     confirmable: ["ready"], blocked: [{ rowKey: "blocked", message: "请选择所需规格的封面" }],
   });
+});
+
+it('can explicitly clear a Bilibili description in overwrite mode without clearing Baidu titles',()=>{
+ const row={content:{title:'标题',description:'旧简介',bilibili:{tags:['游戏']}}};
+ expect(batch.publicContentPatch(row,{description:''},true,'bilibili')).toEqual({description:''});
+ expect(batch.publicContentPatch(row,{description:''},false,'bilibili')).toEqual({});
+ expect(batch.publicContentPatch(row,{description:''},true,'baidu')).toEqual({});
+ expect(batch.publicContentPatch(row,{title:''},true,'bilibili')).toEqual({});
 });

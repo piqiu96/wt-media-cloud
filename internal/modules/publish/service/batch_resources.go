@@ -134,7 +134,7 @@ func (s *Service) AccountCandidates(a identity.PublicUser, platform string, cate
 		if account.TeamID != nil && *account.TeamID != *a.TeamID {
 			reason = "账号不在当前团队范围内"
 		}
-		if platform != "baidu" {
+		if !s.platformEnabled(platform) {
 			reason = "当前平台尚未开放批次准备"
 		}
 		visibleCategories := make([]string, 0, len(account.CategoryIDs))

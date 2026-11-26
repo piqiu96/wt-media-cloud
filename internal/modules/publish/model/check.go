@@ -25,12 +25,16 @@ type PublicCheckReport struct {
 }
 
 func (r PublicCheckReport) Valid() bool {
+	return r.ValidFor("baidu")
+}
+
+func (r PublicCheckReport) ValidFor(platform string) bool {
 	lookupValid := r.LookupResult == "" || ((r.LookupResult == "found") && (r.Observation.Conclusion == StatusReviewing || r.Observation.Conclusion == StatusPublished)) || (r.LookupResult == "not_found" && r.Observation.Conclusion == StatusUncertain && r.Observation.Evidence.SceneClosed && !r.Observation.Evidence.WorkMatched) || (r.LookupResult == "blocked" && r.Observation.Conclusion == StatusUncertain)
 	if r.ReservationID != 0 && (!ValidProfileDisposition(r.ProfileDisposition) || !r.Observation.Evidence.SceneClosed ||
 		r.ProfileDisposition == "not_opened" && r.BrowserUsed) {
 		return false
 	}
-	return lookupValid && r.Generation > 0 && r.Observation.Valid() && (r.Observation.Conclusion == StatusUncertain || r.Observation.Conclusion == StatusReviewing || r.Observation.Conclusion == StatusPublished)
+	return lookupValid && r.Generation > 0 && r.Observation.ValidFor(platform) && (r.Observation.Conclusion == StatusUncertain || r.Observation.Conclusion == StatusReviewing || r.Observation.Conclusion == StatusPublished)
 }
 
 type PublicCheckAcknowledgement struct {
@@ -62,9 +66,10 @@ type CheckActor struct {
 }
 
 type CheckClaimInput struct {
-	RequestKey       string            `json:"request_key"`
-	Capacity         ExecutionCapacity `json:"capacity"`
-	SettleUnreceived bool              `json:"settle_unreceived"`
+	SupportedPlatforms []string          `json:"supported_platforms,omitempty"`
+	RequestKey         string            `json:"request_key"`
+	Capacity           ExecutionCapacity `json:"capacity"`
+	SettleUnreceived   bool              `json:"settle_unreceived"`
 }
 
 type CancelledCheckClaim struct {

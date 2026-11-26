@@ -12,7 +12,7 @@ import (
 func safeDisposition(a model.Attempt) model.Status {
 	if a.ResolvedAt != nil && a.ResolutionNote != nil {
 		var v model.ResultResolution
-		if json.Unmarshal([]byte(*a.ResolutionNote), &v) == nil && v.Valid() && v.AttemptID == a.ID && (v.Conclusion == model.StatusFailed || v.Conclusion == model.StatusReviewing || v.Conclusion == model.StatusPublished) && v.Evidence.PlatformUID == a.Input.PlatformUID {
+		if json.Unmarshal([]byte(*a.ResolutionNote), &v) == nil && v.ValidFor(a.Input.PublicationPlatform()) && v.AttemptID == a.ID && (v.Conclusion == model.StatusFailed || v.Conclusion == model.StatusReviewing || v.Conclusion == model.StatusPublished) && v.Evidence.PlatformUID == a.Input.PlatformUID {
 			return v.Conclusion
 		}
 	}
@@ -24,7 +24,7 @@ func safeDisposition(a model.Attempt) model.Status {
 		return ""
 	}
 	ev := r.Evidence
-	if !ev.SceneClosed || ev.PlatformUID != a.Input.PlatformUID || ev.BitProfileID != a.Input.BitProfileID || ev.VideoSHA256 != a.Input.VideoSHA256 || ev.CoverSHA256 != a.Input.CoverSHA256 || ev.PortraitCoverSHA256 != a.Input.PortraitCoverSHA256 {
+	if !ev.SceneClosed || ev.PlatformUID != a.Input.PlatformUID || ev.BitProfileID != a.Input.BitProfileID || ev.VideoSHA256 != a.Input.VideoSHA256 || ev.CoverSHA256 != a.Input.CoverSHA256 || ev.PortraitCoverSHA256 != a.Input.PortraitCoverSHA256 || ev.SpaceCoverSHA256 != a.Input.SpaceCoverSHA256 {
 		return ""
 	}
 	if r.Status == model.StatusFailed && ev.NotSubmitted && a.SubmitStartedAt == nil {
@@ -45,7 +45,7 @@ func (s ExecutionStore) OriginalAttempt(task, attempt uint64, user int64) (model
 	return model.OriginalAttemptState{AttemptID: a.ID, ResultHash: a.ResultHash, SceneResolved: status != "", ResolvedStatus: status}, nil
 }
 func (s ExecutionStore) ResolveResult(candidate model.Task, actor int64, in model.ResultResolution, now time.Time) (model.Task, error) {
-	if !in.Valid() {
+	if !in.ValidFor(candidate.Platform) {
 		return model.Task{}, ErrConflict
 	}
 	var out model.Task
@@ -80,7 +80,7 @@ func (s ExecutionStore) ResolveResult(candidate model.Task, actor int64, in mode
 		if a.PublicationID != v.ID || a.ExecutorUserID != v.OperatorID || in.Evidence.PlatformUID != a.Input.PlatformUID || a.Input.PlatformUID != v.PlatformAccountUID || (v.Status == model.StatusUncertain && !originalReviewing && !manualUnknown && (a.ResolvedAt != nil || a.Status != model.AttemptStatusInterrupted)) || (v.Status == model.StatusReviewing && safeDisposition(a) != model.StatusReviewing) {
 			return ErrConflict
 		}
-		if v.Platform != "baidu" {
+		if !in.ValidFor(v.Platform) || in.Conclusion == model.StatusPublished && a.Input.PublicationPlatform() == "bilibili" && (a.Input.Content.Bilibili == nil || a.Input.Content.Bilibili.Visibility != "public") {
 			return ErrConflict
 		}
 		if v.PlatformSubmissionID != nil && *v.PlatformSubmissionID != "" && (in.Conclusion == model.StatusReviewing || in.Conclusion == model.StatusPublished) && *v.PlatformSubmissionID != in.PlatformSubmissionID {

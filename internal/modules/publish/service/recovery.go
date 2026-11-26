@@ -1,6 +1,7 @@
 package service
 
 import (
+	"github.com/wt-media/wt-media-cloud/internal/config"
 	identity "github.com/wt-media/wt-media-cloud/internal/modules/identity/service"
 	"github.com/wt-media/wt-media-cloud/internal/modules/publish/model"
 	"github.com/wt-media/wt-media-cloud/internal/modules/publish/repository"
@@ -18,11 +19,12 @@ type RecoveryRepository interface {
 	OriginalAttempt(uint64, uint64, int64) (model.OriginalAttemptState, error)
 }
 type RecoveryService struct {
-	Repo RecoveryRepository
+	PlatformSettings config.PublicationPlatformsConfig
+	Repo             RecoveryRepository
 }
 
 func WiredRecovery() *RecoveryService {
-	return &RecoveryService{Repo: ExecutionStore()}
+	return &RecoveryService{PlatformSettings: config.Get().App.PublicationPlatforms, Repo: ExecutionStore()}
 }
 func (s *RecoveryService) readable(actor identity.PublicUser, id uint64) (model.Task, error) {
 	v, e := s.Repo.Get(id)
@@ -43,10 +45,10 @@ func (s *RecoveryService) Resolve(actor identity.PublicUser, id uint64, in model
 		return model.Task{}, ErrNotFound
 	}
 
-	if !in.Valid() {
+	if !in.ValidFor(v.Platform) {
 		return model.Task{}, ErrInvalid
 	}
-	if v.Platform != "baidu" {
+	if v.Platform != "baidu" && v.Platform != "bilibili" {
 		return model.Task{}, ErrClosed
 	}
 	return s.Repo.ResolveResult(v, int64(actor.ID), in, time.Now().UTC())
@@ -62,7 +64,7 @@ func (s *RecoveryService) Retry(actor identity.PublicUser, id, revision uint64) 
 	if !ownsPublication(actor, v) {
 		return model.Task{}, ErrNotFound
 	}
-	if v.Platform != "baidu" {
+	if !enabledPlatform(v.Platform, s.PlatformSettings) {
 		return model.Task{}, ErrClosed
 	}
 	if revision == 0 {

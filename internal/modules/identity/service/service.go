@@ -734,7 +734,7 @@ func (s *Service) CreateCategory(actorID UserID, categoryType CategoryType, name
 	categoryStore, okStore := s.store.(operationCategoryStore)
 	name = strings.TrimSpace(name)
 	remark = strings.TrimSpace(remark)
-	if !ok || !isAdmin(actor) || !okStore || name == "" || len([]rune(name)) > 128 || len([]rune(remark)) > 255 || !validCategoryType(categoryType) {
+	if !ok || !isAdmin(actor) || !okStore || name == "" || len([]rune(name)) > 128 || len([]rune(remark)) > 255 || categoryType != CategoryTypeGame {
 		return Category{}, ErrInvalidInput
 	}
 	now := s.now()

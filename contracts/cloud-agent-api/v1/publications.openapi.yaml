@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: WT Media Cloud-Agent Publication Execution
-  version: 2026.11.25.2
+  version: 2026.11.26.2
   description: >-
     Owner-scoped publication execution for standalone and batch tasks. New work requires a current
     Desktop session and Agent contract revision 2026.11.25.2 or newer. Original attempt keepalive,
@@ -9,7 +9,7 @@ info:
     represents the exact original operation and persists until trustworthy closure; elapsed time alone
     does not release a Profile, account, or unresolved window.
     Task/attempt ids and revisions are decimal strings. Responses use errcode/message/data/logid.
-    New execution freezes portrait_cover_sha256/portrait_cover_size in addition to the horizontal cover, and requires matching portrait_cover_sha256 in progress and result evidence. Missing portrait input is refused; no automatic conversion.
+    Baidu execution retains portrait_cover_sha256/portrait_cover_size. Bilibili freezes platform=bilibili and space_cover_sha256/space_cover_size with its 4:3 primary cover. Progress and result evidence must match the exact platform-specific secondary digest; no automatic conversion. Legacy inputs omit platform and remain Baidu. Bilibili uses decimal aid as canonical original submission and public work identity; public URLs are exact https://www.bilibili.com/video/av{aid}. A receipt or URL shape alone never proves publication.
     Download grants appear only in responses, never in frozen snapshots, evidence or logs.
 paths:
   /api/v1/cloud-agent/publication-task/claim:
@@ -28,8 +28,8 @@ paths:
             replayed=true. Only the known original claimant with durable local state may continue.
             Stopped, finished and lost attempts receive no new file grants. A busy/no-task reply creates no attempt.
           content: {application/json: {schema: {$ref: '#/components/schemas/Envelope'}}}
-        '401': {description: Invalid bearer or Desktop session no longer current.}
-        '409': {description: Changed input, platform unavailable, publication_admission_closed during legacy cutover, or publication_agent_upgrade_required for an older Agent requesting new work.}
+        '401': {description: "Invalid bearer or Desktop session no longer current."}
+        '409': {description: "Changed input, platform unavailable, publication_admission_closed during legacy cutover, or publication_agent_upgrade_required for an older Agent requesting new work."}
   /api/v1/cloud-agent/publication-task/{id}/report:
     post:
       operationId: reportPublication
@@ -46,7 +46,7 @@ paths:
             submit permission even after claim. Explicit stop_requested=true with allow_submit=false and verified
             original scene closure can prove no submission. Missing or failed replies remain uncertain.
           content: {application/json: {schema: {$ref: '#/components/schemas/FeedbackEnvelope'}}}
-        '409': {description: Stale/conflicting report, invalid transition, changed input or unsafe scene.}
+        '409': {description: "Stale/conflicting report, invalid transition, changed input or unsafe scene."}
   /api/v1/cloud-agent/publication-task/{id}/complete:
     post:
       operationId: completePublication
@@ -57,7 +57,7 @@ paths:
         '200':
           description: Exact result and sequence replay acknowledges the original completion. Reviewing requires the real matching receipt. Completion may update original task facts and group progress without reopening a stopped or ended batch. Public success is verified separately.
           content: {application/json: {schema: {$ref: '#/components/schemas/FeedbackEnvelope'}}}
-        '409': {description: Foreign/non-current attempt, stale sequence, conflicting result, or an already resolved scene.}
+        '409': {description: "Foreign/non-current attempt, stale sequence, conflicting result, or an already resolved scene."}
   /api/v1/cloud-agent/publication-task/{id}/attempt/{attempt_id}:
     get:
       operationId: inspectOriginalPublicationAttempt
@@ -95,7 +95,7 @@ paths:
         '200':
           description: Original attempt feedback with allow_submit=false.
           content: {application/json: {schema: {$ref: '#/components/schemas/FeedbackEnvelope'}}}
-        '409': {description: Stale, unsafe, changed input or no original waiting scene eligibility.}
+        '409': {description: "Stale, unsafe, changed input or no original waiting scene eligibility."}
   /api/v1/cloud-agent/publication-task/{id}/resume:
     post:
       operationId: resumePublication
@@ -119,7 +119,7 @@ paths:
         '200':
           description: Original attempt is running with its automatic slot and allow_submit=false.
           content: {application/json: {schema: {$ref: '#/components/schemas/FeedbackEnvelope'}}}
-        '409': {description: Stale revision, unsafe original scene, parent control, changed input, upgrade required or capacity wait. Wait never starts local actions.}
+        '409': {description: "Stale revision, unsafe original scene, parent control, changed input, upgrade required or capacity wait. Wait never starts local actions."}
   /api/v1/cloud-agent/publication-task/check/claim:
     post:
       operationId: claimPublicCheck
@@ -168,8 +168,8 @@ paths:
                           - {$ref: '#/components/schemas/PublicCheckClaim'}
                           - {$ref: '#/components/schemas/ReleasedPublicCheckClaim'}
                           - {$ref: '#/components/schemas/CancelledPublicCheckClaim'}
-        '401': {description: Claim requires a current Desktop session. Unreceived settlement requires a current same-owner Strict token or a valid original-owner and original-session ReportSafe token.}
-        '409': {description: Request key reused with different input, a newer Agent contract is required, or legacy cutover still closes new admission.}
+        '401': {description: "Claim requires a current Desktop session. Unreceived settlement requires a current same-owner Strict token or a valid original-owner and original-session ReportSafe token."}
+        '409': {description: "Request key reused with different input, a newer Agent contract is required, or legacy cutover still closes new admission."}
   /api/v1/cloud-agent/publication-task/{id}/check:
     post:
       operationId: observePublication
@@ -208,9 +208,9 @@ paths:
                           - allOf:
                               - {$ref: '#/components/schemas/PublicCheckReleaseAcknowledgement'}
                               - not: {required: [observation_hash]}
-        '400': {description: Invalid observation, release evidence or unsupported conclusion.}
-        '401': {description: Observation requires a current Desktop session. Release-only accepts a current same-owner Strict token or an original-owner and original-session ReportSafe token.}
-        '409': {description: Original revision, attempt, generation, input or reservation changed, or evidence conflicts. A stale observation can be followed by original release-only closure.}
+        '400': {description: "Invalid observation, release evidence or unsupported conclusion."}
+        '401': {description: "Observation requires a current Desktop session. Release-only accepts a current same-owner Strict token or an original-owner and original-session ReportSafe token."}
+        '409': {description: "Original revision, attempt, generation, input or reservation changed, or evidence conflicts. A stale observation can be followed by original release-only closure."}
 components:
   securitySchemes:
     agentBearer: {type: http, scheme: bearer}
@@ -238,6 +238,7 @@ components:
       properties:
         request_key: {$ref: '#/components/schemas/RequestKey'}
         capacity: {$ref: '#/components/schemas/ExecutionCapacity'}
+        supported_platforms: {$ref: '#/components/schemas/SupportedPlatforms'}
       description: capacity is mandatory for new work. Legacy request-key-only packets may read an existing original claim without receiving new work or grants.
     PublicCheckClaimRequest:
       type: object
@@ -246,6 +247,15 @@ components:
       properties:
         request_key: {$ref: '#/components/schemas/RequestKey'}
         capacity: {$ref: '#/components/schemas/ExecutionCapacity'}
+        supported_platforms: {$ref: '#/components/schemas/SupportedPlatforms'}
+    SupportedPlatforms:
+      type: array
+      minItems: 1
+      maxItems: 2
+      uniqueItems: true
+      items: {type: string, enum: [baidu, bilibili]}
+      default: [baidu]
+      description: Omission permits Baidu new work only. A client must explicitly advertise Bilibili before any Bilibili publish/check admission. Replaying original work never authorizes a new submission. Capability does not override deployment availability or owner/Profile authorization.
     UnreceivedPublicCheckSettlement:
       type: object
       additionalProperties: false
@@ -357,6 +367,7 @@ components:
         bit_profile_id: {type: string, maxLength: 255}
         video_sha256: {type: string, pattern: '^[a-f0-9]{64}$'}
         portrait_cover_sha256: {type: string, pattern: '^[a-f0-9]{64}$'}
+        space_cover_sha256: {type: string, pattern: '^[a-f0-9]{64}$', description: Bilibili space cover, required to match the frozen input for any progress report. Never substitutes for the Baidu portrait cover.}
         cover_sha256: {type: string, pattern: '^[a-f0-9]{64}$'}
       allOf:
         - if: {not: {required: [stage]}}
@@ -368,6 +379,7 @@ components:
                 - {required: [video_sha256]}
                 - {required: [cover_sha256]}
                 - {required: [portrait_cover_sha256]}
+                - {required: [space_cover_sha256]}
         - if: {required: [scene_parked]}
           then: {required: [stage], properties: {stage: {const: awaiting_human}}}
     Completion:
@@ -397,6 +409,7 @@ components:
             bit_profile_id: {type: string, maxLength: 255}
             video_sha256: {type: string, pattern: '^[a-f0-9]{64}$'}
             portrait_cover_sha256: {type: string, pattern: '^[a-f0-9]{64}$'}
+            space_cover_sha256: {type: string, pattern: '^[a-f0-9]{64}$'}
             cover_sha256: {type: string, pattern: '^[a-f0-9]{64}$'}
             receipt_id: {type: string, maxLength: 255}
             not_submitted: {type: boolean}
@@ -410,7 +423,7 @@ components:
         replayed: {type: boolean}
         execution_group_no: {type: [integer, 'null'], minimum: 1, description: Fixed batch execution group assigned at claim. Null for a standalone task.}
         effective_capacity: {$ref: '#/components/schemas/ExecutionCapacity'}
-        files: {type: object, description: 'video, cover (16:9), and portrait_cover (3:4) short-lived single-object grants, each {url,size,sha256}; never persist. Omitted on replay of finished/lost work.'}
+        files: {type: object, description: 'Short-lived single-object grants, each {url,size,sha256}; never persist. Baidu: video, cover (16:9), portrait_cover (3:4). Bilibili: video, cover (4:3), space_cover (16:9); frozen input additionally carries space_cover_sha256/space_cover_size, empty legacy portrait fields do not authorize a resource. Omitted on replay of finished/lost work.'}
     ExecutionFeedback:
       type: object
       required: [task_status, attempt_status, attempt_id, report_seq, stop_requested, allow_submit, scene_parked]

@@ -4,11 +4,12 @@ import ResourceOverlay from "../../../shared/ui/resource/ResourceOverlay.vue";
 import ResourceSection from "../../../shared/ui/resource/ResourceSection.vue";
 import FeedbackAlert from "../../../shared/ui/feedback/FeedbackAlert.vue";
 import PublicationContentGenerator from "./PublicationContentGenerator.vue";
+import BilibiliContentFields from "./BilibiliContentFields.vue";
 import PublishingCoverEditor from "./PublishingCoverEditor.vue";
 import PublishingResourcePicker from "./PublishingResourcePicker.vue";
 import { createFilesClient } from "../../../shared/api/files.js";
-import { coverConfigFromReference, coverMatchesRatio, coverReference, coverRenderInput, coverResultMatches, emptyCoverConfig } from "../coverPreparation.js";
-import { coverProfiles } from "../batchPreparation.js";
+import { coverConfigFromReference, coverMatchesRatio, coverMatchesProfile, coverReference, coverRenderInput, coverResultMatches, emptyCoverConfig } from "../coverPreparation.js";
+import { generationPatch, generationValues, platformCoverProfiles } from "../platformContent.js";
 import { contentIssue, publicationTextLength } from "../eligibility.js";
 
 const props = defineProps({
@@ -26,13 +27,18 @@ const files = createFilesClient();
 const selection = ref(null);
 const error = ref("");
 const staged = ref({});
-const values = computed(() => ({ ...props.row.content, cover_title: props.row.cover_title || "" }));
-const check = computed(() => contentIssue({ ...props.row, content: {
+const coverProfiles = computed(() => platformCoverProfiles(props.platform));
+const values = computed(() => generationValues(props.platform, props.row.content, props.row.cover_title || ''));
+const check = computed(() => contentIssue({ ...props.row, platform: props.platform, content: {
   ...props.row.content,
   description: props.row.content.description || "",
   cover_file_id: props.row.content.cover_file_id === "0" ? "" : props.row.content.cover_file_id,
   portrait_cover_file_id: props.row.content.portrait_cover_file_id === "0" ? "" : props.row.content.portrait_cover_file_id,
 } }));
+function adopt(field, value) {
+  try { emit('edit', generationPatch(props.platform, props.row.content, field, value)); error.value = ''; }
+  catch (failure) { error.value = failure.message; }
+}
 const generationContext = computed(() => ({
   rowKey: props.row.row_key, platform: props.platform, categoryId: props.row.category_id,
   outputId: props.row.composite_output_id, identityKey: props.row.input_revision,
@@ -41,7 +47,7 @@ const generationContext = computed(() => ({
 function url(file) {
   try { return files.resourceURL(file); } catch { return undefined; }
 }
-const configs = computed(() => Object.fromEntries(coverProfiles.map(profile => {
+const configs = computed(() => Object.fromEntries(coverProfiles.value.map(profile => {
   const saved = props.row.content[profile.render];
   const recipe = props.recipes[profile.key] || (saved ? coverConfigFromReference(saved) : emptyCoverConfig());
   return [profile.key, { ...recipe, title: props.row.cover_title || "" }];
@@ -57,12 +63,12 @@ function renderBasis(profile) {
     config: configs.value[profile.key],
   });
 }
-const stagedArtworks = computed(() => Object.fromEntries(coverProfiles.map(profile => {
+const stagedArtworks = computed(() => Object.fromEntries(coverProfiles.value.map(profile => {
   const entry = staged.value[profile.key];
   return [profile.key, entry?.basis === renderBasis(profile) ? entry.result : null];
 })));
-watch(() => coverProfiles.map(renderBasis), (bases) => {
-  coverProfiles.forEach((profile, index) => {
+watch(() => coverProfiles.value.map(renderBasis), (bases) => {
+  coverProfiles.value.forEach((profile, index) => {
     const entry = staged.value[profile.key];
     if (entry && entry.basis !== bases[index]) delete staged.value[profile.key];
   });
@@ -79,13 +85,13 @@ function useOutput(profile) {
   }
 }
 function selectedImage(file) {
-  if (!selection.value || !coverMatchesRatio(file, ...selection.value.aspect)) return;
+  if (!selection.value || !coverMatchesProfile(file,selection.value,props.platform)) return;
   emit("cover", selection.value, { ...file, file_id: file.id }, undefined);
   selection.value = null;
 }
 function matchesCurrentRender(profile, result) {
   const config = configs.value[profile.key];
-  if (config.method !== "template" || !result || !coverMatchesRatio(result.file, ...profile.aspect)) return false;
+  if (config.method !== "template" || !result || !coverMatchesProfile(result.file,profile,props.platform)) return false;
   try {
     return coverResultMatches(result, coverRenderInput(config, props.output, result.row_key, result.input_revision));
   } catch {
@@ -112,9 +118,10 @@ function applyArtwork(profile) {
   <ResourceOverlay form-actions :visible="true" :width="960" title="编辑发布内容"
     @update:visible="!$event && emit('close')">
     <div class="batch-stack">
-      <div class="batch-content-source"><div><small>发布账号</small><strong>{{accountName}}</strong><span>百家号</span></div><div><small>发布成片</small><strong :title="outputName">{{outputName}}</strong><span>成片 ID：{{row.composite_output_id}}</span></div></div>
+      <div class="batch-content-source"><div><small>发布账号</small><strong>{{accountName}}</strong><span>{{platform === 'bilibili' ? 'B站' : '百家号'}}</span></div><div><small>发布成片</small><strong :title="outputName">{{outputName}}</strong><span>成片 ID：{{row.composite_output_id}}</span></div></div>
       <ResourceSection title="文案与创作声明">
-        <div class="batch-form-grid">
+        <BilibiliContentFields v-if="platform === 'bilibili'" :content="row.content" :disabled="disabled" @patch="emit('edit', $event)" />
+        <div v-else class="batch-form-grid">
           <label class="batch-form-wide">发布文案
             <t-textarea :value="row.content.description || ''" :maxlength="50" aria-label="发布文案" :disabled="disabled"
               @change="emit('edit', { description: $event })" />
@@ -130,8 +137,9 @@ function applyArtwork(profile) {
               @change="emit('edit', { declaration: $event || '' })" />
           </label>
         </div>
+        <label v-if="platform === 'bilibili'">封面短标题<t-input :value="row.cover_title || ''" :maxlength="100" aria-label="封面短标题" :disabled="disabled" @change="emit('edit', { cover_title: $event })" /></label>
         <PublicationContentGenerator :context="generationContext" :values="values" template :disabled="disabled"
-          @adopt="(field, value) => emit('edit', { [field]: value })" />
+          @adopt="adopt" />
       </ResourceSection>
       <ResourceSection title="封面">
         <FeedbackAlert v-if="error" theme="error" :message="error" />
@@ -160,6 +168,6 @@ function applyArtwork(profile) {
     </div>
     <template #footer><t-button theme="primary" @click="emit('close')">完成</t-button></template>
   </ResourceOverlay>
-  <PublishingResourcePicker v-if="selection" visible kind="image" :category="row.category_id" :aspect="selection.aspect"
+  <PublishingResourcePicker v-if="selection" visible kind="image" :platform="platform" :category="row.category_id" :aspect="selection.aspect"
     @selected="selectedImage" @update:visible="selection = null" />
 </template>

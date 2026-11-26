@@ -1,4 +1,6 @@
 <script setup>
+import { usePublicationPlatforms } from "../usePublicationPlatforms.js";
+const platforms = usePublicationPlatforms();
 // Layout and slots adapted from example/proto/publishing-design/plan/PlanList.vue.
 import ResourceNameLink from "../../../shared/ui/resource/ResourceNameLink.vue";
 import ResourceId from "../../../shared/ui/resource/ResourceId.vue";
@@ -110,7 +112,7 @@ const columns = [
         ><span class="wt-filter-field__label">发布平台</span
         ><Select
           v-model="filters.platform"
-          :options="[{ value: 'baidu', label: '百家号' }]"
+          :options="platforms.options.value"
           clearable
           placeholder="全部"
       /></label>

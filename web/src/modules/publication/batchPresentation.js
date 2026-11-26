@@ -3,6 +3,7 @@ import { executionLabels } from './batchPreparation.js';
 
 // Execution status remains separate from configuration readiness and group progress.
 export function batchStatus(batch) {
+  if (batch.handed_off_at && !['ended','cancelled'].includes(batch.execution_status) && batchPendingCount(batch) === 0) return '已推进';
   if (batch.execution_status === 'running' && batch.execution?.phase === 'awaiting_processing') return '待处理';
   return executionLabels[batch.execution_status] || '状态待刷新';
 }

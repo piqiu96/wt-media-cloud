@@ -6,6 +6,7 @@ import (
 )
 
 type ExecutionInput struct {
+	Platform            string  `json:"platform,omitempty"`
 	PortraitCoverSHA256 string  `json:"portrait_cover_sha256"`
 	PortraitCoverSize   int64   `json:"portrait_cover_size"`
 	ProfileID           uint64  `json:"profile_id,string"`
@@ -17,7 +18,17 @@ type ExecutionInput struct {
 	VideoSize           int64   `json:"video_size"`
 	CoverSHA256         string  `json:"cover_sha256"`
 	CoverSize           int64   `json:"cover_size"`
+	SpaceCoverSHA256    string  `json:"space_cover_sha256,omitempty"`
+	SpaceCoverSize      int64   `json:"space_cover_size,omitempty"`
 }
+
+func (i ExecutionInput) PublicationPlatform() string {
+	if i.Platform == "" {
+		return "baidu"
+	}
+	return i.Platform
+}
+
 type HumanContinuation struct {
 	AttemptID        uint64 `json:"attempt_id,string"`
 	ExpectedRevision uint64 `json:"expected_revision,string"`

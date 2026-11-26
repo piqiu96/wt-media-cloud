@@ -19,3 +19,15 @@ it('always offers detail and only projects provider-permitted commands for the o
  expect(batchActionLabel('stop',{execution_status:'not_started'})).toBe('终止');
  expect(batchActionLabel('stop',active)).toBe('终止发布');
 });
+
+it('keeps handed-off failures historical while retaining real unresolved work',()=>{
+ const previous={execution_status:'running',handed_off_at:'2026-11-26T21:22:36+08:00',allowed_actions:[],execution:{phase:'awaiting_processing',verification_required_count:0,task_counts:{failed:1}}};
+ expect(batchStatus(previous)).toBe('已推进');
+ expect(batchListActions(previous,true)).toEqual(['detail']);
+ const unresolved={...previous,execution:{...previous.execution,task_counts:{failed:1,uncertain:1}}};
+ expect(batchStatus(unresolved)).toBe('待处理');
+ expect(batchListActions(unresolved,true)).toEqual(['process','detail']);
+ const verification={...previous,execution:{...previous.execution,verification_required_count:1}};
+ expect(batchListActions(verification,true)).toEqual(['process','detail']);
+ expect(batchStatus({...previous,execution_status:'ended'})).toBe('已结束');
+});

@@ -81,6 +81,22 @@ func TestCreateAndEditRequireMatchingFrozenRenderedCover(t *testing.T) {
 	}
 }
 
+func TestPlatformCoverFormatsKeepBaiduCompatibility(t *testing.T) {
+	for _, format := range []string{"png", "jpeg", "webp", ""} {
+		for _, ratio := range [][2]int{{4, 3}, {16, 9}} {
+			raw, _ := json.Marshal(filemodel.ImageMetadata{Width: ratio[0] * 100, Height: ratio[1] * 100, Format: format})
+			f := filemodel.File{Type: "image", SizeBytes: 100, MetadataJSON: raw}
+			want := format == "png" || format == "jpeg"
+			if (verifyPlatformCoverSpec("bilibili", f, ratio[0], ratio[1]) == nil) != want {
+				t.Fatalf("Bilibili accepted wrong format: %q ratio %v", format, ratio)
+			}
+			if err := verifyPlatformCoverSpec("baidu", f, ratio[0], ratio[1]); err != nil {
+				t.Fatalf("changed legacy Baidu metadata acceptance: %v", err)
+			}
+		}
+	}
+}
+
 func TestBaiduCoverSpecRejectsWrongRatioMissingMetadataAndOversize(t *testing.T) {
 	for _, tc := range []struct {
 		name          string

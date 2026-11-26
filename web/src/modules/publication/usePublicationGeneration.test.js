@@ -8,6 +8,21 @@ function fixture(generate, getIdentity = async () => '9') {
  return {scope,context,values,adopt,state};
 }
 function result(input){return {content:{description:'模型建议',topics:'#实战'},field_revisions:input.field_revisions}}
+it('generates separate Bilibili fields and rejects stale or invalid tag adoption',async()=>{
+ const scope=effectScope(),context=ref({rowKey:'bili',platform:'bilibili',categoryId:'1',outputId:'141'});
+ const values=reactive({title:'人工标题',description:'独立简介',tags:'游戏',cover_title:''});
+ const calls=[],adopt=vi.fn();let invalid=false;
+ const state=scope.run(()=>usePublicationGeneration({context,values:computed(()=>({...values})),fields:computed(()=>['title','description','tags']),disabled:ref(false),
+  generate:async input=>{calls.push(input);return {content:{title:'生成标题',description:'新简介',tags:invalid?'重复\n重复':'游戏\n画中画'},field_revisions:input.field_revisions}},adopt,getIdentity:async()=> '9'}));
+ state.visible.value=true;state.selected.value=['title','description','tags'];await state.start();
+ expect(calls[0].content).toEqual({title:'人工标题',description:'独立简介',tags:'游戏',cover_title:''});
+ expect(adopt).not.toHaveBeenCalled();
+ values.tags='手动修改';values.tags='游戏';
+ expect(state.canAdopt('tags')).toBe(false);
+ expect(state.canAdopt('title')).toBe(true);
+ await state.apply('title');expect(adopt).toHaveBeenCalledWith('title','生成标题');
+ invalid=true;await state.start();expect(state.error.value).toContain('不重复');expect(state.canAdopt('tags')).toBe(false);scope.stop();
+});
 it('only exposes a complete suggestion for separate adoption without changing input',async()=>{
  const {state,adopt,values,scope}=fixture(async input=>result(input));await state.start();
  expect(values.description).toBe('人工标题');expect(adopt).not.toHaveBeenCalled();expect(state.canAdopt('description')).toBe(true);
@@ -38,4 +53,14 @@ it('changing login identity and generating only topics invalidates all old-user 
 it('adoption checks the exact suggestion clicked before asynchronous identity verification',async()=>{
  let resolveIdentity,delay=false,n=0;const {state,adopt,scope}=fixture(async input=>({content:{description:'suggestion-'+(++n),topics:'#topic'},field_revisions:input.field_revisions}),()=>delay?new Promise(resolve=>{resolveIdentity=resolve}):Promise.resolve('A'));
  await state.start();delay=true;const pending=state.apply('description');expect(adopt).not.toHaveBeenCalled();delay=false;await state.start();resolveIdentity('A');await pending;expect(adopt).not.toHaveBeenCalled();scope.stop();
+});
+
+it('allows explicit adoption of an empty Bilibili description without clearing unselected input',async()=>{
+ const scope=effectScope(), context=ref({rowKey:'empty-intro',platform:'bilibili',categoryId:'1',outputId:'153'});
+ const values=reactive({title:'已填标题',description:'待精简的简介'}), adopt=vi.fn((field,value)=>{values[field]=value});
+ const state=scope.run(()=>usePublicationGeneration({context,values:computed(()=>({...values})),fields:computed(()=>['title','description']),disabled:ref(false),getIdentity:async()=> '9',adopt,
+ generate:async input=>({content:{description:''},field_revisions:input.field_revisions})}));
+ state.visible.value=true;state.selected.value=['description'];await state.start();
+ expect(state.error.value).toBe('');expect(state.canAdopt('description')).toBe(true);expect(values.description).toBe('待精简的简介');
+ await state.apply('description');expect(adopt).toHaveBeenCalledWith('description','');expect(values.description).toBe('');expect(values.title).toBe('已填标题');scope.stop();
 });

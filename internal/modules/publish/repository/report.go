@@ -36,7 +36,7 @@ type reportStep struct {
 }
 
 func verified(a model.Attempt, r model.ExecutionReport) bool {
-	return r.PlatformUID == a.Input.PlatformUID && r.BitProfileID == a.Input.BitProfileID && r.VideoSHA256 == a.Input.VideoSHA256 && r.CoverSHA256 == a.Input.CoverSHA256 && r.PortraitCoverSHA256 == a.Input.PortraitCoverSHA256
+	return r.PlatformUID == a.Input.PlatformUID && r.BitProfileID == a.Input.BitProfileID && r.VideoSHA256 == a.Input.VideoSHA256 && r.CoverSHA256 == a.Input.CoverSHA256 && r.PortraitCoverSHA256 == a.Input.PortraitCoverSHA256 && r.SpaceCoverSHA256 == a.Input.SpaceCoverSHA256
 }
 func (s ExecutionStore) Report(candidate model.Task, user int64, r model.ExecutionReport, currentSession bool, now time.Time) (model.ExecutionFeedback, error) {
 	var out model.ExecutionFeedback
@@ -56,7 +56,7 @@ func (s ExecutionStore) Report(candidate model.Task, user int64, r model.Executi
 		if r.Stage == "" {
 			// No stage means keepalive only. It never revalidates resources,
 			// appends history, changes task revision, or grants submission.
-			if r.PlatformUID != "" || r.BitProfileID != "" || r.VideoSHA256 != "" || r.CoverSHA256 != "" || r.PortraitCoverSHA256 != "" {
+			if r.PlatformUID != "" || r.BitProfileID != "" || r.VideoSHA256 != "" || r.CoverSHA256 != "" || r.PortraitCoverSHA256 != "" || r.SpaceCoverSHA256 != "" {
 				return ErrConflict
 			}
 			v, a, e := currentAttempt(tx, candidate.ID, user, r.AttemptID)
@@ -241,12 +241,12 @@ func (s ExecutionStore) Complete(candidate model.Task, user int64, r model.Compl
 		switch status {
 		case model.StatusReviewing:
 			ev := result.Evidence
-			if a.SubmitStartedAt == nil || result.PlatformWorkID == "" || ev.ReceiptID != result.PlatformWorkID || !ev.SceneClosed || ev.PlatformUID != a.Input.PlatformUID || ev.BitProfileID != a.Input.BitProfileID || ev.VideoSHA256 != a.Input.VideoSHA256 || ev.CoverSHA256 != a.Input.CoverSHA256 || ev.PortraitCoverSHA256 != a.Input.PortraitCoverSHA256 {
+			if a.SubmitStartedAt == nil || result.PlatformWorkID == "" || ev.ReceiptID != result.PlatformWorkID || !ev.SceneClosed || ev.PlatformUID != a.Input.PlatformUID || ev.BitProfileID != a.Input.BitProfileID || ev.VideoSHA256 != a.Input.VideoSHA256 || ev.CoverSHA256 != a.Input.CoverSHA256 || ev.PortraitCoverSHA256 != a.Input.PortraitCoverSHA256 || ev.SpaceCoverSHA256 != a.Input.SpaceCoverSHA256 {
 				return ErrConflict
 			}
 		case model.StatusFailed:
 			ev := result.Evidence
-			if a.SubmitStartedAt != nil || !ev.NotSubmitted || !ev.SceneClosed || result.ErrorCode == "" || ev.PlatformUID != a.Input.PlatformUID || ev.BitProfileID != a.Input.BitProfileID || ev.VideoSHA256 != a.Input.VideoSHA256 || ev.CoverSHA256 != a.Input.CoverSHA256 || ev.PortraitCoverSHA256 != a.Input.PortraitCoverSHA256 {
+			if a.SubmitStartedAt != nil || !ev.NotSubmitted || !ev.SceneClosed || result.ErrorCode == "" || ev.PlatformUID != a.Input.PlatformUID || ev.BitProfileID != a.Input.BitProfileID || ev.VideoSHA256 != a.Input.VideoSHA256 || ev.CoverSHA256 != a.Input.CoverSHA256 || ev.PortraitCoverSHA256 != a.Input.PortraitCoverSHA256 || ev.SpaceCoverSHA256 != a.Input.SpaceCoverSHA256 {
 				return ErrConflict
 			}
 		case model.StatusUncertain:

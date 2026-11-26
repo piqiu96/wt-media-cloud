@@ -51,16 +51,15 @@ func DownloadGuide(ctx context.Context, rawURL, path string) error {
 					return nil, errGuideUnsafe
 				}
 			}
-			return (&net.Dialer{Timeout: 10 * time.Second}).DialContext(ctx, network, net.JoinHostPort(ips[0].String(), port))
+			conn, err := (&net.Dialer{Timeout: 10 * time.Second}).DialContext(ctx, network, net.JoinHostPort(ips[0].String(), port))
+			if err != nil {
+				return nil, err
+			}
+			return &guideReadIdleConn{Conn: conn}, nil
 		},
 	}
 	defer transport.CloseIdleConnections()
-	client := &http.Client{Transport: transport, Timeout: 5 * time.Minute, CheckRedirect: func(next *http.Request, via []*http.Request) error {
-		if len(via) >= 3 || executor.ValidatePublicMediaURL(next.URL.String()) != nil {
-			return http.ErrUseLastResponse
-		}
-		return nil
-	}}
+	client := guideHTTPClient(transport)
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
 		return err
@@ -83,6 +82,26 @@ func DownloadGuide(ctx context.Context, rawURL, path string) error {
 		return fmt.Errorf("download guide: HTTP %d", response.StatusCode)
 	}
 	return saveGuideBody(response.Body, response.ContentLength, path, MaxGuideBytes)
+}
+
+// A resource may keep transferring beyond five minutes. Bound idle reads
+// separately while the client and original task context bound total duration.
+type guideReadIdleConn struct{ net.Conn }
+
+func (c *guideReadIdleConn) Read(p []byte) (int, error) {
+	if err := c.Conn.SetReadDeadline(time.Now().Add(30 * time.Second)); err != nil {
+		return 0, err
+	}
+	return c.Conn.Read(p)
+}
+
+func guideHTTPClient(transport http.RoundTripper) *http.Client {
+	return &http.Client{Transport: transport, Timeout: time.Hour, CheckRedirect: func(next *http.Request, via []*http.Request) error {
+		if len(via) >= 3 || executor.ValidatePublicMediaURL(next.URL.String()) != nil {
+			return http.ErrUseLastResponse
+		}
+		return nil
+	}}
 }
 
 func saveGuideBody(body io.Reader, contentLength int64, path string, limit int64) error {

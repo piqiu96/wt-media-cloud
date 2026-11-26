@@ -3,6 +3,7 @@ package repository
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/wt-media/wt-media-cloud/internal/modules/publish/model"
@@ -11,7 +12,7 @@ import (
 
 // A group is assigned once. Free space after assignment is never filled by
 // another row. A busy actual Profile is not reserved by group membership.
-func (s ExecutionStore) prepareBatchGroups(user int64, cap model.ExecutionCapacity, now time.Time) error {
+func (s ExecutionStore) prepareBatchGroups(user int64, cap model.ExecutionCapacity, supported []string, now time.Time) error {
 	var after uint64
 	for {
 		var ids []uint64
@@ -22,7 +23,7 @@ func (s ExecutionStore) prepareBatchGroups(user int64, cap model.ExecutionCapaci
 			AND pending.execution_group_no IS NULL AND pending.authorized_at IS NOT NULL
 			AND pending.cancel_requested_at IS NULL AND (pending.not_before IS NULL OR pending.not_before<=?))`,
 				[]model.Status{model.StatusPending, model.StatusQueued}, now).
-			Where("id>?", after).Order("id").Limit(100).Pluck("id", &ids).Error; err != nil {
+			Where("platform IN ?", supported).Where("id>?", after).Order("id").Limit(100).Pluck("id", &ids).Error; err != nil {
 			return err
 		}
 		for _, id := range ids {
@@ -32,7 +33,7 @@ func (s ExecutionStore) prepareBatchGroups(user int64, cap model.ExecutionCapaci
 				if err != nil {
 					return err
 				}
-				if stoppedParent(&b) || b.OperatorID != user || b.ExecutionStatus != model.BatchRunning || b.StartedAt == nil || b.StoppedAt != nil ||
+				if !slices.Contains(supported, b.Platform) || stoppedParent(&b) || b.OperatorID != user || b.ExecutionStatus != model.BatchRunning || b.StartedAt == nil || b.StoppedAt != nil ||
 					b.ExecutionGroupNo != nil && (b.GroupEndedAt == nil || b.NextGroupAt == nil || now.Before(*b.NextGroupAt)) {
 					return nil
 				}

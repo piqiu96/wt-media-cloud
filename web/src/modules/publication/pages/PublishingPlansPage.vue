@@ -1,4 +1,5 @@
 <script setup>
+import { platformLabel } from "../../../shared/utils/platforms.js";
 import { batchStatus } from "../batchPresentation.js";
 import { computed, ref, watch, onBeforeUnmount, nextTick } from "vue";
 import {
@@ -993,7 +994,7 @@ onBeforeUnmount(() => {
                   label: '执行周期',
                   value: plan.date_start + ' ~ ' + plan.date_end,
                 },
-                { label: '发布平台', value: '百家号' },
+                { label: '发布平台', value: [...new Set(plan.goals.map(g => g.platform))].map(platformLabel).join('、') || '—' },
                 {
                   label: '发布类目',
                   value: [
@@ -1065,7 +1066,7 @@ onBeforeUnmount(() => {
                   v-for="g in plan.goal_results"
                   :key="g.platform + g.category_id"
                 >
-                  <td>百家号</td>
+                  <td>{{platformLabel(g.platform)}}</td>
                   <td>{{ categoryName(g.category_id) }}</td>
                   <td>{{ g.target_count }}</td>
                   <td>{{ g.published_count }}</td>
@@ -1136,7 +1137,7 @@ onBeforeUnmount(() => {
                     >
                   </td>
                   <td>
-                    百家号<small>{{
+                    {{platformLabel(r.batch.platform)}}<small>{{
                       r.batch.targets
                         .map(
                           (t) =>

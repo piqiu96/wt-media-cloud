@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: WT Media Publication Plan
-  version: 2026.11.25.4
+  version: 2026.11.26.2
   description: Session-owned orchestration of prepared batches. No public automatic
     advance, makeup, cross-user authorization or parallel workflow engine. IDs/revisions
     decimal strings and timestamps RFC3339. All mutations audit; transaction locks
@@ -1070,6 +1070,7 @@ components:
           type: string
           enum:
           - baidu
+          - bilibili
         category_id: *id001
         target_count: *id002
       required:
@@ -1101,6 +1102,7 @@ components:
           type: string
           enum:
           - baidu
+          - bilibili
         group_order: *id002
         batch_order: *id002
         targets: &id008
@@ -1292,6 +1294,7 @@ components:
           type: string
           enum:
           - baidu
+          - bilibili
         category_id: *id001
         shortfall: &id014
           type: integer

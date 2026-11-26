@@ -7,6 +7,7 @@ import FeedbackAlert from "../../../shared/ui/feedback/FeedbackAlert.vue";
 import { createPublicationBatchClient } from "../../../shared/api/publication.js";
 import { publicationStatuses } from "../status.js";
 import { executionPhase } from "../executionPresentation.js";
+import { publicationTitle } from '../platformContent.js';
 
 const props = defineProps({
   batch: { type: Object, required: true },
@@ -124,11 +125,11 @@ function taskAction(task) {
       <t-table class="wt-resource-table" :columns="columns" :data="state.items || []" row-key="id"
         :scroll="{ x: '1184px' }" :loading="loading" :empty="error ? '任务读取失败' : '没有符合条件的正式任务'">
         <template #id="{ row }"><ResourceId :value="row.id" label="任务 ID" /></template>
-        <template #content="{ row }">{{ row.content?.description || "—" }}</template>
+        <template #content="{ row }">{{ publicationTitle(batch.platform,row.content) || "—" }}</template>
         <template #account="{ row }"><span class="batch-task-resource-name" :title="row.resources?.account_name || accountName(row)">{{ row.resources?.account_name || accountName(row) }}</span></template>
         <template #output="{ row }"><span class="batch-task-resource-name" :title="row.resources?.output_name || outputName(row)">{{ row.resources?.output_name || outputName(row) }}</span></template>
         <template #status="{ row }"><ResourceStatusBadge :label="publicationStatuses[row.status] || '状态未知'"
-          :tone="row.status === 'published' ? 'success' : ['failed','awaiting_human','uncertain'].includes(row.status) ? 'warning' : 'neutral'" /></template>
+          :tone="row.status === 'published' ? 'success' : ['failed','awaiting_human','uncertain'].includes(row.status) ? 'warning' : 'neutral'" /><small v-if="row.verification_required" class="batch-muted batch-task-block">公开结果需人工核实</small></template>
         <template #group="{ row }">{{ row.execution_group_no ? '第 ' + row.execution_group_no + ' 组' : '—' }}</template>
         <template #execution="{ row }">
           <span v-if="row.execution_stage">{{ executionPhase(row.execution_stage) }}</span>

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"time"
 
 	transferdto "github.com/wt-media/wt-media-cloud/internal/modules/filetransfer/dto"
 	identityservice "github.com/wt-media/wt-media-cloud/internal/modules/identity/service"
@@ -66,6 +67,10 @@ func MarkVideoFailed(teamID identityservice.TeamID, materialID int64, message st
 
 func MarkVideoNotPrepared(teamID identityservice.TeamID, materialID int64) error {
 	return newWiredService().MarkVideoNotPrepared(teamID, materialID)
+}
+
+func ReconcileCancelledMaterialPreparations(now time.Time) (int64, error) {
+	return repository.ReconcileCancelledMaterialPreparations(now)
 }
 
 // ResolvePreparationSource is named with a verb rather than after the method it
