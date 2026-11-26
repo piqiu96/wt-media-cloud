@@ -35,7 +35,7 @@ const checkedCounts = computed(() => [
         <t-descriptions-item v-if="execution.execution_group_no" label="执行组">第 {{ execution.execution_group_no }} 组</t-descriptions-item>
         <t-descriptions-item v-if="currentGroup" label="本组已安排">{{ currentGroup }} 条</t-descriptions-item>
         <t-descriptions-item v-if="execution.group_ended_at" label="本组自动处理结束">{{ formatPublicationTime(execution.group_ended_at) }}</t-descriptions-item>
-        <t-descriptions-item v-if="execution.next_group_at && !execution.stopped_at && !execution.ended_at" label="最早下一组">
+        <t-descriptions-item v-if="execution.next_group_at && !execution.stopped_at && !execution.ended_at && !batch.handed_off_at" label="最早下一组">
           {{ formatPublicationTime(execution.next_group_at) }}
         </t-descriptions-item>
         <t-descriptions-item label="并发数">{{batch.execution_setting.concurrency_limit}}</t-descriptions-item>
