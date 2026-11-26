@@ -377,7 +377,7 @@ func (s *Service) batchCandidateCovers(ctx context.Context, a identity.PublicUse
 				resources.PortraitCoverResourcePath = files.ResourcePath(file.ResourceToken)
 			}
 		}
-		if len(file.SHA256) != 64 || verifyCoverSpec(file, cover.width, cover.height) != nil {
+		if len(file.SHA256) != 64 || verifyPlatformCoverSpec(platform, file, cover.width, cover.height) != nil {
 			issues = append(issues, batchIssue(row, cover.field, "cover_invalid", "封面必须是符合平台规格的正式图片"))
 			continue
 		}

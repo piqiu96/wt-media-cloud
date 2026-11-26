@@ -7,11 +7,12 @@ const platformRulesRevision = "2026.11.26.1"
 var bilibiliStatements = []string{"内容无需标注", "含AI生成内容", "含虚构演绎内容", "内容含营销信息", "个人观点，仅供参考", "内容为转载"}
 
 type CoverRule struct {
-	Field       string `json:"field"`
-	WidthRatio  int    `json:"width_ratio"`
-	HeightRatio int    `json:"height_ratio"`
-	MaxBytes    int64  `json:"max_bytes"`
-	Required    bool   `json:"required"`
+	Field       string   `json:"field"`
+	WidthRatio  int      `json:"width_ratio"`
+	HeightRatio int      `json:"height_ratio"`
+	MaxBytes    int64    `json:"max_bytes"`
+	Required    bool     `json:"required"`
+	Formats     []string `json:"formats"`
 }
 
 type PlatformRule struct {
@@ -48,7 +49,11 @@ func platformRules(cfg config.PublicationPlatformsConfig) PlatformRules {
 	}
 	tags := append([]string{}, cfg.Bilibili.Tags...)
 	cover := func(field string, width, height int) CoverRule {
-		return CoverRule{Field: field, WidthRatio: width, HeightRatio: height, MaxBytes: 5 * 1024 * 1024, Required: true}
+		formats := []string{"png", "jpeg", "webp"}
+		if field == "space_cover_file_id" || width == 4 && height == 3 {
+			formats = []string{"png", "jpeg"}
+		}
+		return CoverRule{Field: field, WidthRatio: width, HeightRatio: height, MaxBytes: 5 * 1024 * 1024, Required: true, Formats: formats}
 	}
 	return PlatformRules{Revision: platformRulesRevision, Platforms: []PlatformRule{
 		{Platform: "baidu", Name: "百家号", Enabled: true, TitleMaxLength: 50, DescriptionMaxLength: 50, LengthUnit: "unicode_code_points", StatementOptions: []string{"无需声明"}, VisibilityOptions: []string{"public"},

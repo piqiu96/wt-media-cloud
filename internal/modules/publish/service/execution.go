@@ -161,7 +161,7 @@ func readExecutionInput(tx *gorm.DB, v model.Task) (model.ExecutionInput, error)
 	if v.Platform == "bilibili" {
 		secondarySHA = snap.SpaceCoverSHA
 	}
-	if portrait.SHA256 != secondarySHA || len(portrait.SHA256) != 64 || verifyCoverSpec(portrait, width, height) != nil || verifyPrimaryCover(v.Platform, f) != nil {
+	if portrait.SHA256 != secondarySHA || len(portrait.SHA256) != 64 || verifyPlatformCoverSpec(v.Platform, portrait, width, height) != nil || verifyPrimaryCover(v.Platform, f) != nil {
 		return out, repository.ErrInputChanged
 	}
 	out = model.ExecutionInput{ProfileID: id, BitProfileID: p.BitProfileID, BitMainUserID: p.BitMainUserID, PlatformUID: v.PlatformAccountUID, Content: v.Content, VideoSHA256: o.SHA256, VideoSize: o.FileSizeBytes, CoverSHA256: f.SHA256, CoverSize: f.SizeBytes}

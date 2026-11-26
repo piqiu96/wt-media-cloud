@@ -16,9 +16,9 @@ func TestBilibiliBatchCoversKeepBothIndependentResourcePaths(t *testing.T) {
 	s, actor, _ := fixture()
 	row := model.BatchCandidate{RowKey: "bili-row", Content: biliContentFixture()}
 	s.File = func(_ context.Context, _ identity.PublicUser, id, _ int64) (filemodel.File, error) {
-		size := []byte(`{"width":1200,"height":900}`)
+		size := []byte(`{"width":1200,"height":900,"format":"png"}`)
 		if id == row.Content.SpaceCoverFileID {
-			size = []byte(`{"width":1280,"height":720}`)
+			size = []byte(`{"width":1280,"height":720,"format":"png"}`)
 		}
 		return filemodel.File{ID: id, Type: "image", SizeBytes: 1, SHA256: strings.Repeat("a", 64), ResourceToken: "cover-token", MetadataJSON: size}, nil
 	}

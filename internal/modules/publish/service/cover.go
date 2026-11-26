@@ -75,9 +75,22 @@ func secondaryCover(platform string, c model.Content) (int64, *model.CoverRender
 
 func verifyPrimaryCover(platform string, f filemodel.File) error {
 	if platform == "bilibili" {
-		return verifyCoverSpec(f, 4, 3)
+		return verifyPlatformCoverSpec(platform, f, 4, 3)
 	}
 	return verifyCoverSpec(f, 16, 9)
+}
+
+func verifyPlatformCoverSpec(platform string, f filemodel.File, width, height int) error {
+	if err := verifyCoverSpec(f, width, height); err != nil {
+		return err
+	}
+	if platform == "bilibili" {
+		var metadata filemodel.ImageMetadata
+		if json.Unmarshal(f.MetadataJSON, &metadata) != nil || metadata.Format != "png" && metadata.Format != "jpeg" {
+			return fmt.Errorf("%w: B站封面仅支持PNG或JPEG", ErrInvalid)
+		}
+	}
+	return nil
 }
 
 func (s *Service) prepareSecondaryCover(ctx context.Context, a identity.PublicUser, platform string, content model.Content, categoryID, outputID int64, saved bool) (filemodel.File, json.RawMessage, error) {
@@ -95,7 +108,7 @@ func (s *Service) prepareSecondaryCover(ctx context.Context, a identity.PublicUs
 	if len(file.SHA256) != 64 || previewCover(file) {
 		return file, nil, ErrInvalid
 	}
-	if err = verifyCoverSpec(file, width, height); err != nil {
+	if err = verifyPlatformCoverSpec(platform, file, width, height); err != nil {
 		return file, nil, err
 	}
 	snapshot, err := verifyCoverRender(file, model.Content{CoverRender: ref}, outputID)
