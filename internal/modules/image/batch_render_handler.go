@@ -53,7 +53,7 @@ func validCoverRevision(raw string, allowZero bool) bool {
 }
 
 func validBatchCoverRow(row batchCoverRow) bool {
-	if row.Platform != "baidu" || row.CategoryID <= 0 ||
+	if row.Platform != "baidu" && row.Platform != "bilibili" || row.CategoryID <= 0 ||
 		row.RowKey == "" || len(row.RowKey) > 64 || strings.TrimSpace(row.RowKey) != row.RowKey ||
 		!validCoverRevision(row.InputRevision, false) || len(row.FieldRevisions) == 0 || len(row.FieldRevisions) > 16 ||
 		len(row.Specs) == 0 || len(row.Specs) > 2 {
@@ -66,7 +66,8 @@ func validBatchCoverRow(row batchCoverRow) bool {
 	}
 	seen := map[string]bool{}
 	for _, spec := range row.Specs {
-		if spec.Specification != "landscape" && spec.Specification != "portrait" ||
+		_, _, valid := batchCoverRatio(row.Platform, spec.Specification)
+		if !valid ||
 			seen[spec.Specification] || spec.TemplateID == 0 || spec.PublishedRevision == 0 ||
 			strings.TrimSpace(spec.Title) == "" || utf8.RuneCountInString(spec.Title) > 2000 ||
 			spec.BackgroundOutputID < 0 || spec.BackgroundOutputID > 0 && spec.BackgroundImageAssetID > 0 {
@@ -75,6 +76,26 @@ func validBatchCoverRow(row batchCoverRow) bool {
 		seen[spec.Specification] = true
 	}
 	return true
+}
+
+func batchCoverRatio(platform, specification string) (int, int, bool) {
+	if platform == "baidu" {
+		if specification == "landscape" {
+			return 16, 9, true
+		}
+		if specification == "portrait" {
+			return 3, 4, true
+		}
+	}
+	if platform == "bilibili" {
+		if specification == "recommendation" {
+			return 4, 3, true
+		}
+		if specification == "space" {
+			return 16, 9, true
+		}
+	}
+	return 0, 0, false
 }
 
 func renderBatchCover(c *app.RequestContext, a identity.PublicUser) {
@@ -110,10 +131,7 @@ func renderBatchCover(c *app.RequestContext, a identity.PublicUser) {
 					if err := ctx.Err(); err != nil {
 						return nil, err
 					}
-					width, height := 16, 9
-					if spec.Specification == "portrait" {
-						width, height = 3, 4
-					}
+					width, height, _ := batchCoverRatio(row.Platform, spec.Specification)
 					artwork, issues, err := templates.RenderCover(ctx, a, service.ArtworkInput{
 						RowKey: row.RowKey, InputRevision: row.InputRevision, TemplateID: spec.TemplateID, PublishedRevision: spec.PublishedRevision, Title: spec.Title,
 						BackgroundImageAssetID: spec.BackgroundImageAssetID, BackgroundOutputID: spec.BackgroundOutputID,

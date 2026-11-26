@@ -37,10 +37,25 @@ class PublicationPlanContractTest(unittest.TestCase):
         )
 
     def test_changed_openapi_documents_validate(self):
-        for name in ["publication-plan.openapi.yaml", "publication-batch.openapi.yaml", "publication.openapi.yaml"]:
+        for name in ["publication-plan.openapi.yaml", "publication-batch.openapi.yaml", "publication.openapi.yaml", "cover-template.openapi.yaml"]:
             with self.subTest(name=name):
                 OpenAPIV31SpecValidator(SchemaPath.from_dict(self.docs[name], base_uri=(API / name).as_uri())).validate()
                 self.assertEqual(self.docs[name]["info"]["version"], "2026.11.26.2")
+
+    def test_batch_cover_specifications_are_platform_specific(self):
+        schema = self.schema('BatchRenderRow', 'cover-template.openapi.yaml')
+        row = {'row_key': 'a', 'input_revision': '1', 'field_revisions': {'cover_file_id': '0'},
+               'category_id': '1', 'platform': 'bilibili', 'specs': [{
+                   'specification': 'recommendation', 'template_id': '1', 'expected_published_revision': 1, 'title': '封面'}]}
+        self.assertTrue(schema.is_valid(row))
+        row['specs'][0]['specification'] = 'space'
+        self.assertTrue(schema.is_valid(row))
+        row['specs'][0]['specification'] = 'portrait'
+        self.assertFalse(schema.is_valid(row))
+        row['platform'] = 'baidu'
+        self.assertTrue(schema.is_valid(row))
+        row['specs'][0]['specification'] = 'recommendation'
+        self.assertFalse(schema.is_valid(row))
 
     def test_bilibili_content_is_independent_and_baidu_is_compatible(self):
         schema = self.schema("Content", "publication.openapi.yaml")
